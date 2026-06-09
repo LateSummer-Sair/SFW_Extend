@@ -1,0 +1,2 @@
+Manifest-Version: 1.0
+ACT: 夏希尔.中文测试项目.测试组件主函数;

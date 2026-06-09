@@ -1,0 +1,2 @@
+Manifest-Version: 1.0
+ACT: sair.scq.SCServerActivity;sair.scq.SCClientActivity;

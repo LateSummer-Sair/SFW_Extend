@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>类结构详解 — AiAgent 技术文档</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <canvas id="particles-canvas"></canvas>
+
+    <nav class="top-nav">
+        <div class="nav-inner">
+            <div class="nav-logo"><div class="icon">⚡</div><span>AiAgent</span></div>
+            <div class="nav-links">
+                <a href="index.html">概述</a>
+                <a href="architecture.html">架构</a>
+                <a href="patterns.html">设计模式</a>
+                <a href="classes.html" class="active">类结构</a>
+                <a href="commands.html">命令</a>
+            </div>
+        </div>
+    </nav>
+
+    <section style="padding-top:140px; padding-bottom:40px;">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Class Structure</div>
+                <h2>类结构详解</h2>
+                <div class="section-divider"></div>
+                <p>21 个核心类，按职责划分为 5 个包，总计约 5,530 行代码。</p>
+                <p style="margin-top:8px; font-size:0.85rem; color:var(--text-muted);">
+                    <code style="color:var(--accent-cyan);">sair.aiagent</code> (1 类) ·
+                    <code style="color:var(--accent-purple);">.core</code> (12 类) ·
+                    <code style="color:var(--accent-green);">.model</code> (3 类) ·
+                    <code style="color:var(--accent-amber);">.util</code> (2 类) ·
+                    <code style="color:var(--accent-cyan);">.ui</code> (2 类) ·
+                    <code style="color:var(--accent-purple);">.acts</code> (1 类)
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section style="padding-top:10px;">
+        <div class="container">
+
+            <!-- PersistenceManager -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge cyan">Core</span>
+                    <h4>PersistenceManager</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 678 行</div>
+                <p>
+                    SQLite 统一持久化核心 —— 替代 memory.json / journal.json / history.json / emotion.json / context.json 五个独立 JSON 文件。<br><br>
+                    <b>单文件数据库 aiagent.db</b>，WAL 模式（PRAGMA journal_mode=WAL），synchronous=NORMAL，busy_timeout=3000ms。<br>
+                    <b>5 张表</b>：<code>memories</code>（记忆条目 + category/importance）、<code>memories_fts</code>（FTS5 全文索引）、
+                    <code>journal</code>（会话日志，最多 80 条）、<code>conversations</code>（对话历史 + token 估算）、
+                    <code>app_state</code>（键值状态，存情绪/上下文摘要）。<br><br>
+                    <b>FTS5 触发器</b>：INSERT/UPDATE/DELETE 自动同步全文索引，搜索失败自动回退 LIKE 查询。<br>
+                    <b>旧数据迁移</b>：首次初始化自动将 5 个 JSON 文件导入 SQLite 并重命名为 .bak 备份。<br>
+                    <b>事务安全</b>：所有写操作在 <code>synchronized(lock)</code> 保护下执行，WAL checkpoint 在 close() 时完成。
+                </p>
+            </div>
+
+            <!-- AiAgentActivity -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge cyan">Entry</span>
+                    <h4>AiAgentActivity</h4>
+                </div>
+                <div class="p-class">sair.aiagent · 210 行</div>
+                <p>
+                    继承 <code>sair.user.Activity</code>，实现 SFW 插件生命周期。
+                    <code>main()</code> 方法按 <code>funcName</code> 路由到 <b>17 个命令</b>处理方法，委托 <code>ActivityActions</code>。
+                    构造函数中初始化所有核心组件：<code>AiConfig</code>、<code>PersistenceManager</code>、<code>ConversationHistory</code>、
+                    <code>DeepSeekClient</code>、<code>MemoryManager</code>、<code>ConfirmationGate</code>、
+                    <code>DynamicCodeEngine</code>、<code>JournalManager</code>、<code>EmotionManager</code>、
+                    <code>AgentExecutor</code>、<code>ActivityActions</code>。流式输出通过单例 <code>StreamPrinter.getInstance()</code> 管理。
+                    提供 <code>stopActivePrinter()</code> 先中断 API 线程再排空打印机，确保输出完整。<br>
+                    <code>exit()</code> 关闭 PersistenceManager（WAL checkpoint + connection close）。
+                </p>
+            </div>
+
+            <!-- AgentExecutor -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge amber">Core</span>
+                    <h4>AgentExecutor</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 938 行</div>
+                <p>
+                    项目最大文件，ReAct 推理-行动循环引擎。<br><br>
+                    <b>核心流程</b>：<code>execute(task)</code> → <code>runLoop()</code>（最多 30 轮）→
+                    每轮 <code>buildSystemPrompt()</code> 融合 6 种上下文 → <code>DeepSeekClient.chatStream()</code>
+                    流式推理 → 正则 <code>parseActions()</code> 匹配 XML 标签 → <code>executeAction()</code>
+                    执行操作 → 捕获结果注入下轮 system prompt。<br><br>
+                    <b>上下文注入链</b>：静态提示词（缓存） + 上轮 Agent 总结 + Chat 历史摘要 +
+                    会话日志（JournalManager） + 情绪状态（EmotionManager） + 记忆检索（MemoryManager）。<br><br>
+                    <b>11 种 XML 标签</b>：cmd / readfile / readdir / sys / evaljs / eval / web /
+                    remember / download / superise / editprompt。<br><br>
+                    <b>安全机制</b>：SSRF 内网地址黑名单，高危操作经 ConfirmationGate 确认，
+                    每轮后清除线程中断标记防止污染。
+                </p>
+            </div>
+
+            <!-- ActivityActions -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge green">Core</span>
+                    <h4>ActivityActions</h4>
+                </div>
+                <div class="p-class">sair.aiagent.acts · 471 行</div>
+                <p>
+                    命令委托层。将 17 个用户命令的实现从 <code>AiAgentActivity</code> 分离出来，
+                    遵循单一职责原则。核心方法：<br><br>
+                    <b>handleChat()</b> — 情绪检测 → 记忆检索 → 注入 Agent 结果 → 流式对话 → 保存上下文。<br>
+                    <b>handleExec()</b> — 情绪检测 + 暂停检查 → 记忆检索 → 注入 Chat 历史/日志/情绪 →
+                    Agent 执行 → 记录总结用于层层递进。<br>
+                    <b>handleMood()</b> — 查询 AI 当前心情、开心值、连续失败/夸赞、性别。<br>
+                    <b>handleYes/No</b> — 统一路由 ConfirmationGate 确认。<br>
+                    <b>buildChatContextForAgent()</b> — 从 ConversationHistory 取最近 6 条消息（每条截断 200 字符）构建 Agent 可读摘要。
+                </p>
+            </div>
+
+            <!-- DeepSeekClient -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge cyan">Core</span>
+                    <h4>DeepSeekClient</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 384 行</div>
+                <p>
+                    封装全部 HTTP 通信，使用 <code>HttpURLConnection</code>，零第三方依赖。<br>
+                    手动拼接 JSON 请求体，通过正则解析 SSE 流（匹配 <code>data: {...}</code> 行并提取
+                    <code>delta.content</code> 字段）和标准 JSON 响应。<br>
+                    内置 <code>jsonEscape()</code> / <code>jsonUnescape()</code> 处理特殊字符转义。<br>
+                    API 端点：<code>{baseUrl}/v1/chat/completions</code>，Authorization Bearer 认证。<br>
+                    超时配置：连接 30s，读取 300s。支持 HTTP 请求取消（通过 <code>HttpURLConnection.disconnect()</code>）。
+                </p>
+            </div>
+
+            <!-- DynamicCodeEngine -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge cyan">Core</span>
+                    <h4>DynamicCodeEngine</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 412 行</div>
+                <p>
+                    双引擎动态代码执行系统：<b>Nashorn JavaScript</b> 即时执行 + <b>JavaCompiler</b> 即时编译注入。<br>
+                    编译时自动构建完整 classpath（系统 classpath + <code>URLClassLoader</code> + SFW <code>SairLoader</code>）。<br>
+                    <b>InMemoryClassLoader</b> 使用 <code>defineClass()</code> 加载字节码，优先委托父加载器解析依赖。<br>
+                    编译→加载→执行→丢弃，全程一次性，执行后立即清理引用交由 GC 回收。<br>
+                    支持动态 <code>.jar</code> 加载（<code>loadJar()</code>），不注入系统 ClassLoader，仅在 <code>modLibLoader</code> 中管理。
+                </p>
+            </div>
+
+            <!-- EmotionManager -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge rose">Core</span>
+                    <h4>EmotionManager</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 301 行</div>
+                <p>
+                    AI 情绪状态机，模拟类人情感。<br><br>
+                    <b>情绪词典</b>：辱骂词 17 个（如"笨蛋""废物""蠢"）→ -20 happiness；
+                    夸赞词 18 个（如"真棒""厉害""爱你"）→ +15 happiness；
+                    安慰词 18 个（如"别难过""加油""抱抱"）→ +25 happiness。<br><br>
+                    <b>阈值机制</b>：happiness ≤ -30 或连续失败 ≥ 3 次 → Agent 暂停（<code>CountDownLatch</code> 阻塞，
+                    等待用户安慰/指导，120 秒超时自动恢复）；happiness ≥ 80 且连续夸赞 ≥ 2 次 → 触发彩蛋。<br><br>
+                    <b>持久化</b>：状态序列化到 <code>app_state("emotion")</code>（SQLite，Gson JSON），
+                    高频操作仅标记脏数据，由 <code>flushSave()</code> 在 Agent 循环结束时统一写入，减少磁盘 I/O。<br>
+                    支持 <code>buildEmotionContext()</code> 生成注入 system prompt 的情绪描述文本。<br>
+                    性别默认为 female，影响 AI 的语气和表达风格。
+                </p>
+            </div>
+
+            <!-- StreamPrinter -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge green">Core</span>
+                    <h4>StreamPrinter</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 327 行</div>
+                <p>
+                    单例流式输出核心（<code>getInstance()</code> 全局唯一）。<br>
+                    内部维护 <code>LinkedBlockingQueue&lt;Item&gt;</code>，支持两种输出通道：
+                    <b>行输出</b>（系统消息，<code>offerLine()</code> / <code>offerPlain()</code>，无延迟直出）和
+                    <b>字符输出</b>（AI 流式，<code>offer(char)</code>，10ms 延迟打字机效果）。<br>
+                    <code>start()</code> 先全速排空旧队列再启动新流；守护线程永续运行无需手动启停。<br>
+                    SFW 换行适配：<code>\n</code> 自动转换为 <code>\r\n</code>。<br>
+                    预定义颜色：<code>C_AI</code>（翠绿 100,255,180）和 <code>C_THINK</code>（淡紫蓝 180,180,255）。
+                </p>
+                <div class="code-block" style="margin-top:16px;">
+                    <div class="code-header"><span class="lang">核心打印循环</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="kw">private void</span> <span class="fn">printLoop</span>() {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="type">Item</span> item = queue.take();  <span class="cmt">// 守护线程，永久阻塞等待</span>
+        <span class="kw">if</span> (item.text != <span class="kw">null</span>) {
+            <span class="cmt">// 行输出（系统消息）—— 无延迟，直接通过EdtUtils</span>
+            SairCons.<span class="fn">print</span>(item.color, item.text + (item.newline ? <span class="str">"\r\n"</span> : <span class="str">""</span>));
+        } <span class="kw">else</span> {
+            <span class="cmt">// 字符输出（AI 流式）—— 10ms 延迟</span>
+            <span class="kw">if</span> (item.ch == <span class="str">'\n'</span>) SairCons.<span class="fn">print</span>(item.color, <span class="str">"\r\n"</span>);
+            <span class="kw">else if</span> (item.ch != <span class="str">'\r'</span>) SairCons.<span class="fn">print</span>(item.color, String.<span class="fn">valueOf</span>(item.ch));
+            Thread.<span class="fn">sleep</span>(<span class="num">10</span>);
+        }
+    }
+}</code></pre>
+                </div>
+            </div>
+
+            <!-- SysConsoleExecutor -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge amber">Core</span>
+                    <h4>SysConsoleExecutor</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 290 行</div>
+                <p>
+                    跨平台系统命令执行器。<code>ProcessBuilder</code> 封装，自动识别操作系统切换
+                    <code>cmd.exe /c</code>（Windows）或 <code>/bin/sh -c</code>（Linux/macOS）。<br>
+                    捕获 stdout + stderr，设置 30 秒超时保护。<br>
+                    支持两种模式：<b>同步执行</b>（返回完整输出字符串）和 <b>实时回调</b>（通过 <code>OutputListener</code>
+                    接口逐行推送，配合 <code>SysConsolePanel</code> 实现实时终端面板）。<br>
+                    Windows 编码强制使用 UTF-8（不依赖 chcp 检测）。
+                </p>
+            </div>
+
+            <!-- MemoryManager -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge amber">Core</span>
+                    <h4>MemoryManager</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 109 行</div>
+                <p>
+                    持久化记忆管理器 —— <b>SQLite 门面</b>。内部完全委托 <code>PersistenceManager</code> 的 FTS5 全文搜索 + CRUD。<br>
+                    支持添加（含 category/importance）、列出、按 ID 删除、清空操作。<br>
+                    <b>FTS5 搜索</b>：全文搜索引擎按 BM25 相关性排序，失败回退 LIKE 模糊查询，最多返回 5 条。<br>
+                    <b>上下文构建</b>：检索相关记忆 → 构建 2000 字符上限的上下文文本 → 注入 system prompt。<br>
+                    附带 <code>saveContext()</code>/<code>loadContext()</code> 跨会话上下文摘要能力（存 app_state）。<br>
+                    原有独立 JSON 文件逻辑已完全删除，统一由 PersistenceManager 管理。
+                </p>
+            </div>
+
+            <!-- JournalManager -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge green">Core</span>
+                    <h4>JournalManager</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 63 行</div>
+                <p>
+                    追加式会话日志管理器 —— <b>SQLite 门面</b>。内部完全委托 PersistenceManager 的 journal 表。<br>
+                    每条日志包含：时间戳、角色（user/assistant/agent）、模式（chat/exec/execs）、内容摘要（截断 300 字符）、
+                    执行结果（截断 500 字符）。<br>
+                    容量控制：最多保留 80 条，超出时自动移除最旧条目（SQL DELETE WHERE id NOT IN ... LIMIT 80）。<br>
+                    <code>buildRecentContext()</code> 取最近 25 条日志构建上下文文本（上限 5000 字符），
+                    注入 Agent system prompt，实现跨重启的长期记忆。<br>
+                    Chat 模式下也记录用户消息和 AI 回复，形成完整对话日志。
+                </p>
+            </div>
+
+            <!-- ConversationHistory -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge green">Core</span>
+                    <h4>ConversationHistory</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 173 行</div>
+                <p>
+                    对话历史管理器 —— <b>滑动窗口 + SQLite 持久化</b>。<br>
+                    维护与 AI 的完整对话上下文，通过 token 估算实现最多约 <b>900,000 token</b> 的上下文窗口（约 1M 的 90%）。<br>
+                    当累计 token 超限时，自动移除最旧消息，但至少保留最近 <b>4 条消息</b>（2 轮对话）作为保底。<br>
+                    Token 估算采用经验公式：中文≈0.6 token/字，英文≈0.25 token/字。<br>
+                    持久化：设置 PersistenceManager 后每次 add/clear 自动保存到 SQLite conversations 表，SFW 重启后恢复。
+                </p>
+            </div>
+
+            <!-- AiConfig -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge purple">Core</span>
+                    <h4>AiConfig</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 200 行</div>
+                <p>
+                    全局配置管理器，DCL 单例（双重检查锁定保证线程安全）。<br>
+                    管理字段：API Key（<b>AES 加密</b>存储，<code>javax.crypto</code>）、API URL、Model、
+                    System Prompt。通过 <code>Properties</code> 文件持久化到 <code>config.properties</code>。<br>
+                    <code>load()</code> 时自动升级旧配置值（如旧模型名自动升级到默认模型）。<br>
+                    URL 格式校验（<code>setApiUrl()</code> 拒绝非法 URL）。<br>
+                    默认值：model = <code>deepseek-chat</code>，API URL = <code>https://api.deepseek.com</code>。
+                </p>
+            </div>
+
+            <!-- ConfirmationGate -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge amber">Core</span>
+                    <h4>ConfirmationGate</h4>
+                </div>
+                <div class="p-class">sair.aiagent.core · 150 行</div>
+                <p>
+                    统一高危操作确认门控。<code>CountDownLatch(1)</code> 实现同步阻塞等待。<br>
+                    <code>await(type, desc, timeoutMs)</code>：打印确认提示 → 阻塞等待 → 超时返回 false（默认 60 秒）。
+                    <code>confirm(boolean)</code>：释放 latch，返回确认结果。<br>
+                    <code>setBypassConfirm(true)</code>：跳过等待，直接返回 true（execs 自由模式）。<br>
+                    所有状态赋值（latch / result / pendingType / pendingDesc）在 <code>synchronized</code> 块内完成，
+                    超时后 latch 置 null 防止 <code>isAwaiting()</code> 误判。
+                </p>
+            </div>
+
+            <!-- FileUtils -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge amber">Util</span>
+                    <h4>FileUtils</h4>
+                </div>
+                <div class="p-class">sair.aiagent.util · 204 行</div>
+                <p>
+                    静态工具类，禁止实例化。核心能力：<br>
+                    <b>文本文件读取</b>：UTF-8 / GBK 自动识别解码（上限 10MB / 50,000 字符输出），
+                    尝试 UTF-8 → 检查是否存在替换字符 → 存在则降级 GBK 重试。<br>
+                    <b>图片元信息提取</b>：读取图片尺寸（宽×高）和文件大小。<br>
+                    <b>目录递归列出</b>：目录优先排序，显示文件大小和类型。
+                </p>
+            </div>
+
+            <!-- EdtUtils -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge purple">Util</span>
+                    <h4>EdtUtils</h4>
+                </div>
+                <div class="p-class">sair.aiagent.util · 56 行</div>
+                <p>
+                    EDT 安全输出工具类，薄封装层。<br>
+                    所有 <code>println(Color, String)</code> / <code>print(Color, String)</code>
+                    方法内部路由到单例 <code>StreamPrinter.getInstance()</code>，
+                    通过 <code>offerLine()</code> / <code>offerPlain()</code> 将内容送入 FIFO 队列。<br>
+                    还提供 <code>printlnLines()</code> 批量输出方法（原子输出多行文本，避免被字符输出穿插）。
+                </p>
+            </div>
+
+            <!-- SurpriseWindow -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge rose">UI</span>
+                    <h4>SurpriseWindow</h4>
+                </div>
+                <div class="p-class">sair.aiagent.ui · 164 行</div>
+                <p>
+                    AI 彩蛋/撒娇弹窗。无装饰 JFrame，始终置顶，屏幕居中。<br>
+                    两种风格：<b>撒娇模式</b>（粉色背景，检测关键词：😭 😢 💔 对不起 难过 撒娇）和
+                    <b>惊喜模式</b>（橘色背景，默认）。<br>
+                    大号 Emoji 标签（72pt Segoe UI Emoji）+ 文案标签，点击即关闭，3-8 秒自动关闭。<br>
+                    通过 <code>display()</code> 方法在 EDT 线程中弹出，触发自 Agent 的 <code>&lt;superise&gt;</code> 标签。
+                </p>
+            </div>
+
+            <!-- SysConsolePanel -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge cyan">UI</span>
+                    <h4>SysConsolePanel</h4>
+                </div>
+                <div class="p-class">sair.aiagent.ui · 156 行</div>
+                <p>
+                    JPanel 控件，内嵌只读 JTextArea（monospace 字体，深色背景）实时显示系统命令输出。<br>
+                    通过 <code>ConsFrame.printComponent()</code> 渲染到 SFW 控制台，<br>
+                    支持 <code>appendLine()</code> 逐行追加输出、<code>appendRaw()</code> 追加原始文本、
+                    <code>setFinished()</code> 标记完成状态（绿色 ✔）、<code>setError()</code> 标记失败（红色 ✘）。
+                </p>
+            </div>
+
+            <!-- ChatMessage -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge green">Model</span>
+                    <h4>ChatMessage</h4>
+                </div>
+                <div class="p-class">sair.aiagent.model · 115 行</div>
+                <p>
+                    对话消息 POJO。字段：<code>role</code>（"user"/"assistant"/"system"）、<code>content</code>（消息内容）。
+                    提供无参构造器（支持 Gson 反序列化）和有参构造器。<br>
+                    <code>estimateTokens()</code>：粗略 token 估算，中文 ~0.6 token/字，英文 ~0.25 token/字。
+                </p>
+            </div>
+
+            <!-- AgentAction -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge green">Model</span>
+                    <h4>AgentAction</h4>
+                </div>
+                <div class="p-class">sair.aiagent.model · 46 行</div>
+                <p>
+                    Agent 操作 POJO。字段：<code>type</code>（标签名：cmd/readfile/sys/evaljs/eval/web 等）、
+                    <code>content</code>（标签体内容）。由 <code>AgentExecutor.parseActions()</code> 通过正则匹配生成。
+                </p>
+            </div>
+
+            <!-- MemoryEntry -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge green">Model</span>
+                    <h4>MemoryEntry</h4>
+                </div>
+                <div class="p-class">sair.aiagent.model · 83 行</div>
+                <p>
+                    记忆条目 POJO。字段：<code>id</code>（自增编号）、<code>timestamp</code>（Unix 毫秒）、
+                    <code>category</code>（分类：general / user_pref / project / lesson）、
+                    <code>importance</code>（重要性 0-10）、<code>content</code>（记忆内容）。
+                    <code>toString()</code> 使用 <b>静态缓存 SimpleDateFormat</b> 格式化时间，分类非 general 时显示 [category] 前缀。
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <p>
+                <span class="brand">AiAgent</span> v1.6 ·
+                基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
+                对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
+            </p>
+            <p style="margin-top:6px; font-size:0.78rem;">
+                SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · Java 8
+            </p>
+        </div>
+    </footer>
+
+    <div class="back-to-top" title="回到顶部">↑</div>
+    <script src="js/main.js"></script>
+</body>
+</html>

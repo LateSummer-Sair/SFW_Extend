@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SCQ 即时聊天插件 — 技术总结文档</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+:root {
+  --bg: #0d1117;
+  --card: #161b22;
+  --border: #30363d;
+  --text: #c9d1d9;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --orange: #d2991d;
+  --red: #f85149;
+  --purple: #a371f7;
+  --radius: 12px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+}
+.container { max-width: 1100px; margin: 0 auto; padding: 40px 24px; }
+
+/* Hero */
+.hero {
+  text-align: center;
+  padding: 80px 0 60px;
+  background: linear-gradient(135deg, #1a2332 0%, #0d1117 40%, #1a1a2e 100%);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 40px;
+}
+.hero .badge {
+  display: inline-block;
+  padding: 4px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 20px;
+  color: var(--accent);
+  font-size: 13px;
+  letter-spacing: 2px;
+  margin-bottom: 24px;
+}
+.hero h1 {
+  font-size: 42px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #58a6ff, #a371f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 12px;
+}
+.hero .subtitle {
+  color: var(--muted);
+  font-size: 18px;
+}
+.hero .meta {
+  margin-top: 24px;
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.hero .meta span { display: flex; align-items: center; gap: 6px; }
+.meta-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.meta-dot.green { background: var(--green); }
+.meta-dot.purple { background: var(--purple); }
+.meta-dot.orange { background: var(--orange); }
+
+/* Section */
+section { margin-bottom: 48px; }
+.section-title {
+  font-size: 26px;
+  font-weight: 700;
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.section-title .icon { font-size: 24px; }
+
+/* Cards */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  margin-bottom: 20px;
+}
+.card h3 {
+  font-size: 18px;
+  margin-bottom: 14px;
+  color: var(--accent);
+}
+.card p { color: var(--muted); margin-bottom: 10px; }
+
+/* Grid */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+@media (max-width: 768px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+/* Feature Cards */
+.fcard {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+  transition: border-color .2s;
+}
+.fcard:hover { border-color: var(--accent); }
+.fcard .ficon { font-size: 32px; margin-bottom: 12px; }
+.fcard h4 { font-size: 15px; margin-bottom: 8px; color: var(--text); }
+.fcard p { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+/* Fix list */
+.fix-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  margin-bottom: 14px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.fix-tag {
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fix-tag.crit { background: rgba(248,81,73,0.15); color: var(--red); }
+.fix-tag.major { background: rgba(210,153,29,0.15); color: var(--orange); }
+.fix-tag.minor { background: rgba(63,185,80,0.15); color: var(--green); }
+.fix-body h4 { font-size: 15px; margin-bottom: 4px; }
+.fix-body p { font-size: 13px; color: var(--muted); }
+.fix-body code {
+  background: rgba(139,148,158,0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+/* Code blocks */
+pre {
+  background: #0d1117;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 16px 0;
+}
+pre code { color: #c9d1d9; }
+.keyword { color: #ff7b72; }
+.string { color: #a5d6ff; }
+.comment { color: #8b949e; font-style: italic; }
+.func { color: #d2a8ff; }
+.type { color: #ffa657; }
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 14px;
+}
+th, td {
+  padding: 10px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+th { color: var(--accent); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+td { color: var(--text); }
+td.mono { font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 12px; color: var(--accent); }
+
+/* Mermaid */
+.mermaid-wrap {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin: 20px 0;
+  display: flex;
+  justify-content: center;
+}
+
+/* Flow steps */
+.flow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0;
+  margin: 24px 0;
+  font-size: 13px;
+}
+.flow .step {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 18px;
+  text-align: center;
+  color: var(--accent);
+}
+.flow .arrow {
+  color: var(--muted);
+  padding: 0 8px;
+  font-size: 18px;
+}
+
+/* Stats */
+.stat-row { display: flex; gap: 20px; }
+.stat-card {
+  flex: 1;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+}
+.stat-card .num { font-size: 36px; font-weight: 700; color: var(--accent); }
+.stat-card .label { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+/* Footer */
+footer {
+  text-align: center;
+  padding: 40px 0;
+  color: var(--muted);
+  font-size: 13px;
+  border-top: 1px solid var(--border);
+  margin-top: 60px;
+}
+
+/* Tag cloud */
+.tag-cloud { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag {
+  padding: 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.tag:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Highlight box */
+.hl-box {
+  border-left: 3px solid var(--orange);
+  background: rgba(210,153,29,0.08);
+  padding: 14px 20px;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  margin: 16px 0;
+  font-size: 14px;
+}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="badge">TECHNICAL SUMMARY</div>
+  <h1>SCQ 即时聊天插件</h1>
+  <div class="subtitle">基于 SairFramework 的实时通信系统 — 架构设计与实现全解析</div>
+  <div class="meta">
+    <span><span class="meta-dot green"></span> 25 Java 源文件</span>
+    <span><span class="meta-dot purple"></span> ~96KB JAR</span>
+    <span><span class="meta-dot orange"></span> JDK 1.8</span>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- 项目概况 -->
+<section>
+  <h2 class="section-title"><span class="icon">📋</span> 项目概况</h2>
+  <div class="card">
+    <p>SCQ 是一个基于 <strong>SairFramework</strong> 插件框架开发的即时聊天系统，采用 C/S 架构，支持私聊、群聊、好友管理、指令传达和 IR 脚本执行。服务端负责用户管理和消息路由，客户端提供完整的 Swing GUI 交互界面。</p>
+  </div>
+
+  <div class="stat-row" style="margin:20px 0">
+    <div class="stat-card"><div class="num">2</div><div class="label">Activity 入口</div></div>
+    <div class="stat-card"><div class="num">25</div><div class="label">Java 源文件</div></div>
+    <div class="stat-card"><div class="num">7</div><div class="label">子包模块</div></div>
+    <div class="stat-card"><div class="num">27</div><div class="label">消息类型</div></div>
+  </div>
+</section>
+
+<!-- 技术栈 -->
+<section>
+  <h2 class="section-title"><span class="icon">🔧</span> 技术栈</h2>
+  <div class="tag-cloud">
+    <span class="tag">Java 8</span>
+    <span class="tag">SairFramework</span>
+    <span class="tag">TCP Socket</span>
+    <span class="tag">DataInputStream</span>
+    <span class="tag">DataOutputStream</span>
+    <span class="tag">Swing GUI</span>
+    <span class="tag">JList CellRenderer</span>
+    <span class="tag">BlockingQueue</span>
+    <span class="tag">JSON 手动解析</span>
+    <span class="tag">AES/CBC 加密</span>
+    <span class="tag">ConsFrame</span>
+    <span class="tag">SairCons.runner</span>
+    <span class="tag">SairScrollBarUI</span>
+    <span class="tag">RoundedBorder</span>
+  </div>
+</section>
+
+<!-- 系统架构 -->
+<section>
+  <h2 class="section-title"><span class="icon">🏗️</span> 系统架构</h2>
+
+  <div class="mermaid-wrap">
+    <div class="mermaid">
+graph TB
+    subgraph 客户端A ["💻 客户端 A"]
+        UI_A["SCClientUI<br/>Swing GUI"]
+        CORE_A["SCClientCore<br/>TCP持久连接"]
+        ACT_A["ClientActions<br/>命令调度"]
+    end
+
+    subgraph 服务端 ["🖥️ 服务端"]
+        SVR["SCServerCore<br/>Socket监听"]
+        SES["ClientSession<br/>会话管理"]
+        UMGR["UserManager<br/>用户管理"]
+        GMGR["GroupManager<br/>群组管理"]
+    end
+
+    subgraph 客户端B ["💻 客户端 B"]
+        UI_B["SCClientUI<br/>Swing GUI"]
+        CORE_B["SCClientCore<br/>TCP持久连接"]
+        ACT_B["ClientActions<br/>命令调度"]
+    end
+
+    UI_A --> ACT_A --> CORE_A
+    CORE_A -->|"TCP 长连接"| SVR
+    SVR --> SES
+    SES --> UMGR
+    SES --> GMGR
+    SES -->|"消息路由"| CORE_B
+    CORE_B --> UI_B
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>🖥️ 服务端</h3>
+      <p><code>SCServerCore</code> 监听 TCP 端口，为每个连接创建 <code>ClientSession</code> 线程。通过 <code>UserManager</code> 和 <code>GroupManager</code> 管理注册用户与群组数据，数据以 JSON 持久化到本地文件。</p>
+    </div>
+    <div class="card">
+      <h3>💻 客户端</h3>
+      <p><code>SCClientCore</code> 维持单 Socket 持久连接，发送线程从 BlockingQueue 取消息写入，接收线程循环读取后回调 MessageHandler。聊天记录使用 AES/CBC 加密本地存储。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 目录结构 -->
+<section>
+  <h2 class="section-title"><span class="icon">📁</span> 源码结构</h2>
+  <table>
+    <tr><th>包路径</th><th>职责</th><th>核心文件</th></tr>
+    <tr><td class="mono">sair.scq</td><td>Activity 入口</td><td class="mono">SCServerActivity, SCClientActivity</td></tr>
+    <tr><td class="mono">sair.scq.protocol</td><td>通信协议</td><td class="mono">MessageType, SCMessage</td></tr>
+    <tr><td class="mono">sair.scq.model</td><td>数据模型</td><td class="mono">UserInfo, GroupInfo, ChatRecord</td></tr>
+    <tr><td class="mono">sair.scq.server</td><td>服务端逻辑</td><td class="mono">SCServerCore, ClientSession, UserManager, GroupManager</td></tr>
+    <tr><td class="mono">sair.scq.client</td><td>客户端核心</td><td class="mono">SCClientCore, LocalStore, CryptoUtils</td></tr>
+    <tr><td class="mono">sair.scq.ui</td><td>GUI 组件</td><td class="mono">SCClientUI, ChatPanel, ContactPanel, LoginPanel, ...</td></tr>
+    <tr><td class="mono">sair.scq.acts</td><td>命令调度</td><td class="mono">ClientActions, ServerActions</td></tr>
+  </table>
+</section>
+
+<!-- 核心功能 -->
+<section>
+  <h2 class="section-title"><span class="icon">⚡</span> 核心功能</h2>
+  <div class="grid-3">
+    <div class="fcard"><div class="ficon">💬</div><h4>私聊 &amp; 群聊</h4><p>支持一对一私聊与多人群聊，消息通过服务端实时路由</p></div>
+    <div class="fcard"><div class="ficon">👥</div><h4>好友 &amp; 通讯录</h4><p>双向添加好友，UID添加群组，实时推送通讯录更新</p></div>
+    <div class="fcard"><div class="ficon">👑</div><h4>三级权限</h4><p>超级管理员 → 管理员 → 成员，支持禁言/踢人/入群审核</p></div>
+    <div class="fcard"><div class="ficon">📜</div><h4>IR 脚本执行</h4><p>发送 .ir 脚本到目标客户端，通过 IRRunnable 模式自动执行</p></div>
+    <div class="fcard"><div class="ficon">🔐</div><h4>加密存储</h4><p>聊天记录 AES/CBC 加密存储客户端，服务端不保留聊天数据</p></div>
+    <div class="fcard"><div class="ficon">🎨</div><h4>圆角透明 UI</h4><p>Swing GUI 全部组件圆角化、透明背景，继承 SairFramework 主题</p></div>
+  </div>
+</section>
+
+<!-- 通信协议 -->
+<section>
+  <h2 class="section-title"><span class="icon">📡</span> 通信协议</h2>
+  <div class="card">
+    <h3>传输格式</h3>
+    <p>采用 <strong>长度前缀 + JSON 字符串</strong> 的二进制协议：</p>
+    <pre><code><span class="comment">// 发送端</span>
+<span class="type">byte</span>[] jsonBytes = msg.toJson().getBytes(StandardCharsets.UTF_8);
+dos.writeInt(jsonBytes.length);     <span class="comment">// 4字节长度前缀</span>
+dos.write(jsonBytes);               <span class="comment">// JSON 字节</span>
+dos.flush();
+
+<span class="comment">// 接收端</span>
+<span class="type">int</span> length = dis.readInt();
+<span class="type">byte</span>[] buf = <span class="keyword">new</span> <span class="type">byte</span>[length];
+dis.readFully(buf);
+SCMessage msg = SCMessage.fromJson(<span class="keyword">new</span> String(buf, UTF_8));</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>消息 JSON 结构</h3>
+    <pre><code>{
+  <span class="string">"t"</span>: <span class="string">"COMMAND"</span>,          <span class="comment">// 消息类型</span>
+  <span class="string">"f"</span>: 1001,                  <span class="comment">// 发送方 UID</span>
+  <span class="string">"i"</span>: 1002,                  <span class="comment">// 接收方 UID / 群组 GID</span>
+  <span class="string">"d"</span>: <span class="string">"Hello World"</span>,     <span class="comment">// 主要载荷</span>
+  <span class="string">"o"</span>: <span class="string">"{\"key\":\"val\"}"</span>, <span class="comment">// 额外数据</span>
+  <span class="string">"ts"</span>: 1716982400000         <span class="comment">// 时间戳</span>
+}</code></pre>
+  </div>
+</section>
+
+<!-- IR 脚本流程 -->
+<section>
+  <h2 class="section-title"><span class="icon">📜</span> IR 脚本传输与执行</h2>
+  <div class="card">
+    <h3>完整流程</h3>
+    <div class="flow">
+      <div class="step">📂 客户端A<br/>读取 .ir 文件</div>
+      <div class="arrow">→</div>
+      <div class="step">📦 包装 "IR:"<br/>前缀字符串</div>
+      <div class="arrow">→</div>
+      <div class="step">📨 COMMAND<br/>消息发送</div>
+      <div class="arrow">→</div>
+      <div class="step">🖥️ 服务端<br/>转发路由</div>
+      <div class="arrow">→</div>
+      <div class="step">📩 客户端B<br/>接收解析</div>
+      <div class="arrow">→</div>
+      <div class="step">⚡ IRRunnable<br/>模式执行</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>发送端</h3>
+      <pre><code><span class="comment">// ClientActions.handleUISendCommand</span>
+<span class="keyword">if</span> (trimmed.startsWith(<span class="string">"\""</span>) && trimmed.endsWith(<span class="string">"\""</span>)) {
+    String path = trimmed.substring(1, trimmed.length() - 1);
+    String irContent = <span class="keyword">new</span> String(
+        Files.readAllBytes(Paths.get(path)), UTF_8);
+    clientCore.sendCommand(currentChatUID, <span class="string">"IR:"</span> + irContent);
+}</code></pre>
+    </div>
+    <div class="card">
+      <h3>接收端</h3>
+      <pre><code><span class="comment">// SCClientActivity.handleCommand</span>
+<span class="keyword">if</span> (command.startsWith(<span class="string">"IR:"</span>)) {
+    String irContent = command.substring(3);
+    <span class="comment">// IR脚本始终通过IRRunnable模式执行</span>
+    <span class="func">SairCons.runner</span>(<span class="keyword">true</span>, irContent);
+}</code></pre>
+    </div>
+  </div>
+
+  <div class="hl-box">
+    <strong>设计原则：</strong>IR 脚本作为程序化内容（machine-to-machine），<strong>始终自动执行</strong>，不依赖 <code>autoExecute</code> 开关。普通 SairFramework 命令（<code>插件/功能名 参数</code> 格式）则受 <code>scqc/autoExec true</code> 控制。
+  </div>
+</section>
+
+<!-- 好友系统 -->
+<section>
+  <h2 class="section-title"><span class="icon">👥</span> 好友系统 — 双向添加机制</h2>
+  <div class="mermaid-wrap">
+    <div class="mermaid">
+sequenceDiagram
+    participant A as 客户端A<br/>(UID: 1001)
+    participant S as 服务端
+    participant B as 客户端B<br/>(UID: 1002)
+
+    A->>S: CONTACT_ADD 添加1002
+    S->>S: addContact(1001, 1002)
+    S->>S: addContact(1002, 1001)
+    S-->>A: OK + 通讯录推送
+    S-->>B: CONTACT_ADDED 通知
+    S-->>B: 通讯录推送
+    Note over A,B: 双向好友关系建立完成
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>关键设计</h3>
+    <ul style="color:var(--muted); font-size:14px; padding-left:20px">
+      <li><strong>双向添加</strong>：A 加 B 时，服务端同时执行 <code>addContact(A, B)</code> 和 <code>addContact(B, A)</code></li>
+      <li><strong>实时通知</strong>：新增 <code>CONTACT_ADDED</code> 消息类型，被添加方立即收到通知</li>
+      <li><strong>通讯录刷新</strong>：每次好友变更后自动推送完整通讯录给双方</li>
+      <li><strong>UID + 名称显示</strong>：通讯录格式为 <code>[在线] UID:1001 - 用户名 - 签名</code></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 群组权限 -->
+<section>
+  <h2 class="section-title"><span class="icon">👑</span> 三级权限与群组管理</h2>
+  <div class="grid-3">
+    <div class="fcard">
+      <div class="ficon">👑</div>
+      <h4>超级管理员</h4>
+      <p>创建群组<br/>自定义UID<br/>设置/撤销管理员<br/><em>admin数 = 1 + 人数/40</em></p>
+    </div>
+    <div class="fcard">
+      <div class="ficon">🛡️</div>
+      <h4>管理员</h4>
+      <p>禁言/解禁成员<br/>入群审核（批准/拒绝）<br/>踢出成员</p>
+    </div>
+    <div class="fcard">
+      <div class="ficon">👤</div>
+      <h4>成员</h4>
+      <p>群聊消息<br/>申请加入群组<br/>退出群组</p>
+    </div>
+  </div>
+</section>
+
+<!-- 消息类型全景 -->
+<section>
+  <h2 class="section-title"><span class="icon">📨</span> 27 种消息类型</h2>
+  <table>
+    <tr><th>类别</th><th>消息类型</th></tr>
+    <tr><td>🔐 认证</td><td class="mono">REGISTER, LOGIN, LOGOUT, OK, ERROR</td></tr>
+    <tr><td>💬 聊天</td><td class="mono">PRIVATE_MSG, GROUP_MSG</td></tr>
+    <tr><td>👥 用户</td><td class="mono">USER_LIST, USER_UPDATE, STATUS</td></tr>
+    <tr><td>🏠 群组</td><td class="mono">GROUP_CREATE, GROUP_JOIN, GROUP_LEAVE, GROUP_KICK, GROUP_MUTE, GROUP_UNMUTE, GROUP_SET_ADMIN, GROUP_LIST, GROUP_INFO</td></tr>
+    <tr><td>📋 审核</td><td class="mono">JOIN_REQUEST, APPROVE_JOIN, REJECT_JOIN</td></tr>
+    <tr><td>📇 通讯录</td><td class="mono">CONTACT_ADD, CONTACT_LIST, CONTACT_ADDED</td></tr>
+    <tr><td>⚡ 指令</td><td class="mono">COMMAND</td></tr>
+    <tr><td>📁 文件</td><td class="mono">FILE_TRANSFER</td></tr>
+  </table>
+</section>
+
+<!-- 关键修复记录 -->
+<section>
+  <h2 class="section-title"><span class="icon">🔨</span> 迭代修复记录</h2>
+
+  <div class="fix-item">
+    <span class="fix-tag crit">严重</span>
+    <div class="fix-body">
+      <h4>getMaxAdmins() 公式错误</h4>
+      <p><code>Math.max(1, size/40)</code> → <code>1 + size/40</code>，修复 40 人时仍只有 1 名管理员的 BUG</p>
+    </div>
+  </div>
+
+  <div class="fix-item">
+    <span class="fix-tag crit">严重</span>
+    <div class="fix-body">
+      <h4>IR 脚本受 autoExecute 误控</h4>
+      <p>IR 脚本改为<strong>始终自动执行</strong>（machine-to-machine），普通命令仍受 <code>autoExecute</code> 控制</p>
+    </div>
+  </div>
+
+  <div class="fix-item">
+    <span class="fix-tag crit">严重</span>
+    <div class="fix-body">
+      <h4>好友单向添加</h4>
+      <p>服务端 <code>handleContactAdd</code> 改为双向 <code>addContact</code> + 新增 <code>CONTACT_ADDED</code> 通知</p>
+    </div>
+  </div>
+
+  <div class="fix-item">
+    <span class="fix-tag major">重要</span>
+    <div class="fix-body">
+      <h4>RoundedBorder 从未使用</h4>
+      <p>6 个 UI 文件中所有 <code>SBorder</code> 替换为 <code>RoundedBorder(10, ...)</code>，实现圆角化</p>
+    </div>
+  </div>
+
+  <div class="fix-item">
+    <span class="fix-tag major">重要</span>
+    <div class="fix-body">
+      <h4>入群审核缺协议</h4>
+      <p>新增 <code>JOIN_REQUEST / APPROVE_JOIN / REJECT_JOIN</code> 消息类型和完整处理链</p>
+    </div>
+  </div>
+
+  <div class="fix-item">
+    <span class="fix-tag major">重要</span>
+    <div class="fix-body">
+      <h4>MANIFEST.MF ACT 行缺失</h4>
+      <p><code>jar cf</code> → <code>jar cfm</code>，确保自定义 MANIFEST.MF 中的 <code>ACT:</code> 行正确打包</p>
+    </div>
+  </div>
+
+  <div class="fix-item">
+    <span class="fix-tag minor">优化</span>
+    <div class="fix-body">
+      <h4>聊天界面过大</h4>
+      <p>高度从 <code>8/10</code> 缩小到 <code>4/10</code>，输入面板宽度减半</p>
+    </div>
+  </div>
+</section>
+
+<!-- 线程模型 -->
+<section>
+  <h2 class="section-title"><span class="icon">🧵</span> 线程模型</h2>
+  <div class="mermaid-wrap">
+    <div class="mermaid">
+graph LR
+    subgraph 服务端
+        ML["主线程<br/>ServerSocket.accept()"]
+        CL1["ClientSession#1<br/>while(running) read"]
+        CL2["ClientSession#2<br/>while(running) read"]
+        CL3["ClientSession#N<br/>while(running) read"]
+        ML -->|"new Thread"| CL1
+        ML -->|"new Thread"| CL2
+        ML -->|"new Thread"| CL3
+    end
+
+    subgraph 客户端
+        ST["发送线程<br/>BlockingQueue.take() → write"]
+        RT["接收线程<br/>while(running) read → handler"]
+        UI["Swing EDT<br/>UI 事件处理"]
+    end
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>服务端</h3>
+      <ul style="color:var(--muted); font-size:14px; padding-left:20px">
+        <li>主线程阻塞等待新连接</li>
+        <li>每个客户端一个 <code>ClientSession</code> 线程</li>
+        <li>同步读一个消息 → 处理 → 返回结果</li>
+        <li><code>synchronized</code> 保护 <code>DataOutputStream</code></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>客户端</h3>
+      <ul style="color:var(--muted); font-size:14px; padding-left:20px">
+        <li>发送线程从 <code>BlockingQueue</code> 取消息</li>
+        <li>接收线程持久循环读取（参照 nsc AutoPrintln）</li>
+        <li>消息回调在接收线程中执行</li>
+        <li>UI 更新通过 <code>SwingUtilities.invokeLater</code></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- GUI 设计 -->
+<section>
+  <h2 class="section-title"><span class="icon">🎨</span> GUI 设计</h2>
+  <div class="card">
+    <h3>布局结构</h3>
+    <pre style="text-align:center"><code>┌─────────────────────────────────────────────┐
+│  titleBar: SCQ - 用户名       [在线 - UID] │  ← 标题栏 RoundedBorder
+├──────────┬──────────────────────────────────┤
+│ 好友列表  │                                   │
+│ ┌──────┐ │         chatPanel                 │
+│ │UID:1 │ │    ┌─────────────────────────┐   │
+│ │UID:2 │ │    │ [10:30] UID:1: Hello    │   │  ← 消息显示区
+│ │UID:3 │ │    │ [10:31] UID:2: World    │   │
+│ └──────┘ │    └─────────────────────────┘   │
+│ ──────── │                                   │
+│ 群组列表  │                                   │
+│ ┌──────┐ │                                   │
+│ │ 技术群 │ │                                   │
+│ └──────┘ │                                   │
+├──────────┴──────────────────────────────────┤
+│  [命令模式]  [___________________]  [发送]   │  ← 输入区 RoundedBorder
+└─────────────────────────────────────────────┘</code></pre>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>视觉特性</h3>
+      <ul style="color:var(--muted); font-size:14px; padding-left:20px">
+        <li>全部组件 <code>setOpaque(false)</code> 透明背景</li>
+        <li><code>RoundedBorder(10, ...)</code> 圆角边框</li>
+        <li><code>SairScrollBarUI</code> 自定义滚动条</li>
+        <li><code>SCListCellRenderer</code> 自定义消息渲染（左右对齐+颜色区分）</li>
+        <li>继承 <code>FCM</code> 主题色系统</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>交互模式</h3>
+      <ul style="color:var(--muted); font-size:14px; padding-left:20px">
+        <li>双击好友/群组 → 切换聊天对象</li>
+        <li>右键 → 移除好友/退出群组</li>
+        <li><strong>消息模式</strong> ↔ <strong>命令模式</strong> 一键切换</li>
+        <li>命令模式：输入框红色边框提示</li>
+        <li>IR 脚本：双引号包裹路径自动识别</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 在线状态 -->
+<section>
+  <h2 class="section-title"><span class="icon">🟢</span> 在线状态判断</h2>
+  <div class="card">
+    <p>参照 nsc 项目的 <strong>socket-driven</strong> 机制，在线状态完全基于<strong>实际 TCP 连接状态</strong>判断，而非依赖 <code>UserInfo.isOnline</code> 布尔字段：</p>
+    <pre><code><span class="comment">// SCServerCore.java</span>
+<span class="keyword">public boolean</span> <span class="func">isUserOnline</span>(<span class="type">long</span> uid) {
+    ClientSession session = sessionMap.get(uid);
+    <span class="keyword">return</span> session != <span class="keyword">null</span> && isSessionActive(session);
+}
+
+<span class="comment">// 断线时自动清理：Socket IOException → logout → unregisterSession</span></code></pre>
+  </div>
+</section>
+
+<!-- 安全性 -->
+<section>
+  <h2 class="section-title"><span class="icon">🔐</span> 安全性</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h3>传输安全</h3>
+      <ul style="color:var(--muted); font-size:14px; padding-left:20px">
+        <li>用户密码 SHA-256 哈希存储，永不明文传输</li>
+        <li>服务端验证登录时比对哈希值</li>
+        <li>消息通过 TCP 长连接传输（局域网场景）</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>存储安全</h3>
+      <ul style="color:var(--muted); font-size:14px; padding-left:20px">
+        <li>聊天记录 <strong>AES/CBC 模式</strong>加密存储客户端</li>
+        <li>加密密钥由用户密码派生</li>
+        <li>服务端<strong>不存储任何聊天记录</strong>，仅存用户/群组信息</li>
+        <li><code>handleOk</code> 防护：必须含 <code>"passwordHash"</code> 才解析为 UserInfo</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 部署 -->
+<section>
+  <h2 class="section-title"><span class="icon">🚀</span> 构建与部署</h2>
+  <div class="card">
+    <h3>编译命令</h3>
+    <pre><code><span class="comment">:: JDK 1.8 路径</span>
+SET JDK=D:\APPs\SairFrameWork\8x64\bin\javac
+SET CP=D:\APPs\SairFrameWork\SFW.jar
+SET SRC=d:\Users\Desktop\FileExp\scq
+SET OUT=d:\Users\Desktop\FileExp\scq\out
+
+<span class="comment">:: 编译</span>
+%JDK% -encoding UTF-8 -cp %CP% -d %OUT% ^
+  %SRC%\sair\scq\*.java ^
+  %SRC%\sair\scq\protocol\*.java ^
+  %SRC%\sair\scq\model\*.java ^
+  %SRC%\sair\scq\server\*.java ^
+  %SRC%\sair\scq\client\*.java ^
+  %SRC%\sair\scq\ui\*.java ^
+  %SRC%\sair\scq\acts\*.java
+
+<span class="comment">:: 打包（必须 cfm 包含自定义 MANIFEST.MF）</span>
+%JDK:javac=jar% cfm %SRC%\scq.jar %SRC%\META-INF\MANIFEST.MF -C %OUT% .
+
+<span class="comment">:: 部署</span>
+copy %SRC%\scq.jar D:\APPs\SairFrameWork\plugins\exection\scq.jar</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>MANIFEST.MF</h3>
+    <pre><code>Manifest-Version: 1.0
+ACT: sair.scq.SCServerActivity;sair.scq.SCClientActivity;</code></pre>
+    <div class="hl-box">
+      ⚠️ <strong>注意：</strong>必须使用 <code>jar cfm</code> 命令明确指定自定义 MANIFEST.MF，<code>jar cf</code> 会生成默认清单覆盖掉 <code>ACT:</code> 行，导致 SairFramework 无法识别 Activity。
+    </div>
+  </div>
+</section>
+
+<!-- 总结 -->
+<section>
+  <h2 class="section-title"><span class="icon">📝</span> 总结</h2>
+  <div class="card">
+    <p>SCQ 插件实现了完整的即时聊天系统，涵盖用户认证、私聊群聊、好友管理、群组权限、指令传达和 IR 脚本执行等核心功能。系统采用标准 C/S 架构，通过 TCP 长连接和自定义 JSON 协议实现高效通信。UI 遵循 SairFramework 设计规范，透明圆角化控件与框架主题深度融合。</p>
+    <p style="margin-top:12px">历经多轮迭代，修复了管理员数量公式、好友单向添加、在线状态虚判、IR 脚本执行受阻等关键问题，当前版本功能完整、运行稳定。</p>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  SCQ 即时聊天插件 — 基于 SairFramework 的实时通信系统<br/>
+  25 个 Java 源文件 · JDK 1.8 · SairFramework SFW · 圆角透明 Swing GUI
+</footer>
+
+<script>mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });</script>
+</body>
+</html>

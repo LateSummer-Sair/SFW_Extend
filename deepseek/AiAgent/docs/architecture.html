@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统架构 — AiAgent 技术文档</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <!-- Particle Background -->
+    <canvas id="particles-canvas"></canvas>
+
+    <!-- Top Navigation -->
+    <nav class="top-nav">
+        <div class="nav-inner">
+            <div class="nav-logo">
+                <div class="icon">⚡</div>
+                <span>AiAgent</span>
+            </div>
+            <div class="nav-links">
+                <a href="index.html">概述</a>
+                <a href="architecture.html" class="active">架构</a>
+                <a href="patterns.html">设计模式</a>
+                <a href="classes.html">类结构</a>
+                <a href="commands.html">命令</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Page Header -->
+    <section style="padding-top:140px; padding-bottom:40px;">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Architecture</div>
+                <h2>系统架构</h2>
+                <div class="section-divider"></div>
+                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Architecture Diagram -->
+    <section style="padding-top:20px;">
+        <div class="container">
+            <div class="arch-diagram reveal">
+                <!-- Entry Layer -->
+                <div class="arch-layer">
+                    <div class="arch-node entry">AiAgentActivity<br><small>门面 · 命令路由</small></div>
+                </div>
+                <div class="arch-arrow">↓</div>
+                <!-- Core Layer Row 1 -->
+                <div class="arch-layer">
+                    <div class="arch-node core">PersistenceManager<br><small>SQLite · FTS5</small></div>
+                    <div class="arch-node core">AiConfig<br><small>单例</small></div>
+                    <div class="arch-node core">StreamPrinter<br><small>生产者-消费者</small></div>
+                    <div class="arch-node core">DeepSeekClient<br><small>策略</small></div>
+                    <div class="arch-node core">AgentExecutor<br><small>ReAct</small></div>
+                </div>
+                <!-- Core Layer Row 2 -->
+                <div class="arch-layer">
+                    <div class="arch-node core">ConversationHistory<br><small>滑动窗口</small></div>
+                    <div class="arch-node core">MemoryManager<br><small>记忆管理</small></div>
+                    <div class="arch-node core">DynamicCodeEngine<br><small>动态编译</small></div>
+                    <div class="arch-node core">SysConsoleExecutor<br><small>系统终端</small></div>
+                </div>
+                <!-- Core Layer Row 3 -->
+                <div class="arch-layer">
+                    <div class="arch-node core">ConfirmationGate<br><small>确认门控</small></div>
+                    <div class="arch-node core">ActivityActions<br><small>命令委托</small></div>
+                    <div class="arch-node core">JournalManager<br><small>会话日志</small></div>
+                    <div class="arch-node core">EmotionManager<br><small>情绪状态机</small></div>
+                </div>
+                <div class="arch-arrow">↓</div>
+                <!-- Model + Util + UI Layer -->
+                <div class="arch-layer">
+                    <div class="arch-node model">ChatMessage<br><small>消息模型</small></div>
+                    <div class="arch-node model">AgentAction<br><small>操作模型</small></div>
+                    <div class="arch-node model">MemoryEntry<br><small>记忆模型</small></div>
+                    <div class="arch-node util">EdtUtils<br><small>EDT安全</small></div>
+                    <div class="arch-node util">FileUtils<br><small>文件工具</small></div>
+                    <div class="arch-node util">SysConsolePanel<br><small>终端面板</small></div>
+                    <div class="arch-node util">SurpriseWindow<br><small>彩蛋弹窗</small></div>
+                </div>
+            </div>
+
+            <div style="text-align:center; margin-top:32px;">
+                <p style="color:var(--text-muted); font-size:0.85rem;">
+                    包结构：<code style="color:var(--accent-cyan);">sair.aiagent</code>
+                    → <code style="color:var(--accent-purple);">.core</code>
+                    / <code style="color:var(--accent-green);">.model</code>
+                    / <code style="color:var(--accent-amber);">.util</code>
+                    / <code style="color:var(--accent-cyan);">.ui</code>
+                    / <code style="color:var(--accent-purple);">.acts</code>
+                </p>
+                <p style="color:var(--text-muted); font-size:0.78rem; margin-top:8px;">
+                    21 个源文件 · 约 5,530 行代码 · 5 个包
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Data Flow: Chat Mode -->
+    <section id="dataflow">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Data Flow</div>
+                <h2>Chat 模式数据流</h2>
+                <div class="section-divider"></div>
+                <p>用户输入 <code>ai/chat</code> → AI 逐字响应的完整调用链。</p>
+            </div>
+
+            <div class="arch-diagram reveal">
+                <div class="arch-layer">
+                    <div class="arch-node entry">ai/chat [消息]<br><small>SFW控制台输入</small></div>
+                </div>
+                <div class="arch-arrow">↓ AiAgentActivity.main("ai/chat", args)</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">ActivityActions.handleChat()<br><small>参数校验 + 情绪检测</small></div>
+                </div>
+                <div class="arch-arrow">↓ 新线程 AiAgent-Chat</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">DeepSeekClient.chatStream()<br><small>SSE流式HTTP请求</small></div>
+                </div>
+                <div class="arch-arrow">↓ printer.offer(ch)</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">StreamPrinter<br><small>LinkedBlockingQueue → 10ms → EDT</small></div>
+                </div>
+                <div class="arch-arrow">↓ EdtUtils / SairCons.print()</div>
+                <div class="arch-layer">
+                    <div class="arch-node entry">SFW Console<br><small>JTextPane 逐字渲染</small></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Data Flow: Agent Mode -->
+    <section id="agent-flow">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Data Flow</div>
+                <h2>Agent 执行循环数据流</h2>
+                <div class="section-divider"></div>
+                <p>用户输入 <code>ai/exec</code> → ReAct 推理-行动循环的完整链路。</p>
+            </div>
+
+            <div class="arch-diagram reveal">
+                <div class="arch-layer">
+                    <div class="arch-node entry">ai/exec [任务]<br><small>SFW控制台输入</small></div>
+                </div>
+                <div class="arch-arrow">↓ AiAgentActivity.main("ai/exec", args)</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">ActivityActions.handleExec()<br><small>参数校验 + 情绪检测 + 上下文注入</small></div>
+                </div>
+                <div class="arch-arrow">↓ 上下文注入链</div>
+                <div class="arch-layer">
+                    <div class="arch-node model">MemoryManager<br><small>检索相关记忆</small></div>
+                    <div class="arch-node model">ConversationHistory<br><small>Chat历史摘要</small></div>
+                    <div class="arch-node model">JournalManager<br><small>跨会话日志</small></div>
+                    <div class="arch-node model">EmotionManager<br><small>当前情绪状态</small></div>
+                    <div class="arch-node model">上一轮Agent<br><small>层层递进总结</small></div>
+                </div>
+                <div class="arch-arrow">↓ 所有上下文融合于 PersistenceManager (SQLite)</div>
+                <div class="arch-arrow">↓ AgentExecutor.runLoop() — 最多30轮</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">① buildSystemPrompt()<br><small>融合所有上下文</small></div>
+                </div>
+                <div class="arch-arrow">↓</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">② DeepSeekClient.chatStream()<br><small>SSE流式 → StreamPrinter</small></div>
+                </div>
+                <div class="arch-arrow">↓</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">③ parseActions() → ConfirmationGate<br><small>正则匹配XML → 确认门控</small></div>
+                </div>
+                <div class="arch-arrow">↓</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">④ executeAction() → 结果注入<br><small>cmd/readfile/sys/eval/web...</small></div>
+                </div>
+                <div class="arch-arrow">↓ 循环回到①（直到无XML标签或超过30轮）</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stream Output Deep Dive -->
+    <section id="stream">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Deep Dive</div>
+                <h2>流式逐字输出原理</h2>
+                <div class="section-divider"></div>
+                <p>从 API 字节流到控制台逐字渲染的完整数据流，含排空策略与线程模型。</p>
+            </div>
+
+            <div class="arch-diagram reveal">
+                <div class="arch-layer">
+                    <div class="arch-node entry">DeepSeek API<br><small>SSE Stream (text/event-stream)</small></div>
+                </div>
+                <div class="arch-arrow">↓ data: {"choices":[{"delta":{"content":"你"}}]}</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">DeepSeekClient<br><small>BufferedReader逐行读 → 正则解析 delta.content</small></div>
+                </div>
+                <div class="arch-arrow">↓ printer.offer("你好世界") — 逐字符入队</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">LinkedBlockingQueue&lt;Item&gt;<br><small>['你','好','世','界'] — FIFO有序</small></div>
+                </div>
+                <div class="arch-arrow">↓ daemon线程: take()阻塞 → sleep(10ms)</div>
+                <div class="arch-layer">
+                    <div class="arch-node util">SairCons.print(C_AI, ch)<br><small>逐字 · 翠绿色 · EDT安全</small></div>
+                </div>
+                <div class="arch-arrow">↓</div>
+                <div class="arch-layer">
+                    <div class="arch-node entry">SFW Console (JTextPane)<br><small>打字机效果 · 10ms间隔</small></div>
+                </div>
+            </div>
+
+            <div style="max-width:800px; margin:40px auto 0;">
+                <h3 style="color:var(--accent-cyan); margin-bottom:16px;">核心机制</h3>
+                <div class="pattern-card">
+                    <h4>单例守护线程</h4>
+                    <p>
+                        StreamPrinter 通过 <code>getInstance()</code> 返回全局唯一实例。内部 daemon 线程
+                        在首次实例化时启动，永续运行，无需手动启停。所有 Chat 和 Agent 模式共享同一输出队列，
+                        无竞态覆盖风险。
+                    </p>
+                </div>
+                <div class="pattern-card">
+                    <h4>双通道输出</h4>
+                    <p>
+                        <b>行输出</b>（系统消息）：通过 <code>offerLine()</code> 入队，消费者 <b>无延迟直出</b>。<br>
+                        <b>字符输出</b>（AI流式）：通过 <code>offer(char)</code> 入队，消费者 <b>10ms 延迟逐字</b>打印。<br>
+                        两种类型通过 <code>LinkedBlockingQueue</code> 严格保证 FIFO 顺序。
+                    </p>
+                </div>
+                <div class="pattern-card">
+                    <h4>流式排空策略</h4>
+                    <p>
+                        每次 <code>start()</code> 调用时：<br>
+                        ① 生产者线程先 <code>offerLine("…")</code> 放入排空标记<br>
+                        ② 消费者检测到标记后，全速从队列取出剩余元素（无延迟）<br>
+                        ③ 排空完成后，设置新流颜色，恢复正常 10ms 延迟输出<br>
+                        此机制确保新流到来时旧内容完整输出，不截断不丢失。
+                    </p>
+                </div>
+                <div class="pattern-card">
+                    <h4>EDT 线程安全</h4>
+                    <p>
+                        SFW 控制台基于 Swing JTextPane，仅 EDT 线程可安全写入。<br>
+                        StreamPrinter 的 daemon 线程不在 EDT 中运行，所有输出均通过
+                        <code>EdtUtils</code> 路由，内部统一调用 <code>SairCons.print()</code>（已在 EDT 安全包装内）。
+                    </p>
+                </div>
+            </div>
+
+            <div style="text-align:center; margin-top:40px; color:var(--text-muted); font-size:0.9rem;">
+                <p>
+                    <span style="color:var(--accent-cyan);">API 线程</span>（生产者）
+                    → <span style="color:var(--accent-purple);">阻塞队列</span>
+                    → <span style="color:var(--accent-green);">打印 daemon 线程</span>（消费者）
+                    → <span style="color:var(--accent-amber);">SairCons</span>
+                    → <span style="color:var(--accent-rose);">控制台</span>
+                </p>
+                <p style="margin-top:8px;">
+                    队列空 + 生产者结束 → 自动停止 · 新流到来 → <code>start()</code> 全速排空旧队列<br>
+                    单例守护线程永续运行，FIFO 队列保证行输出与字符输出严格有序
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Context Injection Chain -->
+    <section id="context">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Context Chain</div>
+                <h2>三模式上下文注入链</h2>
+                <div class="section-divider"></div>
+                <p>chat ↔ exec ↔ execs 之间双向上下文同步，实现跨模式记忆穿透。</p>
+            </div>
+
+            <div class="arch-diagram reveal">
+                <div class="arch-layer">
+                    <div class="arch-node core">Chat 模式<br><small>ai/chat</small></div>
+                    <div class="arch-node entry" style="font-size:0.7rem;">← Agent结果注入 →</div>
+                    <div class="arch-node core">Agent 模式<br><small>ai/exec / ai/execs</small></div>
+                </div>
+                <div class="arch-arrow">↓ 上传</div>
+                <div class="arch-layer">
+                    <div class="arch-node model">ConversationHistory<br><small>持久化 aiagent.db</small></div>
+                </div>
+            </div>
+
+            <div style="max-width:800px; margin:24px auto;">
+                <div class="pattern-card">
+                    <h4>① Chat → Agent</h4>
+                    <p>
+                        <code>handleExec()</code> 调用 <code>agent.setChatHistoryContext(buildChatContextForAgent())</code>，
+                        取最近 6 条 Chat 消息（每条截断 200 字符）构建摘要，注入到 Agent 的 system prompt
+                        的 "Recent Chat History" 段。
+                    </p>
+                </div>
+                <div class="pattern-card">
+                    <h4>② Agent → Chat</h4>
+                    <p>
+                        Agent 执行完成后，<code>getLastSummary()</code> 获取本轮操作摘要，
+                        在 Chat 的 system prompt 中注入，Chat 模式可感知 Agent 做了什么。
+                    </p>
+                </div>
+                <div class="pattern-card">
+                    <h4>③ Agent → 下一轮 Agent（层层递进）</h4>
+                    <p>
+                        每轮 Agent 结束后，<code>handleExec()</code> 调用 <code>agent.setPreviousSessionSummary(lastSummary)</code>，
+                        将本轮总结注入下一轮的 system prompt 的 "Previous Agent Session" 段。
+                        配合 JournalManager 的跨会话日志，形成完整记忆链。
+                    </p>
+                </div>
+                <div class="pattern-card">
+                    <h4>④ 辅助上下文注入口</h4>
+                    <p>
+                        <b>MemoryManager</b>：FTS5 全文搜索检索相关记忆 → 注入 system prompt<br>
+                        <b>JournalManager</b>：最近 25 条会话日志（跨重启持久化，SQLite）→ 注入 system prompt<br>
+                        <b>EmotionManager</b>：当前情绪状态（心情+性别，持久化到 app_state）→ 注入 system prompt<br>
+                        <b>PersistenceManager</b>：SQLite 统一持久化层，WAL 模式增量写入，替代 5 个 JSON 文件<br>
+                        以上所有上下文在 <code>buildSystemPrompt()</code> 中一次性融合。
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                <span class="brand">AiAgent</span> v1.6 ·
+                基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
+                对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
+            </p>
+            <p style="margin-top:6px; font-size:0.78rem;">
+                SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · Java 8
+            </p>
+        </div>
+    </footer>
+
+    <!-- Back to Top -->
+    <div class="back-to-top" title="回到顶部">↑</div>
+
+    <!-- Scripts -->
+    <script src="js/main.js"></script>
+</body>
+</html>

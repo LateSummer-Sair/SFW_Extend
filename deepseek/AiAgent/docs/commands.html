@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>命令参考 & 部署 — AiAgent 技术文档</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <canvas id="particles-canvas"></canvas>
+
+    <nav class="top-nav">
+        <div class="nav-inner">
+            <div class="nav-logo"><div class="icon">⚡</div><span>AiAgent</span></div>
+            <div class="nav-links">
+                <a href="index.html">概述</a>
+                <a href="architecture.html">架构</a>
+                <a href="patterns.html">设计模式</a>
+                <a href="classes.html">类结构</a>
+                <a href="commands.html" class="active">命令</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- CLI Reference -->
+    <section style="padding-top:140px; padding-bottom:40px;">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">CLI Reference</div>
+                <h2>用户命令参考</h2>
+                <div class="section-divider"></div>
+                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 17 个用户命令。</p>
+            </div>
+        </div>
+    </section>
+
+    <section style="padding-top:10px;">
+        <div class="container">
+            <div style="overflow-x:auto;">
+                <table class="cmd-table reveal">
+                    <thead>
+                        <tr>
+                            <th>命令</th>
+                            <th>参数</th>
+                            <th>分类</th>
+                            <th>说明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="cmd-name">ai/setkey</td>
+                            <td>[API Key]</td>
+                            <td style="color:var(--accent-purple);">配置</td>
+                            <td class="cmd-desc">设置 DeepSeek API 密钥，AES 加密存储，自动持久化到 config.properties</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/seturl</td>
+                            <td>[URL]</td>
+                            <td style="color:var(--accent-purple);">配置</td>
+                            <td class="cmd-desc">设置 API 地址，默认 https://api.deepseek.com，带 URL 格式校验</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/setmodel</td>
+                            <td>[模型名]</td>
+                            <td style="color:var(--accent-purple);">配置</td>
+                            <td class="cmd-desc">设置模型，默认 deepseek-chat。旧值自动升级到新默认值</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/setprompt</td>
+                            <td>[提示词]</td>
+                            <td style="color:var(--accent-purple);">配置</td>
+                            <td class="cmd-desc">设置系统提示词，可定义 AI 性格/行为边界。AI 也可通过 &lt;editprompt&gt; 自行修改</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/showprompt</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-purple);">配置</td>
+                            <td class="cmd-desc">查看当前系统提示词全文</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/info</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-purple);">配置</td>
+                            <td class="cmd-desc">查看配置摘要（Model / URL / Key状态）+ 对话统计 + 数据目录路径（aiagent.db）</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/chat</td>
+                            <td>[消息]</td>
+                            <td style="color:var(--accent-cyan);">对话</td>
+                            <td class="cmd-desc">与 AI 对话，流式打字机输出。自动注入 Agent 执行结果作为上下文。触发情绪检测</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/exec</td>
+                            <td>[任务]</td>
+                            <td style="color:var(--accent-amber);">Agent</td>
+                            <td class="cmd-desc">Agent 安全模式。高危操作需 ai/yes ai/no 确认（60s超时自动拒绝）。注入：Chat历史 + 上轮Agent总结 + 日志 + 情绪</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/execs</td>
+                            <td>[任务]</td>
+                            <td style="color:var(--accent-amber);">Agent</td>
+                            <td class="cmd-desc">Agent 自由模式。绕过所有确认，自动执行。注入的上下文与 exec 相同</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/reset</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-cyan);">对话</td>
+                            <td class="cmd-desc">清空对话上下文（ConversationHistory）+ Agent 记忆链 + 清空磁盘缓存</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/stop</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-cyan);">对话</td>
+                            <td class="cmd-desc">立即中断当前流式输出：中断 API 线程 → 全速排空打印机 → 丢弃剩余队列</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/mood</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-rose);">情绪</td>
+                            <td class="cmd-desc">查询 AI 当前心情（emoji + 描述）+ 开心值 + 连续失败/夸赞次数 + 性别</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/memories</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-green);">记忆</td>
+                            <td class="cmd-desc">列出所有已存储的持久化记忆（SQLite aiagent.db）</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/forget</td>
+                            <td>[ID]</td>
+                            <td style="color:var(--accent-green);">记忆</td>
+                            <td class="cmd-desc">按 ID 删除指定记忆</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/forgetall</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-green);">记忆</td>
+                            <td class="cmd-desc">清空所有持久化记忆</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/yes</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-amber);">安全</td>
+                            <td class="cmd-desc">确认 AI 请求的高危操作（通过 ConfirmationGate 释放 latch，Agent 继续执行）</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/no</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-amber);">安全</td>
+                            <td class="cmd-desc">拒绝 AI 请求的高危操作（latch 释放但返回 false，Agent 跳过此操作）</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Internal XML Tags -->
+    <section id="xml-tags">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Internal API</div>
+                <h2>Agent XML 操作标签</h2>
+                <div class="section-divider"></div>
+                <p>AI Agent 通过 XML 标签发出操作指令，由 <code>AgentExecutor.parseActions()</code> 正则解析。共 11 种标签。</p>
+            </div>
+
+            <div style="overflow-x:auto;">
+                <table class="cmd-table reveal">
+                    <thead>
+                        <tr>
+                            <th>标签</th>
+                            <th>格式</th>
+                            <th>需确认</th>
+                            <th>说明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="cmd-name">&lt;cmd&gt;</td>
+                            <td>&lt;cmd&gt;plugin/func args&lt;/cmd&gt;</td>
+                            <td style="color:var(--accent-rose);">是</td>
+                            <td class="cmd-desc">执行 SFW 插件命令（如 Filer/read、IDE/open）</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;sys&gt;</td>
+                            <td>&lt;sys&gt;dir /s&lt;/sys&gt;</td>
+                            <td style="color:var(--accent-rose);">是</td>
+                            <td class="cmd-desc">执行系统命令（Windows cmd / Linux sh），30 秒超时，UTF-8 输出</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;readfile&gt;</td>
+                            <td>&lt;readfile&gt;path/to/file&lt;/readfile&gt;</td>
+                            <td style="color:var(--accent-rose);">是</td>
+                            <td class="cmd-desc">读取文本文件，UTF-8/GBK 自动识别，上限 10MB / 50000 字符</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;readdir&gt;</td>
+                            <td>&lt;readdir&gt;path/to/dir&lt;/readdir&gt;</td>
+                            <td style="color:var(--accent-rose);">是</td>
+                            <td class="cmd-desc">递归列出目录结构，目录优先排序</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;evaljs&gt;</td>
+                            <td>&lt;evaljs&gt;js code&lt;/evaljs&gt;</td>
+                            <td style="color:var(--accent-rose);">是</td>
+                            <td class="cmd-desc">Nashorn 引擎即时执行 JavaScript，返回值自动转字符串</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;eval&gt;</td>
+                            <td>&lt;eval&gt;java code&lt;/eval&gt;</td>
+                            <td style="color:var(--accent-rose);">是</td>
+                            <td class="cmd-desc">JavaCompiler 即时编译执行。须定义 public void run() 方法。一次性：编译→加载→执行→GC</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;web&gt;</td>
+                            <td>&lt;web&gt;https://...&lt;/web&gt;</td>
+                            <td style="color:var(--accent-rose);">是</td>
+                            <td class="cmd-desc">HTTP GET 获取网页内容。SSRF 黑名单：拒绝 localhost/127.0.0.1/内网地址</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;download&gt;</td>
+                            <td>&lt;download&gt;https://...&lt;/download&gt;</td>
+                            <td style="color:var(--accent-rose);">是</td>
+                            <td class="cmd-desc">下载文件到 dataDir/downloads/，自动创建目录</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;remember&gt;</td>
+                            <td>&lt;remember&gt;重要信息&lt;/remember&gt;</td>
+                            <td style="color:var(--accent-green);">否</td>
+                            <td class="cmd-desc">记录重要信息到持久化记忆（MemoryManager），后续自动检索注入</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;superise&gt;</td>
+                            <td>&lt;superise&gt;🎉 太棒了！&lt;/superise&gt;</td>
+                            <td style="color:var(--accent-green);">否</td>
+                            <td class="cmd-desc">弹出彩蛋/撒娇窗口。支持 emoji + 文案。粉色（撒娇）/ 橘色（惊喜），3-8 秒自动关闭</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;editprompt&gt;</td>
+                            <td>&lt;editprompt&gt;新提示词&lt;/editprompt&gt;</td>
+                            <td style="color:var(--accent-green);">否</td>
+                            <td class="cmd-desc">AI 修改自身 system prompt。要求 ≥ 30 字符，实现性格自我演化</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Deployment -->
+    <section id="deploy">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Deployment</div>
+                <h2>部署指南</h2>
+                <div class="section-divider"></div>
+                <p>编译、打包、部署三步完成。</p>
+            </div>
+
+            <div class="card-grid">
+                <div class="card reveal">
+                    <div class="card-icon cyan">1</div>
+                    <h3>编译</h3>
+                    <p>
+                        使用 SFW 内置 JDK (8x64) 编译全部 21 个源文件。
+                        classpath 需包含 SFW.jar、gson-2.8.6.jar 和 sqlite-jdbc-3.42.0.0.jar。
+                    </p>
+                    <div class="code-block" style="margin-top:14px;">
+                        <div class="code-header"><span class="lang">PowerShell</span><button class="copy-btn">Copy</button></div>
+<pre><code>javac -encoding UTF-8 \
+  -cp "SFW.jar;plugins/bootlib/gson-2.8.6.jar;plugins/bootlib/sqlite-jdbc-3.42.0.0.jar" \
+  -d build \
+  sair/aiagent/**/*.java</code></pre>
+                    </div>
+                </div>
+
+                <div class="card reveal">
+                    <div class="card-icon purple">2</div>
+                    <h3>打包</h3>
+                    <p>
+                        使用 jar 命令打包，MANIFEST.MF 必须包含
+                        <code>ACT: sair.aiagent.AiAgentActivity;</code>
+                    </p>
+                    <div class="code-block" style="margin-top:14px;">
+                        <div class="code-header"><span class="lang">PowerShell</span><button class="copy-btn">Copy</button></div>
+<pre><code>jar cfm AiAgent.jar \
+  META-INF/MANIFEST.MF \
+  -C build .</code></pre>
+                    </div>
+                </div>
+
+                <div class="card reveal">
+                    <div class="card-icon green">3</div>
+                    <h3>部署</h3>
+                    <p>
+                        将 AiAgent.jar 复制到 SFW 的 plugins/exection/ 目录，
+                        启动 SFW 后即可使用 <code>ai/</code> 命令。
+                    </p>
+                    <div class="code-block" style="margin-top:14px;">
+                        <div class="code-header"><span class="lang">PowerShell</span><button class="copy-btn">Copy</button></div>
+<pre><code>Copy-Item AiAgent.jar \
+  plugins/exection/AiAgent.jar</code></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quick Start -->
+    <section id="quickstart">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Quick Start</div>
+                <h2>快速开始</h2>
+                <div class="section-divider"></div>
+                <p>部署后在 SFW 控制台输入以下命令开始使用。</p>
+            </div>
+
+            <div class="code-block reveal">
+                <div class="code-header"><span class="lang">SFW Console</span><button class="copy-btn">Copy</button></div>
+<pre><code><span class="cmt"># 1. 设置 API Key</span>
+ai/setkey sk-your-deepseek-api-key
+
+<span class="cmt"># 2. 与 AI 对话（自动感知 Agent 历史 + 情绪状态）</span>
+ai/chat 你好，请介绍一下你自己
+
+<span class="cmt"># 3. Agent 安全模式 —— 高危操作需确认（ai/yes）</span>
+ai/exec 列出所有已加载的插件
+
+<span class="cmt"># 4. Agent 自由模式 —— 无需确认，自动执行</span>
+ai/execs 分析插件功能并分类
+
+<span class="cmt"># 5. Chat 自动感知 Agent —— 询问之前做了什么</span>
+ai/chat 刚才exec分析了哪些插件？
+
+<span class="cmt"># 6. 查询 AI 心情</span>
+ai/mood
+
+<span class="cmt"># 7. 查看配置和统计</span>
+ai/info
+ai/memories</code></pre>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <p>
+                <span class="brand">AiAgent</span> v1.6 ·
+                基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
+                对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
+            </p>
+            <p style="margin-top:6px; font-size:0.78rem;">
+                SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · Java 8
+            </p>
+        </div>
+    </footer>
+
+    <div class="back-to-top" title="回到顶部">↑</div>
+    <script src="js/main.js"></script>
+</body>
+</html>

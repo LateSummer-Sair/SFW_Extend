@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Sair Music Player V4.1 — 技术总结</title>
+<style>
+:root {--bg:#0d1117;--fg:#c9d1d9;--accent:#58a6ff;--border:#30363d;--hdr:#161b22;--code:#1c2128;--warn:#d29922;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--fg);display:flex;min-height:100vh}
+nav{position:fixed;top:0;left:0;width:260px;height:100vh;background:var(--hdr);border-right:1px solid var(--border);overflow-y:auto;padding:20px 16px;z-index:10}
+nav h2{font-size:15px;color:var(--accent);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+nav a{display:block;font-size:13px;color:var(--fg);text-decoration:none;padding:4px 0;border-left:2px solid transparent;padding-left:8px;transition:.15s}
+nav a:hover,nav a.active{color:var(--accent);border-left-color:var(--accent)}
+nav .sub{padding-left:18px;font-size:12px}
+main{margin-left:260px;padding:32px 48px;max-width:1000px;flex:1}
+h1{font-size:26px;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:24px}
+h2{font-size:20px;color:var(--accent);margin:36px 0 16px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:16px;color:#e6edf3;margin:24px 0 10px}
+p,li{font-size:14px;line-height:1.75}
+code{background:var(--code);padding:2px 6px;border-radius:4px;font-size:13px;color:#ffa657}
+pre{background:var(--code);border:1px solid var(--border);border-radius:6px;padding:16px;overflow-x:auto;margin:12px 0;font-size:13px;line-height:1.5}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th,td{border:1px solid var(--border);padding:8px 12px;text-align:left}
+th{background:var(--hdr);color:var(--accent)}
+.warn{border-left:3px solid var(--warn);padding:10px 14px;margin:12px 0;background:#1a1500;border-radius:0 6px 6px 0;font-size:13px}
+.warn::before{content:'⚠ 注意：';color:var(--warn);font-weight:bold}
+.tag{display:inline-block;background:#1f6feb33;color:var(--accent);border-radius:10px;padding:1px 8px;font-size:11px;margin:0 2px}
+.arch{background:var(--code);border:1px solid var(--border);border-radius:6px;padding:16px;margin:12px 0;font-family:'Consolas','Courier New',monospace;font-size:12px;line-height:1.6;white-space:pre;overflow-x:auto}
+</style>
+</head>
+<body>
+
+<nav>
+<h2>📋 目录</h2>
+<a href="#overview">1. 项目概览</a>
+<a href="#architecture" class="sub">1.1 目录结构</a>
+<a href="#arch-flow" class="sub">1.2 架构数据流</a>
+<a href="#features">2. 功能说明</a>
+<a href="#f-play" class="sub">2.1 播放控制</a>
+<a href="#f-list" class="sub">2.2 列表管理</a>
+<a href="#f-lyric" class="sub">2.3 歌词系统</a>
+<a href="#f-audio" class="sub">2.4 音效系统</a>
+<a href="#f-ui" class="sub">2.5 UI 面板</a>
+<a href="#f-api" class="sub">2.6 API 接口</a>
+<a href="#tech">3. 技术细节</a>
+<a href="#t-play" class="sub">3.1 播放引擎</a>
+<a href="#t-dsp" class="sub">3.2 音频 DSP 管道</a>
+<a href="#t-lrc" class="sub">3.3 歌词同步</a>
+<a href="#t-config" class="sub">3.4 配置持久化</a>
+<a href="#notes">4. 注意事项</a>
+<a href="#n-critical" class="sub">4.1 关键约定</a>
+<a href="#n-encoding" class="sub">4.2 编码规范</a>
+<a href="#n-pitfalls" class="sub">4.3 已知陷阱</a>
+<a href="#files">5. 文件索引</a>
+</nav>
+
+<main>
+
+<h1 id="overview">Sair Music Player V4.1 — 技术总结与功能说明</h1>
+
+<p>
+基于 <span class="tag">SairFramework</span> 控制台框架构建的模块化 Java 音乐播放器。
+支持 MP3/WAV 解码、15段专业均衡器、环绕声、声场扩展、Viper 综合音效、
+LRC 歌词同步、桌面歌词、播放列表持久化等功能。
+</p>
+
+<!-- ==================== ARCHITECTURE ==================== -->
+
+<h2 id="architecture">1.1 目录结构</h2>
+
+<pre>
+sair/player/
+├── PlayerActivity.java          ← 主活动入口，命令路由
+├── acts/                        ← 动作/业务逻辑层
+│   ├── ActivityActions.java     ← 所有命令行动作实现
+│   ├── PlayerActions.java       ← 播放器核心调度（跨歌曲处理器管理）
+│   ├── SairMP3Player.java       ← 音频播放引擎（解码 + DSP + 输出）
+│   ├── AutoNextPlayThread.java  ← 自动播放 + 歌词加载线程
+│   ├── PlayerList.java          ← 播放列表数据模型
+│   ├── ListPage.java            ← 列表项接口
+│   └── IOTools.java             ← 文件序列化/反序列化
+├── audio/                       ← 音频处理层
+│   ├── EQProcessor.java         ← 15段 IIR BiQuad 均衡器
+│   ├── BiquadFilter.java        ← BiQuad 滤波器（7种滤波类型）
+│   ├── VolumeController.java    ← 音量/静音控制
+│   ├── SurroundProcessor.java   ← 环绕声（5种模式）
+│   ├── SoundstageExpander.java  ← 声场扩展（HRTF + 混响）
+│   ├── ViperEffectsProcessor.java ← Viper4Android 风格综合音效
+│   └── AudioConfig.java         ← 音效配置文件读写
+└── ui/                          ← 用户界面层
+    ├── ConsUI.java              ← 主 UI 布局（列表 + 歌词 + 进度条）
+    ├── EQPanel.java             ← 15段均衡器图形面板
+    ├── AdvancedEffectsPanel.java ← 高级音效控制面板
+    ├── FrequencyResponsePanel.java ← 频率响应可视化
+    ├── DesktopLyricWindow.java  ← 桌面歌词浮动窗口
+    ├── FlushLRCThread.java      ← 歌词同步刷新线程（面板内）
+    ├── FlushDesktopLRC.java     ← 桌面歌词刷新线程
+    ├── FlushJSBThread.java      ← 进度条刷新线程
+    ├── Click.java               ← 鼠标事件（列表双击 + 进度条点击）
+    └── Renden.java              ← 歌词 CellRenderer
+</pre>
+
+<h2 id="arch-flow">1.2 架构数据流</h2>
+
+<div class="arch">
+┌─────────────────────────────────────────────────┐
+│                 PlayerActivity                  │
+│  main(funcName, args) → 命令路由 switch-case     │
+└──────┬────────────────────────┬─────────────────┘
+       │                        │
+  ActivityActions          PlayerActions
+  (命令实现层)              (调度层)
+       │                        │
+       │              ┌─────────┴──────────┐
+       │              │                    │
+       │        AutoNextPlayThread    SairMP3Player
+       │        (播放线程)            (播放引擎)
+       │              │                    │
+       │     ┌────────┼────────┐    ┌──────┼──────┐
+       │     │        │        │    │      │      │
+       │   Flush   Flush    Flush  │   EQ   Surround
+       │   LRC     Desktop  JSB    │  Proc  Proc  ...
+       │   Thread  LRC     Thread  │
+       │     │        │        │    │
+       ▼     ▼        ▼        ▼    ▼
+    ConsUI  JList  Desktop  JProgress  SourceDataLine
+    (主UI) (歌词) LyricWin (进度条)   (扬声器)
+</div>
+
+<!-- ==================== FEATURES ==================== -->
+
+<h2 id="features">2. 功能说明</h2>
+
+<h3 id="f-play">2.1 播放控制</h3>
+<table>
+<tr><th>命令</th><th>说明</th></tr>
+<tr><td><code>plt/start [序号]</code></td><td>开始/继续播放；无参数则继续当前暂停的歌曲</td></tr>
+<tr><td><code>plt/pause</code></td><td>暂停播放（可恢复）</td></tr>
+<tr><td><code>plt/stop</code></td><td>完全停止（释放资源，不可恢复）</td></tr>
+<tr><td><code>plt/playat [路径]</code></td><td>直接播放指定文件路径</td></tr>
+<tr><td><code>plt/cp [true|false]</code></td><td>控制台输出开关（歌曲名 + 音效保存提示）</td></tr>
+</table>
+
+<p>进度条支持<span class="tag">点击跳转</span>：点击进度条任意位置计算比例 <code>mx/width</code>，通过 <code>ByteArrayInputStream.reset() + skip()</code> 实现毫秒级精确定位。</p>
+
+<h3 id="f-list">2.2 列表管理</h3>
+<table>
+<tr><th>命令</th><th>说明</th></tr>
+<tr><td><code>plt/list</code></td><td>显示播放列表 UI 组件</td></tr>
+<tr><td><code>plt/add [路径]</code></td><td>添加单个 MP3 或整个文件夹</td></tr>
+<tr><td><code>plt/remove [all|序号]</code></td><td>移除单首或清空全部</td></tr>
+<tr><td><code>plt/savelist</code></td><td>保存当前列表到 <code>savelist.data</code></td></tr>
+<tr><td><code>plt/reloadlist [path]</code></td><td>重新加载存档列表</td></tr>
+</table>
+
+<p>播放列表底部有进度条；歌词面板居中显示 LRC 歌词，当前行<span class="tag">高亮放大</span>。</p>
+
+<h3 id="f-lyric">2.3 歌词系统</h3>
+<table>
+<tr><th>命令</th><th>说明</th></tr>
+<tr><td><code>plt/lrccode [1|其他]</code></td><td>1=GBK 编码；其他=UTF-8</td></tr>
+<tr><td><code>plt/lrcoffset [number]</code></td><td>歌词偏移量（毫秒）</td></tr>
+<tr><td><code>plt/desktoplyric [on|off]</code></td><td>桌面歌词开关（默认开启）</td></tr>
+</table>
+
+<p><strong>LRC 文件查找策略：</strong></p>
+<ol>
+<li>在 <code>{dataDir}/lrc/{歌曲名}.lrc</code> 目录查找</li>
+<li>在 MP3 文件同级目录查找同名 <code>.lrc</code> 文件</li>
+<li>支持 8 种大小写变体（<code>.lrc</code> → <code>.LRC</code>）</li>
+</ol>
+
+<p><strong>桌面歌词：</strong>浮动透明 JWindow，始终置顶。当前行用 <code>FCM.EXECTION_pathInfo_Color</code> 大字体渲染，下一行用 <code>FCM.EXECTION_help_Color</code> 半透明显示。支持<span class="tag">鼠标拖拽</span>移动。颜色自动跟随 SairFramework 主题变化。</p>
+
+<h3 id="f-audio">2.4 音效系统</h3>
+
+<h4>音量控制</h4>
+<table>
+<tr><th>命令</th><th>说明</th></tr>
+<tr><td><code>plt/volume [0-100]</code></td><td>设置音量百分比</td></tr>
+<tr><td><code>plt/volume mute</code></td><td>切换静音</td></tr>
+</table>
+
+<h4>均衡器（15段）</h4>
+<table>
+<tr><th>命令</th><th>说明</th></tr>
+<tr><td><code>plt/eq</code></td><td>打开图形均衡器面板</td></tr>
+<tr><td><code>plt/eq reset</code></td><td>重置所有频段</td></tr>
+<tr><td><code>plt/eq [0-14] [dB]</code></td><td>设频段增益 (-18 ~ +18 dB)</td></tr>
+</table>
+
+<p>频段中心频率：<code>20, 35, 60, 100, 180, 320, 600, 1200, 2400, 4800, 7500, 10000, 13000, 16000, 20000 Hz</code></p>
+
+<h4>高级音效</h4>
+<table>
+<tr><th>命令</th><th>说明</th></tr>
+<tr><td><code>plt/effects panel</code></td><td>打开高级音效面板</td></tr>
+<tr><td><code>plt/effects surround mode [模式]</code></td><td>环绕声模式：none / stereo_expand / virtual_surround / differential / wide_stereo</td></tr>
+<tr><td><code>plt/effects surround width [1.0-3.0]</code></td><td>环绕宽度</td></tr>
+<tr><td><code>plt/effects surround mix [0.0-1.0]</code></td><td>环绕混合度</td></tr>
+<tr><td><code>plt/effects soundstage enable [true|false]</code></td><td>声场扩展开关</td></tr>
+<tr><td><code>plt/effects soundstage preset [预设]</code></td><td>预设：small_room / large_hall / concert / studio / wide</td></tr>
+<tr><td><code>plt/effects viper enable [true|false]</code></td><td>Viper 综合音效开关</td></tr>
+<tr><td><code>plt/effects viper preset [预设]</code></td><td>预设：natural / bass_boost / vocal_clarity / dynamic / warm / bright</td></tr>
+</table>
+
+<h4>DSP 处理流水线顺序</h4>
+<div class="arch">
+SairMP3Player.processAudio():
+  1. EQ 均衡器         (eqProcessor)
+  2. 环绕声处理        (surroundProcessor)  — 仅当 mode ≠ NONE
+  3. 声场扩展          (soundstageExpander) — 仅当 enabled
+  4. Viper 综合音效    (viperProcessor)     — 仅当 enabled
+  5. 音量控制          (volumeController)   — 最后应用
+</div>
+
+<h3 id="f-ui">2.5 UI 面板</h3>
+<p>所有面板均使用<span class="tag">单例缓存</span>模式（<code>null</code> 检查后仅创建一次），避免重复创建：</p>
+<ul>
+<li><strong>EQPanel</strong>：15段滑块 + 预设下拉 + 频率响应曲线 + 音量滑块 + 保存/加载按钮</li>
+<li><strong>AdvancedEffectsPanel</strong>：环绕声设置 / 声场扩展设置 / Viper 音效设置 + 配置按钮</li>
+<li><strong>主列表 UI</strong>：左侧歌曲列表 + 右侧歌词面板 + 底部进度条</li>
+</ul>
+
+<h3 id="f-api">2.6 API 接口</h3>
+<table>
+<tr><th>命令</th><th>说明</th></tr>
+<tr><td><code>plt/getListToOvar</code></td><td>获取所有歌曲路径列表（供外部调用）</td></tr>
+<tr><td><code>plt/getNowPlayID</code></td><td>获取当前播放序号</td></tr>
+<tr><td><code>plt/isPlaying</code></td><td>查询播放状态</td></tr>
+</table>
+
+<!-- ==================== TECHNICAL ==================== -->
+
+<h2 id="tech">3. 技术细节</h2>
+
+<h3 id="t-play">3.1 播放引擎 (SairMP3Player)</h3>
+
+<p><strong>全量内存加载方案：</strong></p>
+<ol>
+<li><code>AudioSystem.getAudioInputStream(file)</code> → 解码为 PCM <code>AudioInputStream</code></li>
+<li><code>putsMemory()</code> → 8KB 分块读取，写入 <code>ByteArrayOutputStream(8MB 初始)</code>，返回 <code>byte[]</code></li>
+<li>播放时 <code>new ByteArrayInputStream(bais)</code> → 4KB 缓冲循环读取 → <code>processAudio()</code> DSP → <code>line.write()</code></li>
+</ol>
+
+<p><strong>关键字段：</strong></p>
+<table>
+<tr><th>字段</th><th>类型</th><th>说明</th></tr>
+<tr><td><code>bais</code></td><td><code>byte[]</code></td><td>PCM 音频数据（全量）</td></tr>
+<tr><td><code>nowBytePosition</code></td><td><code>int</code></td><td>当前播放字节偏移量</td></tr>
+<tr><td><code>nowPosition</code></td><td><code>float</code></td><td>播放进度 0.0~1.0</td></tr>
+<tr><td><code>maxTime</code></td><td><code>int</code></td><td>总时长（秒）</td></tr>
+<tr><td><code>isContinue</code></td><td><code>boolean</code></td><td>暂停标志（false 时 wait）</td></tr>
+<tr><td><code>isBreak</code></td><td><code>boolean</code></td><td>停止标志</td></tr>
+<tr><td><code>isSetPos</code></td><td><code>boolean</code></td><td>跳转请求标志</td></tr>
+</table>
+
+<p><strong>时长计算：</strong><code>maxTime = bais.length / (sampleRate × 2 × channels)</code>（PCM signed 16-bit）。</p>
+
+<p><strong>跳转实现：</strong><code>ByteArrayInputStream.reset()</code> 回到开头 → <code>skip(nowBytePosition)</code> 跳到目标位置。由于是内存数据，跳转<span class="tag">瞬时完成</span>。</p>
+
+<div class="warn">音频处理器（EQ、Volume、Surround 等）由 PlayerActions <strong>统一管理</strong>，跨歌曲共享同一个实例。每次切换歌曲时通过 <code>setNewPlayer()</code> 绑定到新播放器，而非创建新处理器。</div>
+
+<h3 id="t-dsp">3.2 音频 DSP 管道</h3>
+
+<h4>BiquadFilter — 双二阶 IIR 滤波器</h4>
+<p>支持 7 种滤波类型：<code>PEAKING, LOWPASS, HIGHPASS, LOWSHELF, HIGHSHELF, NOTCH, BANDPASS</code>。采用 <code>RBJ Audio-EQ-Cookbook</code> 公式计算系数。每个样本经过 <code>y[n] = b0·x[n] + b1·x[n-1] + b2·x[n-2] - a1·y[n-1] - a2·y[n-2]</code> 差分方程处理。</p>
+
+<h4>SurroundProcessor — 环绕声</h4>
+<ul>
+<li><strong>STEREO_EXPAND</strong>：M/S 分解 → 放大 Side 信号 → 重组（核心公式：<code>side *= expandWidth</code>）</li>
+<li><strong>VIRTUAL_SURROUND</strong>：哈斯效应延迟线 + 交叉馈送</li>
+<li><strong>DIFFERENTIAL</strong>：基于左右声道差分的相位处理</li>
+<li><strong>WIDE_STEREO</strong>：高频增强 + 中置图像压缩</li>
+</ul>
+
+<h4>SoundstageExpander — 声场扩展</h4>
+<p>M/S 分解 → 宽度扩展 → 中置图像控制 → 简易混响（100ms 延迟线） → 简化 HRTF 空间化 → 高度增强（高频强调）。参数：width(0.5-3.0)、depth(0.0-2.0)、height(0.5-2.0)、centerImage(0.0-2.0)。</p>
+
+<h4>ViperEffectsProcessor — 综合音效</h4>
+<p>包含 4 个独立子模块：<strong>BassEnhancer</strong>（谐波增强低频）、<strong>TrebleEnhancer</strong>（动态高频提升）、<strong>Compressor</strong>（动态范围压缩，ratio 1.0-4.0）、<strong>Exciter</strong>（谐波激励器）。支持 6 种预设配置。</p>
+
+<h3 id="t-lrc">3.3 歌词同步</h3>
+
+<p><code>FlushLRCThread</code> 每 200ms 轮询一次：</p>
+<ol>
+<li><code>nowTime = mp3MaxTime × getNowPos()</code>（当前播放秒数）</li>
+<li><code>getApproximate()</code>：从后向前遍历时间数组，找到最后一个 <code>time[i] &lt; nowTime</code> 的索引</li>
+<li><code>flushLRCUI(index, size)</code>：设置 JList 选中项 + 滚动到视图中央</li>
+</ol>
+
+<p><code>FlushDesktopLRC</code> 复用同一个 <code>LRC</code> 对象（通过 <code>AutoNextPlayThread.creatLRC()</code> 共享），将匹配的歌词行渲染到 <code>DesktopLyricWindow</code> 浮动窗口。</p>
+
+<h3 id="t-config">3.4 配置持久化</h3>
+
+<p><code>AudioConfig</code> 以 <code>key=value</code> 格式读写 <code>audio_config.cfg</code>：</p>
+<ul>
+<li><strong>EQ</strong>：<code>eq_band_0</code> ~ <code>eq_band_14</code>（线性增益值）</li>
+<li><strong>音量</strong>：<code>volume</code>、<code>master_volume</code>、<code>muted</code></li>
+<li><strong>环绕声</strong>：<code>surround_mode</code>、<code>surround_width</code>、<code>surround_mix</code></li>
+<li><strong>声场</strong>：<code>soundstage_enabled</code>、<code>soundstage_width</code>、<code>depth</code>、<code>height</code>、<code>center</code></li>
+<li><strong>Viper</strong>：<code>viper_enabled</code>、<code>viper_bass_enabled/strength</code>、<code>viper_treble_enabled/strength</code>、<code>viper_compressor_enabled/ratio</code>、<code>viper_exciter_enabled/amount</code></li>
+</ul>
+
+<div class="warn">配置 <strong>不会自动加载</strong>（<code>loadAudioConfig()</code> 已被注释）。用户需通过 EQ 面板或高级音效面板的 <code>Save Config / Load Config</code> 按钮手动操作。</div>
+
+<!-- ==================== NOTES ==================== -->
+
+<h2 id="notes">4. 注意事项</h2>
+
+<h3 id="n-critical">4.1 关键约定</h3>
+
+<div class="warn"><strong>音频处理器跨歌曲共享：</strong>EQProcessor、VolumeController、SurroundProcessor、SoundstageExpander、ViperEffectsProcessor 由 PlayerActions 统一创建并管理。切换歌曲时不重建，只通过 setNewPlayer() 重新绑定。这保证了 EQ/音效设置在切歌时保持不变。</div>
+
+<div class="warn"><strong>全量内存加载：</strong>SairMP3Player 使用 putsMemory() 将整个 MP3 解码后的 PCM 数据加载进内存（byte[] bais）。好处是跳转瞬时完成、无需处理流生命周期；代价是每首歌曲占用的内存约为 MP3 大小的 4-5 倍（PCM 16-bit 立体声 44.1kHz ≈ 10MB/分钟）。</div>
+
+<div class="warn"><strong>UI 面板单例缓存：</strong>EQPanel 和 AdvancedEffectsPanel 分别只在首次请求时创建一次（null 检查），之后复用。千万不要在 show 方法中去掉 null 检查，否则会产生重复且无响应的面板实例。</div>
+
+<div class="warn"><strong>ViperEffectsProcessor 的数据复制：</strong>process() 方法必须 <code>System.arraycopy</code> 输入数据到新数组再处理，不能直接修改输入引用，否则会导致「同一首歌循环播放时音效错乱」的 Bug。</div>
+
+<div class="warn"><strong>配置 if-else 链：</strong>AudioConfig.loadConfig() 中环绕声和 Viper 的配置项必须用 <code>else if (key.equals(...) && obj != null)</code> 独立判断，不能用嵌套 if-else 结构（否则环绕声 != null 会导致 Viper 分支永远不执行）。</div>
+
+<h3 id="n-encoding">4.2 编码规范</h3>
+
+<ul>
+<li><strong>禁止使用外部库：</strong>所有功能（MP3 解码、DSP 滤波、LRC 解析）仅依赖 JDK 标准库 + SairFramework</li>
+<li><strong>FCM 颜色同步：</strong>UI 文字颜色必须使用 <code>FCM.EXECTION_pathInfo_Color</code> / <code>FCM.EXECTION_help_Color</code>，禁止硬编码 Color 常量</li>
+<li><strong>项目文件编码：</strong>UTF-8</li>
+<li><strong>Java 版本：</strong>需支持 try-with-resources、lambda、switch-string（JDK 7+）</li>
+</ul>
+
+<h3 id="n-pitfalls">4.3 已知陷阱</h3>
+
+<table>
+<tr><th>陷阱</th><th>原因</th><th>解决</th></tr>
+<tr>
+  <td>进度条始终满格</td>
+  <td>totalBytes 用 MP3 文件大小，currentBytePosition 追 PCM 解码字节（约 5× 差距）</td>
+  <td>现在用 bais.length（PCM 字节）统一计算</td>
+</tr>
+<tr>
+  <td>桌面歌词拖拽消失</td>
+  <td>静态内部类中 setLocation 移动的是 JPanel 而非 JWindow</td>
+  <td>改为非静态内部类，调用 DesktopLyricWindow.this.setLocation()</td>
+</tr>
+<tr>
+  <td>Viper 配置加载无效</td>
+  <td>loadConfig 的 else if 嵌套结构导致 Viper key 永不匹配</td>
+  <td>改为每个 key 独立判断 + null 检查</td>
+</tr>
+<tr>
+  <td>重复打开高级面板产生空面板</td>
+  <td>showAdvancedEffectsPanel 无缓存，每次都 new</td>
+  <td>添加 advancedEffectsPanel 字段做 null 检查缓存</td>
+</tr>
+</table>
+
+<!-- ==================== FILE INDEX ==================== -->
+
+<h2 id="files">5. 文件索引</h2>
+
+<table>
+<tr><th>文件</th><th>行数</th><th>职责</th></tr>
+<tr><td><code>PlayerActivity.java</code></td><td>217</td><td>活动入口、命令路由、LRC 编码/偏移/桌面歌词开关</td></tr>
+<tr><td><code>acts/ActivityActions.java</code></td><td>434</td><td>所有命令行动作实现（start/pause/stop/add/remove/eq/effects/desktoplyric...）</td></tr>
+<tr><td><code>acts/PlayerActions.java</code></td><td>361</td><td>播放器调度层：处理器管理、播放/停止/跳转/配置存取</td></tr>
+<tr><td><code>acts/SairMP3Player.java</code></td><td>349</td><td>音频引擎：PCM 解码、DSP 管道、Line 输出、进度/跳转</td></tr>
+<tr><td><code>acts/AutoNextPlayThread.java</code></td><td>186</td><td>自动切歌 + LRC 文件查找加载 + 歌词/进度条线程管理</td></tr>
+<tr><td><code>acts/PlayerList.java</code></td><td>85</td><td>播放列表模型（path + name + head 三 ArrayList）</td></tr>
+<tr><td><code>acts/ListPage.java</code></td><td>9</td><td>列表项接口（getPath / getName）</td></tr>
+<tr><td><code>acts/IOTools.java</code></td><td>49</td><td>文件序列化（Objserialize）和 MP3 文件扫描</td></tr>
+<tr><td><code>audio/AudioConfig.java</code></td><td>252</td><td>音效配置 key=value 读写（audio_config.cfg）</td></tr>
+<tr><td><code>audio/EQProcessor.java</code></td><td>234</td><td>15段 BiQuad 均衡器：process16Bit → applyEQ → filter.process</td></tr>
+<tr><td><code>audio/BiquadFilter.java</code></td><td>208</td><td>双二阶 IIR（RBJ Cookbook）：PEAKING/LOWPASS/HIGHPASS/LOWSHELF/HIGHSHELF/NOTCH/BANDPASS</td></tr>
+<tr><td><code>audio/VolumeController.java</code></td><td>95</td><td>音量增益 + 静音：short × (volume × masterVolume)</td></tr>
+<tr><td><code>audio/SurroundProcessor.java</code></td><td>342</td><td>5 模式环绕声：M/S 分解 + 延迟线 + 差分 + 宽立体声</td></tr>
+<tr><td><code>audio/SoundstageExpander.java</code></td><td>258</td><td>声场扩展：HRTF 简化模型 + 混响 + 高度增强</td></tr>
+<tr><td><code>audio/ViperEffectsProcessor.java</code></td><td>417</td><td>Viper 综合音效：低音增强 / 高音增强 / 压缩器 / 激励器 + 6 预设</td></tr>
+<tr><td><code>ui/ConsUI.java</code></td><td>241</td><td>主布局：列表+歌词+进度条、面板缓存管理</td></tr>
+<tr><td><code>ui/EQPanel.java</code></td><td>316</td><td>15段均衡器 UI：滑块 + 预设 + 频率响应图 + 音量 + 配置按钮</td></tr>
+<tr><td><code>ui/AdvancedEffectsPanel.java</code></td><td>404</td><td>高级音效 UI：环绕声/声场/Viper 设置 + 配置按钮</td></tr>
+<tr><td><code>ui/FrequencyResponsePanel.java</code></td><td>—</td><td>频率响应曲线可视化（实时绘制滤波器幅度响应）</td></tr>
+<tr><td><code>ui/DesktopLyricWindow.java</code></td><td>143</td><td>桌面歌词浮动窗口：JWindow + 自定义 paint + FCM 颜色同步 + 拖拽</td></tr>
+<tr><td><code>ui/FlushLRCThread.java</code></td><td>76</td><td>面板歌词刷新线程：200ms 轮询 → JList 选中更新</td></tr>
+<tr><td><code>ui/FlushDesktopLRC.java</code></td><td>95</td><td>桌面歌词刷新线程：200ms 轮询 → DesktopLyricWindow 更新</td></tr>
+<tr><td><code>ui/FlushJSBThread.java</code></td><td>—</td><td>进度条刷新线程：setMaximum / setValue 循环</td></tr>
+<tr><td><code>ui/Click.java</code></td><td>52</td><td>鼠标事件：ListClick（双击播放/右键移除）+ BarClick（进度条跳转）</td></tr>
+<tr><td><code>ui/Renden.java</code></td><td>35</td><td>LRCListCellRenderer：选中行放大字体</td></tr>
+</table>
+
+<hr style="margin-top:40px;border-color:var(--border)">
+<p style="text-align:center;color:#484f58;font-size:12px">Sair Music Player V4.1 · Creater: Sair</p>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path="exec_codes/层压组胚计算器"/>
+	<classpathentry kind="src" path="exec_codes/中文封装代码"/>
+	<classpathentry kind="src" path="exec_codes/oldcode"/>
+	<classpathentry kind="src" path="exec_codes/reconstitution/io"/>
+	<classpathentry kind="src" path="exec_codes/reconstitution/musicplayer"/>
+	<classpathentry kind="src" path="exec_codes/reconstitution/server_client"/>
+	<classpathentry kind="src" path="sacoms/javacode"/>
+	<classpathentry kind="src" path="sacoms/res"/>
+	<classpathentry kind="src" path="deepseek/jud"/>
+	<classpathentry kind="src" path="deepseek/scq"/>
+	<classpathentry kind="src" path="deepseek/GomokuProject/src"/>
+	<classpathentry kind="src" path="deepseek/QrCode"/>
+	<classpathentry kind="src" path="deepseek/AiAgent"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-1.8"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/jpdt_res.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/bootlib/commons-net-3.3.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/bootlib/gson-2.8.6.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/bootlib/layer.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/中文代码组件支持包.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/zxing-core-3.5.3.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/zxing-javase-3.5.3.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/bootlib/commons-compress-1.28.0.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/bootlib/sqlite-jdbc-3.42.0.0.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/SaComS.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/SFW.jar"/>
+	<classpathentry kind="output" path="bin"/>
+</classpath>

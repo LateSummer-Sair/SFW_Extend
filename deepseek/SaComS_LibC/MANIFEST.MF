@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Created-By: SaComS_LibC
+NAME: SaComS_LibC
+DIR: sair.sacoms.jni.JNISaComS
