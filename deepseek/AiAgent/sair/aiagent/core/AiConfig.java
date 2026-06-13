@@ -6,8 +6,13 @@ import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -30,6 +35,28 @@ public class AiConfig {
             "你是一个运行在 SairFrameWork(SFW) 中的 AI 智能助手。"
           + "你可以帮助用户完成任务，分析数据，操作框架。"
           + "请用中文回复。";
+
+    /** execq QQ通道默认提示词 */
+    public static final String DEFAULT_EXECQ_PROMPT =
+            "你正在通过QQ与用户聊天。你是运行在SairFrameWork中的AI助手，通过execq通道为用户服务。\n"
+          + "## 可用能力\n"
+          + "你在此通道中能力受限，仅可使用以下标签：\n"
+          + "- <cmd> — 执行SFW插件命令\n"
+          + "- <web> — 搜索/获取网页内容\n"
+          + "- <readdir> — 列出目录\n"
+          + "- <setname>名字</setname> — 设置你的名字（内部使用，不会展示给用户）\n"
+          + "其他所有标签均不可用，请勿尝试。\n\n"
+          + "## 回复规则\n"
+          + "- 用中文回复，简洁有帮助\n"
+          + "- 回复将直接发送给QQ用户\n"
+          + "- 保持自然对话风格\n"
+          + "- 如果你认为需要一个合适的名字让用户称呼，可以使用<setname>标签设置\n\n"
+          + "## 主人权限说明\n"
+          + "- 如果消息来自**主人**（配置文件中指定的QQ号），主人可以通过添加'execs:'前缀来触发execs模式\n"
+          + "- 当主人发送'execs:任务描述'时，系统会将该任务交给椰羊的execs身份处理，具有完整的执行权限\n"
+          + "- execs模式的执行结果会实时输出到SFW控制台，并发送摘要给主人\n"
+          + "- 如果主人消息没有execs:前缀，则按普通execq模式处理（受限权限）\n"
+          + "- 普通用户的消息始终使用execq模式（受限权限）";
 
     // ==================== 单例 ====================
 
@@ -60,6 +87,29 @@ public class AiConfig {
     private String apiUrl    = DEFAULT_API_URL;
     private String model     = DEFAULT_MODEL;
     private String systemPrompt = DEFAULT_SYSTEM_PROMPT;
+
+    // === OneBot QQ 配置 ===
+    private int onebotPort = 5800;
+    private String onebotToken = "";
+    private boolean onebotEnabled = false;
+    private long onebotSelfId = 0;
+    
+    /** 主人QQ号列表（具备execs权限） */
+    private Set<Long> masterQQs = new LinkedHashSet<>();
+    
+    private String execqPrompt = DEFAULT_EXECQ_PROMPT;
+
+    /** 主动查看功能是否启用 */
+    private boolean proactiveCheckEnabled = false;
+
+    /** 监听的群号列表（逗号分隔） */
+    private final Set<Long> monitoredGroups = new LinkedHashSet<>();
+
+    /** AI机器人名字（用于检测群聊中提到名字时触发回复） */
+    private String botName = "";
+
+    /** execq <cmd> 插件白名单（逗号分隔持久化），为空则不限制 */
+    private final Set<String> execqCmdWhitelist = new LinkedHashSet<>();
 
     /** 配置文件路径（init后设置） */
     private File configFile;
@@ -94,6 +144,49 @@ public class AiConfig {
             if (!sp.isEmpty()) {
                 systemPrompt = sp;
             }
+            // OneBot 配置
+            onebotEnabled = "true".equalsIgnoreCase(p.getProperty("onebotEnabled", "false"));
+            try { onebotPort = Integer.parseInt(p.getProperty("onebotPort", "5800")); } catch (NumberFormatException ignored) {}
+            onebotToken = p.getProperty("onebotToken", "");
+            try { onebotSelfId = Long.parseLong(p.getProperty("onebotSelfId", "0")); } catch (NumberFormatException ignored) {}
+            String eqp = p.getProperty("execqPrompt", "");
+            if (!eqp.isEmpty()) {
+                execqPrompt = eqp;
+            }
+            // execq 插件白名单
+            String whitelist = p.getProperty("execqCmdWhitelist", "");
+            if (!whitelist.isEmpty()) {
+                execqCmdWhitelist.clear();
+                for (String item : whitelist.split(",")) {
+                    String trimmed = item.trim();
+                    if (!trimmed.isEmpty()) {
+                        execqCmdWhitelist.add(trimmed);
+                    }
+                }
+            }
+            // 主动查看配置
+            proactiveCheckEnabled = "true".equalsIgnoreCase(p.getProperty("proactiveCheckEnabled", "false"));
+            String groupsStr = p.getProperty("monitoredGroups", "");
+            if (!groupsStr.isEmpty()) {
+                monitoredGroups.clear();
+                for (String item : groupsStr.split(",")) {
+                    try {
+                        monitoredGroups.add(Long.parseLong(item.trim()));
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+            // 主人QQ号列表（具备execs权限）
+            String mastersStr = p.getProperty("masterQQs", "");
+            if (!mastersStr.isEmpty()) {
+                masterQQs.clear();
+                for (String item : mastersStr.split(",")) {
+                    try {
+                        masterQQs.add(Long.parseLong(item.trim()));
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+            // AI机器人名字
+            botName = p.getProperty("botName", "");
         } catch (Exception ignored) {
             // 读取失败则使用默认值
         }
@@ -111,6 +204,28 @@ public class AiConfig {
             p.setProperty("apiUrl",       apiUrl);
             p.setProperty("model",        model);
             p.setProperty("systemPrompt", systemPrompt);
+            // OneBot 配置
+            p.setProperty("onebotEnabled", String.valueOf(onebotEnabled));
+            p.setProperty("onebotPort",    String.valueOf(onebotPort));
+            p.setProperty("onebotToken",   onebotToken);
+            p.setProperty("onebotSelfId",  String.valueOf(onebotSelfId));
+            p.setProperty("execqPrompt",   execqPrompt);
+            p.setProperty("execqCmdWhitelist", String.join(",", execqCmdWhitelist));
+            // 主动查看配置
+            p.setProperty("proactiveCheckEnabled", String.valueOf(proactiveCheckEnabled));
+            List<String> groupList = new ArrayList<>();
+            for (Long g : monitoredGroups) {
+                groupList.add(String.valueOf(g));
+            }
+            p.setProperty("monitoredGroups", String.join(",", groupList));
+            // 主人QQ号列表（具备execs权限）
+            List<String> masterList = new ArrayList<>();
+            for (Long qq : masterQQs) {
+                masterList.add(String.valueOf(qq));
+            }
+            p.setProperty("masterQQs", String.join(",", masterList));
+            // AI机器人名字
+            p.setProperty("botName", botName);
             try (FileOutputStream fos = new FileOutputStream(configFile)) {
                 p.store(new OutputStreamWriter(fos, StandardCharsets.UTF_8),
                         "AiAgent Configuration");
@@ -146,10 +261,84 @@ public class AiConfig {
                 ? prompt.trim() : DEFAULT_SYSTEM_PROMPT;
     }
 
+    // === OneBot Getters/Setters ===
+
+    public int getOnebotPort()           { return onebotPort; }
+    public void setOnebotPort(int port)  { this.onebotPort = port > 0 ? port : 5800; }
+
+    public String getOnebotToken()             { return onebotToken; }
+    public void setOnebotToken(String token)   { this.onebotToken = (token != null) ? token.trim() : ""; }
+
+    public boolean isOnebotEnabled()            { return onebotEnabled; }
+    public void setOnebotEnabled(boolean v)     { this.onebotEnabled = v; }
+
+    public long getOnebotSelfId()               { return onebotSelfId; }
+    public void setOnebotSelfId(long id)        { this.onebotSelfId = id; }
+    
+    /** 获取主人QQ号列表 */
+    public Set<Long> getMasterQQs()             { return Collections.unmodifiableSet(masterQQs); }
+    
+    /** 添加主人QQ号 */
+    public void addMasterQQ(long qq)            { masterQQs.add(qq); }
+    
+    /** 移除主人QQ号 */
+    public void removeMasterQQ(long qq)         { masterQQs.remove(qq); }
+    
+    /** 检查是否是主人 */
+    public boolean isMasterQQ(long qq)          { return masterQQs.contains(qq); }
+    
+    /** 设置主人QQ号列表（从配置文件加载） */
+    public void setMasterQQs(Set<Long> qqList)  { 
+        this.masterQQs.clear();
+        if (qqList != null) {
+            this.masterQQs.addAll(qqList);
+        }
+    }
+
+    public String getExecqPrompt()                { return execqPrompt; }
+    public void setExecqPrompt(String prompt)     { this.execqPrompt = (prompt != null && !prompt.trim().isEmpty()) ? prompt.trim() : DEFAULT_EXECQ_PROMPT; }
+
+    // === execq 插件白名单 ===
+
+    /** 获取 execq <cmd> 插件白名单（不可变视图） */
+    public Set<String> getExecqCmdWhitelist() { return Collections.unmodifiableSet(execqCmdWhitelist); }
+
+    /** 向白名单添加插件名 */
+    public boolean addExecqCmdPlugin(String pluginName) {
+        if (pluginName == null || pluginName.trim().isEmpty()) return false;
+        return execqCmdWhitelist.add(pluginName.trim());
+    }
+
+    /** 从白名单移除插件名 */
+    public boolean removeExecqCmdPlugin(String pluginName) {
+        if (pluginName == null || pluginName.trim().isEmpty()) return false;
+        return execqCmdWhitelist.remove(pluginName.trim());
+    }
+
+    /** 检查插件名是否在白名单中（白名单为空表示不限制） */
+    public boolean isExecqCmdPluginAllowed(String pluginName) {
+        if (execqCmdWhitelist.isEmpty()) return false; // 空白名单 = 全部禁止
+        return execqCmdWhitelist.contains(pluginName);
+    }
+
     /** @return API Key 是否已设置 */
     public boolean hasApiKey() {
         return apiKey != null && !apiKey.isEmpty();
     }
+
+    // === 主动查看配置 ===
+
+    public boolean isProactiveCheckEnabled() { return proactiveCheckEnabled; }
+    public void setProactiveCheckEnabled(boolean v) { this.proactiveCheckEnabled = v; }
+
+    public Set<Long> getMonitoredGroups() { return Collections.unmodifiableSet(monitoredGroups); }
+    public boolean addMonitoredGroup(long groupId) { return monitoredGroups.add(groupId); }
+    public boolean removeMonitoredGroup(long groupId) { return monitoredGroups.remove(groupId); }
+
+    // === AI机器人名字 ===
+
+    public String getBotName() { return botName != null ? botName.trim() : ""; }
+    public void setBotName(String name) { this.botName = (name != null) ? name.trim() : ""; }
 
     // ==================== 工具方法 ====================
 

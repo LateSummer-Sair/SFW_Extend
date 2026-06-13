@@ -7,6 +7,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -16,6 +17,7 @@ import sair.FCM;
 import sair.Pathes;
 import sair.aiagent.model.AgentAction;
 import sair.aiagent.model.ChatMessage;
+import sair.aiagent.onebot.QQMemoryManager;
 import sair.aiagent.ui.SysConsolePanel;
 import sair.aiagent.util.EdtUtils;
 import sair.aiagent.util.FileUtils;
@@ -33,6 +35,10 @@ public class AgentExecutor {
 
     private static final Pattern TAG_PATTERN =
             Pattern.compile("<(cmd|readfile|readdir|sys|evaljs|eval|web|remember|download|superise|editprompt)>(.*?)</\\1>", Pattern.DOTALL);
+
+    /** execq 受限标签白名单：仅 cmd / web / readdir / setname */
+    private static final Pattern EXECQ_TAG_PATTERN =
+            Pattern.compile("<(cmd|web|readdir|setname)>(.*?)</\\1>", Pattern.DOTALL);
 
     private final Activity selfActivity;
     private final DeepSeekClient client;
@@ -53,6 +59,11 @@ public class AgentExecutor {
     private volatile String chatHistoryContext;
     /** 缓存系统提示词的不变部分（角色定义、能力清单等），避免每轮重建 */
     private volatile String cachedStaticPrompt;
+    /** execq <cmd> 插件白名单（来自 AiConfig） */
+    private volatile Set<String> cmdWhitelist;
+    
+    /** QQ execs消息回调（用于实时推送每一轮输出给主人） */
+    private volatile java.util.function.Consumer<String> qqExecsCallback;
 
     public AgentExecutor(Activity selfActivity, DeepSeekClient client, DynamicCodeEngine codeEngine, ConfirmationGate gate) {
         this.selfActivity = selfActivity;
@@ -92,6 +103,16 @@ public class AgentExecutor {
     public void setPreviousSessionSummary(String summary) {
         this.previousSessionSummary = summary;
     }
+    
+    /** 设置QQ execs消息回调 */
+    public void setQqExecsCallback(java.util.function.Consumer<String> callback) {
+        this.qqExecsCallback = callback;
+    }
+    
+    /** 获取QQ execs消息回调 */
+    public java.util.function.Consumer<String> getQqExecsCallback() {
+        return qqExecsCallback;
+    }
 
     /** 获取本轮会话总结 */
     public String getLastSummary() {
@@ -103,14 +124,165 @@ public class AgentExecutor {
         this.chatHistoryContext = ctx;
     }
 
+    /** 设置 execq <cmd> 插件白名单 */
+    public void setCmdWhitelist(Set<String> whitelist) {
+        this.cmdWhitelist = whitelist;
+    }
+
+    // ==================== execq QQ通道 ====================
+
+    public String executeQq(String task, String systemPrompt, QQMemoryManager qqMemory) {
+        boolean prevBypass = gate.isBypassConfirm();
+        gate.setBypassConfirm(true);
+        try {
+            return runExecqLoop(task, systemPrompt, qqMemory);
+        } finally {
+            gate.setBypassConfirm(prevBypass);
+        }
+    }
+
+    /** execq QQ通道 - 使用统一记忆管理器 */
+    public String executeQq(String task, String systemPrompt, Object memoryManager) {
+        boolean prevBypass = gate.isBypassConfirm();
+        gate.setBypassConfirm(true);
+        try {
+            // 判断记忆管理器类型
+            if (memoryManager instanceof sair.aiagent.onebot.UnifiedQQMemoryManager) {
+                return runExecqLoopWithUnifiedMemory(task, systemPrompt, 
+                    (sair.aiagent.onebot.UnifiedQQMemoryManager) memoryManager);
+            } else if (memoryManager instanceof QQMemoryManager) {
+                return runExecqLoop(task, systemPrompt, (QQMemoryManager) memoryManager);
+            }
+            return "[错误] 未知的记忆管理器类型";
+        } finally {
+            gate.setBypassConfirm(prevBypass);
+        }
+    }
+    
+    /** execs QQ通道（主人专用）- 使用统一记忆管理器 */
+    public String executeQqExecs(String task, String systemPrompt, Object memoryManager) {
+        // execs模式：主人权限，绕过确认，允许所有操作
+        boolean prevBypass = gate.isBypassConfirm();
+        gate.setBypassConfirm(true);
+        try {
+            // 判断记忆管理器类型
+            if (memoryManager instanceof sair.aiagent.onebot.UnifiedQQMemoryManager) {
+                return runExecqLoopWithUnifiedMemory(task, systemPrompt, 
+                    (sair.aiagent.onebot.UnifiedQQMemoryManager) memoryManager);
+            } else if (memoryManager instanceof QQMemoryManager) {
+                return runExecqLoop(task, systemPrompt, (QQMemoryManager) memoryManager);
+            }
+            return "[错误] 未知的记忆管理器类型";
+        } finally {
+            gate.setBypassConfirm(prevBypass);
+        }
+    }
+
+    private String runExecqLoop(String task, String systemPrompt, QQMemoryManager qqMemory) {
+        List<ChatMessage> history = new ArrayList<>();
+        history.add(new ChatMessage("system", systemPrompt));
+        history.add(new ChatMessage("user", task));
+
+        for (int round = 1; round <= 5; round++) {
+            String response;
+            try {
+                response = client.chatSync(history);
+            } catch (Exception e) {
+                return "[错误] AI调用失败: " + e.toString();
+            }
+            if (response == null || response.trim().isEmpty()) {
+                return "(AI未响应)";
+            }
+            history.add(new ChatMessage("assistant", response));
+            List<AgentAction> actions = parseExecqActions(response);
+            if (actions.isEmpty()) {
+                String clean = response.replaceAll("<[^>]+>", "").trim();
+                return clean.isEmpty() ? response : clean;
+            }
+            for (AgentAction action : actions) {
+                try {
+                    String result = executeQqAction(action);
+                    history.add(new ChatMessage("user", result));
+                } catch (Exception e) {
+                    history.add(new ChatMessage("user",
+                            "操作 " + action.getType() + " 失败: " + e.getMessage()));
+                }
+            }
+        }
+        for (int i = history.size() - 1; i >= 0; i--) {
+            if ("assistant".equals(history.get(i).getRole())) {
+                return history.get(i).getContent().replaceAll("<[^>]+>", "").trim();
+            }
+        }
+        return "(处理完成)";
+    }
+
+    static List<AgentAction> parseExecqActions(String response) {
+        List<AgentAction> actions = new ArrayList<>();
+        Matcher m = EXECQ_TAG_PATTERN.matcher(response);
+        while (m.find()) {
+            actions.add(new AgentAction(m.group(1), m.group(2).trim()));
+        }
+        return actions;
+    }
+
+    private String executeQqAction(AgentAction action) {
+        switch (action.getType()) {
+            case "cmd":     return executeCmdExecq(action.getContent());
+            case "web":     return executeWeb(action.getContent());
+            case "readdir": return executeReadDir(action.getContent());
+            case "setname": return executeSetName(action.getContent());
+            default:        return "QQ execq通道不支持: " + action.getType();
+        }
+    }
+
+    /** execq 通道的 cmd 执行：先检查插件白名单 */
+    private String executeCmdExecq(String command) {
+        String pluginName = extractPluginName(command);
+        if (pluginName == null) {
+            return "execq通道 <cmd> 格式错误，应为 pluginName/funcName args，收到: " + command;
+        }
+        if (cmdWhitelist == null || !cmdWhitelist.contains(pluginName)) {
+            return "execq通道 <cmd> 被拒绝：插件 [" + pluginName + "] 不在白名单中。"
+                 + "当前白名单: " + (cmdWhitelist == null ? "(无)" : cmdWhitelist.toString());
+        }
+        return executeCmd(command);
+    }
+
+    /** 设置AI机器人名字（内部标签，不展示给用户） */
+    private String executeSetName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return "[setname] 错误：名字不能为空";
+        }
+        String trimmedName = name.trim();
+        // 持久化保存名字到配置
+        sair.aiagent.core.AiConfig.getInstance().setBotName(trimmedName);
+        sair.aiagent.core.AiConfig.getInstance().save();
+        // 返回成功消息（不会展示给用户，只给AI看）
+        return "[setname] 名字已设置为: " + trimmedName;
+    }
+
+    /** 从 SFW 命令字符串提取插件名，格式: pluginName/funcName args */
+    static String extractPluginName(String command) {
+        if (command == null) return null;
+        String trimmed = command.trim();
+        int slashIdx = trimmed.indexOf('/');
+        if (slashIdx <= 0) return null;
+        return trimmed.substring(0, slashIdx);
+    }
+
     public void execute(String task) throws IOException {
         stopped = false;
+
+        // execs模式：主人权限，绕过所有确认，静默执行
+        boolean prevBypass = gate.isBypassConfirm();
+        gate.setBypassConfirm(true);
 
         try {
             runLoop(task);
         } finally {
             // 重置确认模式：execs 结束后不污染后续 exec
-            gate.setBypassConfirm(false);
+            gate.setBypassConfirm(prevBypass);
         }
     }
 
@@ -172,6 +344,21 @@ public class AgentExecutor {
             printer.finish();
             printer.await(5000);
             EdtUtils.println("");
+            
+            // 如果有QQ execs回调，发送这一轮的思考内容给主人
+            if (qqExecsCallback != null && response != null && !response.trim().isEmpty()) {
+                try {
+                    // 提取关键信息：去掉XML标签，保留纯文本
+                    String cleanResponse = response.replaceAll("<[^>]+>", "").trim();
+                    if (!cleanResponse.isEmpty()) {
+                        String roundMsg = "\n[第" + round + "轮思考]\n" + 
+                            (cleanResponse.length() > 200 ? cleanResponse.substring(0, 200) + "..." : cleanResponse);
+                        qqExecsCallback.accept(roundMsg);
+                    }
+                } catch (Exception e) {
+                    System.err.println("[Execs] 发送QQ消息失败: " + e.toString());
+                }
+            }
 
             if (stopped) {
                 EdtUtils.println(FCM.Error_Color, "Agent已停止。");
@@ -926,13 +1113,49 @@ public class AgentExecutor {
     }
 
     private static String extractDiff(String before, String after) {
-        if (before == null || after == null) return "(无输出)";
-        if (after.length() <= before.length()) return "(无输出)";
-        String diff = after.substring(before.length());
-        if (diff.length() > 3000) {
-            diff = "...(已截断)\n" + diff.substring(diff.length() - 3000);
+        if (before == null || after == null) return after;
+        if (before.equals(after)) return "(无变化)";
+        return after;
+    }
+
+    /** 使用统一记忆管理器的execq循环 */
+    private String runExecqLoopWithUnifiedMemory(String task, String systemPrompt, 
+                                                  sair.aiagent.onebot.UnifiedQQMemoryManager unifiedMemory) {
+        List<ChatMessage> history = new ArrayList<>();
+        history.add(new ChatMessage("system", systemPrompt));
+        history.add(new ChatMessage("user", task));
+
+        for (int round = 1; round <= 5; round++) {
+            String response;
+            try {
+                response = client.chatSync(history);
+            } catch (Exception e) {
+                return "[错误] AI调用失败: " + e.toString();
+            }
+            if (response == null || response.trim().isEmpty()) {
+                return "(AI未响应)";
+            }
+            history.add(new ChatMessage("assistant", response));
+            List<AgentAction> actions = parseExecqActions(response);
+            if (actions.isEmpty()) {
+                String clean = response.replaceAll("<[^>]+>", "").trim();
+                return clean.isEmpty() ? response : clean;
+            }
+            for (AgentAction action : actions) {
+                try {
+                    String result = executeQqAction(action);
+                    // 如果是setname标签，记录到AI的独立记忆
+                    if ("setname".equals(action.getType())) {
+                        unifiedMemory.addMemory("AI的名字被设置为: " + action.getContent());
+                    }
+                    history.add(new ChatMessage("user", result));
+                } catch (Exception e) {
+                    history.add(new ChatMessage("user",
+                        "[执行错误] " + e.toString()));
+                }
+            }
         }
-        return diff.isEmpty() ? "(无输出)" : diff;
+        return "[达到最大轮数]";
     }
 
 }

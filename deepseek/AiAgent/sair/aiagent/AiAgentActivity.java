@@ -20,6 +20,9 @@ import sair.aiagent.core.JournalManager;
 import sair.aiagent.core.MemoryManager;
 import sair.aiagent.core.PersistenceManager;
 import sair.aiagent.core.StreamPrinter;
+import sair.aiagent.onebot.OneBotServer;
+import sair.aiagent.onebot.QQMessageHandler;
+import sair.sys.SairCons;
 import sair.user.Activity;
 
 /**
@@ -44,6 +47,10 @@ public class AiAgentActivity extends Activity {
     private final EmotionManager      emotionManager;
     private final ActivityActions     actions;
 
+    /** OneBot QQ 集成 */
+    private volatile OneBotServer oneBotServer;
+    private volatile QQMessageHandler oneBotMessageHandler;
+
     private volatile PersistenceManager persistenceManager;
     private volatile Thread activeThread;
     private volatile boolean initialized = false;
@@ -51,7 +58,7 @@ public class AiAgentActivity extends Activity {
     // ==================== 构造 ====================
 
     public AiAgentActivity() {
-        debugLog("=== AiAgentActivity CONSTRUCTOR ===");
+        debugLog("=== AiAgentActivity 构造 ===");
         config     = AiConfig.getInstance();
         history    = new ConversationHistory();
         client     = new DeepSeekClient(config);
@@ -62,16 +69,16 @@ public class AiAgentActivity extends Activity {
         emotionManager = new EmotionManager();
         agent      = new AgentExecutor(this, client, codeEngine, gate);
         actions    = new ActivityActions(this);
-        debugLog("Constructor done.");
+        debugLog("构造完成");
     }
 
     // ==================== Activity 生命周期 ====================
 
     @Override
     public Object main(String funcName, String args) {
-        debugLog("main() called: funcName=" + funcName + " args=" + args);
+        debugLog("main() 调用: funcName=" + funcName + " args=" + args);
         if (!initialized) {
-            debugLog("First call - initializing...");
+            debugLog("首次调用 - 初始化中...");
             String dataDir = getDataDir();
             config.init(dataDir);
 
@@ -95,13 +102,16 @@ public class AiAgentActivity extends Activity {
             history.loadFromFile();
             emotionManager.load(dataDir);
 
-            debugLog("History loaded: " + history.size() + " messages");
+            debugLog("历史加载: " + history.size() + " 条消息");
+
+            // === OneBot QQ 初始化 ===
+            initOneBot(dataDir);
 
             // === 跨会话上下文 ===
             String prevCtx = memory.loadContext();
             if (prevCtx != null) {
                 agent.setPreviousSessionSummary(prevCtx);
-                debugLog("Context loaded from previous session");
+                debugLog("已加载上次会话上下文");
             }
             initialized = true;
         }
@@ -145,16 +155,86 @@ public class AiAgentActivity extends Activity {
             "\t<web>URL</web>                联网获取网页内容",
             "\t<remember>内容</remember>     记录重要信息到持久化记忆",
             "\t<download>URL</download>        下载文件/依赖到 dataDir/downloads/",
+            "QQ OneBot:",
+            "\t" + n + "/onebotconnect       启动OneBot服务",
+            "\t" + n + "/onebotdisconnect    停止OneBot服务",
+            "\t" + n + "/onebotstatus        查看连接状态",
+            "\t" + n + "/onebotsetport [端口] 设置监听端口 (默认5800)",
+            "\t" + n + "/onebotsettoken [Token] 设置Access Token",
+            "\t" + n + "/onebotsetselfid [QQ号] 设置机器人QQ号",
+            "\t" + n + "/onebotsetprompt [提示词] 设置execq通道提示词",
+            "\t" + n + "/onebotshowprompt 显示execq提示词",
+            "\t" + n + "/onebotwhitelist       显示execq插件白名单",
+            "\t" + n + "/onebotwhitelistadd [插件名] 添加插件到白名单",
+            "\t" + n + "/onebotwhitelistremove [插件名] 移除插件",
+            "主动查看:",
+            "\t" + n + "/onebotenableproactive   启用主动查看（每5分钟检查群聊）",
+            "\t" + n + "/onebotdisableproactive  禁用主动查看",
+            "\t" + n + "/onebotaddgroup [群号]   添加监听的群",
+            "\t" + n + "/onebotremovegroup [群号] 移除监听的群",
+            "\t" + n + "/onebotlistgroups        列出监听的群",
+            "\t" + n + "/execq [消息]         QQ通道Agent (受限标签自动允许)",
             Pathes.printSplit,
         };
     }
 
     @Override
     public void exit() {
+        // === 停止OneBot ===
+        if (oneBotServer != null) {
+            oneBotServer.stop();
+        }
+        if (oneBotMessageHandler != null) {
+            oneBotMessageHandler.shutdown();
+        }
         stopActivePrinter();
         if (persistenceManager != null) {
             persistenceManager.close();
             persistenceManager = null;
+        }
+    }
+
+    /** 初始化 OneBot QQ 集成 */
+    private void initOneBot(String dataDir) {
+        try {
+            oneBotServer = new OneBotServer();
+            oneBotServer.setDataDir(dataDir);
+
+            oneBotMessageHandler = new QQMessageHandler();
+            oneBotMessageHandler.setServer(oneBotServer);
+            oneBotMessageHandler.setAgentExecutor(agent);
+            oneBotMessageHandler.setDataDir(dataDir);
+            oneBotMessageHandler.setSelfId(config.getOnebotSelfId());
+
+            // execq 插件白名单注入 AgentExecutor
+            agent.setCmdWhitelist(config.getExecqCmdWhitelist());
+
+            oneBotServer.setMessageHandler(oneBotMessageHandler);
+            oneBotServer.setPort(config.getOnebotPort());
+            oneBotServer.setAccessToken(config.getOnebotToken());
+
+            // === 配置主动查看功能 ===
+            if (config.isProactiveCheckEnabled()) {
+                oneBotMessageHandler.enableProactiveCheck();
+                for (Long groupId : config.getMonitoredGroups()) {
+                    oneBotMessageHandler.addMonitoredGroup(groupId);
+                }
+                debugLog("[OneBot] 主动查看已启用，监听群: " + config.getMonitoredGroups());
+            }
+
+            debugLog("[OneBot] 已初始化. 启用=" + config.isOnebotEnabled()
+                    + " 端口=" + config.getOnebotPort());
+
+            // 如果配置中已启用，自动启动
+            if (config.isOnebotEnabled()) {
+                if (oneBotServer.start()) {
+                    debugLog("[OneBot] 自动启动，端口: " + config.getOnebotPort());
+                } else {
+                    debugLog("[OneBot] 自动启动失败");
+                }
+            }
+        } catch (Exception e) {
+            debugLog("[OneBot] 初始化错误: " + e.toString());
         }
     }
 
@@ -175,6 +255,10 @@ public class AiAgentActivity extends Activity {
     public JournalManager getJournal()          { return journal; }
     public EmotionManager getEmotionManager()   { return emotionManager; }
 
+    /** OneBot QQ 集成 */
+    public OneBotServer getOneBotServer()              { return oneBotServer; }
+    public QQMessageHandler getOneBotMessageHandler()   { return oneBotMessageHandler; }
+
     public Thread getActiveThread()             { return activeThread; }
     public void setActiveThread(Thread t)       { this.activeThread = t; }
 
@@ -189,6 +273,10 @@ public class AiAgentActivity extends Activity {
     public static void debugLog(String msg) {
         synchronized (debugLock) {
             try {
+                // 输出到SFW控制台
+                SairCons.println("[AiAgent] " + msg);
+                
+                // 输出到日志文件
                 if (debugWriter == null) {
                     debugWriter = new PrintWriter(new FileWriter(
                             System.getProperty("user.home") + File.separator + "aiagent_debug.log", true), true);

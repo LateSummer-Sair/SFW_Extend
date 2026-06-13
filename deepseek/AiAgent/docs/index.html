@@ -31,21 +31,22 @@
     <!-- Hero Section -->
     <section class="hero">
         <div class="hero-content">
-            <div class="hero-badge">SFW Plugin · v1.6</div>
+            <div class="hero-badge">SFW Plugin · v1.9</div>
             <h1>
                 <span class="gradient-text">AiAgent</span>
             </h1>
             <p class="hero-subtitle">
-                SairFrameWork AI 智能代理插件 — 对接 DeepSeek API，流式逐字输出，<br>
-                SQLite 统一持久化 + 三模式记忆同步 + 情绪陪伴系统 + 动态代码注入 + 联网搜索 + 跨平台终端 + 会话日志，全面接管 SFW 框架。
+                SairFrameWork AI 智能代理插件 — 对接 DeepSeek API，流式逐字输出，QQ OneBot 机器人（统一记忆库），<br>
+                SQLite 全局持久化 + 记忆联通系统 + 情绪陪伴系统 + 动态代码注入 + 联网搜索 + 跨平台终端 + 会话日志，全面接管 SFW 框架。<br>
+                <strong>v1.9 新增：主人 execs 前缀模式，静默执行 + 实时推送每轮思考结果给 QQ。</strong>
             </p>
             <div class="hero-stats">
                 <div class="hero-stat reveal">
-                    <div class="num" data-target="21">0</div>
+                    <div class="num" data-target="26">0</div>
                     <div class="label">核心类</div>
                 </div>
                 <div class="hero-stat reveal">
-                    <div class="num" data-target="17">0</div>
+                    <div class="num" data-target="28">0</div>
                     <div class="label">命令</div>
                 </div>
                 <div class="hero-stat reveal">
@@ -53,7 +54,7 @@
                     <div class="label">设计模式</div>
                 </div>
                 <div class="hero-stat reveal">
-                    <div class="num" data-target="5530">0</div>
+                    <div class="num" data-target="7200">0</div>
                     <div class="label">行代码</div>
                 </div>
             </div>
@@ -67,10 +68,17 @@
                 <div class="section-tag">Overview</div>
                 <h2>项目概述</h2>
                 <div class="section-divider"></div>
-                <p>AiAgent 是一个为 SFW (SairFrameWork) 框架打造的 AI 智能代理插件（v1.6），全面对接 DeepSeek API，实现流式对话与自主任务执行。21 个 Java 源文件，约 5,530 行代码，SQLite 统一持久化替代 5 个 JSON 文件，外部依赖：SFW.jar + gson-2.8.6.jar + sqlite-jdbc-3.42.0.0.jar。</p>
+                <p>AiAgent 是一个为 SFW (SairFrameWork) 框架打造的 AI 智能代理插件（v1.8），全面对接 DeepSeek API，实现流式对话与自主任务执行。新增 QQ OneBot v11 机器人集成，execq 独立通道（插件白名单门控），**统一记忆库架构**（所有对话历史统一管理，通过来源标记区分群聊/私聊，实现记忆联通）。26 个 Java 源文件，约 7,200 行代码，SQLite 全局持久化，外部依赖：SFW.jar + gson-2.8.6.jar + sqlite-jdbc-3.42.0.0.jar。</p>
             </div>
 
             <ul class="feature-list">
+                <li class="reveal">
+                    <div class="check">✓</div>
+                    <div>
+                        <div class="f-title">QQ OneBot v11 机器人（统一记忆）</div>
+                        <div class="f-desc">反向 WebSocket 连接接手 QQ 私聊群聊。execq 独立通道（独立提示词/记忆/上下文），仅开放 cmd/web/readdir/setname 标签，<b>&lt;cmd&gt; 插件白名单门控</b>，自动绕过确认。**统一记忆库架构**：所有对话存储在 unified_memory.db，通过 source_type/source_id 标记区分群聊/私聊，实现记忆联通，AI 不会失忆。@回复/引用/提到名字触发响应，支持主动查看群聊（每5分钟）</div>
+                    </div>
+                </li>
                 <li class="reveal">
                     <div class="check">✓</div>
                     <div>
@@ -186,12 +194,12 @@
                 <a href="classes.html" class="card reveal" style="text-decoration:none; color:inherit;">
                     <div class="card-icon green">📦</div>
                     <h3>类结构详解</h3>
-                    <p>21 个核心类 · ~5,530 行 · 5 个包：core / model / util / ui / acts</p>
+                    <p>25 个核心类 · ~6,700 行 · 7 个包：core / model / util / ui / acts / onebot / onebot.model</p>
                 </a>
                 <a href="commands.html" class="card reveal" style="text-decoration:none; color:inherit;">
                     <div class="card-icon amber">📋</div>
                     <h3>命令参考 & 部署</h3>
-                    <p>17 个用户命令 · 11 种 XML 操作标签 · 编译打包部署三步骤</p>
+                    <p>28 个用户命令 · 11 种 XML 操作标签 · OneBot QQ 机器人命令 · 插件白名单 · 编译打包部署三步骤</p>
                 </a>
             </div>
         </div>
@@ -201,12 +209,12 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v1.6 ·
+                <span class="brand">AiAgent</span> v1.7 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                三模式同步 · 情绪系统 · 彩蛋弹窗 · 系统终端 · SQLite 持久化 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · FTS5 全文搜索
+                QQ OneBot · 三模式同步 · 情绪系统 · 彩蛋弹窗 · 系统终端 · SQLite 持久化 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · FTS5 全文搜索
             </p>
         </div>
     </footer>

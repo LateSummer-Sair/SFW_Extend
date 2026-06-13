@@ -29,7 +29,7 @@
                 <div class="section-tag">CLI Reference</div>
                 <h2>用户命令参考</h2>
                 <div class="section-divider"></div>
-                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 17 个用户命令。</p>
+                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 28 个用户命令（含 11 个 OneBot QQ 机器人命令）。</p>
             </div>
         </div>
     </section>
@@ -151,6 +151,139 @@
                         </tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- OneBot QQ Commands -->
+    <section id="onebot-cmds">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">QQ Bot</div>
+                <h2>OneBot v11 QQ 机器人命令</h2>
+                <div class="section-divider"></div>
+                <p>通过反向 WebSocket 连接 QQ，execq 独立通道：独立提示词、统一记忆库（所有对话历史统一管理）、插件白名单门控。共 14 个 OneBot 命令。</p>
+                <p><strong>v1.9 新增：</strong>主人消息添加 <code>execs:</code> 前缀可触发完整 execs 链路，静默执行所有操作，实时推送每轮思考结果给主人。</p>
+            </div>
+
+            <div style="overflow-x:auto;">
+                <table class="cmd-table reveal">
+                    <thead>
+                        <tr>
+                            <th>命令</th>
+                            <th>参数</th>
+                            <th>分类</th>
+                            <th>说明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="cmd-name">ai/onebot/connect</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-cyan);">连接</td>
+                            <td class="cmd-desc">启动 OneBot 反向 WebSocket 服务，等待 QQ 端连接</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebot/disconnect</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-cyan);">连接</td>
+                            <td class="cmd-desc">停止 OneBot 服务，断开所有 QQ 连接</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebot/status</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-cyan);">连接</td>
+                            <td class="cmd-desc">查看 OneBot 服务运行状态（监听端口、连接数等）</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebot/setport</td>
+                            <td>[端口号]</td>
+                            <td style="color:var(--accent-purple);">配置</td>
+                            <td class="cmd-desc">设置 WebSocket 监听端口，默认 5800</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebot/settoken</td>
+                            <td>[Token]</td>
+                            <td style="color:var(--accent-purple);">配置</td>
+                            <td class="cmd-desc">设置 Access Token 用于鉴权（与 QQ 端保持一致）</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebot/setselfid</td>
+                            <td>[QQ号]</td>
+                            <td style="color:var(--accent-purple);">配置</td>
+                            <td class="cmd-desc">设置机器人自身 QQ 号，用于群消息 @ 检测与过滤</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebot/setprompt</td>
+                            <td>[提示词]</td>
+                            <td style="color:var(--accent-purple);">配置</td>
+                            <td class="cmd-desc">设置 execq 通道独立系统提示词（与主通道完全独立）</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebot/showprompt</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-purple);">配置</td>
+                            <td class="cmd-desc">显示当前 execq 通道的系统提示词全文</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebot/whitelist</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-amber);">安全</td>
+                            <td class="cmd-desc">显示 execq <code>&lt;cmd&gt;</code> 插件白名单及配置文件路径（config.properties）</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebot/whitelist/add</td>
+                            <td>[插件名]</td>
+                            <td style="color:var(--accent-amber);">安全</td>
+                            <td class="cmd-desc">添加插件到 execq 白名单（如 Filer），自动保存配置并立即生效</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebotwhitelist/remove</td>
+                            <td>[插件名]</td>
+                            <td style="color:var(--accent-amber);">安全</td>
+                            <td class="cmd-desc">从 execq 白名单移除插件，自动保存配置并立即生效</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebotenableproactive</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-green);">功能</td>
+                            <td class="cmd-desc">启用主动查看功能：AI 每 5 分钟自动检查群聊并参与讨论</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebotdisableproactive</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-green);">功能</td>
+                            <td class="cmd-desc">禁用主动查看功能</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebotaddgroup</td>
+                            <td>[群号]</td>
+                            <td style="color:var(--accent-green);">功能</td>
+                            <td class="cmd-desc">添加监听的群号到主动查看列表</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/onebotremovegroup</td>
+                            <td>[群号]</td>
+                            <td style="color:var(--accent-green);">功能</td>
+                            <td class="cmd-desc">从主动查看列表中移除群号</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="max-width:800px; margin:32px auto;">
+                <div class="pattern-card">
+                    <h4>⚙️ execq 通道机制</h4>
+                    <p>
+                        execq 是专门为 QQ 消息设计的独立 Agent 通道，<b>完全隔离于主 AiAgent 通道</b>：<br><br>
+                        <b>独立提示词</b> — 通过 <code>ai/onebot/setprompt</code> 独立配置，不影响主通道<br>
+                        <b>独立记忆</b> — 按 QQ 号隔离，每个用户独立的 SQLite 数据库（<code>qq_memories/{qq}.db</code>）<br>
+                        <b>独立上下文</b> — 每个 QQ 用户的对话历史独立存储，互不干扰<br>
+                        <b>受限标签</b> — 仅开放 <code>&lt;cmd&gt;</code> <code>&lt;web&gt;</code> <code>&lt;readdir&gt;</code>，自动绕过确认<br>
+                        <b>插件白名单</b> — <code>&lt;cmd&gt;</code> 受插件级白名单门控，空白名单=全部拒绝，通过 <code>ai/onebot/whitelist</code> 系列命令管理<br>
+                        <b>群消息过滤</b> — 仅响应 @机器人 或引用回复的消息，避免干扰
+                    </p>
+                </div>
             </div>
         </div>
     </section>
@@ -339,7 +472,26 @@ ai/mood
 
 <span class="cmt"># 7. 查看配置和统计</span>
 ai/info
-ai/memories</code></pre>
+ai/memories
+
+<span class="cmt"># === OneBot QQ 机器人 ===</span>
+<span class="cmt"># 8. 配置并启动QQ机器人</span>
+ai/onebot/setport 5800
+ai/onebot/settoken my-secret-token
+ai/onebot/setselfid 123456789
+ai/onebot/connect
+
+<span class="cmt"># 9. 设置execq提示词（可选）</span>
+ai/onebot/setprompt 你是Sair的QQ助手，请用中文友好回复
+
+<span class="cmt"># 10. 查看状态</span>
+ai/onebot/status
+ai/onebot/showprompt
+
+<span class="cmt"># 11. 管理插件白名单（execq安全门控）</span>
+ai/onebot/whitelist
+ai/onebot/whitelist/add Filer
+ai/onebot/whitelist/add IDE</code></pre>
             </div>
         </div>
     </section>
@@ -347,12 +499,12 @@ ai/memories</code></pre>
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v1.6 ·
+                <span class="brand">AiAgent</span> v1.7 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · Java 8
+                QQ OneBot · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · Java 8
             </p>
         </div>
     </footer>

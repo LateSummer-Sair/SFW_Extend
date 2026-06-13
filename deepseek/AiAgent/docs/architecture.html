@@ -51,16 +51,16 @@
                 <div class="arch-arrow">↓</div>
                 <!-- Core Layer Row 1 -->
                 <div class="arch-layer">
-                    <div class="arch-node core">PersistenceManager<br><small>SQLite · FTS5</small></div>
+                    <div class="arch-node core">PersistenceManager<br><small>SQLite · FTS5 · 统一持久化</small></div>
                     <div class="arch-node core">AiConfig<br><small>单例</small></div>
                     <div class="arch-node core">StreamPrinter<br><small>生产者-消费者</small></div>
                     <div class="arch-node core">DeepSeekClient<br><small>策略</small></div>
-                    <div class="arch-node core">AgentExecutor<br><small>ReAct</small></div>
+                    <div class="arch-node core">AgentExecutor<br><small>ReAct · execs回调</small></div>
                 </div>
                 <!-- Core Layer Row 2 -->
                 <div class="arch-layer">
                     <div class="arch-node core">ConversationHistory<br><small>滑动窗口</small></div>
-                    <div class="arch-node core">MemoryManager<br><small>记忆管理</small></div>
+                    <div class="arch-node core">MemoryManager<br><small>全局记忆管理</small></div>
                     <div class="arch-node core">DynamicCodeEngine<br><small>动态编译</small></div>
                     <div class="arch-node core">SysConsoleExecutor<br><small>系统终端</small></div>
                 </div>
@@ -70,6 +70,14 @@
                     <div class="arch-node core">ActivityActions<br><small>命令委托</small></div>
                     <div class="arch-node core">JournalManager<br><small>会话日志</small></div>
                     <div class="arch-node core">EmotionManager<br><small>情绪状态机</small></div>
+                </div>
+                <div class="arch-arrow">↓</div>
+                <!-- OneBot QQ Layer -->
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">OneBotServer<br><small>WebSocket 服务端</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessageHandler<br><small>消息路由 · execq/execs回调</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">UnifiedQQMemoryManager<br><small>统一记忆库（群聊/私聊联通）</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessage<br><small>OneBot 消息模型</small></div>
                 </div>
                 <div class="arch-arrow">↓</div>
                 <!-- Model + Util + UI Layer -->
@@ -92,9 +100,11 @@
                     / <code style="color:var(--accent-amber);">.util</code>
                     / <code style="color:var(--accent-cyan);">.ui</code>
                     / <code style="color:var(--accent-purple);">.acts</code>
+                    / <code style="color:var(--accent-cyan);">.onebot</code>
+                    / <code style="color:var(--accent-green);">.onebot.model</code>
                 </p>
                 <p style="color:var(--text-muted); font-size:0.78rem; margin-top:8px;">
-                    21 个源文件 · 约 5,530 行代码 · 5 个包
+                    25 个源文件 · 约 6,700 行代码 · 7 个包
                 </p>
             </div>
         </div>
@@ -168,6 +178,10 @@
                 <div class="arch-arrow">↓</div>
                 <div class="arch-layer">
                     <div class="arch-node core">② DeepSeekClient.chatStream()<br><small>SSE流式 → StreamPrinter</small></div>
+                </div>
+                <div class="arch-arrow">↓ v1.9新增：execs回调机制</div>
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">qqExecsCallback<br><small>每轮AI响应后实时推送给QQ主人</small></div>
                 </div>
                 <div class="arch-arrow">↓</div>
                 <div class="arch-layer">
@@ -275,7 +289,7 @@
                 <div class="section-tag">Context Chain</div>
                 <h2>三模式上下文注入链</h2>
                 <div class="section-divider"></div>
-                <p>chat ↔ exec ↔ execs 之间双向上下文同步，实现跨模式记忆穿透。</p>
+                <p>chat ↔ exec ↔ execs ↔ QQ 之间多向上下文同步，实现跨模式记忆穿透。统一记忆库架构确保AI不会失忆。</p>
             </div>
 
             <div class="arch-diagram reveal">
@@ -318,9 +332,11 @@
                     <h4>④ 辅助上下文注入口</h4>
                     <p>
                         <b>MemoryManager</b>：FTS5 全文搜索检索相关记忆 → 注入 system prompt<br>
+                        <b>UnifiedQQMemoryManager</b>：统一记忆库，所有对话存储在 unified_memory.db，通过 source_type/source_id 标记区分群聊/私聊，实现记忆联通<br>
                         <b>JournalManager</b>：最近 25 条会话日志（跨重启持久化，SQLite）→ 注入 system prompt<br>
                         <b>EmotionManager</b>：当前情绪状态（心情+性别，持久化到 app_state）→ 注入 system prompt<br>
                         <b>PersistenceManager</b>：SQLite 统一持久化层，WAL 模式增量写入，替代 5 个 JSON 文件<br>
+                                                <b>UnifiedQQMemoryManager</b>：QQ机器人统一记忆库，存储所有对话历史、群聊记录、AI独立记忆，通过来源标记实现记忆联通<br>
                         以上所有上下文在 <code>buildSystemPrompt()</code> 中一次性融合。
                     </p>
                 </div>
@@ -332,12 +348,12 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v1.6 ·
+                <span class="brand">AiAgent</span> v1.7 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · Java 8
+                QQ OneBot · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · Java 8
             </p>
         </div>
     </footer>
