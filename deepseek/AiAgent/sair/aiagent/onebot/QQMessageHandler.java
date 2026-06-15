@@ -10,15 +10,16 @@ import java.util.function.Consumer;
 import sair.aiagent.AiAgentActivity;
 import sair.aiagent.core.AgentExecutor;
 import sair.aiagent.onebot.model.QQMessage;
+import sair.aiagent.onebot.util.JsonUtil;
 
 /**
  * QQ消息处理器 —— 消息解析、过滤、路由到AI Agent。
  *
  * <h3>处理规则</h3>
  * <ul>
- *   <li><b>群消息</b>：仅响应@机器人 或 引用回复，其余忽略</li>
+ *   <li><b>群消息</b>：仅响应@机器人 或 提到名字，其余忽略</li>
  *   <li><b>私聊消息</b>：全部响应</li>
- *   <li>execq 通道只开放：cmd / web / readdir 三个标签</li>
+ *   <li>execq 通道只开放：cmd / web / readdir / setname / stop 五个标签</li>
  *   <li>默认允许无需确认（自动绕过确认门控）</li>
  *   <li>按QQ号隔离记忆存储</li>
  * </ul>
@@ -63,12 +64,69 @@ public class QQMessageHandler {
     /** 当前监听的群号列表 */
     private final Set<Long> monitoredGroups = Collections.synchronizedSet(new HashSet<>());
 
+    /** NapCat API封装 */
+    private NapCatApi napcatApi;
+
+    /** 内部Agent系统 */
+    private InternalAgents internalAgents;
+    
+    /** Bot持久化管理器 */
+    private BotPersistenceManager persistenceManager;
+    
+    /** 群管理员Agent */
+    private GroupModeratorAgent groupModerator;
+    
+    /** 情绪状态管理器 */
+    private EmotionStateManager emotionManager;
+
+    /** 好友通过时间戳（用于反滥用：5分钟内发起群邀请则拒+警告） */
+    private final Map<Long, Long> friendAcceptTimestamps = new ConcurrentHashMap<>();
+
     // ==================== 配置 ====================
 
     public void setSelfId(long selfId) { this.selfId = selfId; }
     public long getSelfId() { return selfId; }
 
-    public void setServer(OneBotServer server) { this.server = server; }
+    public void setServer(OneBotServer server) { 
+        this.server = server;
+        // 初始化所有组件
+        if (server != null && napcatApi == null && dataDir != null) {
+            // 初始化持久化管理器
+            persistenceManager = new BotPersistenceManager(dataDir);
+            persistenceManager.init();
+            
+            // 初始化API封装
+            napcatApi = new NapCatApi(server);
+            
+            // 初始化情绪状态管理器（传入持久化管理器）
+            emotionManager = new EmotionStateManager(persistenceManager);
+            
+            // 初始化内部Agent（传入持久化管理器）
+            internalAgents = new InternalAgents(napcatApi, this, persistenceManager);
+            
+            // 初始化群管理员Agent
+            groupModerator = new GroupModeratorAgent(napcatApi, internalAgents, persistenceManager);
+            
+            // 设置GroupModerator的记忆管理器引用
+            if (unifiedMemory != null) {
+                groupModerator.setMemoryManager(unifiedMemory);
+            }
+            
+            AiAgentActivity.debugLog("[QQMsg] 所有组件初始化完成: EmotionStateManager, NapCatApi, BotPersistenceManager, InternalAgents, GroupModeratorAgent");
+        }
+    }
+    
+    /** 获取NapCatApi实例 */
+    public NapCatApi getNapcatApi() { return napcatApi; }
+    
+    /** 获取InternalAgents实例 */
+    public InternalAgents getInternalAgents() { return internalAgents; }
+    
+    /** 获取GroupModeratorAgent实例 */
+    public GroupModeratorAgent getGroupModerator() { return groupModerator; }
+    
+    /** 获取EmotionStateManager实例 */
+    public EmotionStateManager getEmotionManager() { return emotionManager; }
     public void setAgentExecutor(AgentExecutor executor) { this.agentExecutor = executor; }
     public void setDataDir(String dir) { 
         this.dataDir = dir;
@@ -145,16 +203,51 @@ public class QQMessageHandler {
                     continue;
                 }
 
-                // 构建分析提示词
+                // 构建分析提示词（包含群上下文）
                 StringBuilder analysisPrompt = new StringBuilder();
-                analysisPrompt.append("你是群聊助手。请分析以下群聊消息，如果有需要回应的话题，请生成回复。\n\n");
+                analysisPrompt.append("你在QQ群聊中，请分析以下消息，有趣的话题可参与讨论。\n\n");
                 
-                // 添加AI名字信息
+                // 群名
+                String gname = unifiedMemory.getGroupName(groupId);
+                analysisPrompt.append("## 当前群: ").append(gname != null ? gname + "(" + groupId + ")" : String.valueOf(groupId)).append("\n");
+                
+                // Bot名字
                 String botName = sair.aiagent.core.AiConfig.getInstance().getBotName();
                 if (botName != null && !botName.isEmpty()) {
-                    analysisPrompt.append("你的名字是: " + botName + "\n");
-                    analysisPrompt.append("如果群友提到了你的名字，你应该参与对话。\n\n");
+                    analysisPrompt.append("你的名字: ").append(botName).append("\n");
                 }
+                
+                // 群管理员/群主
+                java.util.List<String[]> admins = unifiedMemory.getGroupAdmins(groupId);
+                if (!admins.isEmpty()) {
+                    StringBuilder ol = new StringBuilder();
+                    StringBuilder al = new StringBuilder();
+                    for (String[] a : admins) {
+                        if ("owner".equals(a[2])) {
+                            if (ol.length() > 0) ol.append(", ");
+                            ol.append(a[1]).append("(QQ:").append(a[0]).append(")");
+                        } else {
+                            if (al.length() > 0) al.append(", ");
+                            al.append(a[1]).append("(QQ:").append(a[0]).append(")");
+                        }
+                    }
+                    if (ol.length() > 0) analysisPrompt.append("群主: ").append(ol).append("\n");
+                    if (al.length() > 0) analysisPrompt.append("管理员: ").append(al).append("\n");
+                }
+                
+                // 群昵称映射
+                java.util.Map<String, Long> nickMap = unifiedMemory.getGroupNicknameMap(groupId);
+                if (!nickMap.isEmpty()) {
+                    analysisPrompt.append("群昵称→QQ: ");
+                    int nc = 0;
+                    for (java.util.Map.Entry<String, Long> e : nickMap.entrySet()) {
+                        if (nc >= 12) break;
+                        analysisPrompt.append(e.getKey()).append("→").append(e.getValue()).append(" ");
+                        nc++;
+                    }
+                    analysisPrompt.append("\n");
+                }
+                analysisPrompt.append("\n");
                 
                 analysisPrompt.append("## 最近群聊消息\n");
                 
@@ -329,7 +422,7 @@ public class QQMessageHandler {
         return segments;
     }
 
-    /** 检测是否@了机器人、是否引用回复 */
+    /** 检测是否@了机器人、是否引用回复、收集所有@提及 */
     private void checkAtAndReply(QQMessage msg) {
         AiAgentActivity.debugLog("[QQMsg] @检测: selfId=" + selfId + ", segments=" + (msg.getSegments() != null ? msg.getSegments().size() : "null"));
         
@@ -350,6 +443,26 @@ public class QQMessageHandler {
                     msg.setReply(true);
                     AiAgentActivity.debugLog("[QQMsg] 检测到回复消息");
                 }
+                // raw_message降级模式也收集@提及的其他用户
+                int idx = 0;
+                while ((idx = raw.indexOf("[CQ:at,qq=", idx)) >= 0) {
+                    int start = idx + 10;
+                    int end = raw.indexOf("]", start);
+                    if (end > start) {
+                        String qqStr = raw.substring(start, end);
+                        // 可能包含,name=xxx
+                        int commaIdx = qqStr.indexOf(',');
+                        if (commaIdx > 0) qqStr = qqStr.substring(0, commaIdx);
+                        try {
+                            long qq = Long.parseLong(qqStr.trim());
+                            if (qq > 0 && qq != selfId) {
+                                msg.addMentionedUser(qq, raw.substring(idx, end + 1));
+                                AiAgentActivity.debugLog("[QQMsg] 收集到@提及: qq=" + qq);
+                            }
+                        } catch (NumberFormatException ignored) {}
+                    }
+                    idx = end > 0 ? end : idx + 1;
+                }
             }
             return;
         }
@@ -364,6 +477,10 @@ public class QQMessageHandler {
                 } else if (selfId > 0 && seg.qq == selfId) {
                     msg.setAtBot(true);
                     AiAgentActivity.debugLog("[QQMsg] 检测到@机器人: " + selfId);
+                } else if (seg.qq > 0 && seg.qq != selfId) {
+                    // 收集@提及的其他用户
+                    msg.addMentionedUser(seg.qq, "[CQ:at,qq=" + seg.qq + "]");
+                    AiAgentActivity.debugLog("[QQMsg] 收集到@提及: qq=" + seg.qq);
                 } else if (selfId == 0) {
                     AiAgentActivity.debugLog("[QQMsg] 警告: selfId未设置，无法检测@机器人！请执行 ai/onebotsetselfid <QQ号>");
                 }
@@ -375,7 +492,7 @@ public class QQMessageHandler {
             }
         }
         
-        AiAgentActivity.debugLog("[QQMsg] @检测结果: isAtBot=" + msg.isAtBot() + ", isReply=" + msg.isReply());
+        AiAgentActivity.debugLog("[QQMsg] @检测结果: isAtBot=" + msg.isAtBot() + ", isReply=" + msg.isReply() + ", mentionedUsers=" + msg.getMentionedUsers().size());
     }
 
     // ==================== 消息处理 ====================
@@ -408,7 +525,17 @@ public class QQMessageHandler {
 
             // === 记录所有群聊消息到历史记录（无论是否@） ===
             if (msg.isGroupMessage()) {
-                // 1. 记录到群聊完整历史（持久化）
+                // 0. 记录群成员角色（用于@管理员/群主时查表）
+                if (msg.getSender() != null && msg.getSender().role != null) {
+                    unifiedMemory.recordGroupMemberRole(
+                        msg.getGroupId(),
+                        msg.getUserId(),
+                        msg.getDisplayName(),
+                        msg.getSender().role
+                    );
+                }
+                
+                // 1. 记录到群聊完整历史（持久化）- 仅用于临时查阅，不作为长期记忆
                 unifiedMemory.addGroupChatMessage(
                     msg.getUserId(),
                     msg.getDisplayName(),
@@ -416,8 +543,8 @@ public class QQMessageHandler {
                     msg.getGroupId()
                 );
                 
-                // 2. 如果消息触发了AI响应，也记录到统一对话历史
-                boolean shouldRespond = msg.isAtBot() || msg.isReply();
+                // 2. 如果消息触发了AI响应，也记录到个人对话历史（长期存储）
+                boolean shouldRespond = msg.isAtBot(); // 仅响应@自己的消息
                 if (!shouldRespond) {
                     String botName = sair.aiagent.core.AiConfig.getInstance().getBotName();
                     if (botName != null && !botName.isEmpty()) {
@@ -429,13 +556,13 @@ public class QQMessageHandler {
                 }
                 
                 if (shouldRespond) {
-                    // 记录到统一对话历史，标记为群聊来源
+                    // 记录到统一对话历史，标记为群聊来源和个人ID（长期存储个人印象）
                     unifiedMemory.addConversation(
                         "user",
                         msg.getPlainText(),
                         "group",
                         msg.getGroupId(),
-                        msg.getUserId(),
+                        msg.getUserId(),  // 使用个人QQ号作为标识
                         msg.getDisplayName()
                     );
                 }
@@ -451,9 +578,9 @@ public class QQMessageHandler {
                 );
             }
 
-            // 群消息过滤：仅响应@或引用或提到名字
+            // 群消息过滤：仅响应@或提到名字（移除isReply，避免响应所有回复）
             if (msg.isGroupMessage()) {
-                boolean shouldRespond = msg.isAtBot() || msg.isReply();
+                boolean shouldRespond = msg.isAtBot(); // 仅响应@自己的消息
                 
                 // 检查是否提到了AI的名字
                 if (!shouldRespond) {
@@ -468,7 +595,7 @@ public class QQMessageHandler {
                 }
                 
                 if (!shouldRespond) {
-                    AiAgentActivity.debugLog("[QQMsg] 群消息已忽略(未@或引用或提到名字): " + msg.getRawMessage());
+                    AiAgentActivity.debugLog("[QQMsg] 群消息已忽略(未@或提到名字): " + msg.getRawMessage());
                     processingMessages.remove(msgId);
                     return;
                 }
@@ -477,11 +604,40 @@ public class QQMessageHandler {
             // 获取发送者QQ号用于记忆隔离
             long qq = msg.getUserId();
             
+            // === InternalAgents规则检查 ===
+            if (internalAgents != null) {
+                boolean shouldBlock = internalAgents.checkAndEnforceRules(
+                    qq, 
+                    msg.isGroupMessage() ? msg.getGroupId() : 0,
+                    msg.getPlainText()
+                );
+                
+                if (shouldBlock) {
+                    AiAgentActivity.debugLog("[QQMsg] 消息被InternalAgents拦截: userId=" + qq);
+                    processingMessages.remove(msgId);
+                    return;
+                }
+            }
+            
             // 注意：用户消息已在上面的if-else块中记录到unifiedMemory，这里不需要再次记录
             AiAgentActivity.debugLog("[QQMsg] 准备执行AI: " + (msg.isGroupMessage() ? "群聊" : "私聊") + ", userId=" + qq);
 
+            // === 群管理员被动检查（被@时检查违规） ===
+            List<String> punishmentRecords = new ArrayList<>();
+            if (msg.isGroupMessage() && groupModerator != null) {
+                GroupModerationConfig config = groupModerator.getGroupConfig(msg.getGroupId());
+                if (config != null && config.isAutoMonitorEnabled()) {
+                    AiAgentActivity.debugLog("[QQMsg] Bot是管理员，被@时检查群消息违规");
+                    punishmentRecords = groupModerator.checkMessagesOnAt(msg.getGroupId(), qq);
+                    
+                    if (!punishmentRecords.isEmpty()) {
+                        AiAgentActivity.debugLog("[QQMsg] 发现 " + punishmentRecords.size() + " 个违规行为");
+                    }
+                }
+            }
+
             // 构建execq系统提示词
-            String systemPrompt = buildExecqSystemPrompt(msg, null);
+            String systemPrompt = buildExecqSystemPrompt(msg, punishmentRecords);
             AiAgentActivity.debugLog("[QQMsg] 系统提示词构建完成，长度: " + systemPrompt.length());
 
             // 提交到线程池执行（防重复标记在异步任务完成后才移除）
@@ -511,6 +667,114 @@ public class QQMessageHandler {
         }
     }
 
+    // ==================== 好友申请处理 ====================
+
+    /**
+     * 处理好友申请（OneBot v11 request/friend/add事件）。
+     * 规则：无验证消息拒绝，有验证消息同意。同意后记录时间戳用于反滥用检测。
+     * @param userId 申请人QQ号
+     * @param comment 验证消息（可能为空）
+     * @param flag OneBot请求标识（用于API调用）
+     */
+    public void handleFriendRequest(long userId, String comment, String flag) {
+        AiAgentActivity.debugLog("[QQMsg] 好友申请: userId=" + userId + ", comment=" + 
+            (comment != null ? (comment.length() > 30 ? comment.substring(0, 30) + "..." : comment) : "(空)"));
+        
+        if (napcatApi == null) {
+            AiAgentActivity.debugLog("[QQMsg] NapCatApi未就绪，无法处理好友申请");
+            return;
+        }
+        
+        // 无验证消息 → 拒绝
+        if (comment == null || comment.trim().isEmpty()) {
+            AiAgentActivity.debugLog("[QQMsg] 好友申请无验证消息，拒绝");
+            napcatApi.handleFriendRequest(flag, false, "请发送验证消息说明来意");
+            return;
+        }
+        
+        // 有验证消息 → 同意并记录时间戳
+        AiAgentActivity.debugLog("[QQMsg] 好友申请有验证消息，同意");
+        napcatApi.handleFriendRequest(flag, true, null);
+        friendAcceptTimestamps.put(userId, System.currentTimeMillis());
+        
+        // 异步清理过期记录（5分钟后自动过期，避免内存泄漏）
+        execPool.submit(() -> {
+            try {
+                Thread.sleep(5 * 60 * 1000);
+                Long ts = friendAcceptTimestamps.get(userId);
+                if (ts != null && (System.currentTimeMillis() - ts) >= 5 * 60 * 1000) {
+                    friendAcceptTimestamps.remove(userId);
+                }
+            } catch (InterruptedException ignored) {}
+        });
+    }
+
+    // ==================== 群邀请处理 ====================
+
+    /**
+     * 处理群邀请请求（OneBot v11 request/group/invite事件）。
+     * 决策优先级：①主人无条件同意 → ②刚通过好友(5min内)拉群拒+警告 → ③好感度/身份决策。
+     * @param userId 邀请者QQ号
+     * @param groupId 群号
+     * @param flag OneBot请求标识（用于API调用）
+     */
+    public void handleGroupInviteRequest(long userId, long groupId, String flag) {
+        AiAgentActivity.debugLog("[QQMsg] 群邀请决策: userId=" + userId + ", groupId=" + groupId);
+        
+        if (napcatApi == null) {
+            AiAgentActivity.debugLog("[QQMsg] NapCatApi未就绪，无法处理群邀请");
+            return;
+        }
+        
+        // ① 主人 → 无条件同意（主人绕过所有检测）
+        boolean isMaster = sair.aiagent.core.AiConfig.getInstance().isMasterQQ(userId);
+        if (isMaster) {
+            AiAgentActivity.debugLog("[QQMsg] 主人邀请加群，无条件同意");
+            napcatApi.handleGroupInvite(flag, true, null);
+            if (server != null) server.sendPrivateMsg(userId, "[Bot] 主人邀请，已自动同意加群~");
+            return;
+        }
+        
+        // ② 反滥用：刚通过好友申请5分钟内发起群邀请 → 拒+警告
+        Long acceptTime = friendAcceptTimestamps.get(userId);
+        if (acceptTime != null && (System.currentTimeMillis() - acceptTime) < 5 * 60 * 1000) {
+            AiAgentActivity.debugLog("[QQMsg] 刚通过好友申请即邀请加群，拒绝+警告: userId=" + userId);
+            napcatApi.handleGroupInvite(flag, false, "滥用检测");
+            if (server != null) server.sendPrivateMsg(userId,
+                "[Bot] 请不要厚着脸皮拉我进群，我还没认可你，也更没充分了解你。");
+            return;
+        }
+        
+        // ③ 获取好感度与特殊身份
+        int affection = emotionManager != null ? emotionManager.getAffection(userId) : 0;
+        boolean isBetrayer = emotionManager != null && emotionManager.isBetrayer(userId);
+        
+        // ④ 背叛者 → 直接拒绝
+        if (isBetrayer) {
+            AiAgentActivity.debugLog("[QQMsg] 背叛者邀请加群，自动拒绝");
+            napcatApi.handleGroupInvite(flag, false, "你已被永久拉黑");
+            return;
+        }
+        
+        // ⑤ 好感度>600 → 同意加群
+        if (affection > 600) {
+            AiAgentActivity.debugLog("[QQMsg] 好感度>600，同意群邀请: affection=" + affection);
+            napcatApi.handleGroupInvite(flag, true, null);
+            if (server != null) server.sendPrivateMsg(userId, "[Bot] 好感度达标，已同意加群邀请~");
+            return;
+        }
+        
+        // ⑥ 好感度200-600 → 忽略，保持pending（Bot酌情考虑但不自动处理）
+        if (affection > 200) {
+            AiAgentActivity.debugLog("[QQMsg] 好感度一般，忽略群邀请(保持pending): affection=" + affection);
+            return;
+        }
+        
+        // ⑦ 好感度≤200（含陌生人=0）→ 拒绝
+        AiAgentActivity.debugLog("[QQMsg] 好感度过低，拒绝群邀请: affection=" + affection);
+        napcatApi.handleGroupInvite(flag, false, "好感度不足");
+    }
+
     // ==================== execq Agent执行 ====================
 
     /**
@@ -531,11 +795,12 @@ public class QQMessageHandler {
             
             // 在新线程中异步执行execs（不阻塞QQ响应）
             Thread execThread = new Thread(() -> {
+                String botLabel = getBotLabel();
                 try {
                     AiAgentActivity.debugLog("[QQMsg-Execs] execs线程启动，开始执行任务");
                     
                     // 发送开始通知
-                    sendReply(msg, "\n[椰羊execs] 🚀 开始执行任务...\n任务: " + (task.length() > 50 ? task.substring(0, 50) + "..." : task));
+                    sendReply(msg, "\n[" + botLabel + "execs] 🚀 开始执行任务...\n任务: " + (task.length() > 50 ? task.substring(0, 50) + "..." : task));
                     
                     // 设置QQ execs回调，实时接收每一轮的输出
                     agentExecutor.setQqExecsCallback((roundOutput) -> {
@@ -550,14 +815,14 @@ public class QQMessageHandler {
                     agentExecutor.setQqExecsCallback(null);
                     
                     AiAgentActivity.debugLog("[QQMsg-Execs] execs执行完成");
-                    sendReply(msg, "\n[椰羊execs] ✅ 任务执行完成\n详细输出请查看SFW控制台");
+                    sendReply(msg, "\n[" + botLabel + "execs] ✅ 任务执行完成\n详细输出请查看SFW控制台");
                     
                 } catch (Exception e) {
                     // 清除回调
                     agentExecutor.setQqExecsCallback(null);
                     
                     AiAgentActivity.debugLog("[QQMsg-Execs] execs执行异常: " + e.toString());
-                    sendReply(msg, "\n[椰羊execs] ❌ 任务执行失败: " + e.getMessage() + "\n详细错误请查看SFW控制台");
+                    sendReply(msg, "\n[" + botLabel + "execs] ❌ 任务执行失败: " + e.getMessage() + "\n详细错误请查看SFW控制台");
                 }
             }, "QQ-Execs-" + msg.getUserId());
             
@@ -586,6 +851,15 @@ public class QQMessageHandler {
             return;
         }
 
+        // 检测 <stop> 标签：直接停止正在运行的 Agent 执行
+        String plainText = msg.getPlainText();
+        if (plainText != null && plainText.contains("<stop>")) {
+            AiAgentActivity.debugLog("[QQMsg] 检测到<stop>标签，停止Agent执行");
+            agentExecutor.markStopped();
+            sendReply(msg, "\u2705 Agent执行已停止。");
+            return;
+        }
+
         try {
             // 构建任务描述
             String task = buildTaskDescription(msg);
@@ -595,7 +869,6 @@ public class QQMessageHandler {
             boolean isMaster = sair.aiagent.core.AiConfig.getInstance().isMasterQQ(senderQQ);
             
             // 检测是否有execs:前缀
-            String plainText = msg.getPlainText();
             boolean useExecs = isMaster && plainText != null && plainText.startsWith("execs:");
             
             AiAgentActivity.debugLog("[QQMsg] 发送者QQ: " + senderQQ + ", 是否主人: " + isMaster + ", 使用execs: " + useExecs);
@@ -606,7 +879,7 @@ public class QQMessageHandler {
                 AiAgentActivity.debugLog("[QQMsg] 主人execs消息，执行完整execs链路");
                 
                 // 先发送提示消息给主人
-                sendReply(msg, "[椰羊execs] 这条消息将交给另一个身份进行处理...\n正在启动execs链路...");
+                sendReply(msg, "[execs] 这条消息将交给另一个身份进行处理...\n正在启动execs链路...");
                 
                 // 去掉execs:前缀，获取实际任务
                 String actualTask = plainText.substring(6).trim();
@@ -616,13 +889,19 @@ public class QQMessageHandler {
             } else if (isMaster) {
                 // 主人但没有execs:前缀：使用execq模式（受限）
                 AiAgentActivity.debugLog("[QQMsg] 主人普通消息，使用execq模式（受限）");
-                aiResponse = agentExecutor.executeQq(task, systemPrompt, memoryManager);
+                // 群聊构建群管回调，作为线程安全的参数传入（不再用共享字段）
+                final java.util.function.Function<String, String> groupHandler = msg.isGroupMessage() && napcatApi != null
+                    ? (r -> { processQqActions(r, msg); return "[群管已执行] "; }) : null;
+                aiResponse = agentExecutor.executeQq(task, systemPrompt, memoryManager, groupHandler);
             } else {
                 // 普通用户：使用execq模式（受限模式，插件白名单）
                 AiAgentActivity.debugLog("[QQMsg] 普通用户消息，使用execq模式（受限模式）");
-                aiResponse = agentExecutor.executeQq(task, systemPrompt, memoryManager);
+                // 群聊构建群管回调，作为线程安全的参数传入（不再用共享字段）
+                final java.util.function.Function<String, String> groupHandler = msg.isGroupMessage() && napcatApi != null
+                    ? (r -> { processQqActions(r, msg); return "[群管已执行] "; }) : null;
+                aiResponse = agentExecutor.executeQq(task, systemPrompt, memoryManager, groupHandler);
             }
-
+            
             // 记录AI回复到统一对话历史
             if (aiResponse != null && !aiResponse.trim().isEmpty()) {
                 if (msg.isGroupMessage()) {
@@ -633,7 +912,7 @@ public class QQMessageHandler {
                         "group",
                         msg.getGroupId(),
                         selfId,  // AI的QQ号
-                        "AI助手"
+                        null      // Bot名不存入SQL，仅存于config.properties
                     );
                 } else {
                     // 私聊：记录到统一历史，标记为私聊来源
@@ -643,16 +922,32 @@ public class QQMessageHandler {
                         "private",
                         msg.getUserId(),
                         selfId,
-                        "AI助手"
+                        null      // Bot名不存入SQL，仅存于config.properties
                     );
                 }
 
-                // 移除XML标签后发送
+                // === v2.2: 发送前拦截 <ban>/<kick> 标签，执行群管操作（OneBot层自有能力） ===
+                processQqActions(aiResponse, msg);
+
+                // 移除XML标签后发送，支持<split>拆分为多条消息
                 String cleanResponse = aiResponse.replaceAll("<[^>]+>", "").trim();
                 if (!cleanResponse.isEmpty()) {
-                    // 支持多消息发送
-                    List<String> messages = splitIntoMessages(cleanResponse);
-                    sendMultipleReplies(msg, messages);
+                    // 先用<split>分割（标签已被移除，内容变成连续文本在段落间）
+                    // 检查原始响应中是否有<split>来决定是否拆分
+                    String[] splitParts = aiResponse.split("<split>");
+                    if (splitParts.length > 1) {
+                        // AI用了<split>标签，拆分为多条
+                        List<String> messages = new ArrayList<>();
+                        for (String part : splitParts) {
+                            String cleaned = part.replaceAll("<[^>]+>", "").trim();
+                            if (!cleaned.isEmpty()) messages.add(cleaned);
+                        }
+                        sendMultipleReplies(msg, messages);
+                    } else {
+                        // 没使用<split>，正常按段落分割
+                        List<String> messages = splitIntoMessages(cleanResponse);
+                        sendMultipleReplies(msg, messages);
+                    }
                 }
             }
         } catch (Exception e) {
@@ -691,6 +986,155 @@ public class QQMessageHandler {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
+                }
+            }
+        }
+    }
+
+    /**
+     * 发送前处理AI响应中的群管标签（<ban>/<kick>）。
+     * 这是OneBot层的自有能力，不污染AgentExecutor主线。
+     */
+    private void processQqActions(String aiResponse, QQMessage msg) {
+
+        long groupId = msg.isGroupMessage() ? msg.getGroupId() : 0;
+        
+        // === 群管标签（需要群聊+API上下文） ===
+        if (msg.isGroupMessage() && napcatApi != null) {
+            // 处理 <ban>QQ号 [秒数]</ban>
+        java.util.regex.Matcher banMatcher = java.util.regex.Pattern.compile(
+            "<ban>\\s*(\\d+)(?:\\s+(\\d+))?\\s*</ban>").matcher(aiResponse);
+        while (banMatcher.find()) {
+            try {
+                long userId = Long.parseLong(banMatcher.group(1));
+                int duration = 180; // 默认3分钟
+                if (banMatcher.group(2) != null) {
+                    duration = Integer.parseInt(banMatcher.group(2));
+                    if (duration < 0) duration = 0;
+                    if (duration > 2592000) duration = 2592000;
+                }
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<ban>: groupId=" + groupId + ", userId=" + userId + ", duration=" + duration + "s");
+                napcatApi.muteGroupMember(groupId, userId, duration);
+            } catch (NumberFormatException e) {
+                AiAgentActivity.debugLog("[QQMsg] <ban>标签格式错误: " + banMatcher.group());
+            }
+        }
+        
+        // 处理 <kick>QQ号 [block]</kick>
+        java.util.regex.Matcher kickMatcher = java.util.regex.Pattern.compile(
+            "<kick>\\s*(\\d+)(?:\\s+(block))?\\s*</kick>", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(aiResponse);
+        while (kickMatcher.find()) {
+            try {
+                long userId = Long.parseLong(kickMatcher.group(1));
+                boolean block = kickMatcher.group(2) != null;
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<kick>: groupId=" + groupId + ", userId=" + userId + ", block=" + block);
+                napcatApi.kickGroupMember(groupId, userId, block);
+            } catch (NumberFormatException e) {
+                AiAgentActivity.debugLog("[QQMsg] <kick>标签格式错误: " + kickMatcher.group());
+            }
+        }
+        
+        // 处理 <muteall>on|off</muteall> — 全员禁言
+        java.util.regex.Matcher muteallMatcher = java.util.regex.Pattern.compile(
+            "<muteall>\\s*(on|off|true|false|1|0)\\s*</muteall>", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(aiResponse);
+        while (muteallMatcher.find()) {
+            String val = muteallMatcher.group(1).toLowerCase();
+            boolean enable = "on".equals(val) || "true".equals(val) || "1".equals(val);
+            AiAgentActivity.debugLog("[QQMsg] 发送前拦截<muteall>: groupId=" + groupId + ", enable=" + enable);
+            napcatApi.muteAll(groupId, enable);
+        }
+        
+        // 处理 <setadmin>QQ号 on|off</setadmin> — 设置/取消管理员
+        java.util.regex.Matcher setadminMatcher = java.util.regex.Pattern.compile(
+            "<setadmin>\\s*(\\d+)\\s+(on|off|true|false|1|0)\\s*</setadmin>", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(aiResponse);
+        while (setadminMatcher.find()) {
+            try {
+                long userId = Long.parseLong(setadminMatcher.group(1));
+                String val = setadminMatcher.group(2).toLowerCase();
+                boolean enable = "on".equals(val) || "true".equals(val) || "1".equals(val);
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<setadmin>: groupId=" + groupId + ", userId=" + userId + ", enable=" + enable);
+                napcatApi.setGroupAdmin(groupId, userId, enable);
+            } catch (NumberFormatException e) {
+                AiAgentActivity.debugLog("[QQMsg] <setadmin>标签格式错误: " + setadminMatcher.group());
+            }
+        }
+        
+        // 处理 <setcard>QQ号 名片</setcard> — 设置群名片
+        java.util.regex.Matcher setcardMatcher = java.util.regex.Pattern.compile(
+            "<setcard>\\s*(\\d+)\\s+(.+?)\\s*</setcard>", java.util.regex.Pattern.DOTALL).matcher(aiResponse);
+        while (setcardMatcher.find()) {
+            try {
+                long userId = Long.parseLong(setcardMatcher.group(1));
+                String card = setcardMatcher.group(2).trim();
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<setcard>: groupId=" + groupId + ", userId=" + userId + ", card=" + card);
+                napcatApi.setGroupCard(groupId, userId, card);
+            } catch (NumberFormatException e) {
+                AiAgentActivity.debugLog("[QQMsg] <setcard>标签格式错误: " + setcardMatcher.group());
+            }
+        }
+        
+        // 处理 <setgroupname>新群名</setgroupname> — 设置群名
+        java.util.regex.Matcher setgnMatcher = java.util.regex.Pattern.compile(
+            "<setgroupname>\\s*(.+?)\\s*</setgroupname>", java.util.regex.Pattern.DOTALL).matcher(aiResponse);
+        while (setgnMatcher.find()) {
+            String name = setgnMatcher.group(1).trim();
+            AiAgentActivity.debugLog("[QQMsg] 发送前拦截<setgroupname>: groupId=" + groupId + ", name=" + name);
+            napcatApi.setGroupName(groupId, name);
+        }
+        
+        // 处理 <leavegroup>[dismiss]</leavegroup> — 退出/解散群
+        java.util.regex.Matcher leavegroupMatcher = java.util.regex.Pattern.compile(
+            "<leavegroup>\\s*(dismiss)?\\s*</leavegroup>", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(aiResponse);
+        while (leavegroupMatcher.find()) {
+            boolean isDismiss = leavegroupMatcher.group(1) != null;
+            AiAgentActivity.debugLog("[QQMsg] 发送前拦截<leavegroup>: groupId=" + groupId + ", dismiss=" + isDismiss);
+            napcatApi.leaveGroup(groupId, isDismiss);
+        }
+        
+        // 处理 <block>QQ号</block> — 拉黑用户
+        java.util.regex.Matcher blockMatcher = java.util.regex.Pattern.compile(
+            "<block>\\s*(\\d+)\\s*</block>").matcher(aiResponse);
+        while (blockMatcher.find()) {
+            try {
+                long userId = Long.parseLong(blockMatcher.group(1));
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<block>: userId=" + userId);
+                if (internalAgents != null) {
+                    internalAgents.blockUser(userId, "AI判定违规拉黑", true);
+                }
+            } catch (NumberFormatException e) {
+                AiAgentActivity.debugLog("[QQMsg] <block>标签格式错误: " + blockMatcher.group());
+            }
+        }
+        
+        // 处理 <unblock>QQ号</unblock> — 取消拉黑
+        java.util.regex.Matcher unblockMatcher = java.util.regex.Pattern.compile(
+            "<unblock>\\s*(\\d+)\\s*</unblock>").matcher(aiResponse);
+        while (unblockMatcher.find()) {
+            try {
+                long userId = Long.parseLong(unblockMatcher.group(1));
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<unblock>: userId=" + userId);
+                if (internalAgents != null) {
+                    internalAgents.unblockUser(userId);
+                }
+            } catch (NumberFormatException e) {
+                AiAgentActivity.debugLog("[QQMsg] <unblock>标签格式错误: " + unblockMatcher.group());
+            }
+        }
+        
+        } // end 群管标签块
+        
+        // === 好友管理标签（私聊/群聊均可） ===
+        // 处理 <delfriend>QQ号</delfriend> — 删除好友
+        if (napcatApi != null) {
+            java.util.regex.Matcher delfriendMatcher = java.util.regex.Pattern.compile(
+                "<delfriend>\\s*(\\d+)\\s*</delfriend>").matcher(aiResponse);
+            while (delfriendMatcher.find()) {
+                try {
+                    long userId = Long.parseLong(delfriendMatcher.group(1));
+                    AiAgentActivity.debugLog("[QQMsg] 发送前拦截<delfriend>: userId=" + userId);
+                    napcatApi.deleteFriend(userId);
+                } catch (NumberFormatException e) {
+                    AiAgentActivity.debugLog("[QQMsg] <delfriend>标签格式错误: " + delfriendMatcher.group());
                 }
             }
         }
@@ -741,54 +1185,180 @@ public class QQMessageHandler {
     // ==================== 提示词构建 ====================
 
     /** 构建execq通道的系统提示词 */
-    private String buildExecqSystemPrompt(QQMessage msg, QQMemoryManager memMgr) {
-        StringBuilder sb = new StringBuilder(4096);
+    private String buildExecqSystemPrompt(QQMessage msg, List<String> punishmentRecords) {
+        StringBuilder sb = new StringBuilder(8192);
 
         // === 可配置的execq核心提示词 ===
         String corePrompt = sair.aiagent.core.AiConfig.getInstance().getExecqPrompt();
         sb.append(corePrompt).append("\n\n");
 
-        // === QQ上下文信息 ===
-        sb.append("## QQ Chat Context\n");
-        sb.append("你正在通过QQ与用户聊天。当前是");
-        if (msg.isGroupMessage()) {
-            sb.append("群聊，群号: ").append(msg.getGroupId());
-        } else {
-            sb.append("私聊");
+        // === 预先收集身份信息（用于上下文标注） ===
+        java.util.Set<Long> masterQQSet = sair.aiagent.core.AiConfig.getInstance().getMasterQQs();
+        long masterQQ = masterQQSet.isEmpty() ? 0L : masterQQSet.iterator().next();
+        java.util.Set<Long> adminSet = new java.util.HashSet<>();
+        java.util.Set<Long> ownerSet = new java.util.HashSet<>();
+        java.util.Map<Long, String> roleCache = new java.util.LinkedHashMap<>();
+        if (msg.isGroupMessage() && unifiedMemory != null) {
+            java.util.List<String[]> admins = unifiedMemory.getGroupAdmins(msg.getGroupId());
+            for (String[] a : admins) {
+                long aid = Long.parseLong(a[0]);
+                roleCache.put(aid, a[2]); // "owner" or "admin"
+                if ("owner".equals(a[2])) ownerSet.add(aid);
+                else adminSet.add(aid);
+            }
         }
-        sb.append("\n");
-        sb.append("- 用户QQ: ").append(msg.getUserId()).append("\n");
-        sb.append("- 用户昵称: ").append(msg.getDisplayName()).append("\n");
+
+        // === QQ上下文信息 ===
+        sb.append("## 当前上下文\n");
+        if (msg.isGroupMessage()) {
+            // 获取群名（优先缓存，无缓存则异步拉取）
+            String groupName = unifiedMemory.getGroupName(msg.getGroupId());
+            if (groupName == null && napcatApi != null) {
+                final long gid = msg.getGroupId();
+                execPool.submit(() -> {
+                    try {
+                        String info = napcatApi.getGroupInfo(gid, false);
+                        String name = sair.aiagent.onebot.util.JsonUtil.extractString(info, "group_name");
+                        if (name != null && !name.isEmpty()) {
+                            unifiedMemory.setGroupName(gid, name);
+                            AiAgentActivity.debugLog("[QQMsg] 已缓存群名: " + gid + " -> " + name);
+                        }
+                    } catch (Exception ignored) {}
+                });
+            }
+            // 当前发送者角色
+            String senderRole = (msg.getSender() != null && msg.getSender().role != null) 
+                ? msg.getSender().role : "member";
+            String roleLabel = "owner".equals(senderRole) ? "群主" :
+                               "admin".equals(senderRole) ? "管理员" : "成员";
+            
+            sb.append("群: ").append(groupName != null ? groupName + "(" + msg.getGroupId() + ")" : msg.getGroupId());
+            sb.append(" | 说话者: ").append(msg.getDisplayName());
+            sb.append("(QQ:").append(msg.getUserId()).append(")");
+            sb.append(" | 身份: ").append(roleLabel);
+        } else {
+            sb.append("私聊 | QQ:").append(msg.getUserId());
+            sb.append(" | ").append(msg.getDisplayName());
+        }
         
         // 添加AI名字信息
         String botName = sair.aiagent.core.AiConfig.getInstance().getBotName();
         if (botName != null && !botName.isEmpty()) {
-            sb.append("- 你的名字: ").append(botName).append("\n");
-            sb.append("  如果用户在消息中提到你的名字，你应该回应。\n");
+            sb.append(" | 你的名字:").append(botName);
+        }
+        
+        // 主人标记
+        boolean isSpeakerMaster = sair.aiagent.core.AiConfig.getInstance().isMasterQQ(msg.getUserId());
+        if (isSpeakerMaster) {
+            sb.append(" | ⭐此人是主人");
         }
         sb.append("\n");
-
-        // === 对话历史 ===
-        if (msg.isGroupMessage()) {
-            // 群聊：显示最近的群聊上下文
-            List<String[]> groupHistory = unifiedMemory.getRecentGroupChatHistory(msg.getGroupId(), 50);
-            if (!groupHistory.isEmpty()) {
-                sb.append("## Recent Group Chat Context\n");
-                sb.append("以下是最近的群聊消息，请根据上下文理解当前对话：\n");
-                for (String[] h : groupHistory) {
-                    String nickname = h[1];
-                    String content = h[2];
-                    if (content.length() > 200) content = content.substring(0, 200) + "...";
-                    sb.append(nickname).append(": ").append(content).append("\n");
+        
+        // === 当前消息@提及（v2.1 新增） ===
+        if (msg.isGroupMessage() && !msg.getMentionedUsers().isEmpty()) {
+            sb.append("⚠ 此消息@了以下用户: ");
+            int mc = 0;
+            for (Long mu : msg.getMentionedUsers()) {
+                if (mc > 0) sb.append(", ");
+                String tagName = resolveUserName(mu, msg.getGroupId(), unifiedMemory);
+                sb.append(tagName).append("(QQ:").append(mu).append(")");
+                if (mu == masterQQ) sb.append("⭐");
+                if (ownerSet.contains(mu)) sb.append("👑");
+                else if (adminSet.contains(mu)) sb.append("🔧");
+                mc++;
+            }
+            sb.append("\n");
+        }
+        sb.append("\n");
+        
+        // === 群昵称映射（群聊时） ===
+        if (msg.isGroupMessage() && unifiedMemory != null) {
+            java.util.Map<String, Long> nickMap = unifiedMemory.getGroupNicknameMap(msg.getGroupId());
+            if (!nickMap.isEmpty()) {
+                sb.append("## 群昵称→QQ映射(⭐主人👑群主🔧管理,无图标=普通成员群昵称)\n");
+                int nc = 0;
+                for (java.util.Map.Entry<String, Long> e : nickMap.entrySet()) {
+                    if (nc >= 20) break;
+                    sb.append(e.getKey()).append("→").append(e.getValue());
+                    // 标注身份
+                    if (e.getValue() == masterQQ) sb.append("⭐");
+                    if (ownerSet.contains(e.getValue())) sb.append("👑");
+                    else if (adminSet.contains(e.getValue())) sb.append("🔧");
+                    sb.append(" ");
+                    nc++;
                 }
                 sb.append("\n");
             }
             
-            // 同时显示与该用户的个人对话历史（保证记忆连贯性）
-            List<String[]> personalConvs = unifiedMemory.getPrivateConversations(msg.getUserId(), 10);
+            // === 群管理员/群主 ===
+            java.util.List<String[]> admins = unifiedMemory.getGroupAdmins(msg.getGroupId());
+            if (!admins.isEmpty()) {
+                sb.append("## 群管理员/群主\n");
+                StringBuilder ownerLine = new StringBuilder();
+                StringBuilder adminLine = new StringBuilder();
+                for (String[] a : admins) {
+                    long aid = Long.parseLong(a[0]);
+                    String label = a[1] + "(QQ:" + a[0] + ")";
+                    if (aid == masterQQ) label += "⭐";
+                    if ("owner".equals(a[2])) {
+                        if (ownerLine.length() > 0) ownerLine.append(", ");
+                        ownerLine.append(label);
+                    } else {
+                        if (adminLine.length() > 0) adminLine.append(", ");
+                        adminLine.append(label);
+                    }
+                }
+                if (ownerLine.length() > 0) sb.append("群主: ").append(ownerLine).append("\n");
+                if (adminLine.length() > 0) sb.append("管理员: ").append(adminLine).append("\n");
+                sb.append("若@管理员或@群主，从上表选。多管理随机@1-2个即可\n\n");
+            }
+        }
+        
+        // === 个人昵称→QQ映射（跨群/私聊） ===
+        if (unifiedMemory != null) {
+            java.util.Map<String, Long> personalMap = unifiedMemory.getPersonalNicknameMap();
+            if (!personalMap.isEmpty()) {
+                sb.append("## 个人昵称→QQ映射(跨群,⭐主人👑群主🔧管理,其余=昵称)\n");
+                int pc = 0;
+                for (java.util.Map.Entry<String, Long> e : personalMap.entrySet()) {
+                    if (pc >= 15) break;
+                    sb.append(e.getKey()).append("→").append(e.getValue());
+                    if (e.getValue() == masterQQ) sb.append("⭐");
+                    if (ownerSet.contains(e.getValue())) sb.append("👑");
+                    else if (adminSet.contains(e.getValue())) sb.append("🔧");
+                    sb.append(" ");
+                    pc++;
+                }
+                sb.append("\n");
+            }
+        }
+        
+        // === 对话历史（v2.1: 扩容+身份标注） ===
+        if (msg.isGroupMessage()) {
+            // 群聊：临时读取最近50条消息作为上下文（30→50）
+            List<String[]> groupHistory = unifiedMemory.getRecentGroupChatHistory(msg.getGroupId(), 50);
+            if (!groupHistory.isEmpty()) {
+                sb.append("## 临时群上下文(近50条,⭐主人👑群主🔧管理,其余=群昵称)\n");
+                for (String[] h : groupHistory) {
+                    long hUid = Long.parseLong(h[0]);
+                    String hName = h[1];
+                    String content = h[2];
+                    if (content.length() > 200) content = content.substring(0, 200) + "...";
+                    // 身份标注
+                    StringBuilder prefix = new StringBuilder();
+                    if (hUid == masterQQ) prefix.append("⭐");
+                    if (ownerSet.contains(hUid)) prefix.append("👑");
+                    else if (adminSet.contains(hUid)) prefix.append("🔧");
+                    if (prefix.length() > 0) prefix.append(" ");
+                    sb.append(prefix).append(hName).append(": ").append(content).append("\n");
+                }
+                sb.append("\n");
+            }
+            
+            // 与该用户的个人对话历史（10→15）
+            List<String[]> personalConvs = unifiedMemory.getPrivateConversations(msg.getUserId(), 15);
             if (!personalConvs.isEmpty()) {
-                sb.append("## Your Previous Conversations with this User\n");
-                sb.append("以下是你与 ").append(msg.getDisplayName()).append(" 之前的对话历史：\n");
+                sb.append("## 与该用户的历史\n");
                 for (String[] c : personalConvs) {
                     String roleLabel = "user".equals(c[0]) ? msg.getDisplayName() : "You";
                     String content = c[1];
@@ -798,33 +1368,44 @@ public class QQMessageHandler {
                 sb.append("\n");
             }
             
-            // 显示AI的全局最近对话（让AI了解自己的整体状态）
-            List<String[]> globalConvs = unifiedMemory.getGlobalRecentConversations(20);
+            // 全局最近活跃（20→30）
+            List<String[]> globalConvs = unifiedMemory.getGlobalRecentConversations(30);
             if (!globalConvs.isEmpty()) {
-                sb.append("## Your Recent Global Activity\n");
-                sb.append("以下是你最近的活跃记录，帮助你保持记忆的连贯性：\n");
+                sb.append("## 全局最近活跃\n");
                 int count = 0;
                 for (String[] c : globalConvs) {
-                    if (count >= 10) break; // 只显示10条
+                    if (count >= 15) break;
                     String sourceType = c[2];
                     String sourceId = c[3];
-                    String senderName = c[5] != null ? c[5] : "未知";
+                    String senderName = c[5] != null ? c[5] : "?";
+                    String senderIdStr = c[4];
                     String content = c[1];
                     if (content.length() > 150) content = content.substring(0, 150) + "...";
                     
-                    String context = "group".equals(sourceType) ? 
-                        "[群:" + sourceId + "] " + senderName : 
-                        "[私聊] " + senderName;
-                    sb.append(context).append(": ").append(content).append("\n");
+                    // 身份标注
+                    StringBuilder prefix = new StringBuilder();
+                    if (senderIdStr != null) {
+                        try {
+                            long sid = Long.parseLong(senderIdStr);
+                            if (sid == masterQQ) prefix.append("⭐");
+                            if (ownerSet.contains(sid)) prefix.append("👑");
+                            else if (adminSet.contains(sid)) prefix.append("🔧");
+                        } catch (NumberFormatException ignored) {}
+                    }
+                    if (prefix.length() > 0) prefix.append(" ");
+                    
+                    String ctx = "group".equals(sourceType) ? 
+                        (sourceId.equals(String.valueOf(msg.getGroupId())) ? "[本群]" : "[群"+sourceId+"]") : "[私]";
+                    sb.append(ctx).append(prefix).append(senderName).append(": ").append(content).append("\n");
                     count++;
                 }
                 sb.append("\n");
             }
         } else {
-            // 私聊：显示与该用户的对话历史
-            List<String[]> convs = unifiedMemory.getPrivateConversations(msg.getUserId(), 20);
+            // 私聊：显示与该用户的对话历史（20→25）
+            List<String[]> convs = unifiedMemory.getPrivateConversations(msg.getUserId(), 25);
             if (!convs.isEmpty()) {
-                sb.append("## Recent Conversation with this User\n");
+                sb.append("## 与该用户的历史\n");
                 for (String[] c : convs) {
                     String roleLabel = "user".equals(c[0]) ? "User" : "Assistant";
                     String content = c[1];
@@ -834,63 +1415,73 @@ public class QQMessageHandler {
                 sb.append("\n");
             }
             
-            // 显示AI的全局最近对话
-            List<String[]> globalConvs = unifiedMemory.getGlobalRecentConversations(15);
+            // 全局最近活跃（15→20）
+            List<String[]> globalConvs = unifiedMemory.getGlobalRecentConversations(20);
             if (!globalConvs.isEmpty()) {
-                sb.append("## Your Recent Global Activity\n");
-                sb.append("以下是你最近的活跃记录：\n");
+                sb.append("## 全局最近活跃\n");
                 int count = 0;
                 for (String[] c : globalConvs) {
-                    if (count >= 8) break;
-                    String sourceType = c[2];
+                    if (count >= 10) break;
                     String sourceId = c[3];
-                    String senderName = c[5] != null ? c[5] : "未知";
+                    String senderName = c[5] != null ? c[5] : "?";
                     String content = c[1];
                     if (content.length() > 150) content = content.substring(0, 150) + "...";
-                    
-                    String context = "group".equals(sourceType) ? 
-                        "[群:" + sourceId + "] " + senderName : 
-                        "[私聊] " + senderName;
-                    sb.append(context).append(": ").append(content).append("\n");
+                    String ctx = "group".equals(c[2]) ? "[群"+sourceId+"]" : "[私]";
+                    sb.append(ctx).append(senderName).append(": ").append(content).append("\n");
                     count++;
                 }
                 sb.append("\n");
             }
         }
 
-        // === 相关记忆（已禁用，使用统一记忆管理器） ===
-        // 注意：memMgr可能为null，因为我们现在使用UnifiedQQMemoryManager
-        // if (memMgr != null) {
-        //     List<String> memories = memMgr.searchMemories(msg.getPlainText(), 3);
-        //     if (!memories.isEmpty()) {
-        //         sb.append("## Related Memories about this User\n");
-        //         for (String m : memories) {
-        //             sb.append("- ").append(m).append("\n");
-        //         }
-        //         sb.append("\n");
-        //     }
-        // }
+        // === 相关记忆（已禁用） ===
+
+        // === Bot当前情绪状态 ===
+        if (emotionManager != null) {
+            String romanceStr = emotionManager.isInRomance() ? ",恋爱中" : "";
+            sb.append("## 情绪\n");
+            sb.append("怒:").append((int)emotionManager.getAnger()).append("/100");
+            sb.append(" 悲:").append((int)emotionManager.getSadness()).append("/100");
+            sb.append(romanceStr);
+            sb.append(" 态度:").append(emotionManager.getUserAttitudeDescription(msg.getUserId()));
+            sb.append("\n\n");
+        }
+        
+        // === 违规处罚记录 ===
+        if (punishmentRecords != null && !punishmentRecords.isEmpty()) {
+            sb.append("## 违规处罚\n");
+            for (String record : punishmentRecords) {
+                sb.append("- ").append(record).append("\n");
+            }
+            sb.append("\n");
+        }
 
         return sb.toString();
+    }
+
+    /** 解析用户显示名（优先群昵称缓存→回退QQ号） */
+    private String resolveUserName(long qq, long groupId, UnifiedQQMemoryManager mem) {
+        if (mem != null) {
+            java.util.Map<String, Long> nickMap = mem.getGroupNicknameMap(groupId);
+            for (java.util.Map.Entry<String, Long> e : nickMap.entrySet()) {
+                if (e.getValue() == qq) return e.getKey();
+            }
+        }
+        return String.valueOf(qq);
     }
 
     /** 构建任务描述 */
     private String buildTaskDescription(QQMessage msg) {
         StringBuilder sb = new StringBuilder();
-        sb.append("QQ用户 ").append(msg.getDisplayName());
-        sb.append("（QQ:").append(msg.getUserId()).append("）");
-        if (msg.isGroupMessage()) {
-            sb.append(" 在群聊中说：");
-        } else {
-            sb.append(" 私聊你说：");
-        }
+        sb.append(msg.getDisplayName());
+        sb.append("(QQ:").append(msg.getUserId()).append(")");
+        sb.append(msg.isGroupMessage() ? " 群聊: " : " 私聊: ");
         sb.append(msg.getPlainText());
         return sb.toString();
     }
 
     // ==================== 记忆管理器 ====================
 
-    /** 获取或创建指定QQ号的记忆管理器 */
     /** 关闭统一记忆管理器 */
     public void shutdown() {
         // 禁用主动查看
@@ -908,173 +1499,38 @@ public class QQMessageHandler {
         AiAgentActivity.debugLog("[QQMsg] 已关闭");
     }
 
+    // ==================== 工具 ====================
+
+    /** 获取Bot标签名（优先用配置名，无配置则用"Bot"） */
+    private String getBotLabel() {
+        String name = sair.aiagent.core.AiConfig.getInstance().getBotName();
+        return (name != null && !name.isEmpty()) ? name : "Bot";
+    }
+
     // ==================== JSON工具方法（无第三方依赖） ====================
 
     /** 从JSON中提取字符串值 */
     static String extractString(String json, String key) {
-        // 匹配 "key":"value" 或 "key": "value"
-        String searchKey = "\"" + key + "\"";
-        int idx = json.indexOf(searchKey);
-        if (idx < 0) return null;
-
-        int colonIdx = json.indexOf(':', idx + searchKey.length());
-        if (colonIdx < 0) return null;
-
-        // 跳过冒号后的空白
-        int valStart = colonIdx + 1;
-        while (valStart < json.length() && (json.charAt(valStart) == ' ' || json.charAt(valStart) == '\t')) {
-            valStart++;
-        }
-
-        if (valStart >= json.length()) return null;
-
-        char first = json.charAt(valStart);
-        if (first != '"') {
-            // 非字符串值（数字/布尔/null），读取到逗号或}为止
-            int valEnd = valStart;
-            while (valEnd < json.length() && json.charAt(valEnd) != ',' && json.charAt(valEnd) != '}') {
-                valEnd++;
-            }
-            String raw = json.substring(valStart, valEnd).trim();
-            return "null".equals(raw) ? null : raw;
-        }
-
-        // 字符串值，处理转义
-        StringBuilder sb = new StringBuilder();
-        int i = valStart + 1;
-        while (i < json.length()) {
-            char c = json.charAt(i);
-            if (c == '\\' && i + 1 < json.length()) {
-                char next = json.charAt(i + 1);
-                switch (next) {
-                    case '"': sb.append('"'); i += 2; continue;
-                    case '\\': sb.append('\\'); i += 2; continue;
-                    case '/': sb.append('/'); i += 2; continue;
-                    case 'n': sb.append('\n'); i += 2; continue;
-                    case 'r': sb.append('\r'); i += 2; continue;
-                    case 't': sb.append('\t'); i += 2; continue;
-                    case 'u':
-                        if (i + 5 < json.length()) {
-                            try {
-                                sb.append((char) Integer.parseInt(json.substring(i + 2, i + 6), 16));
-                                i += 6; continue;
-                            } catch (NumberFormatException ignored) {}
-                        }
-                        sb.append(c); i++; continue;
-                    default: sb.append(c); i++; continue;
-                }
-            } else if (c == '"') {
-                break;
-            }
-            sb.append(c);
-            i++;
-        }
-        return sb.toString();
+        return JsonUtil.extractString(json, key);
     }
 
     /** 从JSON中提取long值 */
     static long extractLong(String json, String key) {
-        String s = extractString(json, key);
-        if (s == null || s.isEmpty()) return 0;
-        try {
-            return Long.parseLong(s);
-        } catch (NumberFormatException e) {
-            return 0;
-        }
+        return JsonUtil.extractLong(json, key);
     }
 
     /** 从JSON中提取对象 {} 内容 */
     static String extractObject(String json, String key) {
-        String searchKey = "\"" + key + "\"";
-        int idx = json.indexOf(searchKey);
-        if (idx < 0) return null;
-
-        int colonIdx = json.indexOf(':', idx + searchKey.length());
-        if (colonIdx < 0) return null;
-
-        int braceStart = json.indexOf('{', colonIdx + 1);
-        if (braceStart < 0) return null;
-
-        int depth = 1;
-        int pos = braceStart + 1;
-        while (pos < json.length() && depth > 0) {
-            char c = json.charAt(pos);
-            if (c == '{') depth++;
-            else if (c == '}') depth--;
-            else if (c == '"') {
-                pos++;
-                while (pos < json.length()) {
-                    char sc = json.charAt(pos);
-                    if (sc == '\\') { pos += 2; continue; }
-                    if (sc == '"') break;
-                    pos++;
-                }
-            }
-            pos++;
-        }
-        return json.substring(braceStart, pos);
+        return JsonUtil.extractObject(json, key);
     }
 
     /** 从JSON中提取数组 [] 内容 */
     static String extractArray(String json, String key) {
-        String searchKey = "\"" + key + "\"";
-        int idx = json.indexOf(searchKey);
-        if (idx < 0) return null;
-
-        int colonIdx = json.indexOf(':', idx + searchKey.length());
-        if (colonIdx < 0) return null;
-
-        int bracketStart = json.indexOf('[', colonIdx + 1);
-        if (bracketStart < 0) return null;
-
-        int depth = 1;
-        int pos = bracketStart + 1;
-        while (pos < json.length() && depth > 0) {
-            char c = json.charAt(pos);
-            if (c == '[') depth++;
-            else if (c == ']') depth--;
-            else if (c == '"') {
-                pos++;
-                while (pos < json.length()) {
-                    char sc = json.charAt(pos);
-                    if (sc == '\\') { pos += 2; continue; }
-                    if (sc == '"') break;
-                    pos++;
-                }
-            }
-            pos++;
-        }
-        return json.substring(bracketStart + 1, pos - 1);
+        return JsonUtil.extractArray(json, key);
     }
 
     /** 简单拆分JSON数组中的对象 */
     static List<String> splitJsonArray(String arrayStr) {
-        List<String> items = new ArrayList<>();
-        if (arrayStr == null || arrayStr.trim().isEmpty()) return items;
-
-        int start = 0;
-        int depth = 0;
-        boolean inString = false;
-
-        for (int i = 0; i < arrayStr.length(); i++) {
-            char c = arrayStr.charAt(i);
-            if (inString) {
-                if (c == '\\') { i++; continue; }
-                if (c == '"') inString = false;
-            } else {
-                if (c == '"') inString = true;
-                else if (c == '{') {
-                    if (depth == 0) start = i;
-                    depth++;
-                }
-                else if (c == '}') {
-                    depth--;
-                    if (depth == 0) {
-                        items.add(arrayStr.substring(start, i + 1));
-                    }
-                }
-            }
-        }
-        return items;
+        return JsonUtil.splitJsonArray(arrayStr);
     }
 }

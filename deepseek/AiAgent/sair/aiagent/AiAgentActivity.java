@@ -26,7 +26,7 @@ import sair.sys.SairCons;
 import sair.user.Activity;
 
 /**
- * AiAgent v1.4 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出
+ * AiAgent v2.0 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
  *
  * <h3>架构</h3>
  * 路由与命令实现分离 —— {@code main()} 仅做初始化 + 委托 {@link ActivityActions#route}，
@@ -123,7 +123,7 @@ public class AiAgentActivity extends Activity {
         String n = getName();
         return new String[] {
             Pathes.printSplit,
-            "AiAgent v1.4 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出",
+            "AiAgent v2.0 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出 · OneBot QQ",
             "DeepSeek API, 流式打字机效果, Agent自主操作, 持久化记忆, JS/Java动态注入",
             "配置:",
             "\t" + n + "/setkey [密钥]        设置API密钥",
@@ -153,8 +153,11 @@ public class AiAgentActivity extends Activity {
             "\t<evaljs>代码</evaljs>         执行JavaScript",
             "\t<eval>代码</eval>             编译执行Java (须定义run方法)",
             "\t<web>URL</web>                联网获取网页内容",
+            "\t<download>URL</download>      下载文件/依赖到 dataDir/downloads/",
             "\t<remember>内容</remember>     记录重要信息到持久化记忆",
-            "\t<download>URL</download>        下载文件/依赖到 dataDir/downloads/",
+            "\t<superise>文本</superise>     弹出彩蛋窗口(慎用)",
+            "\t<editprompt>文本</editprompt> 修改AI自身系统提示词",
+            "\t<stop></stop>                 停止Agent执行",
             "QQ OneBot:",
             "\t" + n + "/onebotconnect       启动OneBot服务",
             "\t" + n + "/onebotdisconnect    停止OneBot服务",
@@ -201,9 +204,9 @@ public class AiAgentActivity extends Activity {
             oneBotServer.setDataDir(dataDir);
 
             oneBotMessageHandler = new QQMessageHandler();
+            oneBotMessageHandler.setDataDir(dataDir);          // 必须在setServer之前调用！
             oneBotMessageHandler.setServer(oneBotServer);
             oneBotMessageHandler.setAgentExecutor(agent);
-            oneBotMessageHandler.setDataDir(dataDir);
             oneBotMessageHandler.setSelfId(config.getOnebotSelfId());
 
             // execq 插件白名单注入 AgentExecutor

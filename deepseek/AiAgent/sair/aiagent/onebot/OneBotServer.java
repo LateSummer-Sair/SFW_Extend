@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import sair.aiagent.AiAgentActivity;
 import sair.aiagent.onebot.model.QQMessage;
+import sair.aiagent.onebot.util.JsonUtil;
 
 /**
  * OneBot v11 反向 WebSocket 服务端。
@@ -406,15 +407,24 @@ public class OneBotServer {
 
         /** 处理收到的文本消息（OneBot事件） */
         private void onTextMessage(String text) {
-            // 过滤心跳包和非消息事件
+            // 过滤心跳包
             if (text.contains("\"post_type\":\"meta_event\"") || 
                 text.contains("\"post_type\": \"meta_event\"")) {
                 // 静默忽略心跳包
                 return;
             }
+            
+            // 处理request事件（群邀请、好友请求等）
+            if (text.contains("\"post_type\":\"request\"") || 
+                text.contains("\"post_type\": \"request\"")) {
+                handleRequestEvent(text);
+                return;
+            }
+            
+            // 处理notice事件（戳一戳等）
             if (text.contains("\"post_type\":\"notice\"") || 
                 text.contains("\"post_type\": \"notice\"")) {
-                // 静默忽略通知事件
+                handleNoticeEvent(text);
                 return;
             }
             
@@ -425,6 +435,75 @@ public class OneBotServer {
                 } catch (Exception e) {
                     AiAgentActivity.debugLog("[OneBot] 消息处理错误: " + e.toString());
                 }
+            }
+        }
+        
+        /** 处理notice事件（戳一戳、好友申请等） */
+        private void handleNoticeEvent(String text) {
+            try {
+                // 检查是否是戳一戳事件
+                if (text.contains("\"sub_type\":\"poke\"") || 
+                    text.contains("\"sub_type\": \"poke\"")) {
+                            
+                    // 手动解析戳一戳信息（无第三方依赖）
+                    long targetId = JsonUtil.extractLong(text, "target_id");
+                    long userId = JsonUtil.extractLong(text, "user_id");
+                    long groupId = JsonUtil.extractLong(text, "group_id");
+                            
+                    // 从messageHandler获取selfId
+                    long currentSelfId = messageHandler != null ? messageHandler.getSelfId() : 0;
+                            
+                    // 检查是否戳的是机器人自己
+                    if (targetId == currentSelfId && messageHandler != null) {
+                        AiAgentActivity.debugLog("[OneBot] 检测到戳一戳: user=" + userId + ", group=" + groupId);
+                                
+                        // 构造一个虚拟的@消息，触发AI响应
+                        String fakeMessage = "{\"message_type\":\"" + (groupId > 0 ? "group" : "private") + "\"," +
+                            "\"user_id\":" + userId + "," +
+                            (groupId > 0 ? "\"group_id\":" + groupId + "," : "") +
+                            "\"message\":[{\"type\":\"at\",\"data\":{\"qq\":" + currentSelfId + "}},{\"type\":\"text\",\"data\":{\"text\":\"戳了捅我\"}}]," +
+                            "\"message_id\":0," +
+                            "\"raw_message\":\"[CQ:poke,qq=" + userId + "]\"}";
+                                
+                        messageHandler.handleRawMessage(fakeMessage, this::sendText);
+                    }
+                }
+            } catch (Exception e) {
+                AiAgentActivity.debugLog("[OneBot] notice事件处理错误: " + e.toString());
+            }
+        }
+
+        /** 处理request事件（群邀请、好友请求等） */
+        private void handleRequestEvent(String text) {
+            try {
+                String requestType = JsonUtil.extractString(text, "request_type");
+                String subType = JsonUtil.extractString(text, "sub_type");
+                
+                // 好友申请：request_type=friend, sub_type=add
+                if ("friend".equals(requestType) && "add".equals(subType)) {
+                    long userId = JsonUtil.extractLong(text, "user_id");
+                    String comment = JsonUtil.extractString(text, "comment");
+                    String flag = JsonUtil.extractString(text, "flag");
+                    
+                    if (messageHandler != null && flag != null && userId > 0) {
+                        AiAgentActivity.debugLog("[OneBot] 收到好友申请: userId=" + userId);
+                        messageHandler.handleFriendRequest(userId, comment, flag);
+                    }
+                }
+                
+                // 群邀请：request_type=group, sub_type=invite
+                if ("group".equals(requestType) && "invite".equals(subType)) {
+                    long userId = JsonUtil.extractLong(text, "user_id");
+                    long groupId = JsonUtil.extractLong(text, "group_id");
+                    String flag = JsonUtil.extractString(text, "flag");
+                    
+                    if (messageHandler != null && flag != null && userId > 0) {
+                        AiAgentActivity.debugLog("[OneBot] 收到群邀请: userId=" + userId + ", groupId=" + groupId);
+                        messageHandler.handleGroupInviteRequest(userId, groupId, flag);
+                    }
+                }
+            } catch (Exception e) {
+                AiAgentActivity.debugLog("[OneBot] request事件处理错误: " + e.toString());
             }
         }
 
@@ -480,26 +559,6 @@ public class OneBotServer {
     // ==================== JSON工具方法 ====================
 
     static String jsonEscape(String s) {
-        if (s == null) return "";
-        StringBuilder sb = new StringBuilder(s.length() + 16);
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"':  sb.append("\\\""); break;
-                case '\\': sb.append("\\\\"); break;
-                case '\b': sb.append("\\b");  break;
-                case '\f': sb.append("\\f");  break;
-                case '\n': sb.append("\\n");  break;
-                case '\r': sb.append("\\r");  break;
-                case '\t': sb.append("\\t");  break;
-                default:
-                    if (c < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        sb.append(c);
-                    }
-            }
-        }
-        return sb.toString();
+        return JsonUtil.jsonEscape(s);
     }
 }

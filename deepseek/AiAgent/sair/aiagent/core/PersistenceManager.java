@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
+import sair.aiagent.AiAgentActivity;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
@@ -82,7 +83,7 @@ public class PersistenceManager {
             createTables();
 
             if (isNew) {
-                System.err.println("[Persistence] new DB created at " + dbFile.getAbsolutePath());
+                AiAgentActivity.debugLog("[Persistence] new DB created at " + dbFile.getAbsolutePath());
             }
             return isNew;
         } catch (SQLException e) {
@@ -223,7 +224,7 @@ public class PersistenceManager {
                     }
                 }
             } catch (SQLException e) {
-                System.err.println("[Persistence] addMemory FAILED: " + e.getMessage());
+                AiAgentActivity.debugLog("[Persistence] addMemory FAILED: " + e.getMessage());
             }
             return null;
         }
@@ -576,7 +577,7 @@ public class PersistenceManager {
         migrateEmotionJson(dir);
         migrateContextJson(dir);
 
-        System.err.println("[Persistence] JSON→SQLite migration done");
+        AiAgentActivity.debugLog("[Persistence] JSON→SQLite migration done");
     }
 
     private void migrateMemoryJson(File dir) {
@@ -589,12 +590,12 @@ public class PersistenceManager {
                 for (MemoryEntry m : old) {
                     addMemory(m.getContent(), m.getCategory(), m.getImportance());
                 }
-                System.err.println("[Persistence] migrated " + old.size() + " memories from JSON");
+                AiAgentActivity.debugLog("[Persistence] migrated " + old.size() + " memories from JSON");
             }
             // 迁移后重命名为 .bak 避免重复迁移
             f.renameTo(new File(dir, "memory.json.bak"));
         } catch (Exception e) {
-            System.err.println("[Persistence] memory.json migration FAILED: " + e.getMessage());
+            AiAgentActivity.debugLog("[Persistence] memory.json migration FAILED: " + e.getMessage());
         }
     }
 
@@ -640,7 +641,7 @@ public class PersistenceManager {
             String content = new String(
                     java.nio.file.Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
             setState("emotion", content);
-            System.err.println("[Persistence] migrated emotion from JSON");
+            AiAgentActivity.debugLog("[Persistence] migrated emotion from JSON");
             f.renameTo(new File(dir, "emotion.json.bak"));
         } catch (Exception ignored) {}
     }

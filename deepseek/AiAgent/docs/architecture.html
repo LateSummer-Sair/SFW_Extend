@@ -35,7 +35,7 @@
                 <div class="section-tag">Architecture</div>
                 <h2>系统架构</h2>
                 <div class="section-divider"></div>
-                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。</p>
+                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。v2.0 最新修复：线程安全重构（移除共享 groupActionHandler，参数化传递 handler）解决并发群聊上下文混乱、提示词追加机制修复。</p>
             </div>
         </div>
     </section>
@@ -75,8 +75,21 @@
                 <!-- OneBot QQ Layer -->
                 <div class="arch-layer">
                     <div class="arch-node model" style="border-color:var(--accent-cyan);">OneBotServer<br><small>WebSocket 服务端</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessageHandler<br><small>消息路由 · execq/execs回调</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessageHandler<br><small>消息路由 · execq/execs · 邀请决策</small></div>
                     <div class="arch-node model" style="border-color:var(--accent-cyan);">UnifiedQQMemoryManager<br><small>统一记忆库（群聊/私聊联通）</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMemoryManager<br><small>按QQ号隔离记忆</small></div>
+                </div>
+                <!-- OneBot Sub Layer -->
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">NapCatApi<br><small>HTTP API · 群管/邀请/信息</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">InternalAgents<br><small>好感度/拉黑管理</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">GroupModeratorAgent<br><small>违规检测+处罚执行</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">GroupModerationConfig<br><small>违规阈值配置</small></div>
+                </div>
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">EmotionStateManager<br><small>好感度情绪持久化</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">BotPersistenceManager<br><small>bot_data.db 统一管理</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">JsonUtil<br><small>公共JSON解析工具类</small></div>
                     <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessage<br><small>OneBot 消息模型</small></div>
                 </div>
                 <div class="arch-arrow">↓</div>
@@ -102,10 +115,57 @@
                     / <code style="color:var(--accent-purple);">.acts</code>
                     / <code style="color:var(--accent-cyan);">.onebot</code>
                     / <code style="color:var(--accent-green);">.onebot.model</code>
+                    / <code style="color:var(--accent-amber);">.onebot.util</code>
                 </p>
                 <p style="color:var(--text-muted); font-size:0.78rem; margin-top:8px;">
-                    25 个源文件 · 约 6,700 行代码 · 7 个包
+                    33 个源文件 · 约 11,147 行代码 · 9 个包
                 </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Friend/Group Invite Flow -->
+    <section id="invite-flow">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Data Flow</div>
+                <h2>好友/群邀请 好感度决策链</h2>
+                <div class="section-divider"></div>
+                <p>当收到好友申请或群邀请时，AI 依据 7 步优先级决策链智能处理，含反滥用保护。</p>
+            </div>
+
+            <div class="arch-diagram reveal">
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">OneBotServer<br><small>检测 request/friend/add<br>request/group/invite 事件</small></div>
+                </div>
+                <div class="arch-arrow">↓ 路由到 QQMessageHandler</div>
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessageHandler<br><small>handleFriendRequest() / handleGroupInviteRequest()</small></div>
+                </div>
+                <div class="arch-arrow">↓ 7步优先级决策</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">① 主人? → 无条件接受</div>
+                    <div class="arch-node core">② 5分钟内好友? → 拒绝+警告</div>
+                    <div class="arch-node core">③ 查询好感度</div>
+                    <div class="arch-node core">④ 背叛者? → 拒绝</div>
+                </div>
+                <div class="arch-layer">
+                    <div class="arch-node core">⑤ 好感度>600 → 接受</div>
+                    <div class="arch-node core">⑥ 200-600 → 忽略</div>
+                    <div class="arch-node core">⑦ ≤200 → 拒绝</div>
+                </div>
+                <div class="arch-arrow">↓ NapCatApi HTTP 调用</div>
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">NapCatApi.setGroupAddRequest()<br><small>发送 approve/reject</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">NapCatApi.handleFriendRequest()<br><small>同意/拒绝好友申请</small></div>
+                </div>
+            </div>
+
+            <div style="max-width:800px; margin:24px auto;">
+                <div class="pattern-card">
+                    <h4>反滥用保护机制</h4>
+                    <p><b>好友申请通过后，5 分钟内如果该用户发起群邀请，立即拒绝并回复警告</b>："请不要厚着脸皮拉我进群，我还没认可你，也更没充分了解你。"<br>通过 <code>ConcurrentHashMap&lt;Long, Long&gt; friendAcceptTimestamps</code> 跟踪好友通过时间戳，5 分钟后异步清理。</p>
+                </div>
             </div>
         </div>
     </section>
@@ -179,7 +239,7 @@
                 <div class="arch-layer">
                     <div class="arch-node core">② DeepSeekClient.chatStream()<br><small>SSE流式 → StreamPrinter</small></div>
                 </div>
-                <div class="arch-arrow">↓ v1.9新增：execs回调机制</div>
+                <div class="arch-arrow">↓ v2.0：支持 &lt;stop&gt; 标签自停 + execs回调机制</div>
                 <div class="arch-layer">
                     <div class="arch-node model" style="border-color:var(--accent-cyan);">qqExecsCallback<br><small>每轮AI响应后实时推送给QQ主人</small></div>
                 </div>
@@ -348,12 +408,12 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v1.7 ·
+                <span class="brand">AiAgent</span> v2.0 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · Java 8
+                QQ OneBot · NapCat群管理 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志
             </p>
         </div>
     </footer>

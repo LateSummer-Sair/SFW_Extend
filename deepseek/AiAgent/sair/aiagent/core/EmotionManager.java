@@ -15,7 +15,7 @@ public class EmotionManager {
     // ==================== 情绪阈值 ====================
     
     private static final int PAUSE_THRESHOLD = -30;
-    private static final int SURPRISE_THRESHOLD = 80;
+    private static final int SURPRISE_THRESHOLD = 95;
     private static final int MAX_CONSECUTIVE_FAILURES = 3;
     private static final int MIN_CONSECUTIVE_PRAISE = 2;
     private static final int SCOLD_DELTA = -20;
@@ -162,7 +162,14 @@ public class EmotionManager {
     }
 
     public synchronized boolean shouldShowSurprise() {
-        return state.happiness >= SURPRISE_THRESHOLD && state.consecutivePraise >= MIN_CONSECUTIVE_PRAISE;
+        if (state.happiness >= SURPRISE_THRESHOLD && state.consecutivePraise >= MIN_CONSECUTIVE_PRAISE) {
+            // 消费情绪：展示彩蛋后重置，避免连续弹出
+            state.happiness = 60;          // 回到基准线
+            state.consecutivePraise = 0;  // 重置连续夸赞计数
+            markDirty();
+            return true;
+        }
+        return false;
     }
 
     public synchronized void pauseAgent(String reason) {

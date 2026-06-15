@@ -8,7 +8,6 @@
 </head>
 <body>
     <canvas id="particles-canvas"></canvas>
-
     <nav class="top-nav">
         <div class="nav-inner">
             <div class="nav-logo"><div class="icon">⚡</div><span>AiAgent</span></div>
@@ -21,524 +20,212 @@
             </div>
         </div>
     </nav>
-
     <section style="padding-top:140px; padding-bottom:40px;">
         <div class="container">
             <div class="section-header reveal">
                 <div class="section-tag">Class Structure</div>
                 <h2>类结构详解</h2>
                 <div class="section-divider"></div>
-                <p>25 个核心类，按职责划分为 7 个包，总计约 6,700 行代码。</p>
+                <p>33 个核心类，按职责划分为 9 个包，总计约 11,234 行代码。</p>
                 <p style="margin-top:8px; font-size:0.85rem; color:var(--text-muted);">
                     <code style="color:var(--accent-cyan);">sair.aiagent</code> (1 类) ·
                     <code style="color:var(--accent-purple);">.core</code> (12 类) ·
                     <code style="color:var(--accent-green);">.model</code> (3 类) ·
-                    <code style="color:var(--accent-amber);">.util</code> (2 类) ·
+                    <code style="color:var(--accent-amber);">.util</code> (3 类) ·
                     <code style="color:var(--accent-cyan);">.ui</code> (2 类) ·
                     <code style="color:var(--accent-purple);">.acts</code> (1 类) ·
-                    <code style="color:var(--accent-cyan);">.onebot</code> (3 类) ·
-                    <code style="color:var(--accent-green);">.onebot.model</code> (1 类)
+                    <code style="color:var(--accent-cyan);">.onebot</code> (10 类) ·
+                    <code style="color:var(--accent-green);">.onebot.model</code> (1 类) ·
+                    <code style="color:var(--accent-amber);">.onebot.util</code> (1 类)
                 </p>
             </div>
         </div>
     </section>
-
     <section style="padding-top:10px;">
         <div class="container">
-
-            <!-- PersistenceManager -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge cyan">Core</span>
-                    <h4>PersistenceManager</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 678 行</div>
-                <p>
-                    SQLite 统一持久化核心 —— 替代 memory.json / journal.json / history.json / emotion.json / context.json 五个独立 JSON 文件。<br><br>
-                    <b>单文件数据库 aiagent.db</b>，WAL 模式（PRAGMA journal_mode=WAL），synchronous=NORMAL，busy_timeout=3000ms。<br>
-                    <b>5 张表</b>：<code>memories</code>（记忆条目 + category/importance）、<code>memories_fts</code>（FTS5 全文索引）、
-                    <code>journal</code>（会话日志，最多 80 条）、<code>conversations</code>（对话历史 + token 估算）、
-                    <code>app_state</code>（键值状态，存情绪/上下文摘要）。<br><br>
-                    <b>FTS5 触发器</b>：INSERT/UPDATE/DELETE 自动同步全文索引，搜索失败自动回退 LIKE 查询。<br>
-                    <b>旧数据迁移</b>：首次初始化自动将 5 个 JSON 文件导入 SQLite 并重命名为 .bak 备份。<br>
-                    <b>事务安全</b>：所有写操作在 <code>synchronized(lock)</code> 保护下执行，WAL checkpoint 在 close() 时完成。
-                </p>
+                <div class="p-header"><span class="p-badge cyan">Core</span><h4>PersistenceManager</h4></div>
+                <div class="p-class">sair.aiagent.core · 612 行</div>
+                <p>SQLite 统一持久化核心。单文件数据库 aiagent.db，WAL 模式，FTS5 全文搜索，替代 5 个独立 JSON 文件。5 张表：memories / memories_fts / journal / conversations / app_state。事务安全，旧数据自动迁移。</p>
             </div>
-
-            <!-- AiAgentActivity -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge cyan">Entry</span>
-                    <h4>AiAgentActivity</h4>
-                </div>
-                <div class="p-class">sair.aiagent · 290 行</div>
-                <p>
-                    继承 <code>sair.user.Activity</code>，实现 SFW 插件生命周期。
-                    <code>main()</code> 方法按 <code>funcName</code> 路由到 <b>28 个命令</b>处理方法，委托 <code>ActivityActions</code>。
-                    构造函数中初始化所有核心组件：<code>AiConfig</code>、<code>PersistenceManager</code>、<code>ConversationHistory</code>、
-                    <code>DeepSeekClient</code>、<code>MemoryManager</code>、<code>ConfirmationGate</code>、
-                    <code>DynamicCodeEngine</code>、<code>JournalManager</code>、<code>EmotionManager</code>、
-                    <code>AgentExecutor</code>、<code>ActivityActions</code>。流式输出通过单例 <code>StreamPrinter.getInstance()</code> 管理。
-                    提供 <code>stopActivePrinter()</code> 先中断 API 线程再排空打印机，确保输出完整。<br>
-                    管理 <code>OneBotServer</code> + <code>QQMessageHandler</code> 的完整生命周期（启动/停止/配置），
-                    <code>initOneBot()</code> 中注入 execq 插件白名单到 AgentExecutor。
-                    <code>exit()</code> 关闭 PersistenceManager + OneBot 服务（WAL checkpoint + 连接关闭）。
-                </p>
+                <div class="p-header"><span class="p-badge cyan">Entry</span><h4>AiAgentActivity</h4></div>
+                <div class="p-class">sair.aiagent · 264 行</div>
+                <p>继承 sair.user.Activity，SFW 插件入口。main() 路由 28 个命令到 ActivityActions。管理 OneBotServer + QQMessageHandler 完整生命周期。构造函数初始化所有核心组件。</p>
             </div>
-
-            <!-- AgentExecutor -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge amber">Core</span>
-                    <h4>AgentExecutor</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 1080 行</div>
-                <p>
-                    项目最大文件，ReAct 推理-行动循环引擎。<br><br>
-                    <b>核心流程</b>：<code>execute(task)</code> → <code>runLoop()</code>（最多 30 轮）→
-                    每轮 <code>buildSystemPrompt()</code> 融合 6 种上下文 → <code>DeepSeekClient.chatStream()</code>
-                    流式推理 → 正则 <code>parseActions()</code> 匹配 XML 标签 → <code>executeAction()</code>
-                    执行操作 → 捕获结果注入下轮 system prompt。<br><br>
-                    <b>execq 通道</b>：<code>executeQq(task, systemPrompt, memMgr)</code> 专为 OneBot QQ 设计，
-                    受限标签白名单（cmd/web/readdir），自动绕过确认门控，独立上下文。
-                    <code>executeCmdExecq()</code> 在执行 <code>&lt;cmd&gt;</code> 前校验插件白名单（<code>extractPluginName()</code> 提取插件名），空白名单=全部拒绝。<br><br>
-                    <b>上下文注入链</b>：静态提示词（缓存） + 上轮 Agent 总结 + Chat 历史摘要 +
-                    会话日志（JournalManager） + 情绪状态（EmotionManager） + 记忆检索（MemoryManager）。<br><br>
-                    <b>11 种 XML 标签</b>：cmd / readfile / readdir / sys / evaljs / eval / web /
-                    remember / download / superise / editprompt。<br><br>
-                    <b>安全机制</b>：SSRF 内网地址黑名单，高危操作经 ConfirmationGate 确认，
-                    每轮后清除线程中断标记防止污染。
-                </p>
+                <div class="p-header"><span class="p-badge amber">Core</span><h4>AgentExecutor</h4></div>
+                <div class="p-class">sair.aiagent.core · 1121 行</div>
+                <p>ReAct 推理-行动循环引擎。最多 30 轮循环，execq 通道 50 轮。12 种 XML 标签：cmd/readfile/readdir/sys/evaljs/eval/web/remember/download/superise/editprompt/stop。execq 受限白名单（cmd/web/readdir/setname/stop），自动绕过确认门控。v2.0 新增 stop 标签三通道覆盖。</p>
             </div>
-
-            <!-- ActivityActions -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge green">Core</span>
-                    <h4>ActivityActions</h4>
-                </div>
-                <div class="p-class">sair.aiagent.acts · 650 行</div>
-                <p>
-                    命令委托层。将 28 个用户命令的实现从 <code>AiAgentActivity</code> 分离出来，
-                    遵循单一职责原则。核心方法：<br><br>
-                    <b>handleChat()</b> — 情绪检测 → 记忆检索 → 注入 Agent 结果 → 流式对话 → 保存上下文。<br>
-                    <b>handleExec()</b> — 情绪检测 + 暂停检查 → 记忆检索 → 注入 Chat 历史/日志/情绪 →
-                    Agent 执行 → 记录总结用于层层递进。<br>
-                    <b>OneBot 系列</b> — handleOneBotConnect() / Disconnect / Status / SetPort / SetToken / SetSelfId / SetPrompt / ShowPrompt，
-                    管理 QQ 机器人完整生命周期及 execq 提示词配置。<br>
-                    <b>白名单系列</b> — handleOneBotWhitelist() / WhitelistAdd / WhitelistRemove，
-                    execq <code>&lt;cmd&gt;</code> 插件白名单管理，增删查 + 自动保存注入 AgentExecutor。<br>
-                    <b>handleMood()</b> — 查询 AI 当前心情、开心值、连续失败/夸赞、性别。<br>
-                    <b>handleYes/No</b> — 统一路由 ConfirmationGate 确认。<br>
-                    <b>buildChatContextForAgent()</b> — 从 ConversationHistory 取最近 6 条消息（每条截断 200 字符）构建 Agent 可读摘要。
-                </p>
+                <div class="p-header"><span class="p-badge green">Core</span><h4>ActivityActions</h4></div>
+                <div class="p-class">sair.aiagent.acts · 644 行</div>
+                <p>命令委托层。28 个命令实现从 AiAgentActivity 分离。核心方法：handleChat() / handleExec() / OneBot 系列 / 白名单系列 / handleMood() / handleYes/No。buildChatContextForAgent() 构建跨模式上下文。</p>
             </div>
-
-            <!-- DeepSeekClient -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge cyan">Core</span>
-                    <h4>DeepSeekClient</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 384 行</div>
-                <p>
-                    封装全部 HTTP 通信，使用 <code>HttpURLConnection</code>，零第三方依赖。<br>
-                    手动拼接 JSON 请求体，通过正则解析 SSE 流（匹配 <code>data: {...}</code> 行并提取
-                    <code>delta.content</code> 字段）和标准 JSON 响应。<br>
-                    内置 <code>jsonEscape()</code> / <code>jsonUnescape()</code> 处理特殊字符转义。<br>
-                    API 端点：<code>{baseUrl}/v1/chat/completions</code>，Authorization Bearer 认证。<br>
-                    超时配置：连接 30s，读取 300s。支持 HTTP 请求取消（通过 <code>HttpURLConnection.disconnect()</code>）。
-                </p>
+                <div class="p-header"><span class="p-badge cyan">Core</span><h4>DeepSeekClient</h4></div>
+                <div class="p-class">sair.aiagent.core · 354 行</div>
+                <p>封装 HTTP 通信，HttpURLConnection 零第三方依赖。手动拼接 JSON，正则解析 SSE 流（匹配 data: {...} 并提取 delta.content）。支持 chatStream() 流式和 chatSync() 同步两种策略。</p>
             </div>
-
-            <!-- DynamicCodeEngine -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge cyan">Core</span>
-                    <h4>DynamicCodeEngine</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 412 行</div>
-                <p>
-                    双引擎动态代码执行系统：<b>Nashorn JavaScript</b> 即时执行 + <b>JavaCompiler</b> 即时编译注入。<br>
-                    编译时自动构建完整 classpath（系统 classpath + <code>URLClassLoader</code> + SFW <code>SairLoader</code>）。<br>
-                    <b>InMemoryClassLoader</b> 使用 <code>defineClass()</code> 加载字节码，优先委托父加载器解析依赖。<br>
-                    编译→加载→执行→丢弃，全程一次性，执行后立即清理引用交由 GC 回收。<br>
-                    支持动态 <code>.jar</code> 加载（<code>loadJar()</code>），不注入系统 ClassLoader，仅在 <code>modLibLoader</code> 中管理。
-                </p>
+                <div class="p-header"><span class="p-badge cyan">Core</span><h4>DynamicCodeEngine</h4></div>
+                <div class="p-class">sair.aiagent.core · 353 行</div>
+                <p>双引擎动态代码执行：Nashorn JavaScript 即时执行 + JavaCompiler 即时编译注入。InMemoryClassLoader 加载字节码，编译→加载→执行→丢弃，全程一次性。支持动态 .jar 加载。</p>
             </div>
-
-            <!-- EmotionManager -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge rose">Core</span>
-                    <h4>EmotionManager</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 301 行</div>
-                <p>
-                    AI 情绪状态机，模拟类人情感。<br><br>
-                    <b>情绪词典</b>：辱骂词 17 个（如"笨蛋""废物""蠢"）→ -20 happiness；
-                    夸赞词 18 个（如"真棒""厉害""爱你"）→ +15 happiness；
-                    安慰词 18 个（如"别难过""加油""抱抱"）→ +25 happiness。<br><br>
-                    <b>阈值机制</b>：happiness ≤ -30 或连续失败 ≥ 3 次 → Agent 暂停（<code>CountDownLatch</code> 阻塞，
-                    等待用户安慰/指导，120 秒超时自动恢复）；happiness ≥ 80 且连续夸赞 ≥ 2 次 → 触发彩蛋。<br><br>
-                    <b>持久化</b>：状态序列化到 <code>app_state("emotion")</code>（SQLite，Gson JSON），
-                    高频操作仅标记脏数据，由 <code>flushSave()</code> 在 Agent 循环结束时统一写入，减少磁盘 I/O。<br>
-                    支持 <code>buildEmotionContext()</code> 生成注入 system prompt 的情绪描述文本。<br>
-                    性别默认为 female，影响 AI 的语气和表达风格。
-                </p>
+                <div class="p-header"><span class="p-badge rose">Core</span><h4>EmotionManager</h4></div>
+                <div class="p-class">sair.aiagent.core · 268 行</div>
+                <p>AI 情绪状态机。情绪词典：辱骂词 17 个(-20)、夸赞词 18 个(+15)、安慰词 18 个(+25)。阈值：happiness≤-30 或连败≥3→暂停；≥95 且连夸≥2→彩蛋(v2.0 阈值 80→95)。持久化到 SQLite app_state。</p>
             </div>
-
-            <!-- StreamPrinter -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge green">Core</span>
-                    <h4>StreamPrinter</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 327 行</div>
-                <p>
-                    单例流式输出核心（<code>getInstance()</code> 全局唯一）。<br>
-                    内部维护 <code>LinkedBlockingQueue&lt;Item&gt;</code>，支持两种输出通道：
-                    <b>行输出</b>（系统消息，<code>offerLine()</code> / <code>offerPlain()</code>，无延迟直出）和
-                    <b>字符输出</b>（AI 流式，<code>offer(char)</code>，10ms 延迟打字机效果）。<br>
-                    <code>start()</code> 先全速排空旧队列再启动新流；守护线程永续运行无需手动启停。<br>
-                    SFW 换行适配：<code>\n</code> 自动转换为 <code>\r\n</code>。<br>
-                    预定义颜色：<code>C_AI</code>（翠绿 100,255,180）和 <code>C_THINK</code>（淡紫蓝 180,180,255）。
-                </p>
-                <div class="code-block" style="margin-top:16px;">
-                    <div class="code-header"><span class="lang">核心打印循环</span><button class="copy-btn">Copy</button></div>
-<pre><code><span class="kw">private void</span> <span class="fn">printLoop</span>() {
-    <span class="kw">while</span> (<span class="kw">true</span>) {
-        <span class="type">Item</span> item = queue.take();  <span class="cmt">// 守护线程，永久阻塞等待</span>
-        <span class="kw">if</span> (item.text != <span class="kw">null</span>) {
-            <span class="cmt">// 行输出（系统消息）—— 无延迟，直接通过EdtUtils</span>
-            SairCons.<span class="fn">print</span>(item.color, item.text + (item.newline ? <span class="str">"\r\n"</span> : <span class="str">""</span>));
-        } <span class="kw">else</span> {
-            <span class="cmt">// 字符输出（AI 流式）—— 10ms 延迟</span>
-            <span class="kw">if</span> (item.ch == <span class="str">'\n'</span>) SairCons.<span class="fn">print</span>(item.color, <span class="str">"\r\n"</span>);
-            <span class="kw">else if</span> (item.ch != <span class="str">'\r'</span>) SairCons.<span class="fn">print</span>(item.color, String.<span class="fn">valueOf</span>(item.ch));
-            Thread.<span class="fn">sleep</span>(<span class="num">10</span>);
-        }
-    }
-}</code></pre>
-                </div>
+                <div class="p-header"><span class="p-badge green">Core</span><h4>StreamPrinter</h4></div>
+                <div class="p-class">sair.aiagent.core · 280 行</div>
+                <p>单例流式输出核心。LinkedBlockingQueue FIFO 队列，双通道：行输出(无延迟) + 字符输出(10ms 打字机效果)。start() 先排空旧队列再启动新流。守护线程永续运行。</p>
             </div>
-
-            <!-- SysConsoleExecutor -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge amber">Core</span>
-                    <h4>SysConsoleExecutor</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 290 行</div>
-                <p>
-                    跨平台系统命令执行器。<code>ProcessBuilder</code> 封装，自动识别操作系统切换
-                    <code>cmd.exe /c</code>（Windows）或 <code>/bin/sh -c</code>（Linux/macOS）。<br>
-                    捕获 stdout + stderr，设置 30 秒超时保护。<br>
-                    支持两种模式：<b>同步执行</b>（返回完整输出字符串）和 <b>实时回调</b>（通过 <code>OutputListener</code>
-                    接口逐行推送，配合 <code>SysConsolePanel</code> 实现实时终端面板）。<br>
-                    Windows 编码强制使用 UTF-8（不依赖 chcp 检测）。
-                </p>
+                <div class="p-header"><span class="p-badge amber">Core</span><h4>SysConsoleExecutor</h4></div>
+                <div class="p-class">sair.aiagent.core · 248 行</div>
+                <p>跨平台系统命令执行器。ProcessBuilder 封装，自动识别 cmd/sh 切换，30s 超时。支持同步执行和实时回调（OutputListener）。Windows 强制 UTF-8 编码。</p>
             </div>
-
-            <!-- MemoryManager -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge amber">Core</span>
-                    <h4>MemoryManager</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 109 行</div>
-                <p>
-                    持久化记忆管理器 —— <b>SQLite 门面</b>。内部完全委托 <code>PersistenceManager</code> 的 FTS5 全文搜索 + CRUD。<br>
-                    支持添加（含 category/importance）、列出、按 ID 删除、清空操作。<br>
-                    <b>FTS5 搜索</b>：全文搜索引擎按 BM25 相关性排序，失败回退 LIKE 模糊查询，最多返回 5 条。<br>
-                    <b>上下文构建</b>：检索相关记忆 → 构建 2000 字符上限的上下文文本 → 注入 system prompt。<br>
-                    附带 <code>saveContext()</code>/<code>loadContext()</code> 跨会话上下文摘要能力（存 app_state）。<br>
-                    原有独立 JSON 文件逻辑已完全删除，统一由 PersistenceManager 管理。
-                </p>
+                <div class="p-header"><span class="p-badge amber">Core</span><h4>MemoryManager</h4></div>
+                <div class="p-class">sair.aiagent.core · 85 行</div>
+                <p>持久化记忆管理器 SQLite 门面。委托 PersistenceManager 的 FTS5 全文搜索 + CRUD。支持添加/列出/删除/清空，FTS5 按 BM25 相关性排序，失败回退 LIKE。上下文上限 2000 字符。</p>
             </div>
-
-            <!-- JournalManager -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge green">Core</span>
-                    <h4>JournalManager</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 63 行</div>
-                <p>
-                    追加式会话日志管理器 —— <b>SQLite 门面</b>。内部完全委托 PersistenceManager 的 journal 表。<br>
-                    每条日志包含：时间戳、角色（user/assistant/agent）、模式（chat/exec/execs）、内容摘要（截断 300 字符）、
-                    执行结果（截断 500 字符）。<br>
-                    容量控制：最多保留 80 条，超出时自动移除最旧条目（SQL DELETE WHERE id NOT IN ... LIMIT 80）。<br>
-                    <code>buildRecentContext()</code> 取最近 25 条日志构建上下文文本（上限 5000 字符），
-                    注入 Agent system prompt，实现跨重启的长期记忆。<br>
-                    Chat 模式下也记录用户消息和 AI 回复，形成完整对话日志。
-                </p>
+                <div class="p-header"><span class="p-badge green">Core</span><h4>JournalManager</h4></div>
+                <div class="p-class">sair.aiagent.core · 47 行</div>
+                <p>追加式会话日志管理器 SQLite 门面。委托 PersistenceManager 的 journal 表。每条日志含时间戳/角色/模式/内容摘要。容量控制最多 80 条。buildRecentContext() 取最近 25 条注入 Agent 上下文。</p>
             </div>
-
-            <!-- ConversationHistory -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge green">Core</span>
-                    <h4>ConversationHistory</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 173 行</div>
-                <p>
-                    对话历史管理器 —— <b>滑动窗口 + SQLite 持久化</b>。<br>
-                    维护与 AI 的完整对话上下文，通过 token 估算实现最多约 <b>900,000 token</b> 的上下文窗口（约 1M 的 90%）。<br>
-                    当累计 token 超限时，自动移除最旧消息，但至少保留最近 <b>4 条消息</b>（2 轮对话）作为保底。<br>
-                    Token 估算采用经验公式：中文≈0.6 token/字，英文≈0.25 token/字。<br>
-                    持久化：设置 PersistenceManager 后每次 add/clear 自动保存到 SQLite conversations 表，SFW 重启后恢复。
-                </p>
+                <div class="p-header"><span class="p-badge green">Core</span><h4>ConversationHistory</h4></div>
+                <div class="p-class">sair.aiagent.core · 148 行</div>
+                <p>对话历史管理器，滑动窗口 + SQLite 持久化。支持约 900K token 上下文窗口。Token 估算：中文~0.6 token/字，英文~0.25 token/字。超限自动移除最旧消息，至少保留 4 条。</p>
             </div>
-
-            <!-- AiConfig -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge purple">Core</span>
-                    <h4>AiConfig</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 230 行</div>
-                <p>
-                    全局配置管理器，DCL 单例（双重检查锁定保证线程安全）。<br>
-                    管理字段：API Key（<b>AES 加密</b>存储，<code>javax.crypto</code>）、API URL、Model、
-                    System Prompt、<b>execqPrompt</b>（execq 通道独立提示词）、OneBot 系列配置（端口/Token/selfId）。
-                    通过 <code>Properties</code> 文件持久化到 <code>config.properties</code>。<br>
-                    <code>load()</code> 时自动升级旧配置值（如旧模型名自动升级到默认模型）。<br>
-                    URL 格式校验（<code>setApiUrl()</code> 拒绝非法 URL）。<br>
-                    默认值：model = <code>deepseek-chat</code>，API URL = <code>https://api.deepseek.com</code>。
-                </p>
+                <div class="p-header"><span class="p-badge purple">Core</span><h4>AiConfig</h4></div>
+                <div class="p-class">sair.aiagent.core · 382 行</div>
+                <p>全局配置管理器，DCL 单例。管理 API Key(AES 加密)、API URL、Model、System Prompt、execqPrompt(QQ 通道独立提示词)、OneBot 配置(端口/Token/selfId/masterQQ/botName)。v2.0 DEFAULT_EXECQ_PROMPT 已压缩优化(-35% token)，16 个 execq 标签含 10 种群管标签。</p>
             </div>
-
-            <!-- ConfirmationGate -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge amber">Core</span>
-                    <h4>ConfirmationGate</h4>
-                </div>
-                <div class="p-class">sair.aiagent.core · 150 行</div>
-                <p>
-                    统一高危操作确认门控。<code>CountDownLatch(1)</code> 实现同步阻塞等待。<br>
-                    <code>await(type, desc, timeoutMs)</code>：打印确认提示 → 阻塞等待 → 超时返回 false（默认 60 秒）。
-                    <code>confirm(boolean)</code>：释放 latch，返回确认结果。<br>
-                    <code>setBypassConfirm(true)</code>：跳过等待，直接返回 true（execs 自由模式）。<br>
-                    所有状态赋值（latch / result / pendingType / pendingDesc）在 <code>synchronized</code> 块内完成，
-                    超时后 latch 置 null 防止 <code>isAwaiting()</code> 误判。
-                </p>
+                <div class="p-header"><span class="p-badge amber">Core</span><h4>ConfirmationGate</h4></div>
+                <div class="p-class">sair.aiagent.core · 130 行</div>
+                <p>统一高危操作确认门控。CountDownLatch(1) 同步阻塞，60s 超时自动拒绝。setBypassConfirm(true) 跳过等待(execs 模式)。所有状态在 synchronized 块内完成。</p>
             </div>
-
-            <!-- FileUtils -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge amber">Util</span>
-                    <h4>FileUtils</h4>
-                </div>
-                <div class="p-class">sair.aiagent.util · 204 行</div>
-                <p>
-                    静态工具类，禁止实例化。核心能力：<br>
-                    <b>文本文件读取</b>：UTF-8 / GBK 自动识别解码（上限 10MB / 50,000 字符输出），
-                    尝试 UTF-8 → 检查是否存在替换字符 → 存在则降级 GBK 重试。<br>
-                    <b>图片元信息提取</b>：读取图片尺寸（宽×高）和文件大小。<br>
-                    <b>目录递归列出</b>：目录优先排序，显示文件大小和类型。
-                </p>
+                <div class="p-header"><span class="p-badge amber">Util</span><h4>FileUtils</h4></div>
+                <div class="p-class">sair.aiagent.util · 177 行</div>
+                <p>静态工具类。文本文件读取：UTF-8/GBK 自动识别，上限 10MB/50K 字符。图片元信息提取。目录递归列出。</p>
             </div>
-
-            <!-- EdtUtils -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge purple">Util</span>
-                    <h4>EdtUtils</h4>
-                </div>
-                <div class="p-class">sair.aiagent.util · 56 行</div>
-                <p>
-                    EDT 安全输出工具类，薄封装层。<br>
-                    所有 <code>println(Color, String)</code> / <code>print(Color, String)</code>
-                    方法内部路由到单例 <code>StreamPrinter.getInstance()</code>，
-                    通过 <code>offerLine()</code> / <code>offerPlain()</code> 将内容送入 FIFO 队列。<br>
-                    还提供 <code>printlnLines()</code> 批量输出方法（原子输出多行文本，避免被字符输出穿插）。
-                </p>
+                <div class="p-header"><span class="p-badge purple">Util</span><h4>EdtUtils</h4></div>
+                <div class="p-class">sair.aiagent.util · 47 行</div>
+                <p>EDT 安全输出工具类。所有 println/print 路由到 StreamPrinter 单例，通过 offerLine/offerPlain 送入 FIFO 队列。支持 printlnLines 批量输出。</p>
             </div>
-
-            <!-- SurpriseWindow -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge rose">UI</span>
-                    <h4>SurpriseWindow</h4>
-                </div>
-                <div class="p-class">sair.aiagent.ui · 164 行</div>
-                <p>
-                    AI 彩蛋/撒娇弹窗。无装饰 JFrame，始终置顶，屏幕居中。<br>
-                    两种风格：<b>撒娇模式</b>（粉色背景，检测关键词：😭 😢 💔 对不起 难过 撒娇）和
-                    <b>惊喜模式</b>（橘色背景，默认）。<br>
-                    大号 Emoji 标签（72pt Segoe UI Emoji）+ 文案标签，点击即关闭，3-8 秒自动关闭。<br>
-                    通过 <code>display()</code> 方法在 EDT 线程中弹出，触发自 Agent 的 <code>&lt;superise&gt;</code> 标签。
-                </p>
+                <div class="p-header"><span class="p-badge rose">UI</span><h4>SurpriseWindow</h4></div>
+                <div class="p-class">sair.aiagent.ui · 139 行</div>
+                <p>AI 彩蛋/撒娇弹窗。无装饰 JFrame，始终置顶。两种风格：撒娇模式(粉色)和惊喜模式(橘色)。大号 Emoji(72pt) + 文案，3-8 秒自动关闭。通过 display() 在 EDT 弹出。</p>
             </div>
-
-            <!-- SysConsolePanel -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge cyan">UI</span>
-                    <h4>SysConsolePanel</h4>
-                </div>
-                <div class="p-class">sair.aiagent.ui · 156 行</div>
-                <p>
-                    JPanel 控件，内嵌只读 JTextArea（monospace 字体，深色背景）实时显示系统命令输出。<br>
-                    通过 <code>ConsFrame.printComponent()</code> 渲染到 SFW 控制台，<br>
-                    支持 <code>appendLine()</code> 逐行追加输出、<code>appendRaw()</code> 追加原始文本、
-                    <code>setFinished()</code> 标记完成状态（绿色 ✔）、<code>setError()</code> 标记失败（红色 ✘）。
-                </p>
+                <div class="p-header"><span class="p-badge cyan">UI</span><h4>SysConsolePanel</h4></div>
+                <div class="p-class">sair.aiagent.ui · 135 行</div>
+                <p>JPanel 控件，内嵌只读 JTextArea(monospace，深色背景)实时显示系统命令输出。通过 ConsFrame.printComponent() 渲染到 SFW 控制台。</p>
             </div>
-
-            <!-- ChatMessage -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge green">Model</span>
-                    <h4>ChatMessage</h4>
-                </div>
-                <div class="p-class">sair.aiagent.model · 115 行</div>
-                <p>
-                    对话消息 POJO。字段：<code>role</code>（"user"/"assistant"/"system"）、<code>content</code>（消息内容）。
-                    提供无参构造器（支持 Gson 反序列化）和有参构造器。<br>
-                    <code>estimateTokens()</code>：粗略 token 估算，中文 ~0.6 token/字，英文 ~0.25 token/字。
-                </p>
+                <div class="p-header"><span class="p-badge green">Model</span><h4>ChatMessage</h4></div>
+                <div class="p-class">sair.aiagent.model · 103 行</div>
+                <p>对话消息 POJO。字段：role(user/assistant/system)、content。estimateTokens() 粗略 token 估算。</p>
             </div>
-
-            <!-- AgentAction -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge green">Model</span>
-                    <h4>AgentAction</h4>
-                </div>
-                <div class="p-class">sair.aiagent.model · 46 行</div>
-                <p>
-                    Agent 操作 POJO。字段：<code>type</code>（标签名：cmd/readfile/sys/evaljs/eval/web 等）、
-                    <code>content</code>（标签体内容）。由 <code>AgentExecutor.parseActions()</code> 通过正则匹配生成。
-                </p>
+                <div class="p-header"><span class="p-badge green">Model</span><h4>AgentAction</h4></div>
+                <div class="p-class">sair.aiagent.model · 40 行</div>
+                <p>Agent 操作 POJO。字段：type(标签名)、content(标签体内容)。由 AgentExecutor.parseActions() 正则匹配生成。</p>
             </div>
-
-            <!-- MemoryEntry -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge green">Model</span>
-                    <h4>MemoryEntry</h4>
-                </div>
-                <div class="p-class">sair.aiagent.model · 83 行</div>
-                <p>
-                    记忆条目 POJO。字段：<code>id</code>（自增编号）、<code>timestamp</code>（Unix 毫秒）、
-                    <code>category</code>（分类：general / user_pref / project / lesson）、
-                    <code>importance</code>（重要性 0-10）、<code>content</code>（记忆内容）。
-                    <code>toString()</code> 使用 <b>静态缓存 SimpleDateFormat</b> 格式化时间，分类非 general 时显示 [category] 前缀。
-                </p>
+                <div class="p-header"><span class="p-badge green">Model</span><h4>MemoryEntry</h4></div>
+                <div class="p-class">sair.aiagent.model · 71 行</div>
+                <p>记忆条目 POJO。字段：id(自增)、timestamp(Unix 毫秒)、category(分类)、importance(0-10)、content。toString() 使用静态缓存 SimpleDateFormat。</p>
             </div>
         </div>
     </section>
-
-    <!-- OneBot Classes -->
     <section style="padding-top:10px;">
         <div class="container">
-
             <div class="section-header reveal" style="margin-bottom:24px;">
                 <div class="section-tag">QQ Bot</div>
                 <h2>OneBot v11 机器人模块</h2>
                 <div class="section-divider"></div>
-                <p>sair.aiagent.onebot (3 类) + sair.aiagent.onebot.model (1 类)，无第三方依赖，手动实现 WebSocket + JSON 解析。</p>
+                <p>sair.aiagent.onebot (10 类) + .onebot.model (1 类) + .onebot.util (1 类)，无第三方依赖，手动实现 WebSocket + JSON 解析。通过 NapCatApi 对接 NapCat QQ 框架 HTTP API 实现群管理能力。v2.0 支持 10 种群管标签。</p>
             </div>
-
-            <!-- OneBotServer -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge cyan">OneBot</span>
-                    <h4>OneBotServer</h4>
-                </div>
-                <div class="p-class">sair.aiagent.onebot · 350 行</div>
-                <p>
-                    OneBot v11 反向 WebSocket 服务器，RFC 6455 协议手动实现，零第三方依赖，JDK 8 兼容。<br><br>
-                    <b>WebSocket 握手</b>：解析 HTTP Upgrade 请求头，SHA-1 + Base64 计算 Sec-WebSocket-Accept，
-                    逐字节读取避免 BufferedReader 预读吞帧。<br>
-                    <b>帧解析</b>：支持 TEXT / PING / PONG / CLOSE 帧类型，自动处理掩码解码，
-                    支持分片帧重组（continuation frame）。<br>
-                    <b>消息发送</b>：<code>sendPrivateMsg()</code> / <code>sendGroupMsg()</code> 构建
-                    OneBot v11 API 调用 JSON，通过 WebSocket 帧发送。<br>
-                    <b>鉴权</b>：支持 Access Token 验证（比较 HTTP 头 <code>Authorization: Bearer xxx</code>）。
-                    <code>start()</code> / <code>stop()</code> 管理 ServerSocket + 客户端连接线程生命周期。
-                </p>
+                <div class="p-header"><span class="p-badge cyan">OneBot</span><h4>OneBotServer</h4></div>
+                <div class="p-class">sair.aiagent.onebot · 479 行</div>
+                <p>OneBot v11 反向 WebSocket 服务器，RFC 6455 协议手动实现，JDK 8 兼容。WebSocket 握手/帧解析/消息发送/鉴权。start()/stop() 管理连接生命周期。</p>
             </div>
-
-            <!-- QQMessageHandler -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge cyan">OneBot</span>
-                    <h4>QQMessageHandler</h4>
-                </div>
-                <div class="p-class">sair.aiagent.onebot · 553 行</div>
-                <p>
-                    QQ 消息处理核心 —— 消息解析、过滤、路由到 AI Agent。<br><br>
-                    <b>无依赖 JSON 解析</b>：<code>extractString()</code> / <code>extractLong()</code> /
-                    <code>extractObject()</code> / <code>extractArray()</code> 完整的手动 JSON 解析器，
-                    支持字符串转义、嵌套对象/数组、Unicode 转义。<br>
-                    <b>消息过滤</b>：群消息仅响应 @机器人 或引用回复，通过 <code>checkAtAndReply()</code>
-                    分析消息段（at / reply / text），selfId=0 时不做精确匹配避免误判。<br>
-                    <b>execq 通道</b>：<code>executeQqAgent()</code> 专为 QQ 设计的受限 Agent 通道 ——
-                    独立提示词（通过 <code>AiConfig.getExecqPrompt()</code> 配置）、独立记忆（QQMemoryManager 按 QQ 号隔离）、
-                    独立上下文（每个 QQ 的对话历史独立存储）。仅开放 cmd/web/readdir 标签，自动绕过确认门控。<br>
-                    <b>防重复</b>：<code>processingMessages</code> 集合实现消息级去重，
-                    remove 操作在异步任务 <code>finally</code> 块中执行，防止竞态。<br>
-                    <b>线程池</b>：3 线程固定线程池处理 QQ 消息，避免阻塞 WebSocket 读取线程。
-                </p>
+                <div class="p-header"><span class="p-badge cyan">OneBot</span><h4>QQMessageHandler</h4></div>
+                <div class="p-class">sair.aiagent.onebot · 1373 行</div>
+                <p>QQ 消息处理核心 —— 消息解析、过滤、路由到 AI Agent，好友/群邀请好感度决策。无依赖 JSON 解析(JsonUtil)。消息过滤：群消息仅响应 @机器人 或提到名字。execq 通道：独立提示词、统一记忆库。群管标签处理：processQqActions() 在发送前拦截 AI 响应中的 10 种群管标签(bankick/muteall/setadmin/setcard/setgroupname/leavegroup/block/unblock/delfriend)，OneBot 层自有能力，不污染 AgentExecutor 主线。</p>
             </div>
-
-            <!-- QQMemoryManager -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge cyan">OneBot</span>
-                    <h4>QQMemoryManager</h4>
-                </div>
-                <div class="p-class">sair.aiagent.onebot · 130 行</div>
-                <p>
-                    按 QQ 号隔离的 SQLite 持久化记忆管理器。<br>
-                    每个 QQ 用户独立的 <code>qq_memories/{qq}.db</code> 数据库文件，含两张表：<br>
-                    <b>conversations</b> — 对话历史（role + content + timestamp），保留最近 200 条<br>
-                    <b>memories</b> — 持久化记忆（content + timestamp），支持全文搜索<br>
-                    通过 <code>QQMessageHandler</code> 的 <code>ConcurrentHashMap&lt;Long, QQMemoryManager&gt;</code>
-                    缓存，按需创建（<code>computeIfAbsent</code>），<code>shutdown()</code> 时统一关闭所有连接。
-                </p>
+                <div class="p-header"><span class="p-badge cyan">OneBot</span><h4>QQMemoryManager</h4></div>
+                <div class="p-class">sair.aiagent.onebot · 286 行</div>
+                <p>按 QQ 号隔离的 SQLite 持久化记忆管理器。每个用户独立 qq_memories/{qq}.db。Conversations 表保留最近 200 条，memories 表支持全文搜索。私聊场景优先使用，群聊使用 UnifiedQQMemoryManager。</p>
             </div>
-
-            <!-- QQMessage -->
             <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge green">OneBot Model</span>
-                    <h4>QQMessage</h4>
-                </div>
-                <div class="p-class">sair.aiagent.onebot.model · 85 行</div>
-                <p>
-                    OneBot v11 消息模型 POJO。字段：<code>postType</code>（message/notice/request）、
-                    <code>messageType</code>（private/group）、<code>subType</code>、<code>messageId</code>、
-                    <code>userId</code>、<code>groupId</code>、<code>rawMessage</code>。<br>
-                    内嵌 <b>Sender</b> 类（userId / nickname / card / sex / age / role / title）和
-                    <b>MessageSegment</b> 类（type / text / qq / id），支持 text / at / reply 等消息段类型。<br>
-                    <code>getPlainText()</code> 从消息段提取纯文本（仅 text 类型），
-                    <code>getDisplayName()</code> 优先群名片 card → 回退昵称 nickname。
-                    <code>isGroupMessage()</code> / <code>isAtBot()</code> / <code>isReply()</code> 便捷判断方法。
-                </p>
+                <div class="p-header"><span class="p-badge green">OneBot Model</span><h4>QQMessage</h4></div>
+                <div class="p-class">sair.aiagent.onebot.model · 113 行</div>
+                <p>OneBot v11 消息模型 POJO。字段：postType / messageType / subType / messageId / userId / groupId / rawMessage。内嵌 Sender 类和 MessageSegment 类。getPlainText() / getDisplayName() / isGroupMessage() / isAtBot() / isReply()。v2.1 新增 mentionedUsers 字段存储被 @ 用户列表。</p>
             </div>
-
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge purple">OneBot</span><h4>NapCatApi</h4></div>
+                <div class="p-class">sair.aiagent.onebot · 341 行</div>
+                <p>NapCat QQ 框架 HTTP API 封装层。群管理 API：muteGroupMember / kickGroupMember / muteAll / setGroupAdmin / setGroupCard / setGroupName / leaveGroup。消息 API：sendGroupMsg / sendPrivateMsg。信息 API：getGroupInfo / getGroupMemberInfo / getStrangerInfo / getFriendList / getGroupList / getGroupMemberList。好友管理：addFriend / deleteFriend / handleFriendRequest / handleGroupInvite。</p>
+            </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge amber">OneBot</span><h4>InternalAgents</h4></div>
+                <div class="p-class">sair.aiagent.onebot · 524 行</div>
+                <p>内部 Agent 管理器 —— 好感度追踪 + 黑名单管理。好感度系统：getAffection / increaseAffection / decreaseAffection。黑名单管理：黑名单检查/拉黑。特殊标记：背叛者/主人识别。持久化到 bot_data.db。v2.0 修复 isSpamming() 按用户独立追踪刷屏检测。</p>
+            </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge rose">OneBot</span><h4>GroupModeratorAgent</h4></div>
+                <div class="p-class">sair.aiagent.onebot · 388 行</div>
+                <p>群聊违规检测与处罚执行引擎。违规检测：广告/刷屏/辱骂等。四级处罚梯度：警告→禁言→踢出→拉黑。根据严重度和历史自动升级。通过 NapCatApi 执行操作。</p>
+            </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge green">OneBot</span><h4>GroupModerationConfig</h4></div>
+                <div class="p-class">sair.aiagent.onebot · 197 行</div>
+                <p>群管理违规检测阈值配置。广告关键词/刷屏频率/辱骂词库/禁言时长梯度/冷却期。Properties 格式持久化，运行时动态修改。</p>
+            </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge purple">OneBot</span><h4>EmotionStateManager</h4></div>
+                <div class="p-class">sair.aiagent.onebot · 462 行</div>
+                <p>QQ Bot 专用情绪与好感度状态管理器。管理 AI 对每个用户的态度和好感度(社交关系)，与 core/EmotionManager(AI 自身情绪)互补。持久化到 bot_data.db。</p>
+            </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge cyan">OneBot</span><h4>BotPersistenceManager</h4></div>
+                <div class="p-class">sair.aiagent.onebot · 698 行</div>
+                <p>QQ Bot 专用数据库管理器 —— 管理 bot_data.db。多表结构：user_attitudes / blacklist / violation_records / group_config / group_members_roles。与 core/PersistenceManager(aiagent.db)独立运作。</p>
+            </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge cyan">OneBot</span><h4>UnifiedQQMemoryManager</h4></div>
+                <div class="p-class">sair.aiagent.onebot · 545 行</div>
+                <p>统一记忆库管理器 —— 所有 QQ 对话历史统一存储。单数据库 unified_memory.db，通过 source_type/source_id 标记来源。群信息缓存(setGroupName/getGroupName)。群成员表(group_members)存储昵称-QQ映射。记忆联通：AI 可跨群聊/私聊感知用户上下文。</p>
+            </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge amber">OneBot Util</span><h4>JsonUtil</h4></div>
+                <div class="p-class">sair.aiagent.onebot.util · 180 行</div>
+                <p>公共 JSON 解析工具类。6 个静态方法：extractString / extractLong / extractObject / extractArray / splitJsonArray / jsonEscape。提取自 QQMessageHandler 和 OneBotServer 的重复 JSON 解析代码，v2.0 统一为公共工具类。</p>
+            </div>
         </div>
     </section>
-
     <footer class="footer">
         <div class="container">
-            <p>
-                <span class="brand">AiAgent</span> v1.7 ·
-                基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
-                对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
-            </p>
-            <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · Java 8
-            </p>
+            <p><span class="brand">AiAgent</span> v2.0 · 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--accent-cyan);">DeepSeek API</span></p>
+            <p style="margin-top:6px; font-size:0.78rem;">QQ OneBot · NapCat群管理 · 10种群管标签 · 好感度决策 · 反滥用 · stop · 群上下文 · SQLite 双库 · 情绪系统 · 彩蛋弹窗 · FTS5 · 流式排空 · 动态注入</p>
         </div>
     </footer>
-
     <div class="back-to-top" title="回到顶部">↑</div>
     <script src="js/main.js"></script>
 </body>

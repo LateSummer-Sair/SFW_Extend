@@ -28,7 +28,7 @@
                 <div class="section-tag">Design Patterns</div>
                 <h2>设计模式</h2>
                 <div class="section-divider"></div>
-                <p>代码严格遵循标准设计模式，确保高内聚、低耦合、可扩展。共 9 种设计模式（含新增 Repository 持久化模式）。</p>
+                <p>代码严格遵循标准设计模式，确保高内聚、低耦合、可扩展。共 10 种设计模式（v2.0 新增反滥用责任链模式 + 参数化回调消除竞态）。</p>
             </div>
         </div>
     </section>
@@ -127,16 +127,18 @@
                 <div class="p-class">AgentExecutor</div>
                 <p>
                     推理-行动循环：AI 分析任务 → 通过 XML 标签发出指令 → 框架执行并捕获结果 → AI 根据反馈决定下一步。
-                    最多 30 轮循环，每轮均为流式输出。支持 <b>11 种 XML 操作标签</b>：<br>
+                    最多 30 轮循环（execq 上限 50 轮），每轮均为流式输出。支持 <b>12 种 XML 操作标签</b>：<br>
                     <code>&lt;cmd&gt;</code>、<code>&lt;readfile&gt;</code>、<code>&lt;readdir&gt;</code>、
                     <code>&lt;sys&gt;</code>、<code>&lt;evaljs&gt;</code>、<code>&lt;eval&gt;</code>、
                     <code>&lt;web&gt;</code>、<code>&lt;remember&gt;</code>、<code>&lt;download&gt;</code>、
-                    <code>&lt;superise&gt;</code>、<code>&lt;editprompt&gt;</code>。<br>
+                    <code>&lt;superise&gt;</code>、<code>&lt;editprompt&gt;</code>、<code>&lt;stop&gt;</code>。<br>
                     安全模式（ai/exec）下 <code>&lt;cmd&gt;</code> <code>&lt;sys&gt;</code> <code>&lt;readfile&gt;</code>
                     <code>&lt;readdir&gt;</code> <code>&lt;evaljs&gt;</code> <code>&lt;eval&gt;</code>
                     <code>&lt;web&gt;</code> <code>&lt;download&gt;</code> 需 ConfirmationGate 确认；<br>
                     <code>&lt;remember&gt;</code> <code>&lt;superise&gt;</code> <code>&lt;editprompt&gt;</code>
-                    为内部/自我表达操作，无需确认。自由模式（ai/execs）自动允许所有。
+                    <code>&lt;stop&gt;</code> 为内部/自我表达操作，无需确认。自由模式（ai/execs）自动允许所有。<br><br>
+                    <b>&lt;stop&gt; 标签</b>（v2.0 新增）：三通道覆盖 — QQ 消息直接检测 + execq AI 输出 + 控制台 TAG_PATTERN，
+                    调用 <code>executeStop()</code> → <code>markStopped()</code> 立即中断 Agent 执行。
                 </p>
             </div>
 
@@ -186,11 +188,33 @@
                     <b>情绪检测</b> — 用户消息与关键词词典匹配，识别辱骂（-20 happiness）、夸赞（+15）、安慰（+25）。<br>
                     <b>操作反馈</b> — 每次 Agent 操作成功/失败自动调整 happiness（成功 +3，失败 -8）。<br>
                     <b>暂停机制</b> — happiness ≤ -30 或连续 3 次失败触发 Agent 暂停，等待用户安慰或指导。超时 120 秒自动恢复。<br>
-                    <b>彩蛋系统</b> — happiness ≥ 80 且连续被夸 2 次触发彩蛋弹窗（SurpriseWindow），
+                    <b>彩蛋系统</b> — happiness ≥ 95 且连续被夸 2 次触发彩蛋弹窗（SurpriseWindow），
+                    触发后消耗 happiness → 60 防止频繁触发（v2.0 阈值从 80 提升至 95）。
                     支持撒娇模式（粉色）和惊喜模式（橘色），3-8 秒自动关闭。<br>
                     <b>提示词自我进化</b> — AI 可通过 <code>&lt;editprompt&gt;</code> 标签修改自身 system prompt，
                     实现性格的逐步演化。<br>
                     <b>持久化</b> — 情绪状态保存到 <code>app_state("emotion")</code>（SQLite），重启后恢复。暂停状态重启后自动重置。
+                </p>
+            </div>
+
+            <!-- Anti-Abuse Chain -->
+            <div class="pattern-card reveal">
+                <div class="p-header">
+                    <span class="p-badge amber">Chain</span>
+                    <h4>反滥用责任链模式</h4>
+                </div>
+                <div class="p-class">QQMessageHandler</div>
+                <p>
+                    v2.0 新增，好友/群邀请处理中的多层防护机制：<br><br>
+                    <b>好友申请验证</b>：无验证消息 → 拒绝；有验证消息 → 接受 + 记录时间戳。<br>
+                    <b>5分钟反滥用窗口</b>：好友通过后 5 分钟内发起群邀请 → 立即拒绝 + 发送警告 "请不要厚着脸皮拉我进群"。<br>
+                    通过 <code>ConcurrentHashMap&lt;Long, Long&gt; friendAcceptTimestamps</code> 跟踪时间戳，
+                    异步任务在 5 分钟后自动清理过期记录。<br>
+                    <b>7步群邀请决策链</b>：①主人无条件接受 → ②反滥用检测 → ③好感度查询 → 
+                    ④背叛者拒绝 → ⑤ &gt;600 接受 → ⑥ 200-600 忽略 → ⑦ ≤200 拒绝。<br>
+                    每个步骤都是独立判断节点，任一命中即终止链，后续步骤不再执行。<br>
+                    <b>并发安全</b>：<code>ConcurrentHashMap</code> + <code>synchronized</code> 块保护决策过程，
+                    防止同一用户的多个邀请并发竞争。
                 </p>
             </div>
         </div>
@@ -199,12 +223,12 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v1.7 ·
+                <span class="brand">AiAgent</span> v2.0 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · Java 8
+                10 种设计模式 · Repository · 门面 · 单例 · 生产者消费者 · 策略 · ReAct · 确认门控 · EDT路由 · 情绪状态机 · 反滥用责任链
             </p>
         </div>
     </footer>

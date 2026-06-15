@@ -8,7 +8,12 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+
+import sair.aiagent.AiAgentActivity;
 
 /**
  * QQ统一记忆管理器 —— 所有消息存储在一个数据库中，通过标记区分来源。
@@ -22,6 +27,7 @@ import java.util.List;
  *   <li>conversations — 对话历史 (id, role, content, source_type, source_id, sender_id, created_at)</li>
  *   <li>memories — AI的独立记忆 (id, content, created_at)</li>
  *   <li>group_chat_history — 群聊完整历史 (id, user_id, nickname, content, group_id, created_at)</li>
+ *   <li>group_nicknames — 群昵称关联表 (group_id, user_id, nickname, updated_at)</li>
  *   <li>app_state — 键值状态</li>
  * </ul>
  */
@@ -104,6 +110,31 @@ public class UnifiedQQMemoryManager {
                     ")"
                 );
                 
+                // 群昵称关联表（群号+昵称→QQ号映射）
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS group_nicknames (" +
+                    "  group_id INTEGER NOT NULL," +
+                    "  user_id INTEGER NOT NULL," +
+                    "  nickname TEXT NOT NULL," +
+                    "  updated_at INTEGER NOT NULL," +
+                    "  PRIMARY KEY (group_id, user_id)" +
+                    ")"
+                );
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_nicknames_lookup ON group_nicknames(group_id, nickname)");
+                
+                // 群成员角色表（群号+QQ号→角色，用于@管理员/群主）
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS group_members (" +
+                    "  group_id INTEGER NOT NULL," +
+                    "  user_id INTEGER NOT NULL," +
+                    "  nickname TEXT NOT NULL," +
+                    "  role TEXT NOT NULL," +  // owner/admin/member
+                    "  updated_at INTEGER NOT NULL," +
+                    "  PRIMARY KEY (group_id, user_id)" +
+                    ")"
+                );
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_members_role ON group_members(group_id, role)");
+                
                 // 应用状态表
                 stmt.execute(
                     "CREATE TABLE IF NOT EXISTS app_state (" +
@@ -134,7 +165,7 @@ public class UnifiedQQMemoryManager {
     // ==================== 对话历史（统一存储） ====================
 
     /** 
-     * 添加一条对话消息到统一历史
+     * 添加一条对话消息到统一历史（自动去重）
      * @param role "user" 或 "assistant"
      * @param content 消息内容
      * @param sourceType "group" 或 "private"
@@ -145,11 +176,35 @@ public class UnifiedQQMemoryManager {
     public void addConversation(String role, String content, String sourceType, 
                                  long sourceId, Long senderId, String senderName) {
         if (content == null || content.trim().isEmpty()) return;
+        
+        String trimmedContent = content.trim();
+        
         synchronized (lock) {
+            // 去重检查：检查最近10条消息中是否有相同内容（避免重复存储）
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id FROM conversations WHERE sender_id = ? AND content = ? ORDER BY created_at DESC LIMIT 10")) {
+                if (senderId != null) {
+                    ps.setLong(1, senderId);
+                } else {
+                    ps.setNull(1, java.sql.Types.INTEGER);
+                }
+                ps.setString(2, trimmedContent);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        // 发现重复，不插入
+                        AiAgentActivity.debugLog("[Memory] 检测到重复消息，跳过存储: " + trimmedContent.substring(0, Math.min(50, trimmedContent.length())));
+                        return;
+                    }
+                }
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[Memory] 去重检查失败: " + e.toString());
+            }
+            
+            // 插入新消息
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO conversations (role, content, source_type, source_id, sender_id, sender_name, created_at) VALUES (?,?,?,?,?,?,?)")) {
                 ps.setString(1, role);
-                ps.setString(2, content.trim());
+                ps.setString(2, trimmedContent);
                 ps.setString(3, sourceType);
                 ps.setLong(4, sourceId);
                 if (senderId != null) {
@@ -298,18 +353,69 @@ public class UnifiedQQMemoryManager {
     /** 添加一条群聊消息到完整历史（持久化，不限制数量） */
     public void addGroupChatMessage(long userId, String nickname, String content, long groupId) {
         if (content == null || content.trim().isEmpty()) return;
+        String displayNick = nickname != null ? nickname : "未知用户";
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO group_chat_history (user_id, nickname, content, group_id, created_at) VALUES (?,?,?,?,?)")) {
                 ps.setLong(1, userId);
-                ps.setString(2, nickname != null ? nickname : "未知用户");
+                ps.setString(2, displayNick);
                 ps.setString(3, content.trim());
                 ps.setLong(4, groupId);
                 ps.setLong(5, System.currentTimeMillis());
                 ps.executeUpdate();
             } catch (SQLException ignored) {}
-            // 不再裁剪，持久化保存所有群聊历史
+            
+            // 同时更新昵称-QQ映射
+            recordGroupNickname(groupId, userId, displayNick);
         }
+    }
+    
+    /** 记录群昵称→QQ号映射 */
+    private void recordGroupNickname(long groupId, long userId, String nickname) {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "REPLACE INTO group_nicknames (group_id, user_id, nickname, updated_at) VALUES (?,?,?,?)")) {
+            ps.setLong(1, groupId);
+            ps.setLong(2, userId);
+            ps.setString(3, nickname);
+            ps.setLong(4, System.currentTimeMillis());
+            ps.executeUpdate();
+        } catch (SQLException ignored) {}
+    }
+    
+    /** 根据群号和昵称查找QQ号 */
+    public Long findUserIdByNickname(long groupId, String nickname) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT user_id FROM group_nicknames WHERE group_id=? AND nickname=? ORDER BY updated_at DESC LIMIT 1")) {
+                ps.setLong(1, groupId);
+                ps.setString(2, nickname);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return rs.getLong(1);
+                }
+            } catch (SQLException ignored) {}
+        }
+        return null;
+    }
+    
+    /** 获取群内所有昵称映射（昵称→QQ号） */
+    public java.util.Map<String, Long> getGroupNicknameMap(long groupId) {
+        java.util.Map<String, Long> map = new java.util.LinkedHashMap<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT nickname, user_id FROM group_nicknames WHERE group_id=? ORDER BY updated_at DESC")) {
+                ps.setLong(1, groupId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String nick = rs.getString(1);
+                        Long uid = rs.getLong(2);
+                        if (!map.containsKey(nick)) {
+                            map.put(nick, uid);
+                        }
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return map;
     }
 
     /** 获取特定群的最近N条消息 */
@@ -340,6 +446,95 @@ public class UnifiedQQMemoryManager {
         return list;
     }
 
+    // ==================== 群成员角色管理 ====================
+
+    /** 记录群成员角色（来自消息 sender.role） */
+    public void recordGroupMemberRole(long groupId, long userId, String nickname, String role) {
+        if (role == null || role.isEmpty()) return;
+        String displayNick = nickname != null ? nickname : "未知";
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "REPLACE INTO group_members (group_id, user_id, nickname, role, updated_at) VALUES (?,?,?,?,?)")) {
+                ps.setLong(1, groupId);
+                ps.setLong(2, userId);
+                ps.setString(3, displayNick);
+                ps.setString(4, role);
+                ps.setLong(5, System.currentTimeMillis());
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    /** 获取群内管理员和群主列表（返回 [userId, nickname, role]） */
+    public List<String[]> getGroupAdmins(long groupId) {
+        List<String[]> list = new ArrayList<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT user_id, nickname, role FROM group_members WHERE group_id=? AND role IN ('owner','admin') ORDER BY role='owner' DESC, updated_at DESC")) {
+                ps.setLong(1, groupId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        list.add(new String[] {
+                            String.valueOf(rs.getLong(1)),
+                            rs.getString(2),
+                            rs.getString(3)
+                        });
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+
+    /** 根据个人昵称（跨群/私聊）查找QQ号 */
+    public Long findUserIdByPersonalNickname(String nickname) {
+        if (nickname == null || nickname.trim().isEmpty()) return null;
+        String q = nickname.trim();
+        synchronized (lock) {
+            // 1. 从对话历史中搜索（私聊+群聊）
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT sender_id FROM conversations WHERE sender_name=? AND sender_id IS NOT NULL ORDER BY created_at DESC LIMIT 1")) {
+                ps.setString(1, q);
+                try (ResultSet rs = ps.executeQuery()) { if (rs.next()) return rs.getLong(1); }
+            } catch (SQLException ignored) {}
+            
+            // 2. 从 group_nicknames 表搜索
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT user_id FROM group_nicknames WHERE nickname=? ORDER BY updated_at DESC LIMIT 1")) {
+                ps.setString(1, q);
+                try (ResultSet rs = ps.executeQuery()) { if (rs.next()) return rs.getLong(1); }
+            } catch (SQLException ignored) {}
+            
+            // 3. 从群聊历史搜索
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT user_id FROM group_chat_history WHERE nickname=? ORDER BY created_at DESC LIMIT 1")) {
+                ps.setString(1, q);
+                try (ResultSet rs = ps.executeQuery()) { if (rs.next()) return rs.getLong(1); }
+            } catch (SQLException ignored) {}
+        }
+        return null;
+    }
+
+    /** 获取跨群个人昵称→QQ映射表（从私聊+群聊历史提取） */
+    public Map<String, Long> getPersonalNicknameMap() {
+        Map<String, Long> map = new LinkedHashMap<>();
+        synchronized (lock) {
+            // GROUP BY 避免 DISTINCT+非SELECT列ORDER BY 的歧义
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(
+                         "SELECT sender_name, sender_id, MAX(created_at) FROM conversations WHERE sender_name IS NOT NULL AND sender_name!='' AND sender_id IS NOT NULL AND sender_id!=0 GROUP BY sender_name, sender_id ORDER BY 3 DESC LIMIT 30")) {
+                while (rs.next()) {
+                    String name = rs.getString(1);
+                    Long uid = rs.getLong(2);
+                    if (!map.containsKey(name)) {
+                        map.put(name, uid);
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return map;
+    }
+
     // ==================== 状态 ====================
 
     /** 设置键值状态 */
@@ -367,5 +562,17 @@ public class UnifiedQQMemoryManager {
             } catch (SQLException ignored) {}
         }
         return null;
+    }
+
+    /** 缓存群名 */
+    public void setGroupName(long groupId, String name) {
+        if (name != null && !name.trim().isEmpty()) {
+            setState("group_name_" + groupId, name.trim());
+        }
+    }
+
+    /** 获取缓存的群名（无缓存返回 null） */
+    public String getGroupName(long groupId) {
+        return getState("group_name_" + groupId);
     }
 }

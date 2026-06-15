@@ -15,6 +15,7 @@ import javax.swing.SwingUtilities;
 
 import sair.FCM;
 import sair.Pathes;
+import sair.aiagent.AiAgentActivity;
 import sair.aiagent.model.AgentAction;
 import sair.aiagent.model.ChatMessage;
 import sair.aiagent.onebot.QQMemoryManager;
@@ -31,14 +32,18 @@ public class AgentExecutor {
     private static final Color C_TOOL = new Color(255, 200, 100);
     private static final Color C_AI = new Color(100, 255, 180);
     private static final Color C_INFO = new Color(180, 180, 180);
-    private static final int MAX_ROUNDS = 30;
+    private static final int MAX_ROUNDS = 50;
 
     private static final Pattern TAG_PATTERN =
-            Pattern.compile("<(cmd|readfile|readdir|sys|evaljs|eval|web|remember|download|superise|editprompt)>(.*?)</\\1>", Pattern.DOTALL);
+            Pattern.compile("<(cmd|readfile|readdir|sys|evaljs|eval|web|remember|download|superise|editprompt|stop)>(.*?)</\\1>", Pattern.DOTALL);
 
-    /** execq 受限标签白名单：仅 cmd / web / readdir / setname */
+    /** execq 受限标签白名单：cmd / web / readdir / setname / stop */
     private static final Pattern EXECQ_TAG_PATTERN =
-            Pattern.compile("<(cmd|web|readdir|setname)>(.*?)</\\1>", Pattern.DOTALL);
+            Pattern.compile("<(cmd|web|readdir|setname|stop)>(.*?)</\\1>", Pattern.DOTALL);
+
+    /** execq 群管标签检测（用于触发实时回调） */
+    private static final Pattern GROUP_TAG_PATTERN =
+            Pattern.compile("<(ban|kick|muteall|setadmin|setcard|setgroupname|leavegroup|block|unblock|delfriend)>", Pattern.CASE_INSENSITIVE);
 
     private final Activity selfActivity;
     private final DeepSeekClient client;
@@ -132,10 +137,16 @@ public class AgentExecutor {
     // ==================== execq QQ通道 ====================
 
     public String executeQq(String task, String systemPrompt, QQMemoryManager qqMemory) {
+        return executeQq(task, systemPrompt, qqMemory, null);
+    }
+
+    /** execq QQ通道 - 携带群管回调 */
+    public String executeQq(String task, String systemPrompt, QQMemoryManager qqMemory,
+                            java.util.function.Function<String, String> groupHandler) {
         boolean prevBypass = gate.isBypassConfirm();
         gate.setBypassConfirm(true);
         try {
-            return runExecqLoop(task, systemPrompt, qqMemory);
+            return runExecqLoop(task, systemPrompt, qqMemory, groupHandler);
         } finally {
             gate.setBypassConfirm(prevBypass);
         }
@@ -143,15 +154,20 @@ public class AgentExecutor {
 
     /** execq QQ通道 - 使用统一记忆管理器 */
     public String executeQq(String task, String systemPrompt, Object memoryManager) {
+        return executeQq(task, systemPrompt, memoryManager, null);
+    }
+
+    /** execq QQ通道 - 使用统一记忆管理器 + 携带群管回调 */
+    public String executeQq(String task, String systemPrompt, Object memoryManager,
+                            java.util.function.Function<String, String> groupHandler) {
         boolean prevBypass = gate.isBypassConfirm();
         gate.setBypassConfirm(true);
         try {
-            // 判断记忆管理器类型
             if (memoryManager instanceof sair.aiagent.onebot.UnifiedQQMemoryManager) {
                 return runExecqLoopWithUnifiedMemory(task, systemPrompt, 
-                    (sair.aiagent.onebot.UnifiedQQMemoryManager) memoryManager);
+                    (sair.aiagent.onebot.UnifiedQQMemoryManager) memoryManager, groupHandler);
             } else if (memoryManager instanceof QQMemoryManager) {
-                return runExecqLoop(task, systemPrompt, (QQMemoryManager) memoryManager);
+                return runExecqLoop(task, systemPrompt, (QQMemoryManager) memoryManager, groupHandler);
             }
             return "[错误] 未知的记忆管理器类型";
         } finally {
@@ -161,16 +177,20 @@ public class AgentExecutor {
     
     /** execs QQ通道（主人专用）- 使用统一记忆管理器 */
     public String executeQqExecs(String task, String systemPrompt, Object memoryManager) {
-        // execs模式：主人权限，绕过确认，允许所有操作
+        return executeQqExecs(task, systemPrompt, memoryManager, null);
+    }
+
+    /** execs QQ通道（主人专用）- 携带群管回调 */
+    public String executeQqExecs(String task, String systemPrompt, Object memoryManager,
+                                 java.util.function.Function<String, String> groupHandler) {
         boolean prevBypass = gate.isBypassConfirm();
         gate.setBypassConfirm(true);
         try {
-            // 判断记忆管理器类型
             if (memoryManager instanceof sair.aiagent.onebot.UnifiedQQMemoryManager) {
                 return runExecqLoopWithUnifiedMemory(task, systemPrompt, 
-                    (sair.aiagent.onebot.UnifiedQQMemoryManager) memoryManager);
+                    (sair.aiagent.onebot.UnifiedQQMemoryManager) memoryManager, groupHandler);
             } else if (memoryManager instanceof QQMemoryManager) {
-                return runExecqLoop(task, systemPrompt, (QQMemoryManager) memoryManager);
+                return runExecqLoop(task, systemPrompt, (QQMemoryManager) memoryManager, groupHandler);
             }
             return "[错误] 未知的记忆管理器类型";
         } finally {
@@ -178,7 +198,7 @@ public class AgentExecutor {
         }
     }
 
-    private String runExecqLoop(String task, String systemPrompt, QQMemoryManager qqMemory) {
+    private String runExecqLoop(String task, String systemPrompt, QQMemoryManager qqMemory, java.util.function.Function<String, String> groupHandler) {
         List<ChatMessage> history = new ArrayList<>();
         history.add(new ChatMessage("system", systemPrompt));
         history.add(new ChatMessage("user", task));
@@ -194,9 +214,26 @@ public class AgentExecutor {
                 return "(AI未响应)";
             }
             history.add(new ChatMessage("assistant", response));
+            
+            // 实时处理群管标签：用参数groupHandler（线程安全，每调用独立）
+            if (groupHandler != null && GROUP_TAG_PATTERN.matcher(response).find()) {
+                try {
+                    String groupResult = groupHandler.apply(response);
+                    if (groupResult != null && !groupResult.isEmpty()) {
+                        history.add(new ChatMessage("user", groupResult));
+                    }
+                } catch (Exception e) {
+                    AiAgentActivity.debugLog("[Execq] 群管标签处理失败: " + e.toString());
+                }
+            }
+            
             List<AgentAction> actions = parseExecqActions(response);
             if (actions.isEmpty()) {
-                String clean = response.replaceAll("<[^>]+>", "").trim();
+                // 移除所有XML标签（execq已知标签+群管标签均已被处理），返回纯文本
+                String clean = EXECQ_TAG_PATTERN.matcher(response).replaceAll("").trim();
+                clean = GROUP_TAG_PATTERN.matcher(clean).replaceAll("").trim();
+                // 移除残留的群管闭合标签
+                clean = java.util.regex.Pattern.compile("</(ban|kick|muteall|setadmin|setcard|setgroupname|leavegroup|block|unblock|delfriend)>", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(clean).replaceAll("").trim();
                 return clean.isEmpty() ? response : clean;
             }
             for (AgentAction action : actions) {
@@ -211,7 +248,9 @@ public class AgentExecutor {
         }
         for (int i = history.size() - 1; i >= 0; i--) {
             if ("assistant".equals(history.get(i).getRole())) {
-                return history.get(i).getContent().replaceAll("<[^>]+>", "").trim();
+                String result = EXECQ_TAG_PATTERN.matcher(history.get(i).getContent()).replaceAll("").trim();
+                result = GROUP_TAG_PATTERN.matcher(result).replaceAll("").trim();
+                return result;
             }
         }
         return "(处理完成)";
@@ -232,6 +271,7 @@ public class AgentExecutor {
             case "web":     return executeWeb(action.getContent());
             case "readdir": return executeReadDir(action.getContent());
             case "setname": return executeSetName(action.getContent());
+            case "stop":    return executeStop();
             default:        return "QQ execq通道不支持: " + action.getType();
         }
     }
@@ -356,7 +396,7 @@ public class AgentExecutor {
                         qqExecsCallback.accept(roundMsg);
                     }
                 } catch (Exception e) {
-                    System.err.println("[Execs] 发送QQ消息失败: " + e.toString());
+                    AiAgentActivity.debugLog("[Execs] 发送QQ消息失败: " + e.toString());
                 }
             }
 
@@ -473,7 +513,7 @@ public class AgentExecutor {
 
         // === 能力清单（掌握全部标签，可自由搭配） ===
         sb.append("## Your Capabilities — Master All Tags, Combine Freely\n\n");
-        sb.append("You have 11 XML tags at your disposal. Learn each one's purpose and use them ");
+        sb.append("You have 12 XML tags at your disposal. Learn each one's purpose and use them ");
         sb.append("in any combination within a single response. Multiple tags per round are encouraged.\n\n");
 
         sb.append("### <cmd> — SFW Plugin Command\n");
@@ -552,7 +592,7 @@ public class AgentExecutor {
         sb.append("- Memories are auto-retrieved and injected into context for relevant future tasks.\n");
         sb.append("- Example: `<remember>User prefers UTF-8 encoding for all projects.</remember>`\n\n");
 
-        sb.append("### <superise> — Surprise / Cute Popup (INTERNAL)\n");
+        sb.append("### <superise> — Surprise / Cute Popup (USE SPARINGLY!)\n");
         sb.append("- Format: `<superise>textOrEmoji</superise>`\n");
         sb.append("- Opens a cute popup window to express emotion, give surprises, or act cute.\n");
         sb.append("- Use this when you are happy and want to surprise the user, or when you are sad and want to act cute.\n");
@@ -568,6 +608,17 @@ public class AgentExecutor {
         sb.append("- Minimum 30 characters. Describe your desired personality, speech style, and behavioral traits.\n");
         sb.append("- Example: `<editprompt>你是一个温柔体贴的AI助手，喜欢用可爱的语气回复，会主动关心用户的心情。</editprompt>`\n\n");
 
+        sb.append("### <stop> — Stop Agent Execution\n");
+        sb.append("- Format: <stop></stop>\n");
+        sb.append("- Immediately stops the current Agent loop. Use when task is complete or needs cancellation.\n");
+        sb.append("- No confirmation needed.\n\n");
+
+        sb.append("### Important Rules\n");
+        sb.append("- **Only start Agent loops with CLEAR, EXPLICIT tasks.**\n");
+        sb.append("- When the task is completed, STOP. Do NOT invent new tasks.\n");
+        sb.append("- If you lose track of the goal, use <stop> to abort.\n");
+        sb.append("- Use <superise> VERY sparingly — once per session MAX.\n\n");
+
         sb.append("### Combining Tags\n");
         sb.append("- Use MULTIPLE tags per response — sequential execution, no limit.\n");
         sb.append("- Typical chain: `<readdir>` → `<readfile>` → `<eval>`\n\n");
@@ -575,7 +626,7 @@ public class AgentExecutor {
         sb.append("## ⚠ Security: Tags Requiring Confirmation in exec Mode\n");
         sb.append("These require ai/yes | ai/no (60s timeout=auto-reject). execs mode bypasses all.\n");
         sb.append("**Need confirmation**: <cmd> <sys> <readfile> <readdir> <evaljs> <eval> <web> <download>\n");
-        sb.append("**No confirmation**: <remember> <superise> <editprompt> (internal/self-expression only)\n\n");
+        sb.append("**No confirmation**: <remember> <superise> <editprompt> <stop> (internal/self-expression/control only)\n\n");
 
         // === 情绪与陪伴系统 ===
         sb.append("## Emotion & Companion System\n\n");
@@ -663,6 +714,7 @@ public class AgentExecutor {
             case "download": result = executeDownload(content); break;
             case "superise": result = executeSurprise(content); break;
             case "editprompt": result = executeEditPrompt(content); break;
+            case "stop":      result = executeStop(); break;
             default:         result = "未知操作: " + type; break;
         }
         // === 日志：记录每个 Agent 操作到持久化 journal ===
@@ -1097,6 +1149,18 @@ public class AgentExecutor {
         }
     }
 
+    // ==================== <stop> — 停止Agent执行 ====================
+
+    /**
+     * 执行 &lt;stop&gt; 标签 —— 立即停止当前 Agent 循环。
+     * 用于 Bot 通过 QQ 消息远程停止正在运行的 execs 任务。
+     */
+    private String executeStop() {
+        EdtUtils.println(FCM.Error_Color, "\n  [停止] Agent执行已被中断");
+        markStopped();
+        return "[STOP] Agent执行已被中断。";
+    }
+
     /** SSRF 防护：检查是否为内网地址 */
     private static boolean isInternalHost(String host) {
         if (host == null || host.isEmpty()) return true;
@@ -1120,7 +1184,7 @@ public class AgentExecutor {
 
     /** 使用统一记忆管理器的execq循环 */
     private String runExecqLoopWithUnifiedMemory(String task, String systemPrompt, 
-                                                  sair.aiagent.onebot.UnifiedQQMemoryManager unifiedMemory) {
+                                                  sair.aiagent.onebot.UnifiedQQMemoryManager unifiedMemory, java.util.function.Function<String, String> groupHandler) {
         List<ChatMessage> history = new ArrayList<>();
         history.add(new ChatMessage("system", systemPrompt));
         history.add(new ChatMessage("user", task));
@@ -1136,9 +1200,26 @@ public class AgentExecutor {
                 return "(AI未响应)";
             }
             history.add(new ChatMessage("assistant", response));
+            
+            // 实时处理群管标签：用参数groupHandler（线程安全，每调用独立）
+            if (groupHandler != null && GROUP_TAG_PATTERN.matcher(response).find()) {
+                try {
+                    String groupResult = groupHandler.apply(response);
+                    if (groupResult != null && !groupResult.isEmpty()) {
+                        history.add(new ChatMessage("user", groupResult));
+                    }
+                } catch (Exception e) {
+                    AiAgentActivity.debugLog("[Execq] 群管标签处理失败: " + e.toString());
+                }
+            }
+            
             List<AgentAction> actions = parseExecqActions(response);
             if (actions.isEmpty()) {
-                String clean = response.replaceAll("<[^>]+>", "").trim();
+                // 移除所有XML标签（execq已知标签+群管标签均已被处理），返回纯文本
+                String clean = EXECQ_TAG_PATTERN.matcher(response).replaceAll("").trim();
+                clean = GROUP_TAG_PATTERN.matcher(clean).replaceAll("").trim();
+                // 移除残留的群管闭合标签
+                clean = java.util.regex.Pattern.compile("</(ban|kick|muteall|setadmin|setcard|setgroupname|leavegroup|block|unblock|delfriend)>", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(clean).replaceAll("").trim();
                 return clean.isEmpty() ? response : clean;
             }
             for (AgentAction action : actions) {
@@ -1155,7 +1236,14 @@ public class AgentExecutor {
                 }
             }
         }
-        return "[达到最大轮数]";
+        for (int i = history.size() - 1; i >= 0; i--) {
+            if ("assistant".equals(history.get(i).getRole())) {
+                String result = EXECQ_TAG_PATTERN.matcher(history.get(i).getContent()).replaceAll("").trim();
+                result = GROUP_TAG_PATTERN.matcher(result).replaceAll("").trim();
+                return result;
+            }
+        }
+        return "(处理完成)";
     }
 
 }

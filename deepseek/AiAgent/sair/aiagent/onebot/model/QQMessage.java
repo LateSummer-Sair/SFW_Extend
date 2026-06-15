@@ -33,6 +33,10 @@ public class QQMessage {
     private boolean isReply;
     /** 引用的消息ID */
     private long replyMessageId;
+    /** 当前消息中@提及的所有用户QQ号（不含机器人自身） */
+    private final List<Long> mentionedUsers = new ArrayList<>();
+    /** 当前消息中@提及的所有用户QQ号对应的原始at段文本 */
+    private final List<String> mentionedAtStrings = new ArrayList<>();
 
     // === 内部类 ===
 
@@ -96,6 +100,16 @@ public class QQMessage {
 
     public long getReplyMessageId() { return replyMessageId; }
     public void setReplyMessageId(long v) { this.replyMessageId = v; }
+
+    /** 获取当前消息中@提及的用户QQ号列表 */
+    public List<Long> getMentionedUsers() { return mentionedUsers; }
+    /** 获取当前消息中@提及的原始at段文本 */
+    public List<String> getMentionedAtStrings() { return mentionedAtStrings; }
+    /** 添加一个被@提及的用户 */
+    public void addMentionedUser(long qq, String atString) {
+        this.mentionedUsers.add(qq);
+        this.mentionedAtStrings.add(atString != null ? atString : String.valueOf(qq));
+    }
 
     /** 是否为群消息 */
     public boolean isGroupMessage() {
