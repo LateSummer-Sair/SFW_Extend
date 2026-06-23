@@ -113,6 +113,7 @@ public class QQMessageHandler {
             }
             
             AiAgentActivity.debugLog("[QQMsg] 所有组件初始化完成: EmotionStateManager, NapCatApi, BotPersistenceManager, InternalAgents, GroupModeratorAgent");
+            bridgeEmotionManagers();
         }
     }
     
@@ -128,6 +129,17 @@ public class QQMessageHandler {
     /** 获取EmotionStateManager实例 */
     public EmotionStateManager getEmotionManager() { return emotionManager; }
     public void setAgentExecutor(AgentExecutor executor) { this.agentExecutor = executor; }
+
+    /** Bridge core EmotionManager to QQ EmotionStateManager */
+    public void bridgeEmotionManagers() {
+        if (agentExecutor != null && emotionManager != null) {
+            sair.aiagent.core.EmotionManager coreEm = agentExecutor.getEmotionManager();
+            if (coreEm != null) {
+                emotionManager.setCoreEmotionManager(coreEm);
+                sair.aiagent.AiAgentActivity.debugLog("[QQMsg] Emotion bridge established");
+            }
+        }
+    }
     public void setDataDir(String dir) { 
         this.dataDir = dir;
         AiAgentActivity.debugLog("[QQMsg] setDataDir被调用: dataDir=" + dir);
@@ -381,6 +393,9 @@ public class QQMessageHandler {
 
             // 检测是否@了机器人、是否引用回复
             checkAtAndReply(msg);
+            
+            // 检测图片和折叠消息
+            detectMediaContent(msg);
 
             return msg;
         } catch (Exception e) {
@@ -415,6 +430,40 @@ public class QQMessageHandler {
                 String dataObj = extractObject(item, "data");
                 if (dataObj != null) {
                     seg.id = extractLong(dataObj, "id");
+                }
+            } else if ("image".equals(seg.type)) {
+                String dataObj = extractObject(item, "data");
+                if (dataObj != null) {
+                    seg.url = extractString(dataObj, "url");
+                    seg.file = extractString(dataObj, "file");
+                    seg.subType = extractString(dataObj, "sub_type");
+                    seg.fileId = extractString(dataObj, "file_id");
+                }
+            } else if ("forward".equals(seg.type)) {
+                String dataObj = extractObject(item, "data");
+                if (dataObj != null) {
+                    seg.content = extractString(dataObj, "content");
+                }
+                // 也尝试直接从message段提取id(forward_id)
+                if (seg.content == null || seg.content.isEmpty()) {
+                    String arrContent = extractArray(item, "data");
+                    if (arrContent != null) {
+                        // forward的data可能是嵌套的数组
+                        seg.content = arrContent;
+                    }
+                }
+            } else if ("record".equals(seg.type)) {
+                String dataObj = extractObject(item, "data");
+                if (dataObj != null) {
+                    seg.url = extractString(dataObj, "url");
+                    seg.file = extractString(dataObj, "file");
+                }
+            } else if ("file".equals(seg.type)) {
+                String dataObj = extractObject(item, "data");
+                if (dataObj != null) {
+                    seg.file = extractString(dataObj, "file");
+                    seg.fileName = extractString(dataObj, "name");
+                    seg.url = extractString(dataObj, "url");
                 }
             }
             segments.add(seg);
@@ -493,6 +542,106 @@ public class QQMessageHandler {
         }
         
         AiAgentActivity.debugLog("[QQMsg] @检测结果: isAtBot=" + msg.isAtBot() + ", isReply=" + msg.isReply() + ", mentionedUsers=" + msg.getMentionedUsers().size());
+    }
+    
+    /** 检测消息中的图片和折叠消息内容 */
+    private void detectMediaContent(QQMessage msg) {
+        if (msg.getSegments() == null || msg.getSegments().isEmpty()) return;
+        
+        boolean hasImage = false;
+        boolean hasForward = false;
+        StringBuilder forwardText = new StringBuilder();
+        
+        for (QQMessage.MessageSegment seg : msg.getSegments()) {
+            if (seg.isImage()) {
+                hasImage = true;
+                if (seg.url != null && !seg.url.isEmpty()) {
+                    msg.addImageUrl(seg.url);
+                }
+                if (seg.file != null && !seg.file.isEmpty()) {
+                    msg.addImageFilePath(seg.file);
+                }
+            }
+            if (seg.isForward()) {
+                hasForward = true;
+                if (seg.content != null && !seg.content.isEmpty()) {
+                    // 尝试从forward content中提取文本
+                    String extracted = extractForwardText(seg.content);
+                    if (extracted != null && !extracted.isEmpty()) {
+                        if (forwardText.length() > 0) forwardText.append("\n");
+                        forwardText.append(extracted);
+                    }
+                }
+            }
+        }
+        
+        if (hasImage) {
+            msg.setHasImage(true);
+            AiAgentActivity.debugLog("[QQMsg] 检测到图片消息: " + msg.getImageUrls().size() + "张");
+        }
+        if (hasForward && forwardText.length() > 0) {
+            msg.setHasForward(true);
+            // 截断过长内容
+            String content = forwardText.toString();
+            if (content.length() > 1000) content = content.substring(0, 1000) + "...";
+            msg.setForwardContent(content);
+            AiAgentActivity.debugLog("[QQMsg] 检测到折叠消息，内容长度: " + content.length());
+        }
+    }
+    
+    /** 从forward content JSON中提取文本 */
+    private String extractForwardText(String forwardContent) {
+        if (forwardContent == null || forwardContent.isEmpty()) return null;
+        
+        StringBuilder result = new StringBuilder();
+        try {
+            // forward content是消息段数组的JSON
+            List<String> items = splitJsonArray(forwardContent);
+            for (String item : items) {
+                // 每个item可能包含message数组
+                String msgArr = extractArray(item, "message");
+                if (msgArr != null && !msgArr.isEmpty()) {
+                    List<String> msgSegments = splitJsonArray(msgArr);
+                    for (String seg : msgSegments) {
+                        String type = extractString(seg, "type");
+                        if ("text".equals(type)) {
+                            String dataObj = extractObject(seg, "data");
+                            if (dataObj != null) {
+                                String text = extractString(dataObj, "text");
+                                if (text != null && !text.isEmpty()) {
+                                    if (result.length() > 0) result.append(" | ");
+                                    result.append(text);
+                                }
+                            }
+                        } else if ("image".equals(type)) {
+                            if (result.length() > 0) result.append(" | ");
+                            result.append("[图片]");
+                        }
+                    }
+                } else {
+                    // 直接是消息段
+                    String type = extractString(item, "type");
+                    if ("text".equals(type)) {
+                        String dataObj = extractObject(item, "data");
+                        if (dataObj != null) {
+                            String text = extractString(dataObj, "text");
+                            if (text != null && !text.isEmpty()) {
+                                if (result.length() > 0) result.append(" | ");
+                                result.append(text);
+                            }
+                        }
+                    } else if ("image".equals(type)) {
+                        if (result.length() > 0) result.append(" | ");
+                        result.append("[图片]");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // 解析失败，降级：尝试直接提取文本
+            return forwardContent.replaceAll("\\{[^}]*\\}", "").replaceAll("[\"\\[\\]]", "").trim();
+        }
+        
+        return result.length() > 0 ? result.toString() : null;
     }
 
     // ==================== 消息处理 ====================
@@ -636,7 +785,48 @@ public class QQMessageHandler {
                 }
             }
 
+            // 如果是引用回复且@了Bot，异步获取被引用的消息内容
+            if (msg.isReply() && msg.isAtBot() && msg.getReplyMessageId() > 0 && napcatApi != null) {
+                try {
+                    int quotedMsgId = (int) msg.getReplyMessageId();
+                    AiAgentActivity.debugLog("[QQMsg] 获取引用消息: messageId=" + quotedMsgId);
+                    String quotedJson = napcatApi.getMessage(quotedMsgId);
+                    if (quotedJson != null && !quotedJson.isEmpty()) {
+                        // 从响应中提取消息内容
+                        String quotedRaw = extractString(quotedJson, "raw_message");
+                        if (quotedRaw == null || quotedRaw.isEmpty()) {
+                            quotedRaw = extractString(quotedJson, "message");
+                        }
+                        if (quotedRaw != null && !quotedRaw.isEmpty()) {
+                            msg.setQuotedMessageContent(quotedRaw);
+                            AiAgentActivity.debugLog("[QQMsg] 获取到引用消息内容: " + 
+                                (quotedRaw.length() > 100 ? quotedRaw.substring(0, 100) + "..." : quotedRaw));
+                        }
+                    }
+                } catch (Exception e) {
+                    AiAgentActivity.debugLog("[QQMsg] 获取引用消息失败: " + e.toString());
+                }
+            }
+
             // 构建execq系统提示词
+                        if (emotionManager != null) {
+                try {
+                    String pt = msg.getPlainTextOnly();
+                    if (pt != null) {
+                        String detected = emotionManager.detectFriendlyEmotion(pt);
+                        if ("praise".equals(detected)) {
+                            emotionManager.onPraise(qq);
+                        } else if ("comfort".equals(detected)) {
+                            emotionManager.onComfort(qq);
+                        } else if ("friendly".equals(detected)) {
+                            emotionManager.onFriendlyInteraction(qq);
+                        }
+                    }
+                } catch (Exception e) {
+                    AiAgentActivity.debugLog("[QQMsg] Emotion detect fail: " + e.toString());
+                }
+            }
+            
             String systemPrompt = buildExecqSystemPrompt(msg, punishmentRecords);
             AiAgentActivity.debugLog("[QQMsg] 系统提示词构建完成，长度: " + systemPrompt.length());
 
@@ -1123,6 +1313,91 @@ public class QQMessageHandler {
         
         } // end 群管标签块
         
+        // === 图片/语音/文件发送标签 ===
+        if (napcatApi != null) {
+            // 处理 <sendimage>路径或内容</sendimage> — 发送图片
+            java.util.regex.Matcher sendImageMatcher = java.util.regex.Pattern.compile(
+                "<sendimage>\\s*(.+?)\\s*</sendimage>", java.util.regex.Pattern.DOTALL).matcher(aiResponse);
+            while (sendImageMatcher.find()) {
+                String imageContent = sendImageMatcher.group(1).trim();
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<sendimage>: " + (imageContent.length() > 40 ? imageContent.substring(0, 40) + "..." : imageContent));
+                // 判断是文件路径还是文字内容
+                File imgFile = new File(imageContent);
+                if (imgFile.exists() && imgFile.isFile()) {
+                    // 本地文件路径，直接发送
+                    if (msg.isGroupMessage()) {
+                        napcatApi.sendGroupImage(msg.getGroupId(), imageContent);
+                    } else {
+                        napcatApi.sendPrivateImage(msg.getUserId(), imageContent);
+                    }
+                } else if (imageContent.startsWith("http://") || imageContent.startsWith("https://")) {
+                    // URL，直接发送
+                    if (msg.isGroupMessage()) {
+                        napcatApi.sendGroupImage(msg.getGroupId(), imageContent);
+                    } else {
+                        napcatApi.sendPrivateImage(msg.getUserId(), imageContent);
+                    }
+                } else {
+                    // 文字内容，渲染为图片后发送
+                    try {
+                        String dataDirPath = dataDir;
+                        File outputDir = new File(dataDirPath, "rendered");
+                        String fileName = "img_" + System.currentTimeMillis() + ".png";
+                        File outputFile = new File(outputDir, fileName);
+                        sair.aiagent.util.ImageRenderer.renderTextToImage(imageContent, outputFile);
+                        String absPath = outputFile.getAbsolutePath();
+                        if (msg.isGroupMessage()) {
+                            napcatApi.sendGroupImage(msg.getGroupId(), absPath);
+                        } else {
+                            napcatApi.sendPrivateImage(msg.getUserId(), absPath);
+                        }
+                    } catch (Exception e) {
+                        AiAgentActivity.debugLog("[QQMsg] <sendimage>渲染失败: " + e.toString());
+                    }
+                }
+            }
+            
+            // 处理 <sendrecord>路径或URL</sendrecord> — 发送语音
+            java.util.regex.Matcher sendRecordMatcher = java.util.regex.Pattern.compile(
+                "<sendrecord>\\s*(.+?)\\s*</sendrecord>", java.util.regex.Pattern.DOTALL).matcher(aiResponse);
+            while (sendRecordMatcher.find()) {
+                String recordPath = sendRecordMatcher.group(1).trim();
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<sendrecord>: " + recordPath);
+                if (msg.isGroupMessage()) {
+                    napcatApi.sendGroupRecord(msg.getGroupId(), recordPath);
+                } else {
+                    napcatApi.sendPrivateRecord(msg.getUserId(), recordPath);
+                }
+            }
+            
+            // 处理 <sendfile>本地文件路径</sendfile> — 发送文件（仅主人可用）
+            java.util.regex.Matcher sendFileMatcher = java.util.regex.Pattern.compile(
+                "<sendfile>\\s*(.+?)\\s*</sendfile>", java.util.regex.Pattern.DOTALL).matcher(aiResponse);
+            while (sendFileMatcher.find()) {
+                String filePath = sendFileMatcher.group(1).trim();
+                long senderQQ = msg.getUserId();
+                boolean isMaster = sair.aiagent.core.AiConfig.getInstance().isMasterQQ(senderQQ);
+                
+                if (!isMaster) {
+                    AiAgentActivity.debugLog("[QQMsg] <sendfile>被拒绝: 用户 " + senderQQ + " 不是主人");
+                    continue;
+                }
+                
+                File f = new File(filePath);
+                if (!f.exists() || !f.isFile()) {
+                    AiAgentActivity.debugLog("[QQMsg] <sendfile>文件不存在: " + filePath);
+                    continue;
+                }
+                
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<sendfile>: " + filePath);
+                if (msg.isGroupMessage()) {
+                    napcatApi.sendGroupFile(msg.getGroupId(), filePath, f.getName());
+                } else {
+                    napcatApi.sendPrivateFile(msg.getUserId(), filePath, f.getName());
+                }
+            }
+        }
+        
         // === 好友管理标签（私聊/群聊均可） ===
         // 处理 <delfriend>QQ号</delfriend> — 删除好友
         if (napcatApi != null) {
@@ -1270,6 +1545,28 @@ public class QQMessageHandler {
             sb.append("\n");
         }
         sb.append("\n");
+        
+        // === 图片信息 ===
+        if (msg.hasImage() && !msg.getImageUrls().isEmpty()) {
+            sb.append("📷 此消息包含 ").append(msg.getImageUrls().size()).append(" 张图片\n");
+            for (int i = 0; i < msg.getImageUrls().size() && i < 3; i++) {
+                sb.append("  图片URL: ").append(msg.getImageUrls().get(i)).append("\n");
+            }
+            sb.append("你可以分析图片内容。用户可能在图中包含文字、表情等信息。\n");
+            sb.append("如果需要发送图片，使用 <sendimage>描述</sendimage> 标签。\n\n");
+        }
+        
+        // === 折叠消息内容 ===
+        if (msg.hasForward() && msg.getForwardContent() != null && !msg.getForwardContent().isEmpty()) {
+            sb.append("📨 此消息是转发/折叠消息，内容: ").append(msg.getForwardContent()).append("\n");
+            sb.append("请分析折叠消息中的内容并做出回复。\n\n");
+        }
+        
+        // === 引用消息内容 ===
+        if (msg.getQuotedMessageContent() != null && !msg.getQuotedMessageContent().isEmpty()) {
+            sb.append("💬 用户回复了以下消息:\n").append(msg.getQuotedMessageContent()).append("\n");
+            sb.append("请结合被引用的消息理解上下文，做出针对性回复。\n\n");
+        }
         
         // === 群昵称映射（群聊时） ===
         if (msg.isGroupMessage() && unifiedMemory != null) {
@@ -1436,17 +1733,12 @@ public class QQMessageHandler {
 
         // === 相关记忆（已禁用） ===
 
-        // === Bot当前情绪状态 ===
+        // === Bot mood (enhanced: tone + relationship + emotional memory) ===
         if (emotionManager != null) {
-            String romanceStr = emotionManager.isInRomance() ? ",恋爱中" : "";
-            sb.append("## 情绪\n");
-            sb.append("怒:").append((int)emotionManager.getAnger()).append("/100");
-            sb.append(" 悲:").append((int)emotionManager.getSadness()).append("/100");
-            sb.append(romanceStr);
-            sb.append(" 态度:").append(emotionManager.getUserAttitudeDescription(msg.getUserId()));
-            sb.append("\n\n");
+            String emotionCtx = emotionManager.buildRichEmotionContext(msg.getUserId());
+            sb.append(emotionCtx);
         }
-        
+
         // === 违规处罚记录 ===
         if (punishmentRecords != null && !punishmentRecords.isEmpty()) {
             sb.append("## 违规处罚\n");
@@ -1477,6 +1769,20 @@ public class QQMessageHandler {
         sb.append("(QQ:").append(msg.getUserId()).append(")");
         sb.append(msg.isGroupMessage() ? " 群聊: " : " 私聊: ");
         sb.append(msg.getPlainText());
+        
+        // 图片信息
+        if (msg.hasImage() && !msg.getImageUrls().isEmpty()) {
+            sb.append("\n📷 此消息包含 ").append(msg.getImageUrls().size()).append(" 张图片");
+            for (int i = 0; i < msg.getImageUrls().size(); i++) {
+                sb.append("\n  图片URL: ").append(msg.getImageUrls().get(i));
+            }
+        }
+        
+        // 引用消息（如果已获取）
+        if (msg.getQuotedMessageContent() != null && !msg.getQuotedMessageContent().isEmpty()) {
+            sb.append("\n💬 被引用的消息: ").append(msg.getQuotedMessageContent());
+        }
+        
         return sb.toString();
     }
 

@@ -31,18 +31,18 @@
     <!-- Hero Section -->
     <section class="hero">
         <div class="hero-content">
-            <div class="hero-badge">SFW Plugin · v2.0</div>
+            <div class="hero-badge">SFW Plugin · v2.1</div>
             <h1>
                 <span class="gradient-text">AiAgent</span>
             </h1>
             <p class="hero-subtitle">
                 SairFrameWork AI 智能代理插件 — 对接 DeepSeek API，流式逐字输出，QQ OneBot 机器人（统一记忆库），<br>
                 SQLite 全局持久化 + 记忆联通系统 + 情绪陪伴系统 + 动态代码注入 + 联网搜索 + 跨平台终端 + 会话日志，全面接管 SFW 框架。<br>
-                <strong>v2.0 最新修复：线程安全重构（移除共享 groupActionHandler，handler 参数化传递避免群聊上下文混乱）、提示词追加机制（config 自定义提示词追加到默认提示词后，不再覆盖）、编译错误修复。</strong>
+                <strong>v2.1 更新：提示词集中管理（PromptManager）、追加模式持久化（config 自定义提示词追加到默认后不覆盖）、12→15 XML标签（新增sendimage/sendrecord/sendfile）。</strong>
             </p>
             <div class="hero-stats">
                 <div class="hero-stat reveal">
-                    <div class="num" data-target="33">0</div>
+                    <div class="num" data-target="34">0</div>
                     <div class="label">核心类</div>
                 </div>
                 <div class="hero-stat reveal">
@@ -68,7 +68,7 @@
                 <div class="section-tag">Overview</div>
                 <h2>项目概述</h2>
                 <div class="section-divider"></div>
-                <p>AiAgent 是一个为 SFW (SairFrameWork) 框架打造的 AI 智能代理插件（v2.0），全面对接 DeepSeek API，实现流式对话与自主任务执行。集成 QQ OneBot v11 机器人，支持群聊/私聊双通道，execq 独立通道（插件白名单门控），<b>统一记忆库架构</b>（所有对话历史统一管理，通过来源标记区分群聊/私聊，实现记忆联通）。具备好友/群邀请好感度决策、反滥用保护、群上下文感知、<code>&lt;stop&gt;</code> 紧急停止标签、群管理违规处罚（警告/禁言/踢出/拉黑）等高级功能。33 个 Java 源文件，约 11,147 行代码，SQLite 全局持久化，外部依赖：SFW.jar + sqlite-jdbc-3.42.0.0.jar + gson-2.8.6.jar。</p>
+                <p>AiAgent 是一个为 SFW (SairFrameWork) 框架打造的 AI 智能代理插件（v2.1），全面对接 DeepSeek API，实现流式对话与自主任务执行。集成 QQ OneBot v11 机器人，支持群聊/私聊双通道，execq 独立通道（插件白名单门控），<b>统一记忆库架构</b>（所有对话历史统一管理，通过来源标记区分群聊/私聊，实现记忆联通）。具备好友/群邀请好感度决策、反滥用保护、群上下文感知、<code>&lt;stop&gt;</code> 紧急停止标签、群管理违规处罚（警告/禁言/踢出/拉黑）、<b>PromptManager 集中式提示词管理</b>（三段提示词统一入口，config.properties 追加模式持久化）等高级功能。34 个 Java 源文件，约 11,500 行代码，SQLite 全局持久化，外部依赖：SFW.jar + sqlite-jdbc-3.42.0.0.jar + gson-2.8.6.jar。</p>
             </div>
 
             <ul class="feature-list">
@@ -173,8 +173,15 @@
                 <li class="reveal">
                     <div class="check">✓</div>
                     <div>
-                        <div class="f-title">AI 自我进化 + 群上下文感知</div>
-                        <div class="f-desc">AI 可通过 &lt;editprompt&gt; 标签修改自身 system prompt。群聊中 AI 清楚知道自己身在哪个群、群主是谁、管理员是谁，Context 行标注发送者群角色（群主/管理员/成员）与群名。通过 NapCatApi 实时获取群信息</div>
+                        <div class="f-title">AI 自我进化 + 提示词集中管理</div>
+                        <div class="f-desc">AI 可通过 &lt;editprompt&gt; 标签修改自身 system prompt，通过 PromptManager 统一追加到 config.properties 持久化。PromptManager 集中管理三段提示词（systemPrompt/execqPrompt/agentStaticPrompt），硬编码默认 + config 追加，重启不丢失</div>
+                    </div>
+                </li>
+                <li class="reveal">
+                    <div class="check">✓</div>
+                    <div>
+                        <div class="f-title">多模态消息支持</div>
+                        <div class="f-desc">QQ 通道支持图片消息识别与发送（&lt;sendimage&gt; 标签 AWT 文字渲染为图）、语音消息发送（&lt;sendrecord&gt;）、文件发送（&lt;sendfile&gt; 仅主人可用）</div>
                     </div>
                 </li>
                 <li class="reveal">
@@ -208,12 +215,12 @@
                 <a href="classes.html" class="card reveal" style="text-decoration:none; color:inherit;">
                     <div class="card-icon green">📦</div>
                     <h3>类结构详解</h3>
-                    <p>33 个核心类 · ~11,147 行 · 9 个包：core / model / util / ui / acts / onebot / onebot.model / onebot.util</p>
+                    <p>34 个核心类 · ~11,500 行 · 9 个包：core / model / util / ui / acts / onebot / onebot.model / onebot.util</p>
                 </a>
                 <a href="commands.html" class="card reveal" style="text-decoration:none; color:inherit;">
                     <div class="card-icon amber">📋</div>
                     <h3>命令参考 & 部署</h3>
-                    <p>43 个总命令 · 12 种主线 XML 标签 + 16 种 OneBot execq 标签 · 提示词压缩优化 · 插件白名单 · 反滥用决策链 · 编译打包部署三步骤</p>
+                    <p>43 个总命令 · 15 种主线 XML 标签 + 16 种 OneBot execq 标签 · PromptManager 集中式提示词管理 · 配置追加模式 · 多模态消息 · 插件白名单 · 反滥用决策链 · 编译打包部署三步骤</p>
                 </a>
             </div>
         </div>
@@ -223,7 +230,7 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.0 ·
+                <span class="brand">AiAgent</span> v2.1 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
             </p>

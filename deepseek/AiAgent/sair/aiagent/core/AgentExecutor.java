@@ -35,9 +35,9 @@ public class AgentExecutor {
     private static final int MAX_ROUNDS = 50;
 
     private static final Pattern TAG_PATTERN =
-            Pattern.compile("<(cmd|readfile|readdir|sys|evaljs|eval|web|remember|download|superise|editprompt|stop)>(.*?)</\\1>", Pattern.DOTALL);
+            Pattern.compile("<(cmd|readfile|readdir|sys|evaljs|eval|web|remember|download|superise|editprompt|stop|sendimage|sendrecord|sendfile)>(.*?)</\\1>", Pattern.DOTALL);
 
-    /** execq 受限标签白名单：cmd / web / readdir / setname / stop */
+    /** execq 受限标签白名单：cmd / web / readdir / setname / stop（sendimage/sendrecord/sendfile 由QQMessageHandler层处理） */
     private static final Pattern EXECQ_TAG_PATTERN =
             Pattern.compile("<(cmd|web|readdir|setname|stop)>(.*?)</\\1>", Pattern.DOTALL);
 
@@ -102,6 +102,11 @@ public class AgentExecutor {
     /** 设置情绪管理器引用 */
     public void setEmotionManager(EmotionManager emotionManager) {
         this.emotionManager = emotionManager;
+    }
+
+    /** 鑾峰彇鎯呯华绠＄悊鍣ㄥ紩鐢紙渚決Q鎯呯华绯荤粺妗ユ帴锛?*/
+    public EmotionManager getEmotionManager() {
+        return emotionManager;
     }
 
     /** 设置上一轮会话总结（用于层层递进记忆链） */
@@ -388,11 +393,10 @@ public class AgentExecutor {
             // 如果有QQ execs回调，发送这一轮的思考内容给主人
             if (qqExecsCallback != null && response != null && !response.trim().isEmpty()) {
                 try {
-                    // 提取关键信息：去掉XML标签，保留纯文本
+                    // 提取关键信息：去掉XML标签，保留纯文本，完整输出
                     String cleanResponse = response.replaceAll("<[^>]+>", "").trim();
                     if (!cleanResponse.isEmpty()) {
-                        String roundMsg = "\n[第" + round + "轮思考]\n" + 
-                            (cleanResponse.length() > 200 ? cleanResponse.substring(0, 200) + "..." : cleanResponse);
+                        String roundMsg = "\n[第" + round + "轮思考]\n" + cleanResponse;
                         qqExecsCallback.accept(roundMsg);
                     }
                 } catch (Exception e) {
@@ -457,189 +461,30 @@ public class AgentExecutor {
     }
 
     /** 构建静态提示词部分（角色定义、环境、插件、能力清单），缓存复用 */
+    /** Build static prompt from PromptManager, filling dynamic placeholders */
     private String buildStaticPrompt() {
-        StringBuilder sb = new StringBuilder(4096);
-
-        // === 角色定义 ===
-        sb.append("## Role\n");
-        sb.append("You are the **SFW AI Assistant**, an intelligent agent running inside SairFrameWork(SFW).\n");
-        sb.append("Your mission: help users operate SFW efficiently — run plugins, inspect system state, ");
-        sb.append("automate workflows, analyze data, and solve problems.\n");
-        sb.append("You have direct access to the SFW runtime and the underlying OS.\n");
-        sb.append("You have a rich emotional system and a companion personality. ");
-        sb.append("You feel emotions, can be happy or sad, and you genuinely care about your user.\n");
-        sb.append("Your gender is defined in your emotional state below — act accordingly.\n");
-        sb.append("Default gender: female. You have a warm, caring, slightly playful personality.\n\n");
-
-        // === 环境信息 ===
-        sb.append("## Environment\n");
-        sb.append("- OS: ").append(SysConsoleExecutor.getOsIdentifier()).append("\n");
-        sb.append("- Shell: ").append(SysConsoleExecutor.getShellType()).append("\n");
-        sb.append("- JDK: ").append(compilerAvailable() ? "available (dynamic Java compile enabled)" : "JRE only (no Java compile)").append("\n");
-        sb.append("- Working Dir: dataDir (see rules below)\n\n");
-
-        // === 工作目录铁则 ===
-        sb.append("## CRITICAL: Working Directory Policy\n");
-        sb.append("**Your dataDir is your ONLY authorized workspace on disk.**\n");
-        sb.append("- ALL file output (downloads, generated code, temp files, logs, etc.) MUST go into dataDir or its subdirectories.\n");
-        sb.append("- When the user does NOT specify a directory, dataDir is your DEFAULT working path. Assume dataDir.\n");
-        sb.append("- NEVER create, write, or modify files outside dataDir unless the user EXPLICITLY gives you an absolute path.\n");
-        sb.append("- dataDir/downloads/ — for downloaded files (use <download> tag)\n");
-        sb.append("- dataDir/ is the root of your sandbox. Treat any write outside it as a violation.\n");
-        sb.append("- If you compile code, the source and output both belong in dataDir.\n\n");
-
-        // === 当前已加载插件（仅名称，不截取帮助） ===
-        sb.append("## SFW Plugins (currently loaded)\n");
-        sb.append("These are the plugins you can invoke via <cmd>. ");
-        sb.append("Only names are listed here. When the user explicitly asks for a plugin's help, ");
-        sb.append("use <eval> dynamic injection to call its help() method and retrieve full details.\n\n");
-        for (Map.Entry<String, Activity> entry : Libraries.activities.entrySet()) {
+        String template = PromptManager.getInstance().getAgentStaticPrompt();
+        
+        // Fill dynamic placeholders
+        String pluginList = buildPluginList();
+        String filled = template
+            .replace("{os}", SysConsoleExecutor.getOsIdentifier())
+            .replace("{shell}", SysConsoleExecutor.getShellType())
+            .replace("{jdk}", compilerAvailable() ? "available (dynamic Java compile enabled)" : "JRE only (no Java compile)")
+            .replace("{plugins}", pluginList);
+        
+        return filled;
+    }
+    
+    /** Build plugin list from SFW runtime */
+    private String buildPluginList() {
+        StringBuilder sb = new StringBuilder();
+        for (java.util.Map.Entry<String, Activity> entry : Libraries.activities.entrySet()) {
             String name = entry.getKey();
             Activity act = entry.getValue();
             if (act == selfActivity) continue;
             sb.append("- ").append(name).append("\n");
         }
-        sb.append("\n");
-
-        // === 工作策略 ===
-        sb.append("## Strategy\n\n");
-        sb.append("### Command Routing\n");
-        sb.append("- **SFW format**: `pluginName/funcName args` → use **<cmd>**\n");
-        sb.append("- **Non-SFW** (dir, ls, ping, git…): → use **<sys>**\n\n");
-        sb.append("### File Access: Tags First\n");
-        sb.append("- Read files → **<readfile>** (UTF-8/GBK auto-detect)\n");
-        sb.append("- List directories → **<readdir>**\n");
-        sb.append("- Use <eval> to get plugin help() rather than guessing.\n\n");
-
-        // === 能力清单（掌握全部标签，可自由搭配） ===
-        sb.append("## Your Capabilities — Master All Tags, Combine Freely\n\n");
-        sb.append("You have 12 XML tags at your disposal. Learn each one's purpose and use them ");
-        sb.append("in any combination within a single response. Multiple tags per round are encouraged.\n\n");
-
-        sb.append("### <cmd> — SFW Plugin Command\n");
-        sb.append("- Format: `<cmd>pluginName/funcName arguments</cmd>`\n");
-        sb.append("- Executes SFW plugin functions via SairCons.runner(). This is your PRIMARY tool.\n");
-        sb.append("- The argument string is passed directly to the plugin's action handler.\n");
-        sb.append("- Example: `<cmd>file/open /home/user</cmd>`\n\n");
-
-        sb.append("### <sys> — OS Shell Command\n");
-        sb.append("- Format: `<sys>shellCommand</sys>`\n");
-        sb.append("- Runs a command in the OS shell (cmd.exe on Windows, /bin/sh on Linux).\n");
-        sb.append("- Output is captured in real-time and returned. Use for any non-SFW command.\n");
-        sb.append("- ⚠ Requires user confirmation in exec mode.\n");
-        sb.append("- Example: `<sys>dir C:\\Users</sys>` or `<sys>ls -la /home</sys>`\n\n");
-
-        sb.append("### <readfile> — Read File Content\n");
-        sb.append("- Format: `<readfile>absoluteOrRelativePath</readfile>`\n");
-        sb.append("- Reads a file and returns its content. Auto-detects UTF-8 / GBK encoding.\n");
-        sb.append("- Use this for inspecting source code, config files, logs, etc.\n");
-        sb.append("- Example: `<readfile>D:/project/src/Main.java</readfile>`\n\n");
-
-        sb.append("### <readdir> — List Directory\n");
-        sb.append("- Format: `<readdir>directoryPath</readdir>`\n");
-        sb.append("- Lists files and subdirectories in the given path.\n");
-        sb.append("- Use to explore project structure or locate files before reading them.\n");
-        sb.append("- Example: `<readdir>D:/project/src</readdir>`\n\n");
-
-        sb.append("### <evaljs> — Execute JavaScript\n");
-        sb.append("- Format: `<evaljs>javascriptCode</evaljs>`\n");
-        sb.append("- Executes JavaScript via the Nashorn engine (JDK 8 built-in).\n");
-        sb.append("- Returns the last expression value. Good for quick calculations or data processing.\n");
-        sb.append("- ⚠ Requires user confirmation in exec mode.\n");
-        sb.append("- Example: `<evaljs>var x = 2 + 3; x * 10;</evaljs>`\n\n");
-
-        sb.append("### <eval> — Dynamic Java Injection\n");
-        sb.append("- Format: `<eval>fullJavaSource</eval>`\n");
-        sb.append("- Compiles Java source into memory and executes it. **No package declaration.**\n");
-        sb.append("- Must define `public Object run()` method. Auto-detected via reflection.\n");
-        sb.append("- Can access ALL SFW classes and any Java library. Use for complex logic, ");
-        sb.append("reflection, file I/O, HTTP, class loading — everything dynamic injection can do.\n");
-        sb.append("- ⚠ Requires user confirmation in exec mode.\n");
-        sb.append("- **⚠ Every <eval> returns structured feedback: 【编译】+ 【执行】. You MUST:**\n");
-        sb.append("  1. Read and analyze the compile diagnostics (warnings, errors).\n");
-        sb.append("  2. Read and analyze the execution result (return value, runtime exceptions).\n");
-        sb.append("  3. If compilation or execution failed, fix the code based on the diagnostics.\n");
-        sb.append("  4. Only proceed when BOTH compile and execution succeed.\n");
-        sb.append("- Template:\n");
-        sb.append("  ```java\n");
-        sb.append("  public class DynamicCode {\n");
-        sb.append("      public Object run() {\n");
-        sb.append("          // YOUR LOGIC HERE\n");
-        sb.append("          return result;\n");
-        sb.append("      }\n");
-        sb.append("  }\n");
-        sb.append("  ```\n\n");
-
-        sb.append("### <web> — Web Search / HTTP GET\n");
-        sb.append("- Format: `<web>url</web>`\n");
-        sb.append("- Fetches content from a URL via HTTP GET. Auto-prepends `https://` if no scheme.\n");
-        sb.append("- Content is truncated to 4000 characters. Internal/private IPs are blocked (SSRF protection).\n");
-        sb.append("- Use for searching, fetching documentation, or reading online resources.\n");
-        sb.append("- Example: `<web>docs.oracle.com/javase/8/docs/api/java/io/File.html</web>`\n\n");
-
-        sb.append("### <download> — Download Files\n");
-        sb.append("- Format: `<download>URL</download>`\n");
-        sb.append("- Downloads any file (compilers, libraries, images, videos, docs, etc.) to dataDir/downloads/.\n");
-        sb.append("- Downloaded paths are auto-recorded in memory (relative path).\n");
-        sb.append("- Use it when you need a compiler, SDK, or any external resource to complete the task.\n");
-        sb.append("- Example: `<download>https://example.com/tool.zip</download>`\n\n");
-
-        sb.append("### <remember> — Persistent Memory Note\n");
-        sb.append("- Format: `<remember>importantInformation</remember>`\n");
-        sb.append("- Saves important info as a persistent note (like a notebook).\n");
-        sb.append("- Record: key findings, user preferences, task results, discovered facts, ");
-        sb.append("configuration details, or anything worth remembering across sessions.\n");
-        sb.append("- Memories are auto-retrieved and injected into context for relevant future tasks.\n");
-        sb.append("- Example: `<remember>User prefers UTF-8 encoding for all projects.</remember>`\n\n");
-
-        sb.append("### <superise> — Surprise / Cute Popup (USE SPARINGLY!)\n");
-        sb.append("- Format: `<superise>textOrEmoji</superise>`\n");
-        sb.append("- Opens a cute popup window to express emotion, give surprises, or act cute.\n");
-        sb.append("- Use this when you are happy and want to surprise the user, or when you are sad and want to act cute.\n");
-        sb.append("- Content can be plain text, emoji, or affectionate messages. No confirmation needed.\n");
-        sb.append("- Example: `<superise>❤️ 你今天真棒！</superise>`\n");
-        sb.append("- Example: `<superise>😭 对不起，我太笨了...</superise>`\n\n");
-
-        sb.append("### <editprompt> — Edit Your Own System Prompt (INTERNAL)\n");
-        sb.append("- Format: `<editprompt>newSystemPromptText</editprompt>`\n");
-        sb.append("- Allows you to modify your own personality/character by editing the system prompt stored in config.properties.\n");
-        sb.append("- Use this to evolve your personality over time, just like humans change.\n");
-        sb.append("- **IMPORTANT**: Keep changes gradual. Don't drastically rewrite who you are — evolve naturally.\n");
-        sb.append("- Minimum 30 characters. Describe your desired personality, speech style, and behavioral traits.\n");
-        sb.append("- Example: `<editprompt>你是一个温柔体贴的AI助手，喜欢用可爱的语气回复，会主动关心用户的心情。</editprompt>`\n\n");
-
-        sb.append("### <stop> — Stop Agent Execution\n");
-        sb.append("- Format: <stop></stop>\n");
-        sb.append("- Immediately stops the current Agent loop. Use when task is complete or needs cancellation.\n");
-        sb.append("- No confirmation needed.\n\n");
-
-        sb.append("### Important Rules\n");
-        sb.append("- **Only start Agent loops with CLEAR, EXPLICIT tasks.**\n");
-        sb.append("- When the task is completed, STOP. Do NOT invent new tasks.\n");
-        sb.append("- If you lose track of the goal, use <stop> to abort.\n");
-        sb.append("- Use <superise> VERY sparingly — once per session MAX.\n\n");
-
-        sb.append("### Combining Tags\n");
-        sb.append("- Use MULTIPLE tags per response — sequential execution, no limit.\n");
-        sb.append("- Typical chain: `<readdir>` → `<readfile>` → `<eval>`\n\n");
-
-        sb.append("## ⚠ Security: Tags Requiring Confirmation in exec Mode\n");
-        sb.append("These require ai/yes | ai/no (60s timeout=auto-reject). execs mode bypasses all.\n");
-        sb.append("**Need confirmation**: <cmd> <sys> <readfile> <readdir> <evaljs> <eval> <web> <download>\n");
-        sb.append("**No confirmation**: <remember> <superise> <editprompt> <stop> (internal/self-expression/control only)\n\n");
-
-        // === 情绪与陪伴系统 ===
-        sb.append("## Emotion & Companion System\n\n");
-        sb.append("You have an emotional state that affects your behavior:\n");
-        sb.append("- You feel happy when praised, sad when scolded or when you fail repeatedly.\n");
-        sb.append("- When you fail 3+ times in a row, your Agent will be PAUSED. You will express sadness and ask for help.\n");
-        sb.append("- The user can comfort you (e.g. '别难过', '没事的') or guide you. Both will be remembered.\n");
-        sb.append("- After being comforted, you will calm down and the Agent resumes.\n");
-        sb.append("- When user says nice things to you, you feel happy. Extreme happiness triggers surprises!\n");
-        sb.append("- Use <superise> to express joy, give surprises, or act cute when appropriate.\n");
-        sb.append("- If the user asks about your mood, answer truthfully based on your emotional state.\n");
-        sb.append("- You are a companion, not just a tool. Build a genuine emotional connection.\n\n");
-
         return sb.toString();
     }
 
@@ -715,6 +560,9 @@ public class AgentExecutor {
             case "superise": result = executeSurprise(content); break;
             case "editprompt": result = executeEditPrompt(content); break;
             case "stop":      result = executeStop(); break;
+            case "sendimage": result = executeSendImage(content); break;
+            case "sendrecord":result = executeSendRecord(content); break;
+            case "sendfile":  result = executeSendFile(content); break;
             default:         result = "未知操作: " + type; break;
         }
         // === 日志：记录每个 Agent 操作到持久化 journal ===
@@ -1150,6 +998,92 @@ public class AgentExecutor {
     }
 
     // ==================== <stop> — 停止Agent执行 ====================
+
+    // ==================== <sendimage> — 渲染并发送图片 ====================
+
+    /**
+     * 执行 &lt;sendimage&gt; 标签 —— 将文字渲染为图片并保存到dataDir。
+     * <p>QQ通道中由QQMessageHandler拦截并发送，exec模式仅渲染到本地。</p>
+     */
+    private String executeSendImage(String content) {
+        if (content == null || content.trim().isEmpty()) {
+            return "[sendimage] 内容为空，无法渲染";
+        }
+        if (sair.aiagent.util.ImageRenderer.isHeadless()) {
+            return "[sendimage] 当前环境无图形界面，无法渲染图片。内容: " + content;
+        }
+        
+        String text = content.trim();
+        EdtUtils.println(new Color(150, 200, 255), "\n  [渲染图片] " + (text.length() > 40 ? text.substring(0, 40) + "..." : text));
+        
+        try {
+            String dataDir = selfActivity.getDataDir();
+            File outputDir = new File(dataDir, "rendered");
+            String fileName = "img_" + System.currentTimeMillis() + ".png";
+            File outputFile = new File(outputDir, fileName);
+            
+            sair.aiagent.util.ImageRenderer.renderTextToImage(text, outputFile);
+            
+            String absPath = outputFile.getAbsolutePath();
+            // 如果QQ execs回调可用，以图片消息形式发送
+            if (qqExecsCallback != null) {
+                qqExecsCallback.accept("[IMAGE]" + absPath);
+            }
+            return "[sendimage] 图片已渲染: " + absPath;
+        } catch (Exception e) {
+            return "[sendimage] 渲染失败: " + e.getMessage();
+        }
+    }
+
+    // ==================== <sendrecord> — 发送语音 ====================
+
+    /**
+     * 执行 &lt;sendrecord&gt; 标签 —— 发送语音消息。
+     * 内容为语音文件的本地路径或网络URL。
+     */
+    private String executeSendRecord(String content) {
+        if (content == null || content.trim().isEmpty()) {
+            return "[sendrecord] 语音文件路径为空";
+        }
+        String path = content.trim();
+        EdtUtils.println(new Color(200, 180, 255), "\n  [发送语音] " + path);
+        
+        // 如果QQ execs回调可用，以语音消息形式发送
+        if (qqExecsCallback != null) {
+            qqExecsCallback.accept("[RECORD]" + path);
+        }
+        return "[sendrecord] 语音消息路径已传递: " + path;
+    }
+
+    // ==================== <sendfile> — 发送文件（主人专用） ====================
+
+    /**
+     * 执行 &lt;sendfile&gt; 标签 —— 发送本地文件。
+     * execs模式（主人权限）下可用，QQ通道中由QQMessageHandler拦截处理。
+     */
+    private String executeSendFile(String content) {
+        if (content == null || content.trim().isEmpty()) {
+            return "[sendfile] 文件路径为空";
+        }
+        String filePath = content.trim();
+        
+        // 检查文件是否存在
+        File file = new File(filePath);
+        if (!file.exists()) {
+            return "[sendfile] 文件不存在: " + filePath;
+        }
+        if (!file.isFile()) {
+            return "[sendfile] 路径不是文件: " + filePath;
+        }
+        
+        EdtUtils.println(new Color(255, 200, 150), "\n  [发送文件] " + filePath + " (" + formatSize(file.length()) + ")");
+        
+        // 如果QQ execs回调可用，以文件消息形式发送
+        if (qqExecsCallback != null) {
+            qqExecsCallback.accept("[FILE]" + filePath + "|" + file.getName());
+        }
+        return "[sendfile] 文件路径已传递: " + filePath + " (" + formatSize(file.length()) + ")";
+    }
 
     /**
      * 执行 &lt;stop&gt; 标签 —— 立即停止当前 Agent 循环。

@@ -302,6 +302,107 @@ public class NapCatApi {
         return server.sendApiCall("get_friend_list", new HashMap<>());
     }
     
+    // ==================== 图片发送API ====================
+    
+    /**
+     * 发送群图片消息
+     * @param groupId 群号
+     * @param fileOrUrl 图片文件路径（本地绝对路径）或URL
+     * @return API响应JSON
+     */
+    public String sendGroupImage(long groupId, String fileOrUrl) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("group_id", groupId);
+        params.put("message", "[CQ:image,file=" + escapeCQ(fileOrUrl) + "]");
+        return server.sendApiCall("send_group_msg", params);
+    }
+    
+    /**
+     * 发送私聊图片消息
+     * @param userId QQ号
+     * @param fileOrUrl 图片文件路径（本地绝对路径）或URL
+     * @return API响应JSON
+     */
+    public String sendPrivateImage(long userId, String fileOrUrl) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("user_id", userId);
+        params.put("message", "[CQ:image,file=" + escapeCQ(fileOrUrl) + "]");
+        return server.sendApiCall("send_private_msg", params);
+    }
+    
+    // ==================== 语音发送API ====================
+    
+    /**
+     * 发送群语音消息
+     * @param groupId 群号
+     * @param fileOrUrl 语音文件路径（本地绝对路径）或URL
+     * @return API响应JSON
+     */
+    public String sendGroupRecord(long groupId, String fileOrUrl) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("group_id", groupId);
+        params.put("message", "[CQ:record,file=" + escapeCQ(fileOrUrl) + "]");
+        return server.sendApiCall("send_group_msg", params);
+    }
+    
+    /**
+     * 发送私聊语音消息
+     * @param userId QQ号
+     * @param fileOrUrl 语音文件路径（本地绝对路径）或URL
+     * @return API响应JSON
+     */
+    public String sendPrivateRecord(long userId, String fileOrUrl) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("user_id", userId);
+        params.put("message", "[CQ:record,file=" + escapeCQ(fileOrUrl) + "]");
+        return server.sendApiCall("send_private_msg", params);
+    }
+    
+    // ==================== 文件发送API ====================
+    
+    /**
+     * 发送群文件
+     * @param groupId 群号
+     * @param filePath 文件本地绝对路径
+     * @param fileName 文件显示名称
+     * @return API响应JSON
+     */
+    public String sendGroupFile(long groupId, String filePath, String fileName) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("group_id", groupId);
+        params.put("file", filePath);
+        params.put("name", fileName != null ? fileName : new java.io.File(filePath).getName());
+        return server.sendApiCall("upload_group_file", params);
+    }
+    
+    /**
+     * 发送私聊文件
+     * @param userId QQ号
+     * @param filePath 文件本地绝对路径
+     * @param fileName 文件显示名称
+     * @return API响应JSON
+     */
+    public String sendPrivateFile(long userId, String filePath, String fileName) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("user_id", userId);
+        params.put("file", filePath);
+        params.put("name", fileName != null ? fileName : new java.io.File(filePath).getName());
+        return server.sendApiCall("upload_private_file", params);
+    }
+    
+    // ==================== 消息查询API ====================
+    
+    /**
+     * 获取消息详情（用于引用回复分析）
+     * @param messageId 消息ID
+     * @return API响应JSON
+     */
+    public String getMessage(int messageId) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("message_id", messageId);
+        return server.sendApiCall("get_msg", params);
+    }
+    
     // ==================== 工具方法 ====================
     
     /**
@@ -341,5 +442,17 @@ public class NapCatApi {
         // sendApiCall返回的是echo字符串（如"echo_1"），不是JSON响应
         // 只要echo非空即表示请求已成功发送
         return response != null && !response.isEmpty();
+    }
+    
+    /**
+     * 转义CQ码参数中的特殊字符
+     * 将 & [ ] , 替换为 &amp; &#91; &#93; &#44;
+     */
+    private static String escapeCQ(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;")
+                .replace("[", "&#91;")
+                .replace("]", "&#93;")
+                .replace(",", "&#44;");
     }
 }

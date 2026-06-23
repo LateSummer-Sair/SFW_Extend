@@ -35,7 +35,7 @@
                 <div class="section-tag">Architecture</div>
                 <h2>系统架构</h2>
                 <div class="section-divider"></div>
-                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。v2.0 最新修复：线程安全重构（移除共享 groupActionHandler，参数化传递 handler）解决并发群聊上下文混乱、提示词追加机制修复。</p>
+                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。v2.1 更新：PromptManager 集中式提示词管理（三段提示词统一入口）、config.properties 追加模式持久化。</p>
             </div>
         </div>
     </section>
@@ -52,7 +52,8 @@
                 <!-- Core Layer Row 1 -->
                 <div class="arch-layer">
                     <div class="arch-node core">PersistenceManager<br><small>SQLite · FTS5 · 统一持久化</small></div>
-                    <div class="arch-node core">AiConfig<br><small>单例</small></div>
+                    <div class="arch-node core">AiConfig<br><small>单例配置</small></div>
+                    <div class="arch-node core">PromptManager<br><small>提示词集中管理</small></div>
                     <div class="arch-node core">StreamPrinter<br><small>生产者-消费者</small></div>
                     <div class="arch-node core">DeepSeekClient<br><small>策略</small></div>
                     <div class="arch-node core">AgentExecutor<br><small>ReAct · execs回调</small></div>
@@ -118,7 +119,7 @@
                     / <code style="color:var(--accent-amber);">.onebot.util</code>
                 </p>
                 <p style="color:var(--text-muted); font-size:0.78rem; margin-top:8px;">
-                    33 个源文件 · 约 11,147 行代码 · 9 个包
+                    34 个源文件 · 约 11,500 行代码 · 9 个包
                 </p>
             </div>
         </div>
@@ -395,7 +396,7 @@
                         <b>UnifiedQQMemoryManager</b>：统一记忆库，所有对话存储在 unified_memory.db，通过 source_type/source_id 标记区分群聊/私聊，实现记忆联通<br>
                         <b>JournalManager</b>：最近 25 条会话日志（跨重启持久化，SQLite）→ 注入 system prompt<br>
                         <b>EmotionManager</b>：当前情绪状态（心情+性别，持久化到 app_state）→ 注入 system prompt<br>
-                        <b>PersistenceManager</b>：SQLite 统一持久化层，WAL 模式增量写入，替代 5 个 JSON 文件<br>
+                        <b>PromptManager</b>：集中式提示词管理器（单例），三段提示词统一入口（systemPrompt/execqPrompt/agentStaticPrompt），硬编码默认 + config.properties 追加模式持久化<br>
                                                 <b>UnifiedQQMemoryManager</b>：QQ机器人统一记忆库，存储所有对话历史、群聊记录、AI独立记忆，通过来源标记实现记忆联通<br>
                         以上所有上下文在 <code>buildSystemPrompt()</code> 中一次性融合。
                     </p>
@@ -408,7 +409,7 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.0 ·
+                <span class="brand">AiAgent</span> v2.1 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
             </p>

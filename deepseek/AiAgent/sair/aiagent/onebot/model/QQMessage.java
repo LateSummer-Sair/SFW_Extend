@@ -37,6 +37,19 @@ public class QQMessage {
     private final List<Long> mentionedUsers = new ArrayList<>();
     /** 当前消息中@提及的所有用户QQ号对应的原始at段文本 */
     private final List<String> mentionedAtStrings = new ArrayList<>();
+    
+    /** 消息是否包含图片 */
+    private boolean hasImage;
+    /** 图片URL列表 */
+    private final List<String> imageUrls = new ArrayList<>();
+    /** 图片本地文件路径列表 */
+    private final List<String> imageFilePaths = new ArrayList<>();
+    /** 是否包含折叠/转发消息 */
+    private boolean hasForward;
+    /** 折叠消息中提取的文本内容 */
+    private String forwardContent;
+    /** 引用消息的原始内容(通过get_msg API获取) */
+    private String quotedMessageContent;
 
     // === 内部类 ===
 
@@ -55,12 +68,21 @@ public class QQMessage {
 
     /** 消息段 */
     public static class MessageSegment {
-        public String type;  // text / at / image / reply / face / record / video / json等
+        public String type;  // text / at / image / reply / face / record / video / json / forward等
         public String text;  // text类型的内容
         public long qq;      // at类型的QQ号
         public long id;      // reply类型的消息ID
         public String url;   // image/record类型的URL
         public String file;  // image/record类型的文件路径
+        public String content; // forward类型的嵌套消息内容(JSON数组)
+        public String subType; // image子类型(0=普通,1=表情)
+        public String fileId;  // image的文件ID
+        public String fileName; // file类型的文件名
+        
+        /** 是否是图片消息段 */
+        public boolean isImage() { return "image".equals(type); }
+        /** 是否是折叠消息段 */
+        public boolean isForward() { return "forward".equals(type); }
     }
 
     // === Getters/Setters ===
@@ -110,6 +132,26 @@ public class QQMessage {
         this.mentionedUsers.add(qq);
         this.mentionedAtStrings.add(atString != null ? atString : String.valueOf(qq));
     }
+    
+    // === 图片/折叠相关 ===
+    
+    public boolean hasImage() { return hasImage; }
+    public void setHasImage(boolean v) { this.hasImage = v; }
+    
+    public List<String> getImageUrls() { return imageUrls; }
+    public void addImageUrl(String url) { if (url != null && !url.isEmpty()) this.imageUrls.add(url); }
+    
+    public List<String> getImageFilePaths() { return imageFilePaths; }
+    public void addImageFilePath(String path) { if (path != null && !path.isEmpty()) this.imageFilePaths.add(path); }
+    
+    public boolean hasForward() { return hasForward; }
+    public void setHasForward(boolean v) { this.hasForward = v; }
+    
+    public String getForwardContent() { return forwardContent; }
+    public void setForwardContent(String v) { this.forwardContent = v; }
+    
+    public String getQuotedMessageContent() { return quotedMessageContent; }
+    public void setQuotedMessageContent(String v) { this.quotedMessageContent = v; }
 
     /** 是否为群消息 */
     public boolean isGroupMessage() {
@@ -129,10 +171,31 @@ public class QQMessage {
         return String.valueOf(userId);
     }
 
-    /** 提取纯文本内容（去除CQ码） */
+    /** 提取纯文本内容（去除CQ码，含图片/折叠占位） */
     public String getPlainText() {
         if (rawMessage == null) return "";
-        // 去除CQ码
+        String text = rawMessage;
+        // 如果解析了消息段且包含图片，追加图片信息
+        if (hasImage && !imageUrls.isEmpty()) {
+            StringBuilder sb = new StringBuilder(text.replaceAll("\\[CQ:[^\\]]+\\]", "").trim());
+            sb.append("\n[包含图片: ").append(imageUrls.size()).append("张]");
+            for (int i = 0; i < imageUrls.size(); i++) {
+                sb.append("\n  图片").append(i + 1).append(": ").append(imageUrls.get(i));
+            }
+            return sb.toString().trim();
+        }
+        // 如果包含折叠消息，追加折叠内容
+        if (hasForward && forwardContent != null && !forwardContent.isEmpty()) {
+            StringBuilder sb = new StringBuilder(text.replaceAll("\\[CQ:[^\\]]+\\]", "").trim());
+            sb.append("\n[转发/折叠消息内容: ").append(forwardContent).append("]");
+            return sb.toString().trim();
+        }
+        return text.replaceAll("\\[CQ:[^\\]]+\\]", "").trim();
+    }
+    
+    /** 提取纯文本内容（仅文本，不含图片/折叠信息） */
+    public String getPlainTextOnly() {
+        if (rawMessage == null) return "";
         return rawMessage.replaceAll("\\[CQ:[^\\]]+\\]", "").trim();
     }
 

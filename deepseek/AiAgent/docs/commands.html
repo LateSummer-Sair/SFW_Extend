@@ -29,7 +29,7 @@
                 <div class="section-tag">CLI Reference</div>
                 <h2>用户命令参考</h2>
                 <div class="section-divider"></div>
-                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 33 个用户命令（含 16 个 OneBot QQ 机器人命令）。AiAgent 主线 12 个 XML 标签，QQ execq 通道 16 个标签（10 种群管标签 + 6 种工具标签）。v2.0 最新修复：线程安全重构 + 提示词追加机制。</p>
+                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 33 个用户命令（含 16 个 OneBot QQ 机器人命令）。AiAgent 主线 15 个 XML 标签，QQ execq 通道 16 个标签（10 种群管标签 + 6 种工具标签）。v2.1 更新：PromptManager 集中式提示词管理、config.properties 追加模式持久化、新增 sendimage/sendrecord/sendfile 标签。</p>
             </div>
         </div>
     </section>
@@ -69,7 +69,7 @@
                             <td class="cmd-name">ai/setprompt</td>
                             <td>[提示词]</td>
                             <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">设置系统提示词，可定义 AI 性格/行为边界。AI 也可通过 &lt;editprompt&gt; 自行修改</td>
+                            <td class="cmd-desc">设置系统提示词（追加到硬编码默认后，持久化到 config.properties）。AI 也可通过 &lt;editprompt&gt; 自行修改</td>
                         </tr>
                         <tr>
                             <td class="cmd-name">ai/showprompt</td>
@@ -163,7 +163,7 @@
                 <h2>OneBot v11 QQ 机器人命令</h2>
                 <div class="section-divider"></div>
                 <p>通过反向 WebSocket 连接 QQ，execq 独立通道：独立提示词、统一记忆库（所有对话历史统一管理）、插件白名单门控。共 16 个 OneBot 命令。</p>
-                <p><strong>v2.0 新增：</strong>主人消息添加 <code>execs:</code> 前缀可触发完整 execs 链路，静默执行所有操作，实时推送每轮思考结果给主人。支持 <code>&lt;stop&gt;</code> 标签紧急停止。群管理中 AI 可执行 10 种群管标签（<code>&lt;ban&gt;</code> 禁言/<code>&lt;kick&gt;</code> 踢出/<code>&lt;muteall&gt;</code> 全禁/<code>&lt;setadmin&gt;</code> 设管/<code>&lt;setcard&gt;</code> 改名/<code>&lt;setgroupname&gt;</code> 改群/<code>&lt;leavegroup&gt;</code> 退群/<code>&lt;block&gt;</code> 拉黑/<code>&lt;unblock&gt;</code> 解黑/<code>&lt;delfriend&gt;</code> 删友）。提示词完全分层隔离（主线 12 标签 vs OneBot 16 标签），DEFAULT_EXECQ_PROMPT 已压缩优化。</p>
+                <p><strong>v2.1 新增：</strong>主人消息添加 <code>execs:</code> 前缀可触发完整 execs 链路，静默执行所有操作，实时推送每轮思考结果给主人。支持 <code>&lt;stop&gt;</code> 标签紧急停止。群管理中 AI 可执行 10 种群管标签（<code>&lt;ban&gt;</code> 禁言/<code>&lt;kick&gt;</code> 踢出/<code>&lt;muteall&gt;</code> 全禁/<code>&lt;setadmin&gt;</code> 设管/<code>&lt;setcard&gt;</code> 改名/<code>&lt;setgroupname&gt;</code> 改群/<code>&lt;leavegroup&gt;</code> 退群/<code>&lt;block&gt;</code> 拉黑/<code>&lt;unblock&gt;</code> 解黑/<code>&lt;delfriend&gt;</code> 删友）。提示词完全分层隔离（主线 15 标签 vs OneBot 16 标签）。</p>
             </div>
 
             <div style="overflow-x:auto;">
@@ -217,7 +217,7 @@
                             <td class="cmd-name">ai/onebotsetprompt</td>
                             <td>[提示词]</td>
                             <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">设置 execq 通道独立系统提示词（与主通道完全独立）</td>
+                            <td class="cmd-desc">设置 execq 通道独立系统提示词（追加到硬编码默认后，持久化到 config.properties）</td>
                         </tr>
                         <tr>
                             <td class="cmd-name">ai/onebotshowprompt</td>
@@ -305,7 +305,7 @@
                 <div class="section-tag">Internal API</div>
                 <h2>Agent XML 操作标签</h2>
                 <div class="section-divider"></div>
-                <p>AI Agent 通过 XML 标签发出操作指令，由 <code>AgentExecutor.parseActions()</code> 正则解析。共 12 种标签。</p>
+                <p>AI Agent 通过 XML 标签发出操作指令，由 <code>AgentExecutor.parseActions()</code> 正则解析。共 15 种标签。</p>
             </div>
 
             <div style="overflow-x:auto;">
@@ -378,6 +378,24 @@
                             <td>&lt;superise&gt;🎉 太棒了！&lt;/superise&gt;</td>
                             <td style="color:var(--accent-green);">否</td>
                             <td class="cmd-desc">弹出彩蛋/撒娇窗口。支持 emoji + 文案。粉色（撒娇）/ 橘色（惊喜），3-8 秒自动关闭</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;sendimage&gt;</td>
+                            <td>&lt;sendimage&gt;文字/路径/URL&lt;/sendimage&gt;</td>
+                            <td style="color:var(--accent-green);">否</td>
+                            <td class="cmd-desc">AWT/Graphics2D 将文字渲染为 PNG 图片发送，或直接发送已有图片文件/URL。QQ 通道发送到聊天，控制台模式保存到 dataDir/rendered/</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;sendrecord&gt;</td>
+                            <td>&lt;sendrecord&gt;路径或URL&lt;/sendrecord&gt;</td>
+                            <td style="color:var(--accent-green);">否</td>
+                            <td class="cmd-desc">发送语音/音频消息。支持本地文件路径或网络 URL，格式 .amr/.silk/.mp3</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;sendfile&gt;</td>
+                            <td>&lt;sendfile&gt;本地路径&lt;/sendfile&gt;</td>
+                            <td style="color:var(--accent-green);">否</td>
+                            <td class="cmd-desc">发送本地文件到 QQ 聊天。⚠ 仅主人（masterQQ）可用，非主人调用将被拒绝</td>
                         </tr>
                         <tr>
                             <td class="cmd-name">&lt;stop&gt;</td>
@@ -515,12 +533,12 @@ ai/onebotwhitelistadd IDE</code></pre>
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.0 ·
+                <span class="brand">AiAgent</span> v2.1 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · NapCat群管理 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 12种XML标签 · 部署三步骤
+                QQ OneBot · NapCat群管理 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 15种XML标签 · 部署三步骤
             </p>
         </div>
     </footer>

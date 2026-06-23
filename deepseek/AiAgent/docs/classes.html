@@ -26,10 +26,10 @@
                 <div class="section-tag">Class Structure</div>
                 <h2>类结构详解</h2>
                 <div class="section-divider"></div>
-                <p>33 个核心类，按职责划分为 9 个包，总计约 11,234 行代码。</p>
+                <p>34 个核心类，按职责划分为 9 个包，总计约 11,500 行代码。</p>
                 <p style="margin-top:8px; font-size:0.85rem; color:var(--text-muted);">
                     <code style="color:var(--accent-cyan);">sair.aiagent</code> (1 类) ·
-                    <code style="color:var(--accent-purple);">.core</code> (12 类) ·
+                    <code style="color:var(--accent-purple);">.core</code> (13 类) ·
                     <code style="color:var(--accent-green);">.model</code> (3 类) ·
                     <code style="color:var(--accent-amber);">.util</code> (3 类) ·
                     <code style="color:var(--accent-cyan);">.ui</code> (2 类) ·
@@ -54,9 +54,19 @@
                 <p>继承 sair.user.Activity，SFW 插件入口。main() 路由 28 个命令到 ActivityActions。管理 OneBotServer + QQMessageHandler 完整生命周期。构造函数初始化所有核心组件。</p>
             </div>
             <div class="pattern-card reveal">
-                <div class="p-header"><span class="p-badge amber">Core</span><h4>AgentExecutor</h4></div>
-                <div class="p-class">sair.aiagent.core · 1121 行</div>
-                <p>ReAct 推理-行动循环引擎。最多 30 轮循环，execq 通道 50 轮。12 种 XML 标签：cmd/readfile/readdir/sys/evaljs/eval/web/remember/download/superise/editprompt/stop。execq 受限白名单（cmd/web/readdir/setname/stop），自动绕过确认门控。v2.0 新增 stop 标签三通道覆盖。</p>
+                <div class="p-header"><span class="p-badge amber">Core</span><h4>AiConfig</h4></div>
+                <div class="p-class">sair.aiagent.core · 372 行</div>
+                <p>单例配置管理器。API Key AES-128 加密存储，config.properties 持久化。提示词通过 PromptManager 统一管理，load 时追加到 PromptManager，save 时从 PromptManager 读取 extra 写入。</p>
+            </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge amber">Core</span><h4>PromptManager</h4></div>
+                <div class="p-class">sair.aiagent.core · 358 行</div>
+                <p>集中式提示词管理器（单例）。三段提示词统一入口：systemPrompt（控制台Chat）、execqPrompt（QQ通道）、agentStaticPrompt（Agent执行）。硬编码默认值 + config.properties 追加模式持久化。setSystemPrompt/setExecqPrompt 走追加写入，重启不丢失。</p>
+            </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge cyan">Core</span><h4>AgentExecutor</h4></div>
+                <div class="p-class">sair.aiagent.core · 1184 行</div>
+                <p>ReAct 推理-行动循环引擎。最多 30 轮循环，execq 通道 50 轮。15 种 XML 标签：cmd/readfile/readdir/sys/evaljs/eval/web/remember/download/superise/editprompt/stop/sendimage/sendrecord/sendfile。execq 受限白名单（cmd/web/readdir/setname/stop），自动绕过确认门控。buildStaticPrompt() 通过 PromptManager 获取模板并动态填充 {os}/{shell}/{jdk}/{plugins}。</p>
             </div>
             <div class="pattern-card reveal">
                 <div class="p-header"><span class="p-badge green">Core</span><h4>ActivityActions</h4></div>
@@ -87,6 +97,11 @@
                 <div class="p-header"><span class="p-badge amber">Core</span><h4>SysConsoleExecutor</h4></div>
                 <div class="p-class">sair.aiagent.core · 248 行</div>
                 <p>跨平台系统命令执行器。ProcessBuilder 封装，自动识别 cmd/sh 切换，30s 超时。支持同步执行和实时回调（OutputListener）。Windows 强制 UTF-8 编码。</p>
+            </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge green">Util</span><h4>ImageRenderer</h4></div>
+                <div class="p-class">sair.aiagent.util · 约150 行</div>
+                <p>AWT/Graphics2D 文字渲染为 PNG 图片工具。支持 renderTextToImage() 渲染多行文字、createBarChart() 柱状图、wrapText() 自动换行。QQ 通道中配合 &lt;sendimage&gt; 标签使用。</p>
             </div>
             <div class="pattern-card reveal">
                 <div class="p-header"><span class="p-badge amber">Core</span><h4>MemoryManager</h4></div>
@@ -222,7 +237,7 @@
     </section>
     <footer class="footer">
         <div class="container">
-            <p><span class="brand">AiAgent</span> v2.0 · 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--accent-cyan);">DeepSeek API</span></p>
+            <p><span class="brand">AiAgent</span> v2.1 · 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--accent-cyan);">DeepSeek API</span></p>
             <p style="margin-top:6px; font-size:0.78rem;">QQ OneBot · NapCat群管理 · 10种群管标签 · 好感度决策 · 反滥用 · stop · 群上下文 · SQLite 双库 · 情绪系统 · 彩蛋弹窗 · FTS5 · 流式排空 · 动态注入</p>
         </div>
     </footer>

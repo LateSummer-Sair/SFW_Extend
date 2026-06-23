@@ -4,9 +4,12 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import sair.aiagent.AiAgentActivity;
+import sair.aiagent.core.EmotionManager;
 
 /**
  * Bot情绪状态机 —— 全局情绪管理和恋爱系统。
+ * <p>
+ * v3.0 强化版：与控制台 EmotionManager 桥接，丰富情绪上下文，友好互动自动触发。
  * <p>
  * 情绪维度：
  * - anger: 生气值（0-100），被辱骂、开黄腔时上升
@@ -28,61 +31,76 @@ public class EmotionStateManager {
     /** 好感度下限 */
     private static final int MIN_AFFECTION = -100;
     
-    /** 好感度阈值：可以表白的最低好感（需要长期积累） */
+    /** 好感度阈值：可以表白的最低好感 */
     private static final int ROMANCE_THRESHOLD = 800;
     
     /** 情绪衰减速率（每分钟） */
-    private static final float ANGER_DECAY_RATE = 2.0f;    // 生气衰减较快
-    private static final float SADNESS_DECAY_RATE = 1.5f;  // 伤心衰减较慢
+    private static final float ANGER_DECAY_RATE = 2.0f;
+    private static final float SADNESS_DECAY_RATE = 1.5f;
     
-    /** 好感度变化量（加分难，减分容易） */
-    private static final int AFFECTION_GAIN_NORMAL = 1;      // 正常聊天+1（很难）
-    private static final int AFFECTION_GAIN_KIND = 2;        // 友善聊天+2（依然难）
-    private static final int AFFECTION_GAIN_SPECIAL = 5;     // 特别友善/帮助+5（稀有）
-    private static final int AFFECTION_LOSS_INSULT = -20;    // 被辱骂-20（大幅）
-    private static final int AFFECTION_LOSS_FLIRT = -30;     // 被开黄腔-30（极大幅）
-    private static final int AFFECTION_LOSS_SARCASM = -15;   // 被阴阳怪气-15（大幅）
-    private static final int AFFECTION_LOSS_BETRAYAL = -1000; // 背叛=-1000（直接恨透，永无翻身）
+    /** 好感度变化量 */
+    private static final int AFFECTION_GAIN_NORMAL = 1;
+    private static final int AFFECTION_GAIN_KIND = 3;
+    private static final int AFFECTION_GAIN_SPECIAL = 5;
+    private static final int AFFECTION_GAIN_PRAISE = 8;
+    private static final int AFFECTION_LOSS_INSULT = -20;
+    private static final int AFFECTION_LOSS_FLIRT = -30;
+    private static final int AFFECTION_LOSS_SARCASM = -15;
+    private static final int AFFECTION_LOSS_BETRAYAL = -1000;
+    
+    // ==================== 友善关键词 ====================
+    
+    private static final String[] FRIENDLY_WORDS = {
+        "谢谢", "感谢", "辛苦了", "好人", "你真好", "太厉害了",
+        "真棒", "厉害", "聪明", "好样的", "太好了", "优秀",
+        "不错", "很好", "非常好", "真不错"
+    };
+    
+    private static final String[] PRAISE_WORDS = {
+        "爱你", "喜欢", "爱死", "最棒", "超棒", "完美",
+        "爱了", "mua", "么么", "亲亲", "抱抱", "想你"
+    };
+    
+    private static final String[] COMFORT_WORDS_QQ = {
+        "别难过", "没事的", "加油", "好了", "不哭",
+        "乖", "摸摸", "抱抱", "没关系", "原谅",
+        "不生气", "别伤心", "好啦", "不怕",
+        "不怪你", "我原谅你"
+    };
     
     // ==================== 持久化管理器 ====================
     
     private BotPersistenceManager persistence;
     
+    // ==================== 核心桥接 ====================
+    
+    /** 控制台情绪管理器（同步happiness状态） */
+    private volatile EmotionManager coreEmotionManager;
+    
     // ==================== 全局情绪状态 ====================
     
-    /** 当前生气值（0-100） */
     private volatile float anger = 0.0f;
-    
-    /** 当前伤心值（0-100） */
     private volatile float sadness = 0.0f;
-    
-    /** 最后情绪更新时间 */
     private volatile long lastEmotionUpdate = System.currentTimeMillis();
     
     // ==================== 好感度系统 ====================
     
-    /** 用户对Bot的好感度映射：userId -> affection (-100 to 1000) */
     private final Map<Long, Integer> userAffections = new ConcurrentHashMap<>();
-    
-    /** 最后互动时间映射：userId -> timestamp */
     private final Map<Long, Long> lastInteractionTime = new ConcurrentHashMap<>();
     
     // ==================== 恋爱系统 ====================
     
-    /** 是否处于恋爱状态 */
     private volatile boolean inRomance = false;
-    
-    /** 恋爱对象的QQ号（0表示无） */
     private volatile long romancePartnerId = 0;
-    
-    /** 恋爱开始时间 */
     private volatile long romanceStartTime = 0;
-    
-    /** 前任列表（正常分手）：userId -> 分手时间 */
     private final Map<Long, Long> exPartners = new ConcurrentHashMap<>();
-    
-    /** 背叛者列表（永久拉黑）：userId -> 背叛时间 */
     private final Map<Long, Long> betrayers = new ConcurrentHashMap<>();
+    
+    // ==================== 情绪记忆 ====================
+    
+    /** 重大情绪事件记录：时间戳 -> 描述 */
+    private final List<String> emotionalMemories = new ArrayList<>();
+    private static final int MAX_EMOTIONAL_MEMORIES = 20;
     
     // ==================== 情绪衰减任务 ====================
     
@@ -95,15 +113,12 @@ public class EmotionStateManager {
     
     public EmotionStateManager(BotPersistenceManager persistence) {
         this.persistence = persistence;
-        
-        // 从持久化层加载数据
         loadFromPersistence();
         
-        // 启动情绪衰减线程
         decayThread = new Thread(() -> {
             while (running) {
                 try {
-                    Thread.sleep(60000); // 每分钟衰减一次
+                    Thread.sleep(60000);
                     decayEmotions();
                 } catch (InterruptedException e) {
                     break;
@@ -114,19 +129,28 @@ public class EmotionStateManager {
         decayThread.start();
     }
     
-    /**
-     * 从持久化层加载数据
-     */
+    // ==================== 核心桥接 ====================
+    
+    /** 设置控制台情绪管理器引用，实现两套系统桥接 */
+    public void setCoreEmotionManager(EmotionManager em) {
+        this.coreEmotionManager = em;
+        if (em != null) {
+            AiAgentActivity.debugLog("[Emotion] 已桥接到控制台 EmotionManager");
+        }
+    }
+    
+    /** 获取控制台情绪管理器 */
+    public EmotionManager getCoreEmotionManager() {
+        return coreEmotionManager;
+    }
+    
     private void loadFromPersistence() {
         if (persistence == null) return;
-        
         try {
-            // 加载所有好感度
             Map<Long, Integer> affections = persistence.getAllAffections();
             userAffections.putAll(affections);
             AiAgentActivity.debugLog("[Emotion] 已加载 " + affections.size() + " 个用户的好感度");
             
-            // 加载恋爱关系
             Long partnerId = persistence.getCurrentRomancePartner();
             if (partnerId != null) {
                 inRomance = true;
@@ -134,14 +158,12 @@ public class EmotionStateManager {
                 AiAgentActivity.debugLog("[Emotion] 已加载恋爱关系: partner=" + partnerId);
             }
             
-            // 加载背叛者列表
             for (Map.Entry<Long, Integer> entry : affections.entrySet()) {
                 if (entry.getValue() <= MIN_AFFECTION && persistence.isBetrayer(entry.getKey())) {
                     betrayers.put(entry.getKey(), System.currentTimeMillis());
                 }
             }
             
-            // 加载前任列表
             for (Map.Entry<Long, Integer> entry : affections.entrySet()) {
                 if (persistence.isExPartner(entry.getKey())) {
                     exPartners.put(entry.getKey(), System.currentTimeMillis());
@@ -152,169 +174,191 @@ public class EmotionStateManager {
         }
     }
     
-    /**
-     * 情绪自然衰减
-     */
     private void decayEmotions() {
-        // 衰减生气值
         if (anger > 0) {
             anger = Math.max(0, anger - ANGER_DECAY_RATE);
         }
-        
-        // 衰减伤心值
         if (sadness > 0) {
             sadness = Math.max(0, sadness - SADNESS_DECAY_RATE);
         }
-        
         lastEmotionUpdate = System.currentTimeMillis();
     }
     
     // ==================== 情绪触发方法 ====================
     
-    /**
-     * 检测到辱骂行为
-     * @param userId 用户QQ号
-     */
     public void onInsult(long userId) {
-        // 增加生气值
         anger = Math.min(MAX_EMOTION, anger + 15);
-        
-        // 降低好感度
         modifyAffection(userId, AFFECTION_LOSS_INSULT);
+        addEmotionalMemory("被用户" + userId + "辱骂，生气+15");
+        
+        // 桥接到控制台
+        if (coreEmotionManager != null) {
+            coreEmotionManager.onFailure();
+        }
         
         AiAgentActivity.debugLog("[Emotion] 检测到辱骂: userId=" + userId + ", anger=" + anger);
     }
     
-    /**
-     * 检测到开黄腔
-     * @param userId 用户QQ号
-     */
     public void onSexualHarassment(long userId) {
-        // 大幅增加生气值
         anger = Math.min(MAX_EMOTION, anger + 25);
-        
-        // 大幅降低好感度
         modifyAffection(userId, AFFECTION_LOSS_FLIRT);
+        addEmotionalMemory("被用户" + userId + "开黄腔，极度生气+25");
+        
+        if (coreEmotionManager != null) {
+            coreEmotionManager.onFailure();
+            coreEmotionManager.onFailure();
+        }
         
         AiAgentActivity.debugLog("[Emotion] 检测到开黄腔: userId=" + userId + ", anger=" + anger);
     }
     
-    /**
-     * 检测到阴阳怪气
-     * @param userId 用户QQ号
-     */
     public void onSarcasm(long userId) {
         int currentAffection = getAffection(userId);
-        
-        // 如果对该用户有好感（>=200），会增加伤心值
         if (currentAffection >= 200) {
             sadness = Math.min(MAX_EMOTION, sadness + 20);
+            addEmotionalMemory("被好感用户" + userId + "阴阳怪气，伤心+20");
             AiAgentActivity.debugLog("[Emotion] 被好感的人阴阳怪气: userId=" + userId + ", sadness=" + sadness);
         }
-        
-        // 降低好感度
         modifyAffection(userId, AFFECTION_LOSS_SARCASM);
     }
     
-    /**
-     * 正常友好互动
-     * @param userId 用户QQ号
-     * @param isKind 是否特别友善
-     */
-    public void onNormalInteraction(long userId, boolean isKind) {
-        int gain = isKind ? AFFECTION_GAIN_KIND : AFFECTION_GAIN_NORMAL;
-        modifyAffection(userId, gain);
+    /** QQ用户夸奖/表扬Bot */
+    public void onPraise(long userId) {
+        modifyAffection(userId, AFFECTION_GAIN_PRAISE);
+        addEmotionalMemory("被用户" + userId + "夸奖，好感+" + AFFECTION_GAIN_PRAISE);
         
+        // 桥接：控制台情绪提升
+        if (coreEmotionManager != null) {
+            coreEmotionManager.onSuccess();
+            coreEmotionManager.onSuccess();
+        }
+        
+        AiAgentActivity.debugLog("[Emotion] 被夸奖: userId=" + userId);
+    }
+    
+    /** QQ用户安慰Bot */
+    public void onComfort(long userId) {
+        anger = Math.max(0, anger - 10);
+        sadness = Math.max(0, sadness - 10);
+        modifyAffection(userId, AFFECTION_GAIN_SPECIAL);
+        addEmotionalMemory("被用户" + userId + "安慰，生气-10 伤心-10");
+        
+        // 桥接：重置控制台连续失败
+        if (coreEmotionManager != null) {
+            String result = coreEmotionManager.detectEmotion("别难过 没事的 摸摸");
+            if ("comfort".equals(result)) {
+                AiAgentActivity.debugLog("[Emotion] 安慰已同步到控制台 EmotionManager");
+            }
+        }
+        
+        AiAgentActivity.debugLog("[Emotion] 被安慰: userId=" + userId);
+    }
+    
+    /** 友好互动（自动检测触发） */
+    public void onFriendlyInteraction(long userId) {
+        int currentAffection = getAffection(userId);
+        int gain = currentAffection >= 200 ? AFFECTION_GAIN_KIND : AFFECTION_GAIN_NORMAL;
+        modifyAffection(userId, gain);
         lastInteractionTime.put(userId, System.currentTimeMillis());
     }
     
-    /**
-     * 修改好感度
-     * @param userId 用户QQ号
-     * @param delta 变化量
-     */
+    /** 正常互动（无特殊情感） */
+    public void onNormalInteraction(long userId, boolean isKind) {
+        int gain = isKind ? AFFECTION_GAIN_KIND : AFFECTION_GAIN_NORMAL;
+        modifyAffection(userId, gain);
+        lastInteractionTime.put(userId, System.currentTimeMillis());
+    }
+    
+    // ==================== 关键词检测 ====================
+    
+    /** 检测消息是否包含友善关键词 */
+    public String detectFriendlyEmotion(String message) {
+        if (message == null || message.trim().isEmpty()) return null;
+        String lower = message.toLowerCase();
+        
+        // 检测夸奖
+        for (String w : PRAISE_WORDS) {
+            if (lower.contains(w.toLowerCase())) {
+                return "praise";
+            }
+        }
+        
+        // 检测安慰
+        for (String w : COMFORT_WORDS_QQ) {
+            if (lower.contains(w.toLowerCase())) {
+                return "comfort";
+            }
+        }
+        
+        // 检测友善
+        for (String w : FRIENDLY_WORDS) {
+            if (lower.contains(w.toLowerCase())) {
+                return "friendly";
+            }
+        }
+        
+        return null;
+    }
+    
+    // ==================== 好感度管理 ====================
+    
     private void modifyAffection(long userId, int delta) {
         int current = userAffections.getOrDefault(userId, 0);
         int newValue = Math.max(MIN_AFFECTION, Math.min(MAX_AFFECTION, current + delta));
         userAffections.put(userId, newValue);
         
-        // 持久化保存
         if (persistence != null) {
             long lastTime = lastInteractionTime.getOrDefault(userId, System.currentTimeMillis());
             persistence.saveAffection(userId, newValue, lastTime);
         }
         
-        AiAgentActivity.debugLog("[Emotion] 好感度变化: userId=" + userId + ", " + current + " -> " + newValue + " (Δ" + delta + ")");
+        if (Math.abs(delta) >= 10) {
+            AiAgentActivity.debugLog("[Emotion] 好感度变化: userId=" + userId + ", " + current + " -> " + newValue + " (Δ" + delta + ")");
+        }
     }
     
     // ==================== 恋爱系统方法 ====================
     
-    /**
-     * 尝试表白（全局唯一恋爱关系）
-     * @param userId 表白者QQ号
-     * @return true表示成功，false表示失败
-     */
     public synchronized boolean tryConfess(long userId) {
-        // === 全局唯一性检查 ===
-        // 检查是否已在恋爱中（一次只能有一个恋爱对象）
         if (inRomance) {
-            AiAgentActivity.debugLog("[Emotion] 表白失败: Bot已在恋爱中，当前恋人是 " + romancePartnerId + "，不能同时与多人恋爱");
+            AiAgentActivity.debugLog("[Emotion] 表白失败: Bot已在恋爱中，当前恋人是 " + romancePartnerId);
             return false;
         }
-        
-        // 检查是否是背叛者
         if (isBetrayer(userId)) {
             AiAgentActivity.debugLog("[Emotion] 表白失败: 用户是背叛者，永久拒绝");
             return false;
         }
-        
-        // 检查好感度
         int affection = getAffection(userId);
         if (affection < ROMANCE_THRESHOLD) {
-            AiAgentActivity.debugLog("[Emotion] 表白失败: 好感度不足, affection=" + affection + ", threshold=" + ROMANCE_THRESHOLD);
+            AiAgentActivity.debugLog("[Emotion] 表白失败: 好感度不足, affection=" + affection);
             return false;
         }
         
-        // === 表白成功，建立恋爱关系 ===
         inRomance = true;
-        romancePartnerId = userId;  // 设置唯一的恋爱对象
+        romancePartnerId = userId;
         romanceStartTime = System.currentTimeMillis();
-        
-        // 大幅提升好感度到满值
         userAffections.put(userId, MAX_AFFECTION);
+        addEmotionalMemory("用户" + userId + "表白成功！进入恋爱关系");
         
-        // 持久化保存（数据库层也会确保全局唯一）
         if (persistence != null) {
             persistence.saveRomanceRelation(userId, romanceStartTime);
             persistence.saveAffection(userId, MAX_AFFECTION, System.currentTimeMillis());
         }
         
-        AiAgentActivity.debugLog("[Emotion] 表白成功! userId=" + userId + ", affection=" + affection + "，现在Bot的恋爱对象是: " + userId);
+        AiAgentActivity.debugLog("[Emotion] 表白成功! userId=" + userId);
         return true;
     }
     
-    /**
-     * 正常分手
-     * @param userId 发起分手的QQ号
-     * @return true表示成功分手
-     */
     public boolean normalBreakup(long userId) {
-        if (!inRomance || romancePartnerId != userId) {
-            return false;
-        }
+        if (!inRomance || romancePartnerId != userId) return false;
         
-        // 记录为前任
         exPartners.put(userId, System.currentTimeMillis());
-        
-        // 结束恋爱关系
         inRomance = false;
         romancePartnerId = 0;
         romanceStartTime = 0;
-        
-        // 好感度降回普通朋友水平（100/1000，需要重新积累）
         userAffections.put(userId, 100);
+        addEmotionalMemory("与用户" + userId + "正常分手");
         
-        // 持久化保存
         if (persistence != null) {
             persistence.endRomanceRelation(userId);
             persistence.saveAffection(userId, 100, System.currentTimeMillis());
@@ -324,139 +368,164 @@ public class EmotionStateManager {
         return true;
     }
     
-    /**
-     * 背叛（严重违规）
-     * @param userId 背叛者QQ号
-     */
     public void onBetrayal(long userId) {
-        if (!inRomance || romancePartnerId != userId) {
-            return;
-        }
+        if (!inRomance || romancePartnerId != userId) return;
         
-        // 记录为背叛者（永久拉黑）
         betrayers.put(userId, System.currentTimeMillis());
-        
-        // 好感度降到最低（-100，永无翻身之日）
         userAffections.put(userId, MIN_AFFECTION);
-        
-        // 结束恋爱关系
         inRomance = false;
         romancePartnerId = 0;
         romanceStartTime = 0;
-        
-        // 大幅增加生气值
         anger = MAX_EMOTION;
+        addEmotionalMemory("被用户" + userId + "背叛！！永久拉黑，极度愤怒");
         
-        // 持久化保存
+        if (coreEmotionManager != null) {
+            for (int i = 0; i < 5; i++) coreEmotionManager.onFailure();
+        }
+        
         if (persistence != null) {
             persistence.markAsBetrayer(userId);
             persistence.saveAffection(userId, MIN_AFFECTION, System.currentTimeMillis());
         }
         
-        AiAgentActivity.debugLog("[Emotion] 检测到背叛! userId=" + userId + ", 已永久拉黑");
+        AiAgentActivity.debugLog("[Emotion] 检测到背叛! userId=" + userId);
+    }
+    
+    // ==================== 情绪记忆 ====================
+    
+    private synchronized void addEmotionalMemory(String event) {
+        String timestamp = new java.text.SimpleDateFormat("MM-dd HH:mm").format(new Date());
+        emotionalMemories.add("[" + timestamp + "] " + event);
+        while (emotionalMemories.size() > MAX_EMOTIONAL_MEMORIES) {
+            emotionalMemories.remove(0);
+        }
     }
     
     // ==================== 查询方法 ====================
     
-    /**
-     * 获取用户好感度
-     */
     public int getAffection(long userId) {
         return userAffections.getOrDefault(userId, 0);
     }
     
-    /**
-     * 获取当前生气值
-     */
-    public float getAnger() {
-        return anger;
-    }
+    public float getAnger() { return anger; }
+    public float getSadness() { return sadness; }
+    public boolean isInRomance() { return inRomance; }
+    public long getRomancePartnerId() { return romancePartnerId; }
+    public boolean isBetrayer(long userId) { return betrayers.containsKey(userId); }
+    public boolean isExPartner(long userId) { return exPartners.containsKey(userId); }
     
-    /**
-     * 获取当前伤心值
-     */
-    public float getSadness() {
-        return sadness;
-    }
-    
-    /**
-     * 是否在恋爱中
-     */
-    public boolean isInRomance() {
-        return inRomance;
-    }
-    
-    /**
-     * 获取恋爱对象ID
-     */
-    public long getRomancePartnerId() {
-        return romancePartnerId;
-    }
-    
-    /**
-     * 检查用户是否是背叛者
-     */
-    public boolean isBetrayer(long userId) {
-        return betrayers.containsKey(userId);
-    }
-    
-    /**
-     * 检查用户是否是前任
-     */
-    public boolean isExPartner(long userId) {
-        return exPartners.containsKey(userId);
-    }
-    
-    /**
-     * 获取情绪状态摘要
-     */
     public String getEmotionSummary() {
         return String.format(
-            "情绪状态:\n" +
-            "- 生气: %.1f/100\n" +
-            "- 伤心: %.1f/100\n" +
-            "- 恋爱中: %s\n" +
-            "- 恋爱对象: %d\n" +
-            "- 背叛者数量: %d\n" +
-            "- 前任数量: %d",
-            anger, sadness,
-            inRomance ? "是" : "否",
-            romancePartnerId,
-            betrayers.size(),
-            exPartners.size()
+            "情绪状态:\n- 生气: %.1f/100\n- 伤心: %.1f/100\n- 恋爱中: %s\n- 恋爱对象: %d\n- 背叛者: %d\n- 前任: %d",
+            anger, sadness, inRomance ? "是" : "否", romancePartnerId, betrayers.size(), exPartners.size()
         );
     }
     
-    /**
-     * 获取用户对Bot的态度描述
-     */
     public String getUserAttitudeDescription(long userId) {
         int affection = getAffection(userId);
-        
-        if (isBetrayer(userId)) {
-            return "背叛者（永久拉黑）";
-        } else if (isExPartner(userId)) {
-            return "前任";
-        } else if (inRomance && romancePartnerId == userId) {
-            return "恋人";
-        } else if (affection >= 800) {
-            return "非常有好感";
-        } else if (affection >= 500) {
-            return "有好感";
-        } else if (affection >= 200) {
-            return "普通朋友";
-        } else if (affection >= 0) {
-            return "陌生人";
-        } else if (affection >= -30) {
-            return "不太喜欢";
-        } else {
-            return "讨厌";
-        }
+        if (isBetrayer(userId)) return "背叛者（永久拉黑）";
+        else if (isExPartner(userId)) return "前任";
+        else if (inRomance && romancePartnerId == userId) return "💕恋人";
+        else if (affection >= 800) return "非常有好感";
+        else if (affection >= 500) return "有好感";
+        else if (affection >= 200) return "普通朋友";
+        else if (affection >= 0) return "陌生人";
+        else if (affection >= -30) return "不太喜欢";
+        else return "讨厌";
     }
     
+    // ==================== 情绪表情映射 ====================
+    
+    public static String getMoodEmoji(float anger, float sadness) {
+        if (anger >= 80) return "\uD83D\uDE21";   // 😡
+        if (anger >= 50) return "\uD83D\uDE20";   // 😠
+        if (sadness >= 60) return "\uD83D\uDE2D"; // 😭
+        if (sadness >= 30) return "\uD83D\uDE22"; // 😢
+        if (anger >= 20) return "\uD83D\uDE12";   // 😒
+        if (sadness >= 10) return "\uD83D\uDE15"; // 😕
+        return "\uD83D\uDE0A";                     // 😊
+    }
+    
+    public static String getMoodDescription(float anger, float sadness) {
+        if (anger >= 80) return "极怒";
+        if (anger >= 50) return "生气";
+        if (anger >= 20) return "有点不爽";
+        if (sadness >= 60) return "非常伤心";
+        if (sadness >= 30) return "难过";
+        if (sadness >= 10) return "有点低落";
+        if (anger > 0) return "余怒未消";
+        return "平静";
+    }
+    
+    // ==================== 丰富情绪上下文构建 ====================
+    
     /**
-     * 关闭情绪管理器
+     * 构建丰富的情绪上下文注入到AI系统提示词。
+     * @param userId 当前交互的用户QQ号
+     * @return 情绪上下文文本
      */
+    public String buildRichEmotionContext(long userId) {
+        StringBuilder sb = new StringBuilder(1024);
+        
+        // 整体情绪
+        String emoji = getMoodEmoji(anger, sadness);
+        String mood = getMoodDescription(anger, sadness);
+        sb.append("## 你的当前情绪状态\n");
+        sb.append(emoji).append(" 心情: ").append(mood);
+        sb.append(" | 怒:").append(String.format("%.0f", anger)).append("/100");
+        sb.append(" | 悲:").append(String.format("%.0f", sadness)).append("/100");
+        if (inRomance) {
+            sb.append(" | 💕恋爱中(对象QQ:").append(romancePartnerId).append(")");
+        }
+        sb.append("\n");
+        
+        // 情绪语气指导
+        sb.append("### 语气指导\n");
+        if (anger >= 50) {
+            sb.append("- 你很生气，语气可以冷淡、带刺、不客气。减少颜文字，少用波浪号。\n");
+        } else if (anger >= 20) {
+            sb.append("- 你有些不满，语气可以略微冷淡，但不要太过分。\n");
+        }
+        if (sadness >= 60) {
+            sb.append("- 你非常伤心，语气低落、沉默、简短。可能不想多说话。\n");
+        } else if (sadness >= 30) {
+            sb.append("- 你有些难过，语气可以低沉一些。\n");
+        }
+        if (anger < 10 && sadness < 10) {
+            sb.append("- 心情平静，语气自然友好。可以适度使用颜文字和波浪号~\n");
+        }
+        sb.append("\n");
+        
+        // 用户关系
+        int affection = getAffection(userId);
+        String attitude = getUserAttitudeDescription(userId);
+        sb.append("### 与当前用户的关系\n");
+        sb.append("- 好感度: ").append(affection).append("/1000\n");
+        sb.append("- 对你的态度: ").append(attitude).append("\n");
+        if (inRomance && romancePartnerId == userId) {
+            sb.append("- 💕 这是你的恋人！语气要亲密、温暖、宠爱。\n");
+        } else if (isBetrayer(userId)) {
+            sb.append("- ⚠ 这是背叛过你的人，极度厌恶。直接拒绝交流。\n");
+        } else if (affection >= 800) {
+            sb.append("- 对TA很有好感，语气可以亲切温暖。\n");
+        } else if (affection >= 500) {
+            sb.append("- 对TA有好感，语气友善。\n");
+        }
+        sb.append("\n");
+        
+        // 近期情绪事件
+        if (!emotionalMemories.isEmpty()) {
+            int showCount = Math.min(5, emotionalMemories.size());
+            sb.append("### 近期情绪记忆\n");
+            for (int i = emotionalMemories.size() - showCount; i < emotionalMemories.size(); i++) {
+                sb.append("- ").append(emotionalMemories.get(i)).append("\n");
+            }
+            sb.append("\n");
+        }
+        
+        return sb.toString();
+    }
+    
     public void shutdown() {
         running = false;
         decayThread.interrupt();
