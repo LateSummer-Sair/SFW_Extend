@@ -50,6 +50,8 @@ public class QQMessage {
     private String forwardContent;
     /** 引用消息的原始内容(通过get_msg API获取) */
     private String quotedMessageContent;
+    /** 折叠消息的转发ID(用于get_forward_msg API获取内容) */
+    private String forwardId;
 
     // === 内部类 ===
 
@@ -75,6 +77,7 @@ public class QQMessage {
         public String url;   // image/record类型的URL
         public String file;  // image/record类型的文件路径
         public String content; // forward类型的嵌套消息内容(JSON数组)
+        public String forwardId; // forward类型的转发ID（字符串）
         public String subType; // image子类型(0=普通,1=表情)
         public String fileId;  // image的文件ID
         public String fileName; // file类型的文件名
@@ -152,6 +155,9 @@ public class QQMessage {
     
     public String getQuotedMessageContent() { return quotedMessageContent; }
     public void setQuotedMessageContent(String v) { this.quotedMessageContent = v; }
+    
+    public String getForwardId() { return forwardId; }
+    public void setForwardId(String v) { this.forwardId = v; }
 
     /** 是否为群消息 */
     public boolean isGroupMessage() {
@@ -174,23 +180,19 @@ public class QQMessage {
     /** 提取纯文本内容（去除CQ码，含图片/折叠占位） */
     public String getPlainText() {
         if (rawMessage == null) return "";
-        String text = rawMessage;
-        // 如果解析了消息段且包含图片，追加图片信息
+        StringBuilder sb = new StringBuilder(rawMessage.replaceAll("\\[CQ:[^\\]]+\\]", "").trim());
+        // 图片信息
         if (hasImage && !imageUrls.isEmpty()) {
-            StringBuilder sb = new StringBuilder(text.replaceAll("\\[CQ:[^\\]]+\\]", "").trim());
             sb.append("\n[包含图片: ").append(imageUrls.size()).append("张]");
             for (int i = 0; i < imageUrls.size(); i++) {
                 sb.append("\n  图片").append(i + 1).append(": ").append(imageUrls.get(i));
             }
-            return sb.toString().trim();
         }
-        // 如果包含折叠消息，追加折叠内容
+        // 折叠消息内容
         if (hasForward && forwardContent != null && !forwardContent.isEmpty()) {
-            StringBuilder sb = new StringBuilder(text.replaceAll("\\[CQ:[^\\]]+\\]", "").trim());
             sb.append("\n[转发/折叠消息内容: ").append(forwardContent).append("]");
-            return sb.toString().trim();
         }
-        return text.replaceAll("\\[CQ:[^\\]]+\\]", "").trim();
+        return sb.toString().trim();
     }
     
     /** 提取纯文本内容（仅文本，不含图片/折叠信息） */

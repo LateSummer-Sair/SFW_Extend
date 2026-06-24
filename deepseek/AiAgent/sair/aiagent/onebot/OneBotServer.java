@@ -44,6 +44,9 @@ public class OneBotServer {
     private ServerSocket serverSocket;
     private Thread acceptThread;
     private final List<WebSocketConnection> connections = new CopyOnWriteArrayList<>();
+    
+    /** API调用等待队列：echo → 响应Future */
+    private final ConcurrentHashMap<String, CompletableFuture<String>> pendingApiCalls = new ConcurrentHashMap<>();
 
     // === 配置项 ===
     private int port = DEFAULT_PORT;
@@ -132,7 +135,7 @@ public class OneBotServer {
 
     // ==================== 发送API调用 ====================
 
-    /** 发送API调用到OneBot实现端并等待响应 */
+    /** 发送API调用到OneBot实现端并等待响应（超时10秒） */
     public String sendApiCall(String action, Map<String, Object> params) {
         String echo = "echo_" + echoCounter.incrementAndGet();
         StringBuilder json = new StringBuilder();
@@ -159,15 +162,44 @@ public class OneBotServer {
         json.append("},\"echo\":\"").append(echo).append("\"}");
 
         String payload = json.toString();
-        AiAgentActivity.debugLog("[OneBot] 发送API: " + payload);
+        
+        // 创建Future用于等待响应
+        CompletableFuture<String> future = new CompletableFuture<>();
+        pendingApiCalls.put(echo, future);
+        
+        AiAgentActivity.debugLog("[OneBot] 发送API: " + (payload.length() > 200 ? payload.substring(0, 200) + "..." : payload));
         // 广播到所有连接
         for (WebSocketConnection c : connections) {
             if (c.isOpen()) {
                 c.sendText(payload);
             }
         }
-        // 返回echo供调用方匹配响应（实际项目中可通过回调处理）
-        return echo;
+        
+        // 等待响应（10秒超时）
+        try {
+            String response = future.get(10, TimeUnit.SECONDS);
+            pendingApiCalls.remove(echo);
+            return response;
+        } catch (TimeoutException e) {
+            pendingApiCalls.remove(echo);
+            AiAgentActivity.debugLog("[OneBot] API调用超时: " + action);
+            return null;
+        } catch (Exception e) {
+            pendingApiCalls.remove(echo);
+            AiAgentActivity.debugLog("[OneBot] API调用异常: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    /** 处理API响应（由WebSocket连接的onTextMessage调用） */
+    void onApiResponse(String text) {
+        String echo = JsonUtil.extractString(text, "echo");
+        if (echo != null && !echo.isEmpty()) {
+            CompletableFuture<String> future = pendingApiCalls.get(echo);
+            if (future != null) {
+                future.complete(text);
+            }
+        }
     }
 
     /** 发送私聊消息 */
@@ -405,8 +437,15 @@ public class OneBotServer {
             }
         }
 
-        /** 处理收到的文本消息（OneBot事件） */
+        /** 处理收到的文本消息（OneBot事件或API响应） */
         private void onTextMessage(String text) {
+            // === 优先检测API响应（status+echo，无post_type） ===
+            // API响应格式: {"status":"ok","retcode":0,"data":{...},"echo":"echo_42"}
+            if (text.contains("\"status\"") && text.contains("\"echo\"")) {
+                onApiResponse(text);
+                return;
+            }
+            
             // 过滤心跳包
             if (text.contains("\"post_type\":\"meta_event\"") || 
                 text.contains("\"post_type\": \"meta_event\"")) {

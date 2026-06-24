@@ -76,11 +76,11 @@ public class PromptManager {
         return systemPromptExtra != null ? systemPromptExtra : "";
     }
 
-    /** 获取 execq prompt = 基础提示词 + config.properties 追加内容 */
+    /** 获取 execq prompt = config.properties 追加内容在前 + 基础规则在后（角色设定优先被注意） */
     public String getExecqPrompt() {
         String base = execqPrompt != null ? execqPrompt : buildDefaultExecqPrompt();
         if (execqPromptExtra != null && !execqPromptExtra.trim().isEmpty()) {
-            return base + "\n\n" + execqPromptExtra;
+            return execqPromptExtra + "\n\n" + base;
         }
         return base;
     }

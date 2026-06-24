@@ -442,14 +442,12 @@ public class QQMessageHandler {
             } else if ("forward".equals(seg.type)) {
                 String dataObj = extractObject(item, "data");
                 if (dataObj != null) {
+                    // 尝试提取content（部分实现如NapCat直接内嵌内容）
                     seg.content = extractString(dataObj, "content");
-                }
-                // 也尝试直接从message段提取id(forward_id)
-                if (seg.content == null || seg.content.isEmpty()) {
-                    String arrContent = extractArray(item, "data");
-                    if (arrContent != null) {
-                        // forward的data可能是嵌套的数组
-                        seg.content = arrContent;
+                    // 提取forward_id（标准OneBot v11）
+                    String fwdId = extractString(dataObj, "id");
+                    if (fwdId != null && !fwdId.isEmpty()) {
+                        seg.forwardId = fwdId;
                     }
                 }
             } else if ("record".equals(seg.type)) {
@@ -565,12 +563,16 @@ public class QQMessageHandler {
             if (seg.isForward()) {
                 hasForward = true;
                 if (seg.content != null && !seg.content.isEmpty()) {
-                    // 尝试从forward content中提取文本
+                    // content直接可用（部分实现如NapCat内嵌）
                     String extracted = extractForwardText(seg.content);
                     if (extracted != null && !extracted.isEmpty()) {
                         if (forwardText.length() > 0) forwardText.append("\n");
                         forwardText.append(extracted);
                     }
+                } else if (seg.forwardId != null && !seg.forwardId.isEmpty()) {
+                    // 标准OneBot v11：只有forward_id，需异步API获取
+                    msg.setForwardId(seg.forwardId);
+                    AiAgentActivity.debugLog("[QQMsg] 检测到折叠消息，forward_id=" + seg.forwardId + "，将异步获取内容");
                 }
             }
         }
@@ -579,14 +581,136 @@ public class QQMessageHandler {
             msg.setHasImage(true);
             AiAgentActivity.debugLog("[QQMsg] 检测到图片消息: " + msg.getImageUrls().size() + "张");
         }
-        if (hasForward && forwardText.length() > 0) {
+        if (hasForward) {
             msg.setHasForward(true);
-            // 截断过长内容
-            String content = forwardText.toString();
-            if (content.length() > 1000) content = content.substring(0, 1000) + "...";
-            msg.setForwardContent(content);
-            AiAgentActivity.debugLog("[QQMsg] 检测到折叠消息，内容长度: " + content.length());
+            if (forwardText.length() > 0) {
+                String content = forwardText.toString();
+                if (content.length() > 1000) content = content.substring(0, 1000) + "...";
+                msg.setForwardContent(content);
+                AiAgentActivity.debugLog("[QQMsg] 检测到折叠消息，内容长度: " + content.length());
+            }
         }
+    }
+    
+    /** 从get_forward_msg API响应中提取文本 */
+    private String extractForwardMsgContent(String apiResponse) {
+        if (apiResponse == null || apiResponse.isEmpty()) return null;
+        
+        StringBuilder result = new StringBuilder();
+        try {
+            // 提取 data.messages 数组
+            String dataObj = extractObject(apiResponse, "data");
+            if (dataObj == null) return null;
+            String messagesArr = extractArray(dataObj, "messages");
+            if (messagesArr == null || messagesArr.isEmpty()) return null;
+            
+            // 拆分消息数组
+            List<String> msgItems = splitJsonArray(messagesArr);
+            for (String msgItem : msgItems) {
+                // 提取发送者昵称
+                String senderObj = extractObject(msgItem, "sender");
+                String nickname = senderObj != null ? extractString(senderObj, "nickname") : null;
+                if (nickname == null || nickname.isEmpty()) nickname = "未知";
+                
+                // 提取消息段数组
+                String messageArr = extractArray(msgItem, "message");
+                if (messageArr == null || messageArr.isEmpty()) continue;
+                
+                // 从消息段中提取文本
+                List<String> segs = splitJsonArray(messageArr);
+                StringBuilder msgText = new StringBuilder();
+                for (String seg : segs) {
+                    String type = extractString(seg, "type");
+                    if ("text".equals(type)) {
+                        String data = extractObject(seg, "data");
+                        if (data != null) {
+                            String text = extractString(data, "text");
+                            if (text != null && !text.isEmpty()) {
+                                if (msgText.length() > 0) msgText.append(" ");
+                                msgText.append(text);
+                            }
+                        }
+                    } else if ("image".equals(type)) {
+                        if (msgText.length() > 0) msgText.append(" ");
+                        msgText.append("[图片]");
+                    } else if ("face".equals(type)) {
+                        if (msgText.length() > 0) msgText.append(" ");
+                        msgText.append("[表情]");
+                    }
+                }
+                
+                if (msgText.length() > 0) {
+                    if (result.length() > 0) result.append("\n");
+                    result.append(nickname).append(": ").append(msgText.toString());
+                }
+            }
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[QQMsg] extractForwardMsgContent解析失败: " + e.toString());
+            return null;
+        }
+        
+        return result.length() > 0 ? result.toString() : null;
+    }
+
+    /** 从get_msg API响应中提取消息段文本 */
+    private String extractMsgSegmentsText(String apiResponse) {
+        if (apiResponse == null || apiResponse.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder();
+        try {
+            String dataObj = extractObject(apiResponse, "data");
+            if (dataObj == null) return null;
+            String msgArr = extractArray(dataObj, "message");
+            if (msgArr == null || msgArr.isEmpty()) return null;
+            List<String> segs = splitJsonArray(msgArr);
+            for (String seg : segs) {
+                String type = extractString(seg, "type");
+                if ("text".equals(type)) {
+                    String data = extractObject(seg, "data");
+                    if (data != null) {
+                        String text = extractString(data, "text");
+                        if (text != null && !text.isEmpty()) sb.append(text);
+                    }
+                } else if ("image".equals(type)) {
+                    sb.append("[图片]");
+                } else if ("face".equals(type)) {
+                    sb.append("[表情]");
+                } else if ("forward".equals(type)) {
+                    sb.append("[折叠消息]");
+                } else if ("at".equals(type)) {
+                    String data = extractObject(seg, "data");
+                    if (data != null) {
+                        String qq = extractString(data, "qq");
+                        if (qq != null) sb.append("@").append(qq);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return sb.length() > 0 ? sb.toString() : null;
+    }
+    
+    /** 从get_msg API响应中检测是否包含forward段，返回forward_id */
+    private String extractForwardIdFromMsgJson(String apiResponse) {
+        if (apiResponse == null || apiResponse.isEmpty()) return null;
+        try {
+            String dataObj = extractObject(apiResponse, "data");
+            if (dataObj == null) return null;
+            String msgArr = extractArray(dataObj, "message");
+            if (msgArr == null || msgArr.isEmpty()) return null;
+            List<String> segs = splitJsonArray(msgArr);
+            for (String seg : segs) {
+                String type = extractString(seg, "type");
+                if ("forward".equals(type)) {
+                    String data = extractObject(seg, "data");
+                    if (data != null) {
+                        String fwdId = extractString(data, "id");
+                        if (fwdId != null && !fwdId.isEmpty()) return fwdId;
+                    }
+                }
+            }
+        } catch (Exception e) { }
+        return null;
     }
     
     /** 从forward content JSON中提取文本 */
@@ -785,31 +909,8 @@ public class QQMessageHandler {
                 }
             }
 
-            // 如果是引用回复且@了Bot，异步获取被引用的消息内容
-            if (msg.isReply() && msg.isAtBot() && msg.getReplyMessageId() > 0 && napcatApi != null) {
-                try {
-                    int quotedMsgId = (int) msg.getReplyMessageId();
-                    AiAgentActivity.debugLog("[QQMsg] 获取引用消息: messageId=" + quotedMsgId);
-                    String quotedJson = napcatApi.getMessage(quotedMsgId);
-                    if (quotedJson != null && !quotedJson.isEmpty()) {
-                        // 从响应中提取消息内容
-                        String quotedRaw = extractString(quotedJson, "raw_message");
-                        if (quotedRaw == null || quotedRaw.isEmpty()) {
-                            quotedRaw = extractString(quotedJson, "message");
-                        }
-                        if (quotedRaw != null && !quotedRaw.isEmpty()) {
-                            msg.setQuotedMessageContent(quotedRaw);
-                            AiAgentActivity.debugLog("[QQMsg] 获取到引用消息内容: " + 
-                                (quotedRaw.length() > 100 ? quotedRaw.substring(0, 100) + "..." : quotedRaw));
-                        }
-                    }
-                } catch (Exception e) {
-                    AiAgentActivity.debugLog("[QQMsg] 获取引用消息失败: " + e.toString());
-                }
-            }
-
-            // 构建execq系统提示词
-                        if (emotionManager != null) {
+            // === 情绪检测（在主线程快速完成，不阻塞） ===
+            if (emotionManager != null) {
                 try {
                     String pt = msg.getPlainTextOnly();
                     if (pt != null) {
@@ -826,19 +927,88 @@ public class QQMessageHandler {
                     AiAgentActivity.debugLog("[QQMsg] Emotion detect fail: " + e.toString());
                 }
             }
-            
-            String systemPrompt = buildExecqSystemPrompt(msg, punishmentRecords);
-            AiAgentActivity.debugLog("[QQMsg] 系统提示词构建完成，长度: " + systemPrompt.length());
 
-            // 提交到线程池执行（防重复标记在异步任务完成后才移除）
+            // === 提交到线程池：获取引用/折叠消息 → 构建提示词 → 执行AI ===
+            // 引用和折叠消息需要API调用，在线程池内同步等待（最多各10秒）
+            // 构建提示词必须在获取引用/折叠内容之后，确保上下文完整
+            final List<String> finalPunishmentRecords = punishmentRecords;
             execPool.submit(() -> {
                 try {
+                    // 获取引用消息内容
+                    if (msg.isReply() && msg.getReplyMessageId() > 0 && napcatApi != null) {
+                        int quotedMsgId = (int) msg.getReplyMessageId();
+                        AiAgentActivity.debugLog("[QQMsg] 获取引用消息: messageId=" + quotedMsgId);
+                        try {
+                            String quotedJson = napcatApi.getMessage(quotedMsgId);
+                            if (quotedJson != null && !quotedJson.isEmpty()) {
+                                // 优先从 data.message 数组解析文本（比raw_message更准确）
+                                String quotedText = extractMsgSegmentsText(quotedJson);
+                                if (quotedText != null && !quotedText.isEmpty()) {
+                                    msg.setQuotedMessageContent(quotedText);
+                                    AiAgentActivity.debugLog("[QQMsg] 引用消息内容(segment): " +
+                                        (quotedText.length() > 100 ? quotedText.substring(0, 100) + "..." : quotedText));
+                                }
+                                // 检查引用消息是否本身就是转发/折叠消息，递归展开
+                                String quotedFwdId = extractForwardIdFromMsgJson(quotedJson);
+                                if (quotedFwdId != null && !quotedFwdId.isEmpty()) {
+                                    AiAgentActivity.debugLog("[QQMsg] 引用消息是折叠消息: forwardId=" + quotedFwdId);
+                                    try {
+                                        String fwdJson = napcatApi.getForwardMsg(quotedFwdId);
+                                        if (fwdJson != null && !fwdJson.isEmpty()) {
+                                            String fwdC = extractForwardMsgContent(fwdJson);
+                                            if (fwdC != null && !fwdC.isEmpty()) {
+                                                if (fwdC.length() > 1000) fwdC = fwdC.substring(0, 1000) + "...";
+                                                String exist = msg.getQuotedMessageContent();
+                                                msg.setQuotedMessageContent((exist != null ? exist + "\n\n" : "")
+                                                    + "[折叠消息展开内容]\n" + fwdC);
+                                                AiAgentActivity.debugLog("[QQMsg] 引用折叠消息展开成功，长度: " + fwdC.length());
+                                            }
+                                        }
+                                    } catch (Exception ef) {
+                                        AiAgentActivity.debugLog("[QQMsg] 引用折叠消息展开失败: " + ef.toString());
+                                    }
+                                }
+                                // 降级：raw_message
+                                if (msg.getQuotedMessageContent() == null || msg.getQuotedMessageContent().isEmpty()) {
+                                    String raw = extractString(quotedJson, "raw_message");
+                                    if (raw != null && !raw.isEmpty()) {
+                                        msg.setQuotedMessageContent(raw);
+                                        AiAgentActivity.debugLog("[QQMsg] 引用消息降级raw_message: " +
+                                            (raw.length() > 100 ? raw.substring(0, 100) + "..." : raw));
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            AiAgentActivity.debugLog("[QQMsg] 获取引用消息失败: " + e.toString());
+                        }
+                    }                    // 获取折叠消息内容（需API调用获取forward详情）
+                    if (msg.getForwardId() != null && !msg.getForwardId().isEmpty() && napcatApi != null) {
+                        AiAgentActivity.debugLog("[QQMsg] 获取折叠消息: forwardId=" + msg.getForwardId());
+                        try {
+                            String forwardJson = napcatApi.getForwardMsg(msg.getForwardId());
+                            if (forwardJson != null && !forwardJson.isEmpty()) {
+                                String extracted = extractForwardMsgContent(forwardJson);
+                                if (extracted != null && !extracted.isEmpty()) {
+                                    if (extracted.length() > 1000) extracted = extracted.substring(0, 1000) + "...";
+                                    msg.setForwardContent(extracted);
+                                    AiAgentActivity.debugLog("[QQMsg] 获取到折叠消息内容，长度: " + extracted.length());
+                                }
+                            }
+                        } catch (Exception e) {
+                            AiAgentActivity.debugLog("[QQMsg] 获取折叠消息失败: " + e.toString());
+                        }
+                    }
+                    
+                    // 构建系统提示词（此时引用/折叠内容已就绪）
+                    String systemPrompt = buildExecqSystemPrompt(msg, finalPunishmentRecords);
+                    AiAgentActivity.debugLog("[QQMsg] 系统提示词构建完成，长度: " + systemPrompt.length());
+                    
+                    // 执行AI代理
                     AiAgentActivity.debugLog("[QQMsg] 开始执行AI代理...");
                     executeQqAgent(msg, unifiedMemory, systemPrompt, responseSender);
                     AiAgentActivity.debugLog("[QQMsg] AI代理执行完成");
                 } catch (Exception e) {
                     AiAgentActivity.debugLog("[QQMsg] 执行错误: " + e.toString());
-                    // 打印完整堆栈
                     java.io.StringWriter sw = new java.io.StringWriter();
                     e.printStackTrace(new java.io.PrintWriter(sw));
                     AiAgentActivity.debugLog("[QQMsg] 堆栈跟踪:\n" + sw.toString());
@@ -1557,9 +1727,15 @@ public class QQMessageHandler {
         }
         
         // === 折叠消息内容 ===
-        if (msg.hasForward() && msg.getForwardContent() != null && !msg.getForwardContent().isEmpty()) {
-            sb.append("📨 此消息是转发/折叠消息，内容: ").append(msg.getForwardContent()).append("\n");
-            sb.append("请分析折叠消息中的内容并做出回复。\n\n");
+        if (msg.hasForward()) {
+            if (msg.getForwardContent() != null && !msg.getForwardContent().isEmpty()) {
+                sb.append("📨 此消息包含转发/折叠消息，以下是其中的内容:\n");
+                sb.append(msg.getForwardContent()).append("\n");
+                sb.append("请认真分析折叠消息中的每一条内容并做出回复。\n\n");
+            } else {
+                sb.append("📨 此消息包含转发/折叠消息，但详细内容暂未获取到。\n");
+                sb.append("请告知用户你暂时无法查看折叠消息的具体内容。\n\n");
+            }
         }
         
         // === 引用消息内容 ===
@@ -1776,6 +1952,13 @@ public class QQMessageHandler {
             for (int i = 0; i < msg.getImageUrls().size(); i++) {
                 sb.append("\n  图片URL: ").append(msg.getImageUrls().get(i));
             }
+        }
+        
+        
+        
+        // 折叠/转发消息内容（显式追加到用户消息，确保 AI 看到）
+        if (msg.hasForward() && msg.getForwardContent() != null && !msg.getForwardContent().isEmpty()) {
+            sb.append("\n" + "📨" + " 转发/折叠消息内容:\n").append(msg.getForwardContent());
         }
         
         // 引用消息（如果已获取）

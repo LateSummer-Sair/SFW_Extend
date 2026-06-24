@@ -403,6 +403,17 @@ public class NapCatApi {
         return server.sendApiCall("get_msg", params);
     }
     
+    /**
+     * 获取合并转发消息内容（用于折叠消息分析）
+     * @param forwardId 转发消息ID（来自forward段的data.id）
+     * @return API响应JSON
+     */
+    public String getForwardMsg(String forwardId) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("message_id", forwardId);
+        return server.sendApiCall("get_forward_msg", params);
+    }
+    
     // ==================== 工具方法 ====================
     
     /**
@@ -435,12 +446,12 @@ public class NapCatApi {
     
     /**
      * 检查API调用是否成功
-     * @param response sendApiCall返回的echo字符串
-     * @return sendApiCall返回echo表示请求已发送，始终返回true
+     * @param response sendApiCall返回的API响应JSON（status+retcode+data+echo）
+     * @return 非空即表示请求已发送并收到响应
      */
     public boolean isSuccess(String response) {
-        // sendApiCall返回的是echo字符串（如"echo_1"），不是JSON响应
-        // 只要echo非空即表示请求已成功发送
+        // sendApiCall返回的是API响应JSON（如{"status":"ok","retcode":0,...}）
+        // 非空即表示请求已成功发送并收到响应
         return response != null && !response.isEmpty();
     }
     

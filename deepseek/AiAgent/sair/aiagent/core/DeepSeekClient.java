@@ -121,7 +121,7 @@ public class DeepSeekClient {
         } catch (URISyntaxException e) {
             throw new IOException("Invalid API URL: " + buildApiUrl(), e);
         }
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setRequestProperty("Authorization", "Bearer " + config.getApiKey());
