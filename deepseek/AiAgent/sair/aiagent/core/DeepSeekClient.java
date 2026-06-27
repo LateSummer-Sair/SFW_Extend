@@ -11,6 +11,7 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -136,6 +137,10 @@ public class DeepSeekClient {
     /** 发送请求体 */
     private void sendRequest(HttpURLConnection conn, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        // 显式设置 Content-Length，避免 Java HttpURLConnection 使用 chunked 分块编码
+        // chunked 编码在发送大体积请求体（如含 base64 图片的 Vision API 请求）时可能导致
+        // 某些 API 网关/代理连接超时
+        conn.setRequestProperty("Content-Length", String.valueOf(bytes.length));
         try (OutputStream os = conn.getOutputStream()) {
             os.write(bytes);
             os.flush();
@@ -157,16 +162,48 @@ public class DeepSeekClient {
      * 手动构建JSON请求体。
      * <p>不依赖第三方JSON库，使用字符串拼接。
      * 所有字段值均经过转义处理。</p>
+     * <p>当 ChatMessage 包含多模态内容（contentParts != null）时，
+     * content 字段输出为 Vision API 数组格式。</p>
      */
     private String buildRequestBody(List<ChatMessage> messages, boolean stream) {
-        StringBuilder sb = new StringBuilder(1024);
+        StringBuilder sb = new StringBuilder(2048);
         sb.append("{\"model\":\"").append(jsonEscape(config.getModel())).append("\",");
         sb.append("\"messages\":[");
         for (int i = 0; i < messages.size(); i++) {
             if (i > 0) sb.append(",");
             ChatMessage msg = messages.get(i);
             sb.append("{\"role\":\"").append(jsonEscape(msg.getRole())).append("\",");
-            sb.append("\"content\":\"").append(jsonEscape(msg.getContent())).append("\"}");
+
+            // 多模态消息：content 使用数组格式
+            if (msg.hasImages() && msg.getContentParts() != null) {
+                sb.append("\"content\":[");
+                List<Map<String, Object>> parts = msg.getContentParts();
+                for (int j = 0; j < parts.size(); j++) {
+                    if (j > 0) sb.append(",");
+                    Map<String, Object> part = parts.get(j);
+                    String type = (String) part.get("type");
+                    if ("text".equals(type)) {
+                        sb.append("{\"type\":\"text\",\"text\":\"")
+                          .append(jsonEscape((String) part.get("text")))
+                          .append("\"}");
+                    } else if ("image_url".equals(type)) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> imageUrlObj = (Map<String, Object>) part.get("image_url");
+                        if (imageUrlObj != null) {
+                            String url = (String) imageUrlObj.get("url");
+                            sb.append("{\"type\":\"image_url\",\"image_url\":{\"url\":\"")
+                              .append(jsonEscape(url != null ? url : ""))
+                              .append("\"}}");
+                        }
+                    }
+                }
+                sb.append("]");
+            } else {
+                // 纯文本消息：content 使用字符串格式
+                sb.append("\"content\":\"").append(jsonEscape(msg.getContent())).append("\"");
+            }
+
+            sb.append("}");
         }
         sb.append("],\"stream\":").append(stream);
         if (!stream) {

@@ -29,7 +29,7 @@
                 <div class="section-tag">CLI Reference</div>
                 <h2>用户命令参考</h2>
                 <div class="section-divider"></div>
-                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 33 个用户命令（含 16 个 OneBot QQ 机器人命令）。AiAgent 主线 15 个 XML 标签，QQ execq 通道 16 个标签（10 种群管标签 + 6 种工具标签）。v2.1 更新：PromptManager 集中式提示词管理、config.properties 追加模式持久化、新增 sendimage/sendrecord/sendfile 标签。</p>
+                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 33 个用户命令（含 16 个 OneBot QQ 机器人命令）。AiAgent 主线 15 个 XML 标签，QQ execq 通道 16 个标签（10 种群管标签 + 6 种工具标签）。v2.3 更新：多模态图片识别（DeepSeek V4 Vision API），QQ 消息中的图片自动传入 AI 进行视觉分析。</p>
             </div>
         </div>
     </section>
@@ -430,7 +430,7 @@
                     <div class="card-icon cyan">1</div>
                     <h3>编译</h3>
                     <p>
-                        使用 SFW 内置 JDK (8x64) 编译全部 33 个源文件。
+                        使用 SFW 内置 JDK (8x64) 编译全部 34 个源文件。
                         classpath 需包含 SFW.jar 和 sqlite-jdbc-3.42.0.0.jar。
                     </p>
                     <div class="code-block" style="margin-top:14px;">
@@ -533,12 +533,12 @@ ai/onebotwhitelistadd IDE</code></pre>
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.1 ·
+                <span class="brand">AiAgent</span> v2.3 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
-                对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
+                对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · NapCat群管理 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 15种XML标签 · 部署三步骤
+                QQ OneBot · NapCat群管理 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 15种XML标签 · 多模态图片识别 · 部署三步骤
             </p>
         </div>
     </footer>

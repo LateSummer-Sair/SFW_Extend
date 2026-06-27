@@ -1135,7 +1135,109 @@ public class QQMessageHandler {
         napcatApi.handleGroupInvite(flag, false, "好感度不足");
     }
 
-    // ==================== execq Agent执行 ====================
+    // ==================== 图片多模态支持 ====================
+
+    /**
+     * 下载图片并转换为 base64 data URI。
+     * <p>用于 DeepSeek Vision API：当 QQ 图片 URL 对 API 不可访问时，
+     * 通过本地下载转为 base64 后传入。</p>
+     *
+     * @param imageUrl 图片 URL
+     * @return base64 data URI 字符串（如 "data:image/jpeg;base64,..."），失败返回 null
+     */
+    private String downloadImageAsBase64(String imageUrl) {
+        if (imageUrl == null || imageUrl.isEmpty()) return null;
+
+        java.net.HttpURLConnection conn = null;
+        java.io.ByteArrayOutputStream baos = null;
+        java.io.InputStream is = null;
+        try {
+            conn = (java.net.HttpURLConnection) new java.net.URL(imageUrl).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(15000);
+            conn.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (compatible; AiAgent-SFW/1.5)");
+            conn.setInstanceFollowRedirects(true);
+
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 400) {
+                AiAgentActivity.debugLog("[QQMsg] 图片下载失败: HTTP " + code + " for " + imageUrl);
+                return null;
+            }
+
+            // 检测 Content-Type 以确定图片格式
+            String contentType = conn.getContentType();
+            String mimeType = "image/jpeg"; // 默认
+            if (contentType != null) {
+                contentType = contentType.toLowerCase();
+                if (contentType.contains("png")) mimeType = "image/png";
+                else if (contentType.contains("gif")) mimeType = "image/gif";
+                else if (contentType.contains("webp")) mimeType = "image/webp";
+                else if (contentType.contains("bmp")) mimeType = "image/bmp";
+            }
+
+            is = conn.getInputStream();
+            baos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            int totalBytes = 0;
+            while ((n = is.read(buf)) != -1) {
+                baos.write(buf, 0, n);
+                totalBytes += n;
+                if (totalBytes > 5 * 1024 * 1024) { // 限制 5MB
+                    AiAgentActivity.debugLog("[QQMsg] 图片过大(>5MB)，放弃下载: " + imageUrl);
+                    return null;
+                }
+            }
+
+            byte[] imageBytes = baos.toByteArray();
+            String base64 = java.util.Base64.getEncoder().encodeToString(imageBytes);
+            String dataUri = "data:" + mimeType + ";base64," + base64;
+            AiAgentActivity.debugLog("[QQMsg] 图片下载成功: " + totalBytes + " bytes -> base64 length " + base64.length());
+            return dataUri;
+
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[QQMsg] 图片下载异常: " + e.toString());
+            return null;
+        } finally {
+            try { if (is != null) is.close(); } catch (Exception ignored) {}
+            try { if (baos != null) baos.close(); } catch (Exception ignored) {}
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * 解析图片 URL 为 Vision API 可用格式。
+     * <p>策略：优先使用原始 URL（DeepSeek 可直接访问公网 URL），
+     * 若 URL 看起来像腾讯内网地址则下载转 base64。</p>
+     *
+     * @param imageUrl 原始图片 URL
+     * @return Vision API 可用的图片 URL 或 base64 data URI，失败返回 null
+     */
+    private String resolveImageForVision(String imageUrl) {
+        if (imageUrl == null || imageUrl.isEmpty()) return null;
+
+        // 已经是 base64 data URI，直接返回
+        if (imageUrl.startsWith("data:")) return imageUrl;
+
+        // 检查是否是腾讯内网域名（qpic.cn, gchat.qpic.cn 等）
+        // 这些 URL DeepSeek API 可能无法访问，需要下载转 base64
+        boolean isInternal = imageUrl.contains("qpic.cn") ||
+                             imageUrl.contains("gchat.qpic") ||
+                             imageUrl.contains("c2cpicdw.qpic") ||
+                             imageUrl.contains("multimedia.nt.qq");
+
+        if (isInternal) {
+            AiAgentActivity.debugLog("[QQMsg] 检测到腾讯内网图片URL，下载转base64: " + imageUrl);
+            String base64 = downloadImageAsBase64(imageUrl);
+            if (base64 != null) return base64;
+            AiAgentActivity.debugLog("[QQMsg] 图片base64转换失败，尝试直接传URL");
+        }
+
+        // 公网 URL 或 base64 失败兜底：直接传原始 URL
+        return imageUrl;
+    }
 
     /**
      * 执行真正的execs链路（与SFW控制台execs完全一样）。
@@ -1224,6 +1326,26 @@ public class QQMessageHandler {
             // 构建任务描述
             String task = buildTaskDescription(msg);
             
+            // === 多模态图片处理：解析图片URL供DeepSeek V4 Vision API使用 ===
+            java.util.List<String> resolvedImageUrls = null;
+            if (msg.hasImage() && !msg.getImageUrls().isEmpty()) {
+                resolvedImageUrls = new java.util.ArrayList<>();
+                for (String imgUrl : msg.getImageUrls()) {
+                    String resolved = resolveImageForVision(imgUrl);
+                    if (resolved != null) {
+                        resolvedImageUrls.add(resolved);
+                        AiAgentActivity.debugLog("[QQMsg] 图片已解析: " +
+                            (resolved.length() > 60 ? resolved.substring(0, 60) + "..." : resolved));
+                    }
+                }
+                if (!resolvedImageUrls.isEmpty()) {
+                    AiAgentActivity.debugLog("[QQMsg] 多模态模式: " + resolvedImageUrls.size() + " 张图片已就绪");
+                } else {
+                    resolvedImageUrls = null; // 全部失败则退化为纯文本
+                    AiAgentActivity.debugLog("[QQMsg] 图片解析全部失败，降级为纯文本模式");
+                }
+            }
+            
             // 判断是否是主人
             long senderQQ = msg.getUserId();
             boolean isMaster = sair.aiagent.core.AiConfig.getInstance().isMasterQQ(senderQQ);
@@ -1252,14 +1374,14 @@ public class QQMessageHandler {
                 // 群聊构建群管回调，作为线程安全的参数传入（不再用共享字段）
                 final java.util.function.Function<String, String> groupHandler = msg.isGroupMessage() && napcatApi != null
                     ? (r -> { processQqActions(r, msg); return "[群管已执行] "; }) : null;
-                aiResponse = agentExecutor.executeQq(task, systemPrompt, memoryManager, groupHandler);
+                aiResponse = agentExecutor.executeQq(task, systemPrompt, memoryManager, groupHandler, resolvedImageUrls);
             } else {
                 // 普通用户：使用execq模式（受限模式，插件白名单）
                 AiAgentActivity.debugLog("[QQMsg] 普通用户消息，使用execq模式（受限模式）");
                 // 群聊构建群管回调，作为线程安全的参数传入（不再用共享字段）
                 final java.util.function.Function<String, String> groupHandler = msg.isGroupMessage() && napcatApi != null
                     ? (r -> { processQqActions(r, msg); return "[群管已执行] "; }) : null;
-                aiResponse = agentExecutor.executeQq(task, systemPrompt, memoryManager, groupHandler);
+                aiResponse = agentExecutor.executeQq(task, systemPrompt, memoryManager, groupHandler, resolvedImageUrls);
             }
             
             // 记录AI回复到统一对话历史
@@ -1718,11 +1840,9 @@ public class QQMessageHandler {
         
         // === 图片信息 ===
         if (msg.hasImage() && !msg.getImageUrls().isEmpty()) {
-            sb.append("📷 此消息包含 ").append(msg.getImageUrls().size()).append(" 张图片\n");
-            for (int i = 0; i < msg.getImageUrls().size() && i < 3; i++) {
-                sb.append("  图片URL: ").append(msg.getImageUrls().get(i)).append("\n");
-            }
-            sb.append("你可以分析图片内容。用户可能在图中包含文字、表情等信息。\n");
+            sb.append("📷 此消息包含 ").append(msg.getImageUrls().size()).append(" 张图片，已作为多模态输入传递给你。\n");
+            sb.append("你现在可以直接分析这些图片的内容——包括图中文字、物体、场景、人物表情等。\n");
+            sb.append("请结合图片内容与文字消息做出综合回复。\n");
             sb.append("如果需要发送图片，使用 <sendimage>描述</sendimage> 标签。\n\n");
         }
         

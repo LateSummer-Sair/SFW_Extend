@@ -28,7 +28,7 @@
                 <div class="section-tag">Design Patterns</div>
                 <h2>设计模式</h2>
                 <div class="section-divider"></div>
-                <p>代码严格遵循标准设计模式，确保高内聚、低耦合、可扩展。共 10 种设计模式（v2.0 新增反滥用责任链模式 + 参数化回调消除竞态）。</p>
+                <p>代码严格遵循标准设计模式，确保高内聚、低耦合、可扩展。共 10 种设计模式（v2.3 策略模式扩展支持多模态 Vision API 双策略路由）。</p>
             </div>
         </div>
     </section>
@@ -114,7 +114,8 @@
                     封装两种 API 调用策略：<code>chatStream()</code>（SSE 流式 + StreamPrinter 逐字输出）
                     和 <code>chatSync()</code>（标准 JSON 响应 + 完整解析）。
                     Chat 与 Agent 模式均默认使用流式策略，打字机效果输出。
-                    两种策略共用同一 <code>buildRequestBody()</code> 构建请求体，仅响应解析部分不同。
+                    <b>v2.3 多模态扩展</b>：<code>buildRequestBody()</code> 智能分发 —— 当 ChatMessage.hasImages() 时自动切换为 Vision API content 数组格式
+                    [{type:"text",...},{type:"image_url",...}]，纯文本消息沿用传统 JSON 格式。两种格式共用同一请求入口，调用方无需感知底层差异。
                 </p>
             </div>
 
@@ -127,7 +128,7 @@
                 <div class="p-class">AgentExecutor</div>
                 <p>
                     推理-行动循环：AI 分析任务 → 通过 XML 标签发出指令 → 框架执行并捕获结果 → AI 根据反馈决定下一步。
-                    最多 30 轮循环（execq 上限 50 轮），每轮均为流式输出。支持 <b>12 种 XML 操作标签</b>：<br>
+                    最多 30 轮循环（execq 上限 50 轮），每轮均为流式输出。支持 <b>15 种 XML 操作标签</b>：<br>
                     <code>&lt;cmd&gt;</code>、<code>&lt;readfile&gt;</code>、<code>&lt;readdir&gt;</code>、
                     <code>&lt;sys&gt;</code>、<code>&lt;evaljs&gt;</code>、<code>&lt;eval&gt;</code>、
                     <code>&lt;web&gt;</code>、<code>&lt;remember&gt;</code>、<code>&lt;download&gt;</code>、
@@ -223,12 +224,12 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.1 ·
+                <span class="brand">AiAgent</span> v2.3 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
-                对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
+                对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                10 种设计模式 · Repository · 门面 · 单例 · 生产者消费者 · 策略 · ReAct · 确认门控 · EDT路由 · 情绪状态机 · 反滥用责任链
+                10 种设计模式 · Repository · 门面 · 单例 · 生产者消费者 · 策略(多模态) · ReAct · 确认门控 · EDT路由 · 情绪状态机 · 反滥用责任链
             </p>
         </div>
     </footer>

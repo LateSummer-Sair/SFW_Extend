@@ -104,7 +104,7 @@ public class AgentExecutor {
         this.emotionManager = emotionManager;
     }
 
-    /** 鑾峰彇鎯呯华绠＄悊鍣ㄥ紩鐢紙渚決Q鎯呯华绯荤粺妗ユ帴锛?*/
+    /** 获取情绪管理器引用（供QQ情绪系统桥接） */
     public EmotionManager getEmotionManager() {
         return emotionManager;
     }
@@ -165,12 +165,30 @@ public class AgentExecutor {
     /** execq QQ通道 - 使用统一记忆管理器 + 携带群管回调 */
     public String executeQq(String task, String systemPrompt, Object memoryManager,
                             java.util.function.Function<String, String> groupHandler) {
+        return executeQq(task, systemPrompt, memoryManager, groupHandler, null);
+    }
+
+    /**
+     * execq QQ通道 - 使用统一记忆管理器 + 携带群管回调 + 多模态图片。
+     * <p>当 imageUrls 非空时，用户消息以 Vision API content 数组格式发送，
+     * 使 DeepSeek V4 能够直接分析图片内容。</p>
+     *
+     * @param task          任务描述文本
+     * @param systemPrompt  系统提示词
+     * @param memoryManager 记忆管理器
+     * @param groupHandler  群管标签回调（可为 null）
+     * @param imageUrls     图片 URL 列表（http/https URL 或 base64 data URI，可为 null）
+     * @return AI 回复文本
+     */
+    public String executeQq(String task, String systemPrompt, Object memoryManager,
+                            java.util.function.Function<String, String> groupHandler,
+                            java.util.List<String> imageUrls) {
         boolean prevBypass = gate.isBypassConfirm();
         gate.setBypassConfirm(true);
         try {
             if (memoryManager instanceof sair.aiagent.onebot.UnifiedQQMemoryManager) {
-                return runExecqLoopWithUnifiedMemory(task, systemPrompt, 
-                    (sair.aiagent.onebot.UnifiedQQMemoryManager) memoryManager, groupHandler);
+                return runExecqLoopWithUnifiedMemory(task, systemPrompt,
+                    (sair.aiagent.onebot.UnifiedQQMemoryManager) memoryManager, groupHandler, imageUrls);
             } else if (memoryManager instanceof QQMemoryManager) {
                 return runExecqLoop(task, systemPrompt, (QQMemoryManager) memoryManager, groupHandler);
             }
@@ -1119,16 +1137,45 @@ public class AgentExecutor {
     /** 使用统一记忆管理器的execq循环 */
     private String runExecqLoopWithUnifiedMemory(String task, String systemPrompt, 
                                                   sair.aiagent.onebot.UnifiedQQMemoryManager unifiedMemory, java.util.function.Function<String, String> groupHandler) {
+        return runExecqLoopWithUnifiedMemory(task, systemPrompt, unifiedMemory, groupHandler, null);
+    }
+
+    /** 使用统一记忆管理器的execq循环（支持多模态图片） */
+    private String runExecqLoopWithUnifiedMemory(String task, String systemPrompt,
+                                                  sair.aiagent.onebot.UnifiedQQMemoryManager unifiedMemory,
+                                                  java.util.function.Function<String, String> groupHandler,
+                                                  java.util.List<String> imageUrls) {
         List<ChatMessage> history = new ArrayList<>();
         history.add(new ChatMessage("system", systemPrompt));
-        history.add(new ChatMessage("user", task));
+
+        // 多模态用户消息：当有图片时，使用 Vision API content 数组格式
+        boolean hasImages = (imageUrls != null && !imageUrls.isEmpty());
+        if (hasImages) {
+            history.add(sair.aiagent.model.ChatMessage.createMultimodal(task, imageUrls));
+        } else {
+            history.add(new ChatMessage("user", task));
+        }
 
         for (int round = 1; round <= 5; round++) {
             String response;
             try {
                 response = client.chatSync(history);
             } catch (Exception e) {
-                return "[错误] AI调用失败: " + e.toString();
+                // 多模态请求失败时，尝试降级为纯文本重试
+                if (hasImages && round == 1) {
+                    AiAgentActivity.debugLog("[Execq] 多模态请求失败(" + e.toString()
+                        + ")，降级为纯文本模式重试");
+                    // 重建第一轮用户消息为纯文本
+                    history.set(1, new ChatMessage("user", task));
+                    hasImages = false;
+                    try {
+                        response = client.chatSync(history);
+                    } catch (Exception e2) {
+                        return "[错误] AI调用失败(含降级重试): " + e2.toString();
+                    }
+                } else {
+                    return "[错误] AI调用失败: " + e.toString();
+                }
             }
             if (response == null || response.trim().isEmpty()) {
                 return "(AI未响应)";

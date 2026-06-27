@@ -35,7 +35,7 @@
                 <div class="section-tag">Architecture</div>
                 <h2>系统架构</h2>
                 <div class="section-divider"></div>
-                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。v2.1 更新：PromptManager 集中式提示词管理（三段提示词统一入口）、config.properties 追加模式持久化。</p>
+                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。v2.3 更新：多模态图片识别（DeepSeek V4 Vision API），QQ 机器人支持图片智能分析。</p>
             </div>
         </div>
     </section>
@@ -55,7 +55,7 @@
                     <div class="arch-node core">AiConfig<br><small>单例配置</small></div>
                     <div class="arch-node core">PromptManager<br><small>提示词集中管理</small></div>
                     <div class="arch-node core">StreamPrinter<br><small>生产者-消费者</small></div>
-                    <div class="arch-node core">DeepSeekClient<br><small>策略</small></div>
+                    <div class="arch-node core">DeepSeekClient<br><small>策略 · Vision API</small></div>
                     <div class="arch-node core">AgentExecutor<br><small>ReAct · execs回调</small></div>
                 </div>
                 <!-- Core Layer Row 2 -->
@@ -76,7 +76,7 @@
                 <!-- OneBot QQ Layer -->
                 <div class="arch-layer">
                     <div class="arch-node model" style="border-color:var(--accent-cyan);">OneBotServer<br><small>WebSocket 服务端</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessageHandler<br><small>消息路由 · execq/execs · 邀请决策</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessageHandler<br><small>消息路由 · 图片下载转base64 · 多模态分发</small></div>
                     <div class="arch-node model" style="border-color:var(--accent-cyan);">UnifiedQQMemoryManager<br><small>统一记忆库（群聊/私聊联通）</small></div>
                     <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMemoryManager<br><small>按QQ号隔离记忆</small></div>
                 </div>
@@ -96,7 +96,7 @@
                 <div class="arch-arrow">↓</div>
                 <!-- Model + Util + UI Layer -->
                 <div class="arch-layer">
-                    <div class="arch-node model">ChatMessage<br><small>消息模型</small></div>
+                    <div class="arch-node model">ChatMessage<br><small>消息模型 · contentParts多模态</small></div>
                     <div class="arch-node model">AgentAction<br><small>操作模型</small></div>
                     <div class="arch-node model">MemoryEntry<br><small>记忆模型</small></div>
                     <div class="arch-node util">EdtUtils<br><small>EDT安全</small></div>
@@ -119,7 +119,7 @@
                     / <code style="color:var(--accent-amber);">.onebot.util</code>
                 </p>
                 <p style="color:var(--text-muted); font-size:0.78rem; margin-top:8px;">
-                    34 个源文件 · 约 11,500 行代码 · 9 个包
+                    34 个源文件 · 约 12,800 行代码 · 9 个包
                 </p>
             </div>
         </div>
@@ -253,6 +253,71 @@
                     <div class="arch-node core">④ executeAction() → 结果注入<br><small>cmd/readfile/sys/eval/web...</small></div>
                 </div>
                 <div class="arch-arrow">↓ 循环回到①（直到无XML标签或超过30轮）</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Multimodal Vision Data Flow -->
+    <section id="multimodal-flow">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Data Flow</div>
+                <h2>多模态图片识别数据流（v2.3）</h2>
+                <div class="section-divider"></div>
+                <p>QQ 用户发送图片 → AI 通过 DeepSeek V4 Vision API 分析图片内容并给出上下文回复的完整链路。</p>
+            </div>
+
+            <div class="arch-diagram reveal">
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQ 用户发送图片<br><small>群聊/私聊 CQ码 [CQ:image]</small></div>
+                </div>
+                <div class="arch-arrow">↓ QQMessageHandler 解析消息段</div>
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">extractImageUrls()<br><small>提取 CQ:image 的 url 字段</small></div>
+                </div>
+                <div class="arch-arrow">↓ resolveImageForVision(url)</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">① 域名检测<br><small>腾讯内部域名? (qpic.cn 等)</small></div>
+                    <div class="arch-node core">② 下载→Base64<br><small>HTTP GET → data:image/xxx;base64,...</small></div>
+                    <div class="arch-node core">③ 直传 URL<br><small>外部图片直接传原URL</small></div>
+                </div>
+                <div class="arch-arrow">↓ resolvedImageUrls 传入 AgentExecutor.executeQq()</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">ChatMessage.createMultimodal()<br><small>文本 + contentParts[{type:"image_url",...}]</small></div>
+                </div>
+                <div class="arch-arrow">↓ DeepSeekClient.buildRequestBody()</div>
+                <div class="arch-layer">
+                    <div class="arch-node entry">Vision API content 数组格式<br><small>[{"type":"text","text":"..."},{"type":"image_url","image_url":{"url":"..."}}]</small></div>
+                </div>
+                <div class="arch-arrow">↓ DeepSeek V4 Vision API → AI 分析图片内容</div>
+                <div class="arch-layer">
+                    <div class="arch-node util">StreamPrinter → QQ NapCatApi<br><small>AI 理解图片并结合上下文回复</small></div>
+                </div>
+            </div>
+
+            <div style="max-width:800px; margin:24px auto;">
+                <div class="pattern-card">
+                    <h4>图片域名解析策略</h4>
+                    <p>
+                        <b>腾讯内部域名</b>（qpic.cn / gchat.qpic.cn / c2cpicdw.qpic.cn / multimedia.nt.qq.com）：<br>
+                        这些域名的图片外网不可直接访问，QQMessageHandler 通过 <code>downloadImageAsBase64()</code> 
+                        使用 QQ Bot 所在网络的 HTTP GET 下载图片字节流，转为 base64 data URI 后传入 Vision API。<br>
+                        限制：最大 5MB，连接超时 8s，读取超时 15s。<br><br>
+                        <b>外部域名</b>（其他公网 URL）：<br>
+                        直接传递图片 URL 给 DeepSeek V4 Vision API，无需本地下载中转。
+                    </p>
+                </div>
+                <div class="pattern-card">
+                    <h4>多模态消息模型</h4>
+                    <p>
+                        <code>ChatMessage</code> 新增 <code>contentParts</code> 字段（List&lt;Map&lt;String,Object&gt;&gt;）：<br>
+                        • 纯文本消息：contentParts = null，使用传统 content 字段<br>
+                        • 多模态消息：contentParts 非 null，存储 Vision API content 数组<br>
+                        • <code>createMultimodal(text, imageUrls)</code> 工厂方法自动构建 contentParts<br>
+                        • <code>hasImages()</code> 快速判断是否包含图片<br>
+                        • <code>estimateTokens()</code> 自动适配 —— 图片按 85 token/张 额外估算
+                    </p>
+                </div>
             </div>
         </div>
     </section>
@@ -409,12 +474,12 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.1 ·
+                <span class="brand">AiAgent</span> v2.3 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
-                对接 <span style="color:var(--accent-cyan);">DeepSeek API</span>
+                对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · NapCat群管理 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志
+                QQ OneBot · NapCat群管理 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · 多模态图片识别
             </p>
         </div>
     </footer>
