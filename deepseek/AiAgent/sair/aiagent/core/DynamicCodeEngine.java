@@ -51,6 +51,17 @@ public class DynamicCodeEngine {
     private final ScriptEngineManager sem;
     private final ScriptEngine jse;
     private boolean jsAvailable;
+    /** 白名单包前缀（Nashorn ClassFilter 允许的 Java 类包） */
+    private static final String[] JS_ALLOWED_PACKAGES = {
+        "java.lang.",
+        "java.util.",
+        "java.math.",
+        "java.text.",
+        "java.net.",
+        "java.io.",
+        "java.nio.file.",
+        "sair."
+    };
 
     // ==================== Java 编译器 ====================
 
@@ -102,14 +113,49 @@ public class DynamicCodeEngine {
 
     // ==================== JS: 执行代码 ====================
 
-    /** 执行 JavaScript 代码片段，返回结果字符串。 */
+    /**
+     * 执行 JavaScript 代码片段，返回结果字符串。
+     * <p>通过 Nashorn ClassFilter 限制 Java 类型访问，仅允许白名单包。</p>
+     */
     public String evalJS(String script) {
         if (!jsAvailable) return "JS 引擎不可用：当前 JVM 未找到 JavaScript 脚本引擎。";
         try {
+            // 为此次执行设置 ClassFilter 沙箱（Nashorn 特有）
+            setNashornClassFilter();
             Object result = jse.eval(script);
             return result == null ? "null" : result.toString();
         } catch (ScriptException e) {
             return "JS 错误: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 为 Nashorn 引擎设置 ClassFilter，限制 Java.type() 可访问的类。
+     * <p>仅允许白名单包前缀的 Java 类。非 Nashorn 引擎静默跳过。</p>
+     */
+    private void setNashornClassFilter() {
+        try {
+            Class<?> cfClass = Class.forName("jdk.nashorn.api.scripting.ClassFilter");
+            Object filter = java.lang.reflect.Proxy.newProxyInstance(
+                cfClass.getClassLoader(),
+                new Class[]{cfClass},
+                new java.lang.reflect.InvocationHandler() {
+                    @Override
+                    public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {
+                        if ("exposeToScripts".equals(method.getName()) && args.length == 1) {
+                            String className = (String) args[0];
+                            for (String prefix : JS_ALLOWED_PACKAGES) {
+                                if (className.startsWith(prefix)) return true;
+                            }
+                            return false;
+                        }
+                        return null;
+                    }
+                });
+            java.lang.reflect.Method setFilter = jse.getClass().getMethod("setClassFilter", cfClass);
+            setFilter.invoke(jse, filter);
+        } catch (Exception ignored) {
+            // 非 Nashorn 引擎或不支持 ClassFilter（Graal.js / Rhino），静默跳过
         }
     }
 
@@ -223,7 +269,8 @@ public class DynamicCodeEngine {
 
     private Class<?> loadLastCompiled(String className) {
         if (lastCompiledObject == null) return null;
-        InMemoryClassLoader loader = new InMemoryClassLoader();
+        // ★ 将编译产物作为构造参数传入，避免实例字段竞态
+        InMemoryClassLoader loader = new InMemoryClassLoader(lastCompiledObject);
         try {
             // ★ 使用 loadClass（标准委托链），而非 findClass（跳过父加载器）
             return loader.loadClass(className);
@@ -383,18 +430,21 @@ public class DynamicCodeEngine {
     // ==================== 内部类: InMemoryClassLoader ====================
 
     private class InMemoryClassLoader extends ClassLoader {
-        InMemoryClassLoader() {
+        private final ByteJavaFileObject compiledObject;
+
+        InMemoryClassLoader(ByteJavaFileObject compiledObject) {
             // 使用 DynamicCodeEngine 的类加载器为父加载器
             // 确保编译产物能访问 ai.jar 中的类
             super(DynamicCodeEngine.class.getClassLoader() != null
                     ? DynamicCodeEngine.class.getClassLoader()
                     : ClassLoader.getSystemClassLoader());
+            this.compiledObject = compiledObject;
         }
 
         @Override
         protected Class<?> findClass(String name) throws ClassNotFoundException {
-            if (lastCompiledObject != null) {
-                byte[] bytes = lastCompiledObject.getBytes();
+            if (compiledObject != null) {
+                byte[] bytes = compiledObject.getBytes();
                 if (bytes.length > 0) {
                     return defineClass(name, bytes, 0, bytes.length);
                 }

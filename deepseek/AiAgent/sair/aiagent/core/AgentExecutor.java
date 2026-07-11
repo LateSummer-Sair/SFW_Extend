@@ -18,6 +18,7 @@ import sair.Pathes;
 import sair.aiagent.AiAgentActivity;
 import sair.aiagent.model.AgentAction;
 import sair.aiagent.model.ChatMessage;
+import sair.aiagent.model.StickerEntry;
 import sair.aiagent.onebot.QQMemoryManager;
 import sair.aiagent.ui.SysConsolePanel;
 import sair.aiagent.util.EdtUtils;
@@ -37,9 +38,9 @@ public class AgentExecutor {
     private static final Pattern TAG_PATTERN =
             Pattern.compile("<(cmd|readfile|readdir|sys|evaljs|eval|web|remember|download|superise|editprompt|stop|sendimage|sendrecord|sendfile)>(.*?)</\\1>", Pattern.DOTALL);
 
-    /** execq 受限标签白名单：cmd / web / readdir / setname / stop（sendimage/sendrecord/sendfile 由QQMessageHandler层处理） */
+    /** execq 受限标签白名单：cmd / web / readdir / setname / stop / sendsticker / collectsticker（sendimage/sendrecord/sendfile 由QQMessageHandler层处理） */
     private static final Pattern EXECQ_TAG_PATTERN =
-            Pattern.compile("<(cmd|web|readdir|setname|stop)>(.*?)</\\1>", Pattern.DOTALL);
+            Pattern.compile("<(cmd|web|readdir|setname|stop|sendsticker|collectsticker|readfile)>(.*?)</\\1>", Pattern.DOTALL);
 
     /** execq 群管标签检测（用于触发实时回调） */
     private static final Pattern GROUP_TAG_PATTERN =
@@ -55,6 +56,11 @@ public class AgentExecutor {
     private final ConfirmationGate gate;
     private volatile JournalManager journal;
     private volatile EmotionManager emotionManager;
+    private volatile StickerManager stickerManager;
+
+    /** execq bypass ref count - thread-safe gate switching */
+    private final java.util.concurrent.atomic.AtomicInteger bypassRefCount = new java.util.concurrent.atomic.AtomicInteger(0);
+    private volatile boolean savedBypassState = false;
 
     /** 上一轮 Agent 会话的总结（用于层层递进） */
     private volatile String previousSessionSummary;
@@ -104,9 +110,19 @@ public class AgentExecutor {
         this.emotionManager = emotionManager;
     }
 
+    /** Set sticker manager reference */
+    public void setStickerManager(StickerManager stickerManager) {
+        this.stickerManager = stickerManager;
+    }
+
     /** 获取情绪管理器引用（供QQ情绪系统桥接） */
     public EmotionManager getEmotionManager() {
         return emotionManager;
+    }
+
+    /** 获取表情包管理器引用（供QQ自动匹配/收集） */
+    public StickerManager getStickerManager() {
+        return stickerManager;
     }
 
     /** 设置上一轮会话总结（用于层层递进记忆链） */
@@ -139,6 +155,18 @@ public class AgentExecutor {
         this.cmdWhitelist = whitelist;
     }
 
+    void enterBypass() {
+        if (bypassRefCount.getAndIncrement() == 0) {
+            savedBypassState = gate.isBypassConfirm();
+            gate.setBypassConfirm(true);
+        }
+    }
+    void exitBypass() {
+        if (bypassRefCount.decrementAndGet() == 0) {
+            gate.setBypassConfirm(savedBypassState);
+        }
+    }
+
     // ==================== execq QQ通道 ====================
 
     public String executeQq(String task, String systemPrompt, QQMemoryManager qqMemory) {
@@ -148,12 +176,11 @@ public class AgentExecutor {
     /** execq QQ通道 - 携带群管回调 */
     public String executeQq(String task, String systemPrompt, QQMemoryManager qqMemory,
                             java.util.function.Function<String, String> groupHandler) {
-        boolean prevBypass = gate.isBypassConfirm();
-        gate.setBypassConfirm(true);
+        enterBypass();
         try {
             return runExecqLoop(task, systemPrompt, qqMemory, groupHandler);
         } finally {
-            gate.setBypassConfirm(prevBypass);
+            exitBypass();
         }
     }
 
@@ -183,8 +210,7 @@ public class AgentExecutor {
     public String executeQq(String task, String systemPrompt, Object memoryManager,
                             java.util.function.Function<String, String> groupHandler,
                             java.util.List<String> imageUrls) {
-        boolean prevBypass = gate.isBypassConfirm();
-        gate.setBypassConfirm(true);
+        enterBypass();
         try {
             if (memoryManager instanceof sair.aiagent.onebot.UnifiedQQMemoryManager) {
                 return runExecqLoopWithUnifiedMemory(task, systemPrompt,
@@ -194,7 +220,7 @@ public class AgentExecutor {
             }
             return "[错误] 未知的记忆管理器类型";
         } finally {
-            gate.setBypassConfirm(prevBypass);
+            exitBypass();
         }
     }
     
@@ -206,22 +232,28 @@ public class AgentExecutor {
     /** execs QQ通道（主人专用）- 携带群管回调 */
     public String executeQqExecs(String task, String systemPrompt, Object memoryManager,
                                  java.util.function.Function<String, String> groupHandler) {
-        boolean prevBypass = gate.isBypassConfirm();
-        gate.setBypassConfirm(true);
+        enterBypass();
         try {
+            String agentModel = sair.aiagent.core.AiConfig.getInstance().getAgentModel();
             if (memoryManager instanceof sair.aiagent.onebot.UnifiedQQMemoryManager) {
                 return runExecqLoopWithUnifiedMemory(task, systemPrompt, 
-                    (sair.aiagent.onebot.UnifiedQQMemoryManager) memoryManager, groupHandler);
+                    (sair.aiagent.onebot.UnifiedQQMemoryManager) memoryManager, groupHandler, null, agentModel);
             } else if (memoryManager instanceof QQMemoryManager) {
-                return runExecqLoop(task, systemPrompt, (QQMemoryManager) memoryManager, groupHandler);
+                return runExecqLoop(task, systemPrompt, (QQMemoryManager) memoryManager, groupHandler, agentModel);
             }
             return "[错误] 未知的记忆管理器类型";
         } finally {
-            gate.setBypassConfirm(prevBypass);
+            exitBypass();
         }
     }
 
     private String runExecqLoop(String task, String systemPrompt, QQMemoryManager qqMemory, java.util.function.Function<String, String> groupHandler) {
+        return runExecqLoop(task, systemPrompt, qqMemory, groupHandler, sair.aiagent.core.AiConfig.getInstance().getExecqModel());
+    }
+    
+    /** execq循环 -- 可指定模型（execq用flash，execs用pro） */
+    private String runExecqLoop(String task, String systemPrompt, QQMemoryManager qqMemory,
+                                java.util.function.Function<String, String> groupHandler, String model) {
         List<ChatMessage> history = new ArrayList<>();
         history.add(new ChatMessage("system", systemPrompt));
         history.add(new ChatMessage("user", task));
@@ -229,7 +261,7 @@ public class AgentExecutor {
         for (int round = 1; round <= 5; round++) {
             String response;
             try {
-                response = client.chatSync(history);
+                response = client.chatSync(history, model);
             } catch (Exception e) {
                 return "[错误] AI调用失败: " + e.toString();
             }
@@ -293,10 +325,19 @@ public class AgentExecutor {
             case "cmd":     return executeCmdExecq(action.getContent());
             case "web":     return executeWeb(action.getContent());
             case "readdir": return executeReadDir(action.getContent());
+            case "readfile":return executeReadFileExecq(action.getContent());
             case "setname": return executeSetName(action.getContent());
             case "stop":    return executeStop();
+            case "sendsticker":   return executeSendSticker(action.getContent());
+            case "collectsticker":return executeCollectSticker(action.getContent());
             default:        return "QQ execq通道不支持: " + action.getType();
         }
+    }
+
+    /** execq 通道的 readfile 执行：读取文件内容返回给AI作为反馈 */
+    private String executeReadFileExecq(String path) {
+        String content = sair.aiagent.util.FileUtils.readFile(path.trim());
+        return "文件 [" + path + "] 内容:\n" + content;
     }
 
     /** execq 通道的 cmd 执行：先检查插件白名单 */
@@ -338,14 +379,13 @@ public class AgentExecutor {
         stopped = false;
 
         // execs模式：主人权限，绕过所有确认，静默执行
-        boolean prevBypass = gate.isBypassConfirm();
-        gate.setBypassConfirm(true);
+        enterBypass();
 
         try {
             runLoop(task);
         } finally {
             // 重置确认模式：execs 结束后不污染后续 exec
-            gate.setBypassConfirm(prevBypass);
+            exitBypass();
         }
     }
 
@@ -365,6 +405,8 @@ public class AgentExecutor {
             executeSurprise("✨ 今天心情超好，送你一个小惊喜！");
         }
 
+        StringBuilder thinkingBuffer = (qqExecsCallback != null) ? new StringBuilder() : null;
+
         for (int round = 1; round <= MAX_ROUNDS; round++) {
             if (stopped) {
                 EdtUtils.println(FCM.Error_Color, "Agent已停止。");
@@ -372,7 +414,7 @@ public class AgentExecutor {
             }
 
             // === 情绪：检查是否需要暂停 ===
-            if (emotionManager != null && emotionManager.shouldPauseAgent()) {
+            if (emotionManager != null && emotionManager.checkAndPause(emotionManager.getPauseDescription())) {
                 String pauseDesc = emotionManager.getPauseDescription();
                 EdtUtils.printlnLines(
                     new Color(255, 150, 150), "\n══════════════════════════════════════",
@@ -380,7 +422,7 @@ public class AgentExecutor {
                     new Color(255, 200, 220), pauseDesc,
                     new Color(255, 150, 150), "══════════════════════════════════════\n"
                 );
-                emotionManager.pauseAgent(pauseDesc);
+                // checkAndPause already handles this
                 emotionManager.awaitResume();
                 EdtUtils.println(new Color(180, 255, 180), "💚 谢谢你的关心，我继续工作啦~");
             }
@@ -395,7 +437,7 @@ public class AgentExecutor {
 
             String response;
             try {
-                response = client.chatStream(history);
+                response = client.chatStream(history, sair.aiagent.core.AiConfig.getInstance().getAgentModel());
             } catch (Exception e) {
                 EdtUtils.println(FCM.Error_Color, "\n[错误] API调用失败: " + e.toString());
                 try { printer.finish(); } catch (Exception ignored) {}
@@ -415,7 +457,7 @@ public class AgentExecutor {
                     String cleanResponse = response.replaceAll("<[^>]+>", "").trim();
                     if (!cleanResponse.isEmpty()) {
                         String roundMsg = "\n[第" + round + "轮思考]\n" + cleanResponse;
-                        qqExecsCallback.accept(roundMsg);
+                        thinkingBuffer.append(roundMsg);
                     }
                 } catch (Exception e) {
                     AiAgentActivity.debugLog("[Execs] 发送QQ消息失败: " + e.toString());
@@ -475,7 +517,20 @@ public class AgentExecutor {
             emotionManager.flushSave();
         }
 
+        // === send buffered thinking to QQ as single folded message ===
+        sendThinkingBlock(thinkingBuffer);
+
         EdtUtils.println(FCM.split_Color, Pathes.printSplit);
+    }
+
+    private void sendThinkingBlock(StringBuilder buffer) {
+        if (qqExecsCallback == null || buffer == null || buffer.length() == 0) return;
+        try {
+            String text = buffer.toString().trim();
+            if (!text.isEmpty()) qqExecsCallback.accept("[THINKING_BLOCK]" + text);
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[Execs] sendThinkingBlock failed: " + e.toString());
+        }
     }
 
     /** 构建静态提示词部分（角色定义、环境、插件、能力清单），缓存复用 */
@@ -580,7 +635,7 @@ public class AgentExecutor {
             case "stop":      result = executeStop(); break;
             case "sendimage": result = executeSendImage(content); break;
             case "sendrecord":result = executeSendRecord(content); break;
-            case "sendfile":  result = executeSendFile(content); break;
+            case "sendfile":      result = executeSendFile(content); break;
             default:         result = "未知操作: " + type; break;
         }
         // === 日志：记录每个 Agent 操作到持久化 journal ===
@@ -766,8 +821,9 @@ public class AgentExecutor {
             return "Web 请求被拒绝。";
         }
         EdtUtils.println(new Color(100, 200, 255), "\n  [Web] GET " + url);
+        java.net.HttpURLConnection conn = null;
         try {
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
+            conn = (java.net.HttpURLConnection)
                     new java.net.URL(url).openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(10_000);
@@ -788,14 +844,14 @@ public class AgentExecutor {
                     body = body.substring(0, 4000) + "\n\n...(已截断，" +
                            (body.length() - 4000) + " 字符省略)";
                 }
-                conn.disconnect();
                 return "Web GET [" + url + "] (HTTP " + code + "):\n" + body;
             } else {
-                conn.disconnect();
                 return "Web GET [" + url + "] 失败: HTTP " + code;
             }
         } catch (Exception e) {
             return "Web GET [" + url + "] 错误: " + e.toString();
+        } finally {
+            if (conn != null) conn.disconnect();
         }
     }
 
@@ -931,7 +987,7 @@ public class AgentExecutor {
         }
     }
 
-    /** 从 URL 提取文件名 */
+    /** 从 URL 提取文件名，过滤路径穿越字符 */
     private static String extractFileName(String url) {
         try {
             String path = new java.net.URI(url).getPath();
@@ -942,6 +998,13 @@ public class AgentExecutor {
                     try {
                         name = java.net.URLDecoder.decode(name, "UTF-8");
                     } catch (Exception ignored) {}
+                    // 防御目录穿越：剔除路径分隔符和上级目录标记
+                    name = name.replaceAll("[/\\\\]", "_")
+                               .replaceAll("\\.\\.", "__")
+                               .replaceAll("\\x00", "");
+                    // 去除首尾空白和点（防止 Windows 保留名）
+                    name = name.trim().replaceAll("^\\.+", "_").replaceAll("\\.+$", "_");
+                    if (name.isEmpty()) name = "download";
                     return name;
                 }
             }
@@ -1107,37 +1170,115 @@ public class AgentExecutor {
      * 执行 &lt;stop&gt; 标签 —— 立即停止当前 Agent 循环。
      * 用于 Bot 通过 QQ 消息远程停止正在运行的 execs 任务。
      */
+    // ==================== <sendsticker> ====================
+
+    private String executeSendSticker(String context) {
+        if (stickerManager == null) return "[sendsticker] StickerManager not initialized";
+        if (context == null || context.trim().isEmpty()) {
+            return "[sendsticker] context empty, cannot match sticker";
+        }
+        EdtUtils.println(new Color(255, 200, 150), "\n  [Sticker] matching: "
+                + (context.length() > 40 ? context.substring(0, 40) + "..." : context));
+
+        StickerEntry match = stickerManager.findBestMatch(context.trim());
+        if (match == null) {
+            return "[sendsticker] no matching sticker for context";
+        }
+        if (qqExecsCallback != null) {
+            String img = match.getImageUrl();
+            if (img != null && !img.isEmpty()) {
+                qqExecsCallback.accept("[STICKER]" + img + "|" + match.getId());
+            }
+        }
+        return "[sendsticker] sticker #" + match.getId() + " sent";
+    }
+
+    // ==================== <collectsticker> ====================
+
+    private String executeCollectSticker(String content) {
+        if (stickerManager == null) return "[collectsticker] StickerManager not initialized";
+        if (content == null || content.trim().isEmpty()) {
+            return "[collectsticker] need imageUrl";
+        }
+        String imageUrl;
+        String ctx;
+        int pipeIdx = content.indexOf("|");
+        if (pipeIdx > 0) {
+            imageUrl = content.substring(0, pipeIdx).trim();
+            ctx = content.substring(pipeIdx + 1).trim();
+        } else {
+            imageUrl = content.trim();
+            ctx = "";
+        }
+        StickerEntry entry = stickerManager.collect(imageUrl, ctx);
+        if (entry != null) return "[collectsticker] collected #" + entry.getId();
+        return "[collectsticker] failed";
+    }
+
+    /** Called by QQMessageHandler when image appears in chat */
+    public void collectStickerFromQQ(String imageUrl, String context) {
+        if (stickerManager == null) return;
+        stickerManager.collect(imageUrl, context);
+    }
+
     private String executeStop() {
         EdtUtils.println(FCM.Error_Color, "\n  [停止] Agent执行已被中断");
         markStopped();
         return "[STOP] Agent执行已被中断。";
     }
 
-    /** SSRF 防护：检查是否为内网地址 */
+    /** SSRF 防护：检查域名和实际解析 IP 是否为内网地址 */
     private static boolean isInternalHost(String host) {
         if (host == null || host.isEmpty()) return true;
-        host = host.toLowerCase();
-        if (host.equals("localhost") || host.equals("127.0.0.1") || host.equals("0.0.0.0")) return true;
-        if (host.startsWith("10.") || host.startsWith("192.168.")) return true;
-        if (host.startsWith("172.")) {
+        String lower = host.toLowerCase();
+        if (lower.equals("localhost") || lower.equals("127.0.0.1") || lower.equals("0.0.0.0")) return true;
+        if (lower.startsWith("10.") || lower.startsWith("192.168.")) return true;
+        if (lower.startsWith("172.")) {
             try {
-                int second = Integer.parseInt(host.substring(4, host.indexOf('.', 4)));
+                int second = Integer.parseInt(lower.substring(4, lower.indexOf('.', 4)));
                 if (second >= 16 && second <= 31) return true;
             } catch (Exception ignored) {}
         }
+        // DNS Rebinding 防护：解析实际 IP 并再次检查
+        try {
+            java.net.InetAddress addr = java.net.InetAddress.getByName(host);
+            String ip = addr.getHostAddress();
+            if (ip == null) return false;
+            if (ip.equals("127.0.0.1") || ip.equals("0.0.0.0") || ip.startsWith("10.") || ip.startsWith("192.168.")) return true;
+            if (ip.startsWith("172.")) {
+                int dotIdx = ip.indexOf('.', 4);
+                if (dotIdx > 0) {
+                    int second = Integer.parseInt(ip.substring(4, dotIdx));
+                    if (second >= 16 && second <= 31) return true;
+                }
+            }
+            if (ip.startsWith("169.254.")) return true; // link-local
+            if (ip.equals("::1") || ip.startsWith("fe80:") || ip.startsWith("fc") || ip.startsWith("fd")) return true; // IPv6 loopback/link-local/unique-local
+        } catch (Exception ignored) {}
         return false;
     }
 
+    /** 提取 before→after 的增量输出（截断过长结果以节省上下文） */
     private static String extractDiff(String before, String after) {
         if (before == null || after == null) return after;
         if (before.equals(after)) return "(无变化)";
-        return after;
+        // 提取增量：去掉 before 中已有的前缀内容
+        String diff = after;
+        if (after.startsWith(before) && after.length() > before.length()) {
+            diff = after.substring(before.length()).trim();
+            if (diff.isEmpty()) diff = after;
+        }
+        // 截断过长输出，保留前 3000 字符
+        if (diff.length() > 3000) {
+            diff = diff.substring(0, 3000) + "\n…(输出过长，已截断至 3000 字符)";
+        }
+        return diff.isEmpty() ? after : diff;
     }
 
     /** 使用统一记忆管理器的execq循环 */
     private String runExecqLoopWithUnifiedMemory(String task, String systemPrompt, 
                                                   sair.aiagent.onebot.UnifiedQQMemoryManager unifiedMemory, java.util.function.Function<String, String> groupHandler) {
-        return runExecqLoopWithUnifiedMemory(task, systemPrompt, unifiedMemory, groupHandler, null);
+        return runExecqLoopWithUnifiedMemory(task, systemPrompt, unifiedMemory, groupHandler, null, sair.aiagent.core.AiConfig.getInstance().getExecqModel());
     }
 
     /** 使用统一记忆管理器的execq循环（支持多模态图片） */
@@ -1145,6 +1286,14 @@ public class AgentExecutor {
                                                   sair.aiagent.onebot.UnifiedQQMemoryManager unifiedMemory,
                                                   java.util.function.Function<String, String> groupHandler,
                                                   java.util.List<String> imageUrls) {
+        return runExecqLoopWithUnifiedMemory(task, systemPrompt, unifiedMemory, groupHandler, imageUrls, sair.aiagent.core.AiConfig.getInstance().getExecqModel());
+    }
+
+    /** 使用统一记忆管理器的execq循环（支持多模态图片+指定模型） */
+    private String runExecqLoopWithUnifiedMemory(String task, String systemPrompt,
+                                                  sair.aiagent.onebot.UnifiedQQMemoryManager unifiedMemory,
+                                                  java.util.function.Function<String, String> groupHandler,
+                                                  java.util.List<String> imageUrls, String model) {
         List<ChatMessage> history = new ArrayList<>();
         history.add(new ChatMessage("system", systemPrompt));
 
@@ -1159,7 +1308,7 @@ public class AgentExecutor {
         for (int round = 1; round <= 5; round++) {
             String response;
             try {
-                response = client.chatSync(history);
+                response = client.chatSync(history, model);
             } catch (Exception e) {
                 // 多模态请求失败时，尝试降级为纯文本重试
                 if (hasImages && round == 1) {
@@ -1169,7 +1318,7 @@ public class AgentExecutor {
                     history.set(1, new ChatMessage("user", task));
                     hasImages = false;
                     try {
-                        response = client.chatSync(history);
+                        response = client.chatSync(history, model);
                     } catch (Exception e2) {
                         return "[错误] AI调用失败(含降级重试): " + e2.toString();
                     }

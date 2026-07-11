@@ -1,6 +1,7 @@
 package sair.aiagent.onebot;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import sair.aiagent.AiAgentActivity;
@@ -370,7 +371,10 @@ public class NapCatApi {
     public String sendGroupFile(long groupId, String filePath, String fileName) {
         Map<String, Object> params = new HashMap<>();
         params.put("group_id", groupId);
-        params.put("file", filePath);
+        // NapCat naively strips "file://" prefix, do NOT add leading / before drive letter
+        String forwardPath = filePath.replace('\\', '/');
+        String uri = "file://" + forwardPath;
+        params.put("file", uri);
         params.put("name", fileName != null ? fileName : new java.io.File(filePath).getName());
         return server.sendApiCall("upload_group_file", params);
     }
@@ -385,7 +389,10 @@ public class NapCatApi {
     public String sendPrivateFile(long userId, String filePath, String fileName) {
         Map<String, Object> params = new HashMap<>();
         params.put("user_id", userId);
-        params.put("file", filePath);
+        // NapCat naively strips "file://" prefix, do NOT add leading / before drive letter
+        String forwardPath = filePath.replace('\\', '/');
+        String uri = "file://" + forwardPath;
+        params.put("file", uri);
         params.put("name", fileName != null ? fileName : new java.io.File(filePath).getName());
         return server.sendApiCall("upload_private_file", params);
     }
@@ -414,6 +421,135 @@ public class NapCatApi {
         return server.sendApiCall("get_forward_msg", params);
     }
     
+    // ==================== 合并转发API ====================
+    
+    /**
+     * 发送群聊合并转发消息（QQ原生折叠卡片效果）。
+     * <p>消息节点格式：List&lt;Map&gt;，每个Map包含type=node和data={uin,name,content}。</p>
+     * @param groupId 群号
+     * @param nodes 转发消息节点列表
+     * @return API响应JSON
+     */
+    public String sendGroupForwardMsg(long groupId, List<Map<String, Object>> nodes) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("group_id", groupId);
+        params.put("messages", nodes);
+        return server.sendApiCall("send_group_forward_msg", params);
+    }
+    
+    /**
+     * 发送私聊合并转发消息（QQ原生折叠卡片效果）。
+     * <p>消息节点格式：List&lt;Map&gt;，每个Map包含type=node和data={uin,name,content}。</p>
+     * @param userId 目标QQ号
+     * @param nodes 转发消息节点列表
+     * @return API响应JSON
+     */
+    public String sendPrivateForwardMsg(long userId, List<Map<String, Object>> nodes) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("user_id", userId);
+        params.put("messages", nodes);
+        return server.sendApiCall("send_private_forward_msg", params);
+    }
+    
+    // ==================== 个人资料API (v2.4) ====================
+    
+    /**
+     * 设置QQ个人资料（昵称、头像、个性签名等）。
+     * @param nickname 新昵称（null表示不修改）
+     * @param avatarUrl 头像图片URL或本地路径（null表示不修改）
+     * @param signature 个性签名（null表示不修改）
+     * @return API响应JSON
+     */
+    public String setQQProfile(String nickname, String avatarUrl, String signature) {
+        Map<String, Object> params = new HashMap<>();
+        if (nickname != null && !nickname.isEmpty()) params.put("nickname", nickname);
+        if (avatarUrl != null && !avatarUrl.isEmpty()) params.put("avatar", avatarUrl);
+        if (signature != null && !signature.isEmpty()) params.put("signature", signature);
+        return server.sendApiCall("set_qq_profile", params);
+    }
+    
+    /**
+     * 获取登录号信息（自己的QQ号、昵称等）
+     * @return API响应JSON
+     */
+    public String getLoginInfo() {
+        return server.sendApiCall("get_login_info", new HashMap<>());
+    }
+    
+    // ==================== 互动API (v2.4) ====================
+    
+    /**
+     * 给好友点赞（拟人化互动）。
+     * @param userId 好友QQ号
+     * @param times 点赞次数（默认10）
+     * @return API响应JSON
+     */
+    public String sendLike(long userId, int times) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("user_id", userId);
+        params.put("times", times > 0 ? times : 10);
+        return server.sendApiCall("send_like", params);
+    }
+    
+    // ==================== 消息管理API (v2.4) ====================
+    
+    /**
+     * 撤回消息。
+     * @param messageId 消息ID
+     * @return API响应JSON
+     */
+    public String deleteMsg(long messageId) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("message_id", messageId);
+        return server.sendApiCall("delete_msg", params);
+    }
+    
+    /**
+     * 标记消息已读。
+     * @param messageId 消息ID
+     * @return API响应JSON
+     */
+    public String markMsgRead(long messageId) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("message_id", messageId);
+        return server.sendApiCall("mark_msg_as_read", params);
+    }
+    
+    // ==================== 系统API (v2.4) ====================
+    
+    /**
+     * 获取运行状态。
+     * @return API响应JSON
+     */
+    public String getStatus() {
+        return server.sendApiCall("get_status", new HashMap<>());
+    }
+    
+    /**
+     * 获取版本信息。
+     * @return API响应JSON
+     */
+    public String getVersionInfo() {
+        return server.sendApiCall("get_version_info", new HashMap<>());
+    }
+    
+    /**
+     * 检查是否可以发送图片。
+     * @return API响应JSON
+     */
+    public String canSendImage() {
+        return server.sendApiCall("can_send_image", new HashMap<>());
+    }
+    
+    /**
+     * 检查是否可以发送语音。
+     * @return API响应JSON
+     */
+    public String canSendRecord() {
+        return server.sendApiCall("can_send_record", new HashMap<>());
+    }
+    
+
     // ==================== 工具方法 ====================
     
     /**

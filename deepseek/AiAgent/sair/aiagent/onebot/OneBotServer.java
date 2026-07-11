@@ -11,6 +11,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
+import com.google.gson.Gson;
+
 import sair.aiagent.AiAgentActivity;
 import sair.aiagent.onebot.model.QQMessage;
 import sair.aiagent.onebot.util.JsonUtil;
@@ -135,6 +137,8 @@ public class OneBotServer {
 
     // ==================== 发送API调用 ====================
 
+    private static final Gson GSON = new Gson();
+
     /** 发送API调用到OneBot实现端并等待响应（超时10秒） */
     public String sendApiCall(String action, Map<String, Object> params) {
         String echo = "echo_" + echoCounter.incrementAndGet();
@@ -153,6 +157,9 @@ public class OneBotServer {
                     json.append(v);
                 } else if (v instanceof Boolean) {
                     json.append(v);
+                } else if (v instanceof List || v instanceof Map) {
+                    // 使用 Gson 序列化复杂嵌套对象（如 forward 消息的 messages 数组）
+                    json.append(GSON.toJson(v));
                 } else {
                     json.append("\"").append(jsonEscape(String.valueOf(v))).append("\"");
                 }

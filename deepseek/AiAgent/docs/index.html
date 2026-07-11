@@ -31,18 +31,18 @@
     <!-- Hero Section -->
     <section class="hero">
         <div class="hero-content">
-            <div class="hero-badge">SFW Plugin · v2.3</div>
+            <div class="hero-badge">SFW Plugin · v2.5</div>
             <h1>
                 <span class="gradient-text">AiAgent</span>
             </h1>
             <p class="hero-subtitle">
                 SairFrameWork AI 智能代理插件 — 对接 DeepSeek API（V4 Vision 多模态），流式逐字输出，QQ OneBot 机器人（统一记忆库），<br>
                 SQLite 全局持久化 + 记忆联通系统 + 情绪陪伴系统 + 动态代码注入 + 联网搜索 + 跨平台终端 + 会话日志，全面接管 SFW 框架。<br>
-                <strong>v2.3 更新：多模态图片识别（DeepSeek V4 Vision API）—— QQ 机器人可接收图片并调用视觉模型分析内容，支持腾讯内部图片域名自动下载转 base64、外部图片直传 URL。ChatMessage 扩展 contentParts 字段支持 Vision API content 数组格式。DeepSeekClient 智能判断纯文本/多模态两种请求体构建策略。</strong>
+                <strong>v2.5 更新：(1) execs 思考过程合并转发 — AI 执行 execs 时的多轮思考通过 NapCat 合并转发 API 折叠为 QQ 原生消息卡片，每轮思考为独立节点，主人可逐条展开查看；(2) 表情包自动收集与发送 — QQ 聊天中自动收集图片到表情库，AI 回复时根据语境自动匹配发送表情包；(3) 6 项安全加固 — AES 密钥多因子派生、路径穿越防护、Nashorn 沙箱强化、HTTP 连接泄漏修复、情绪 TOCTOU 原子化、execq 并发引用计数；(4) 自然语气说话规则 — AI 禁用波浪线和 emoji，回复简洁自然。</strong>
             </p>
             <div class="hero-stats">
                 <div class="hero-stat reveal">
-                    <div class="num" data-target="34">0</div>
+                    <div class="num" data-target="37">0</div>
                     <div class="label">核心类</div>
                 </div>
                 <div class="hero-stat reveal">
@@ -54,7 +54,7 @@
                     <div class="label">设计模式</div>
                 </div>
                 <div class="hero-stat reveal">
-                    <div class="num" data-target="12835">0</div>
+                    <div class="num" data-target="14000">0</div>
                     <div class="label">行代码</div>
                 </div>
             </div>
@@ -68,7 +68,7 @@
                 <div class="section-tag">Overview</div>
                 <h2>项目概述</h2>
                 <div class="section-divider"></div>
-                <p>AiAgent 是一个为 SFW (SairFrameWork) 框架打造的 AI 智能代理插件（v2.3），全面对接 DeepSeek API（V4 Vision 多模态），实现流式对话与自主任务执行。集成 QQ OneBot v11 机器人，支持群聊/私聊双通道，execq 独立通道（插件白名单门控），<b>统一记忆库架构</b>（所有对话历史统一管理，通过来源标记区分群聊/私聊，实现记忆联通）。具备好友/群邀请好感度决策、反滥用保护、群上下文感知、<code>&lt;stop&gt;</code> 紧急停止标签、群管理违规处罚（警告/禁言/踢出/拉黑）、<b>多模态图片识别</b>（DeepSeek V4 Vision API，QQ 机器人可分析图片内容并给出上下文回复）、<b>PromptManager 集中式提示词管理</b>（三段提示词统一入口，config.properties 追加模式持久化）等高级功能。34 个 Java 源文件，约 12,800 行代码，SQLite 全局持久化，外部依赖：SFW.jar + sqlite-jdbc-3.42.0.0.jar + gson-2.8.6.jar。</p>
+                <p>AiAgent 是一个为 SFW (SairFrameWork) 框架打造的 AI 智能代理插件（v2.5），全面对接 DeepSeek API（V4 Vision 多模态），实现流式对话与自主任务执行。集成 QQ OneBot v11 机器人，支持群聊/私聊双通道，execq 独立通道（插件白名单门控），<b>统一记忆库架构</b>（所有对话历史统一管理，通过来源标记区分群聊/私聊，实现记忆联通）。具备好友/群邀请好感度决策、反滥用保护、群上下文感知、<code>&lt;stop&gt;</code> 紧急停止标签、群管理违规处罚（警告/禁言/踢出/拉黑）、<b>多模态图片识别</b>（DeepSeek V4 Vision API）、<b>execs 合并转发思考卡片</b>（QQ 原生折叠消息）、<b>表情包自动收集与语境匹配发送</b>、<b>折叠消息上下文感知</b>（自动展开QQ折叠消息至上下文）、<b>模型智能路由</b>（autoflash/pro自动分派）、<b>编码与UI全量修复</b>（SFW标题乱码/SysConsolePanel字体）、<b>PromptManager 集中式提示词管理</b>（三段提示词统一入口，config.properties 追加模式持久化）等高级功能。37 个 Java 源文件，约 14,000 行代码，SQLite 全局持久化，外部依赖：SFW.jar + sqlite-jdbc-3.42.0.0.jar + gson-2.8.6.jar。</p>
             </div>
 
             <ul class="feature-list">
@@ -187,6 +187,27 @@
                 <li class="reveal">
                     <div class="check">✓</div>
                     <div>
+                        <div class="f-title">execs 思考过程合并转发（v2.5）</div>
+                        <div class="f-desc">QQ 触发 execs 任务后，AI 的多轮思考通过 NapCat <code>send_group_forward_msg</code> / <code>send_private_forward_msg</code> API 折叠为 QQ 原生合并转发消息卡片。每轮思考（[第N轮思考]）拆分为独立节点，主人可逐条展开查看推理过程。OneBotServer 通过 Gson 序列化复杂嵌套的 messages 参数，失败时自动回退纯文本发送</div>
+                    </div>
+                </li>
+                <li class="reveal">
+                    <div class="check">✓</div>
+                    <div>
+                        <div class="f-title">表情包自动收集与发送（v2.5）</div>
+                        <div class="f-desc">StickerManager 管理 SQLite 表情库（stickers 表），QQ 聊天中的图片消息自动收集到表情库，存储图片路径、上下文对话、关键词和时间戳。AI 回复时自动匹配语境关键词发送最相关的表情包。StickerEntry 模型记录 id/filePath/context/keywords/timestamp/imageUrl 字段</div>
+                    </div>
+                </li>
+                <li class="reveal">
+                    <div class="check">✓</div>
+                    <div>
+                        <div class="f-title">6 项安全加固（v2.5）</div>
+                        <div class="f-desc">① AES 密钥多因子派生（不再硬编码）② 路径穿越防护（download 标签校验）③ Nashorn JS ClassFilter 沙箱（禁止访问文件/反射/进程）④ HTTP 连接 try-finally 防泄漏 ⑤ EmotionManager 情绪 TOCTOU 原子化 ⑥ execq bypassConfirm 并发引用计数（enterBypass/exitBypass）</div>
+                    </div>
+                </li>
+                <li class="reveal">
+                    <div class="check">✓</div>
+                    <div>
                         <div class="f-title">增量持久化写入</div>
                         <div class="f-desc">INSERT/UPDATE 逐条写入替代全量 Gson.toJson() 覆盖，事务保护 + busy_timeout=3000ms，高并发安全</div>
                     </div>
@@ -210,17 +231,17 @@
                 <a href="patterns.html" class="card reveal" style="text-decoration:none; color:inherit;">
                     <div class="card-icon purple">🎨</div>
                     <h3>设计模式</h3>
-                    <p>10 种设计模式：Repository · 门面 · 单例 · 生产者消费者 · 策略 · ReAct · 确认门控 · EDT路由 · 情绪状态机 · 反滥用责任链</p>
+                    <p>10 种设计模式：Repository · 门面 · 单例 · 生产者消费者 · 策略(多模态+合并转发) · ReAct · 确认门控 · EDT路由 · 情绪状态机 · 反滥用责任链</p>
                 </a>
                 <a href="classes.html" class="card reveal" style="text-decoration:none; color:inherit;">
                     <div class="card-icon green">📦</div>
                     <h3>类结构详解</h3>
-                    <p>34 个核心类 · ~12,800 行 · 9 个包：core / model / util / ui / acts / onebot / onebot.model / onebot.util</p>
+                    <p>37 个核心类 · ~14,000 行 · 9 个包：core / model / util / ui / acts / onebot / onebot.model / onebot.util</p>
                 </a>
                 <a href="commands.html" class="card reveal" style="text-decoration:none; color:inherit;">
                     <div class="card-icon amber">📋</div>
                     <h3>命令参考 & 部署</h3>
-                    <p>43 个总命令 · 15 种主线 XML 标签 + 16 种 OneBot execq 标签 · PromptManager 集中式提示词管理 · 配置追加模式 · 多模态图片识别 · 插件白名单 · 反滥用决策链 · 编译打包部署三步骤</p>
+                    <p>43 个总命令 · 15 种主线 XML 标签 + 16 种 OneBot execq 标签 · PromptManager 集中式提示词管理 · 配置追加模式 · 多模态图片识别 · 合并转发思考卡片 · 表情包自动管理 · 插件白名单 · 反滥用决策链 · 编译打包部署三步骤</p>
                 </a>
             </div>
         </div>
@@ -230,12 +251,12 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.3 ·
+                <span class="brand">AiAgent</span> v2.5 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · NapCat群管理 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 三模式同步 · 情绪系统 · 彩蛋弹窗 · SQLite · FTS5 · 10种群管标签 · 提示词优化 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · 多模态图片识别
+                QQ OneBot · NapCat群管理 · 合并转发 · 表情包 · 安全加固 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 三模式同步 · 情绪系统 · 彩蛋弹窗 · SQLite · FTS5 · 10种群管标签 · 提示词优化 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · 多模态图片识别
             </p>
         </div>
     </footer>

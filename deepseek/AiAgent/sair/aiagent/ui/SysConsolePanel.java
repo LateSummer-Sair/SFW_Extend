@@ -65,12 +65,12 @@ public class SysConsolePanel extends JPanel {
 
         headerLabel = new JLabel("系统命令: " + command);
         headerLabel.setForeground(new Color(100, 255, 180));
-        headerLabel.setFont(new Font("Consolas", Font.BOLD, 13));
+        headerLabel.setFont(new Font("Microsoft YaHei", Font.BOLD, 13));
         headerPanel.add(headerLabel, BorderLayout.WEST);
 
         statusLabel = new JLabel("\u25B6 执行中...");
         statusLabel.setForeground(new Color(255, 200, 100));
-        statusLabel.setFont(new Font("Consolas", Font.PLAIN, 12));
+        statusLabel.setFont(new Font("Microsoft YaHei", Font.PLAIN, 12));
         headerPanel.add(statusLabel, BorderLayout.EAST);
 
         add(headerPanel, BorderLayout.NORTH);
@@ -81,7 +81,7 @@ public class SysConsolePanel extends JPanel {
         outputArea.setBackground(Color.BLACK);
         outputArea.setForeground(new Color(200, 200, 200));
         outputArea.setCaretColor(Color.WHITE);
-        outputArea.setFont(new Font("Consolas", Font.PLAIN, 13));
+        outputArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
         outputArea.setLineWrap(false);
         outputArea.setWrapStyleWord(false);
 

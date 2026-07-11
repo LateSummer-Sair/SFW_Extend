@@ -1,12 +1,15 @@
 package sair.aiagent;
 
 import java.io.File;
-import java.io.FileWriter;
+import java.io.FileOutputStream;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
 
+import sair.FCM;
 import sair.Pathes;
 import sair.aiagent.acts.ActivityActions;
 import sair.aiagent.core.AgentExecutor;
@@ -19,11 +22,14 @@ import sair.aiagent.core.EmotionManager;
 import sair.aiagent.core.JournalManager;
 import sair.aiagent.core.MemoryManager;
 import sair.aiagent.core.PersistenceManager;
+import sair.aiagent.core.StickerManager;
 import sair.aiagent.core.StreamPrinter;
 import sair.aiagent.onebot.OneBotServer;
 import sair.aiagent.onebot.QQMessageHandler;
 import sair.sys.SairCons;
+import sair.sys.gui.ConsFrame;
 import sair.user.Activity;
+import sair.user.PrintRunnable;
 
 /**
  * AiAgent v2.0 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
@@ -33,6 +39,22 @@ import sair.user.Activity;
  * 具体业务逻辑由 {@code ActivityActions} 实现。
  */
 public class AiAgentActivity extends Activity {
+
+    // ==================== 修复 SFW 窗口标题乱码 ====================
+    /**
+     * SFW SairCons.java L78 编码损坏字符串导致 PrintRunnable 激活
+     * 时窗口标题变乱码。此静态块注册 AiAgent 的 PrintRunnable，
+     * 强制恢复正确标题并正常委托输出，覆盖框架损坏的标题行为。
+     */
+    static {
+        SairCons.addPrintRunnable("AiAgent_TitleFix", new PrintRunnable() {
+            @Override
+            public void run(Integer index, java.awt.Color c, String info) {
+                ConsFrame.setTitleInfo(ConsFrame.title_str);
+                ConsFrame.printo(index, c, info);
+            }
+        });
+    }
 
     // ==================== 组件字段 ====================
 
@@ -45,6 +67,7 @@ public class AiAgentActivity extends Activity {
     private final ConfirmationGate    gate;
     private final JournalManager      journal;
     private final EmotionManager      emotionManager;
+    private final StickerManager      stickerManager;
     private final ActivityActions     actions;
 
     /** OneBot QQ 集成 */
@@ -67,6 +90,7 @@ public class AiAgentActivity extends Activity {
         codeEngine = new DynamicCodeEngine();
         journal    = new JournalManager();
         emotionManager = new EmotionManager();
+        stickerManager = new StickerManager();
         agent      = new AgentExecutor(this, client, codeEngine, gate);
         actions    = new ActivityActions(this);
         debugLog("构造完成");
@@ -92,6 +116,9 @@ public class AiAgentActivity extends Activity {
             history.setPersistenceManager(persistenceManager);
             history.setCacheFile(new File(dataDir, "history.json"));
             emotionManager.setPersistenceManager(persistenceManager);
+            stickerManager.setPersistenceManager(persistenceManager);
+            stickerManager.setDataDir(dataDir);
+            agent.setStickerManager(stickerManager);
 
             // 从 SQLite 加载（首次运行时自动迁移旧 JSON）
             if (isNew) {
@@ -281,8 +308,10 @@ public class AiAgentActivity extends Activity {
                 
                 // 输出到日志文件
                 if (debugWriter == null) {
-                    debugWriter = new PrintWriter(new FileWriter(
-                            System.getProperty("user.home") + File.separator + "aiagent_debug.log", true), true);
+                    debugWriter = new PrintWriter(new OutputStreamWriter(
+                            new FileOutputStream(
+                                System.getProperty("user.home") + File.separator + "aiagent_debug.log", true),
+                            StandardCharsets.UTF_8), true);
                 }
                 debugWriter.println(new SimpleDateFormat("HH:mm:ss.SSS").format(new Date()) + " " + msg);
             } catch (Exception ignored) {}

@@ -28,7 +28,7 @@
                 <div class="section-tag">Design Patterns</div>
                 <h2>设计模式</h2>
                 <div class="section-divider"></div>
-                <p>代码严格遵循标准设计模式，确保高内聚、低耦合、可扩展。共 10 种设计模式（v2.3 策略模式扩展支持多模态 Vision API 双策略路由）。</p>
+                <p>代码严格遵循标准设计模式，确保高内聚、低耦合、可扩展。共 10 种设计模式（v2.5 策略模式扩展支持合并转发消息构建 + 表情包语境匹配）。</p>
             </div>
         </div>
     </section>
@@ -115,7 +115,10 @@
                     和 <code>chatSync()</code>（标准 JSON 响应 + 完整解析）。
                     Chat 与 Agent 模式均默认使用流式策略，打字机效果输出。
                     <b>v2.3 多模态扩展</b>：<code>buildRequestBody()</code> 智能分发 —— 当 ChatMessage.hasImages() 时自动切换为 Vision API content 数组格式
-                    [{type:"text",...},{type:"image_url",...}]，纯文本消息沿用传统 JSON 格式。两种格式共用同一请求入口，调用方无需感知底层差异。
+                    [{type:"text",...},{type:"image_url",...}]，纯文本消息沿用传统 JSON 格式。<br>
+                    <b>v2.5 合并转发扩展</b>：NapCatApi 新增 <code>sendGroupForwardMsg()</code> / <code>sendPrivateForwardMsg()</code> 两种合并转发策略，
+                    OneBotServer <code>sendApiCall()</code> 通过 Gson 序列化支持 List/Map 复杂嵌套参数。QQMessageHandler
+                    <code>sendThinkingAsForward()</code> 按 [第N轮思考] 构建 OneBot v11 forward nodes 数组，失败自动回退纯文本。
                 </p>
             </div>
 
@@ -215,7 +218,10 @@
                     ④背叛者拒绝 → ⑤ &gt;600 接受 → ⑥ 200-600 忽略 → ⑦ ≤200 拒绝。<br>
                     每个步骤都是独立判断节点，任一命中即终止链，后续步骤不再执行。<br>
                     <b>并发安全</b>：<code>ConcurrentHashMap</code> + <code>synchronized</code> 块保护决策过程，
-                    防止同一用户的多个邀请并发竞争。
+                    防止同一用户的多个邀请并发竞争。<br>
+                    <b>v2.5 表情包自动管理扩展</b>：QQMessageHandler 集成 StickerManager，聊天中图片消息自动调用
+                    <code>stickerManager.collectSticker()</code> 收集到 SQLite 表情库，AI 回复末尾自动
+                    <code>stickerManager.findMatchingSticker()</code> 根据语境关键词匹配发送表情包。
                 </p>
             </div>
         </div>
@@ -224,12 +230,12 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.3 ·
+                <span class="brand">AiAgent</span> v2.5 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                10 种设计模式 · Repository · 门面 · 单例 · 生产者消费者 · 策略(多模态) · ReAct · 确认门控 · EDT路由 · 情绪状态机 · 反滥用责任链
+                10 种设计模式 · Repository · 门面 · 单例 · 生产者消费者 · 策略(多模态+合并转发) · ReAct · 确认门控 · EDT路由 · 情绪状态机 · 反滥用责任链(表情包)
             </p>
         </div>
     </footer>

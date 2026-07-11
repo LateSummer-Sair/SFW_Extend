@@ -29,7 +29,7 @@
                 <div class="section-tag">CLI Reference</div>
                 <h2>用户命令参考</h2>
                 <div class="section-divider"></div>
-                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 33 个用户命令（含 16 个 OneBot QQ 机器人命令）。AiAgent 主线 15 个 XML 标签，QQ execq 通道 16 个标签（10 种群管标签 + 6 种工具标签）。v2.3 更新：多模态图片识别（DeepSeek V4 Vision API），QQ 消息中的图片自动传入 AI 进行视觉分析。</p>
+                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 33 个用户命令（含 16 个 OneBot QQ 机器人命令）。AiAgent 主线 15 个 XML 标签，QQ execq 通道 16 个标签（10 种群管标签 + 6 种工具标签）。v2.5 更新：execs 思考过程合并转发折叠卡片、表情包自动收集与语境匹配发送、6 项安全加固。</p>
             </div>
         </div>
     </section>
@@ -163,6 +163,7 @@
                 <h2>OneBot v11 QQ 机器人命令</h2>
                 <div class="section-divider"></div>
                 <p>通过反向 WebSocket 连接 QQ，execq 独立通道：独立提示词、统一记忆库（所有对话历史统一管理）、插件白名单门控。共 16 个 OneBot 命令。</p>
+                <p><strong>v2.5 新增：</strong>execs 合并转发 —— 主人发送 <code>execs:</code> 前缀触发完整 execs 链路后，AI 多轮思考通过 NapCat <code>send_group_forward_msg</code>/<code>send_private_forward_msg</code> API 折叠为 QQ 原生合并转发消息卡片，每轮思考为独立节点可逐条展开。表情包自动管理 —— 聊天中图片自动收集到 SQLite 表情库（stickers 表），AI 回复时根据语境关键词自动匹配发送最相关表情包。6 项安全加固（AES 密钥多因子派生 / 路径穿越防护 / Nashorn 沙箱 / HTTP 防泄漏 / TOCTOU 原子化 / execq 引用计数）。</p>
                 <p><strong>v2.1 新增：</strong>主人消息添加 <code>execs:</code> 前缀可触发完整 execs 链路，静默执行所有操作，实时推送每轮思考结果给主人。支持 <code>&lt;stop&gt;</code> 标签紧急停止。群管理中 AI 可执行 10 种群管标签（<code>&lt;ban&gt;</code> 禁言/<code>&lt;kick&gt;</code> 踢出/<code>&lt;muteall&gt;</code> 全禁/<code>&lt;setadmin&gt;</code> 设管/<code>&lt;setcard&gt;</code> 改名/<code>&lt;setgroupname&gt;</code> 改群/<code>&lt;leavegroup&gt;</code> 退群/<code>&lt;block&gt;</code> 拉黑/<code>&lt;unblock&gt;</code> 解黑/<code>&lt;delfriend&gt;</code> 删友）。提示词完全分层隔离（主线 15 标签 vs OneBot 16 标签）。</p>
             </div>
 
@@ -291,7 +292,9 @@
                         <b>群管理能力</b> — AI 可通过 NapCatApi 执行警告/禁言/踢出/拉黑操作<br>
                         <b>群消息过滤</b> — 仅响应 @机器人 或提到机器人名字或引用回复的消息<br>
                         <b>好感度决策</b> — 7步优先级链处理群邀请：主人→反滥用→好感度→背叛者→阈值判断<br>
-                        <b>&lt;stop&gt; 检测</b> — 主人可通过发送含 <code>&lt;stop&gt;</code> 的消息直接停止 Agent 执行
+                        <b>&lt;stop&gt; 检测</b> — 主人可通过发送含 <code>&lt;stop&gt;</code> 的消息直接停止 Agent 执行<br>
+                        <b>execs 合并转发（v2.5）</b> — 主人发送 <code>execs:</code> 前缀消息后，AI 多轮思考通过 NapCat 合并转发 API 折叠为 QQ 原生消息卡片，每轮 [第N轮思考] 为独立节点<br>
+                        <b>表情包自动管理（v2.5）</b> — 聊天中图片自动收集到 SQLite stickers 表，AI 回复时根据语境关键词自动匹配发送表情包
                     </p>
                 </div>
             </div>
@@ -430,13 +433,13 @@
                     <div class="card-icon cyan">1</div>
                     <h3>编译</h3>
                     <p>
-                        使用 SFW 内置 JDK (8x64) 编译全部 34 个源文件。
-                        classpath 需包含 SFW.jar 和 sqlite-jdbc-3.42.0.0.jar。
+                        使用 SFW 内置 JDK (8x64) 编译全部 37 个源文件。
+                        classpath 需包含 SFW.jar、sqlite-jdbc-3.42.0.0.jar 和 gson-2.8.6.jar。
                     </p>
                     <div class="code-block" style="margin-top:14px;">
                         <div class="code-header"><span class="lang">PowerShell</span><button class="copy-btn">Copy</button></div>
 <pre><code>javac -encoding UTF-8 \
-  -cp "SFW.jar;plugins/bootlib/sqlite-jdbc-3.42.0.0.jar" \
+  -cp "SFW.jar;plugins/bootlib/sqlite-jdbc-3.42.0.0.jar;plugins/bootlib/gson-2.8.6.jar" \
   -d build \
   sair/aiagent/**/*.java</code></pre>
                     </div>
@@ -533,12 +536,12 @@ ai/onebotwhitelistadd IDE</code></pre>
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.3 ·
+                <span class="brand">AiAgent</span> v2.5 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · NapCat群管理 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 15种XML标签 · 多模态图片识别 · 部署三步骤
+                QQ OneBot · NapCat群管理 · 合并转发 · 表情包 · 安全加固 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 15种XML标签 · 多模态图片识别 · 部署三步骤
             </p>
         </div>
     </footer>

@@ -9,6 +9,7 @@ import java.util.function.Consumer;
 
 import sair.aiagent.AiAgentActivity;
 import sair.aiagent.core.AgentExecutor;
+import sair.aiagent.model.StickerEntry;
 import sair.aiagent.onebot.model.QQMessage;
 import sair.aiagent.onebot.util.JsonUtil;
 
@@ -542,6 +543,43 @@ public class QQMessageHandler {
         AiAgentActivity.debugLog("[QQMsg] @检测结果: isAtBot=" + msg.isAtBot() + ", isReply=" + msg.isReply() + ", mentionedUsers=" + msg.getMentionedUsers().size());
     }
     
+    /** 下载接收到的文件到 fileDownloadPath */
+    private void downloadIncomingFile(String fileUrl, String fileName, long senderQQ) {
+        // 仅主人发送的文件才自动下载
+        if (!sair.aiagent.core.AiConfig.getInstance().isMasterQQ(senderQQ)) {
+            AiAgentActivity.debugLog("[QQMsg] 非主人发送文件，跳过自动下载: sender=" + senderQQ);
+            return;
+        }
+        try {
+            String dlDir = sair.aiagent.core.AiConfig.getInstance().getFileDownloadPath();
+            java.io.File dir = new java.io.File(dlDir);
+            if (!dir.exists()) dir.mkdirs();
+            if (fileName == null || fileName.isEmpty()) fileName = "file_" + System.currentTimeMillis();
+            java.io.File outFile = new java.io.File(dir, fileName);
+            // 防止覆盖：加时间戳后缀
+            if (outFile.exists()) {
+                String base = fileName;
+                int dot = base.lastIndexOf('.');
+                String ext = dot > 0 ? base.substring(dot) : "";
+                String stem = dot > 0 ? base.substring(0, dot) : base;
+                outFile = new java.io.File(dir, stem + "_" + System.currentTimeMillis() + ext);
+            }
+            java.net.URL url = new java.net.URL(fileUrl);
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(60000);
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+            java.io.InputStream is = conn.getInputStream();
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile);
+            byte[] buf = new byte[8192]; int n;
+            while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
+            fos.close(); is.close(); conn.disconnect();
+            AiAgentActivity.debugLog("[QQMsg] 文件已下载: " + outFile.getAbsolutePath() + " (" + outFile.length() + " bytes)");
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[QQMsg] 文件下载失败: " + e.toString());
+        }
+    }
+    
     /** 检测消息中的图片和折叠消息内容 */
     private void detectMediaContent(QQMessage msg) {
         if (msg.getSegments() == null || msg.getSegments().isEmpty()) return;
@@ -551,6 +589,13 @@ public class QQMessageHandler {
         StringBuilder forwardText = new StringBuilder();
         
         for (QQMessage.MessageSegment seg : msg.getSegments()) {
+            if (seg.isFile()) {
+                // 主人发送的文件自动下载到 fileDownloadPath
+                AiAgentActivity.debugLog("[QQMsg] 检测到文件消息: name=" + seg.fileName + ", url=" + seg.url);
+                if (seg.url != null && !seg.url.isEmpty()) {
+                    downloadIncomingFile(seg.url, seg.fileName, msg.getUserId());
+                }
+            }
             if (seg.isImage()) {
                 hasImage = true;
                 if (seg.url != null && !seg.url.isEmpty()) {
@@ -796,6 +841,26 @@ public class QQMessageHandler {
                 AiAgentActivity.debugLog("[QQMsg] 警告: selfId未设置，群聊@检测将失效！请执行 ai/onebotsetselfid <QQ号>");
             }
 
+
+            // === 折叠消息内容预展开（必须在存入上下文之前，确保所有消息的折叠内容不丢失） ===
+            if (msg.getForwardId() != null && !msg.getForwardId().isEmpty()
+                    && (msg.getForwardContent() == null || msg.getForwardContent().isEmpty())
+                    && napcatApi != null) {
+                try {
+                    AiAgentActivity.debugLog("[QQMsg] 同步展开折叠消息: forwardId=" + msg.getForwardId());
+                    String fwdJson = napcatApi.getForwardMsg(msg.getForwardId());
+                    if (fwdJson != null && !fwdJson.isEmpty()) {
+                        String extracted = extractForwardMsgContent(fwdJson);
+                        if (extracted != null && !extracted.isEmpty()) {
+                            if (extracted.length() > 1000) extracted = extracted.substring(0, 1000) + "...";
+                            msg.setForwardContent(extracted);
+                            AiAgentActivity.debugLog("[QQMsg] 折叠消息同步展开成功，长度: " + extracted.length());
+                        }
+                    }
+                } catch (Exception e) {
+                    AiAgentActivity.debugLog("[QQMsg] 同步展开折叠消息失败: " + e.toString());
+                }
+            }
             // === 记录所有群聊消息到历史记录（无论是否@） ===
             if (msg.isGroupMessage()) {
                 // 0. 记录群成员角色（用于@管理员/群主时查表）
@@ -982,7 +1047,9 @@ public class QQMessageHandler {
                             AiAgentActivity.debugLog("[QQMsg] 获取引用消息失败: " + e.toString());
                         }
                     }                    // 获取折叠消息内容（需API调用获取forward详情）
-                    if (msg.getForwardId() != null && !msg.getForwardId().isEmpty() && napcatApi != null) {
+                    if (msg.getForwardId() != null && !msg.getForwardId().isEmpty()
+                            && (msg.getForwardContent() == null || msg.getForwardContent().isEmpty())
+                            && napcatApi != null) {
                         AiAgentActivity.debugLog("[QQMsg] 获取折叠消息: forwardId=" + msg.getForwardId());
                         try {
                             String forwardJson = napcatApi.getForwardMsg(msg.getForwardId());
@@ -996,6 +1063,18 @@ public class QQMessageHandler {
                             }
                         } catch (Exception e) {
                             AiAgentActivity.debugLog("[QQMsg] 获取折叠消息失败: " + e.toString());
+                        }
+                    }
+                    
+                    // === 自动收集表情包图片（execq专属） ===
+                    if (msg.hasImage() && agentExecutor != null && agentExecutor.getStickerManager() != null) {
+                        String ctx = msg.getPlainText();
+                        for (String imgUrl : msg.getImageUrls()) {
+                            try {
+                                agentExecutor.collectStickerFromQQ(imgUrl, ctx);
+                            } catch (Exception ex) {
+                                AiAgentActivity.debugLog("[QQMsg] Sticker collect fail: " + ex.toString());
+                            }
                         }
                     }
                     
@@ -1258,16 +1337,20 @@ public class QQMessageHandler {
             // 在新线程中异步执行execs（不阻塞QQ响应）
             Thread execThread = new Thread(() -> {
                 String botLabel = getBotLabel();
+                // 用于缓存思考块，在execs全部完成后以合并转发方式发送
+                final String[] thinkingBlockHolder = new String[1];
                 try {
                     AiAgentActivity.debugLog("[QQMsg-Execs] execs线程启动，开始执行任务");
                     
-                    // 发送开始通知
-                    sendReply(msg, "\n[" + botLabel + "execs] 🚀 开始执行任务...\n任务: " + (task.length() > 50 ? task.substring(0, 50) + "..." : task));
-                    
                     // 设置QQ execs回调，实时接收每一轮的输出
                     agentExecutor.setQqExecsCallback((roundOutput) -> {
-                        // 在后台线程中发送消息给主人
-                        sendReply(msg, roundOutput);
+                        if (roundOutput != null && roundOutput.startsWith("[THINKING_BLOCK]")) {
+                            // 缓存思考块，等execs全部完成后再以合并转发消息发送
+                            thinkingBlockHolder[0] = roundOutput.substring("[THINKING_BLOCK]".length());
+                        } else {
+                            // 其他消息（图片/语音/文件/表情包）立即发送
+                            sendReply(msg, roundOutput);
+                        }
                     });
                     
                     // 执行真正的execs
@@ -1276,8 +1359,12 @@ public class QQMessageHandler {
                     // 清除回调
                     agentExecutor.setQqExecsCallback(null);
                     
+                    // === execs完成后，将思考过程以QQ合并转发消息发送 ===
+                    if (thinkingBlockHolder[0] != null && !thinkingBlockHolder[0].isEmpty()) {
+                        sendThinkingAsForward(msg, thinkingBlockHolder[0]);
+                    }
+                    
                     AiAgentActivity.debugLog("[QQMsg-Execs] execs执行完成");
-                    sendReply(msg, "\n[" + botLabel + "execs] ✅ 任务执行完成\n详细输出请查看SFW控制台");
                     
                 } catch (Exception e) {
                     // 清除回调
@@ -1294,11 +1381,85 @@ public class QQMessageHandler {
             AiAgentActivity.debugLog("[QQMsg] execs任务已提交到后台线程");
             
             // 立即返回，不等待execs完成
-            return "execs任务已在后台启动，请查看SFW控制台获取实时输出";
+            return "好的，马上处理~";
             
         } catch (Exception e) {
             AiAgentActivity.debugLog("[QQMsg] execs提交失败: " + e.toString());
             return "[错误] execs任务提交失败: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 将execs思考过程以QQ原生合并转发（合并转发）消息卡片发送。
+     * <p>按 [第N轮思考] 标识拆分为多个转发节点，每轮思考为一个节点，
+     * 最终形成一个可折叠/展开的消息卡片。</p>
+     * @param msg 原始QQ消息（用于获取群号/私聊对象）
+     * @param thinkingText 累积的思考文本（含 [第N轮思考] 标记）
+     */
+    private void sendThinkingAsForward(QQMessage msg, String thinkingText) {
+        if (napcatApi == null) {
+            // 降级：直接发送文本
+            sendReply(msg, thinkingText);
+            AiAgentActivity.debugLog("[QQMsg] NapCatApi未就绪，思考过程以纯文本发送");
+            return;
+        }
+        
+        try {
+            // 按 [第N轮思考] 拆分为各轮次
+            String[] rounds = thinkingText.split("(?=\\[第\\d+轮思考\\])");
+            
+            String botName = getBotLabel();
+            String botUin = String.valueOf(selfId);
+            
+            List<Map<String, Object>> nodes = new ArrayList<>();
+            
+            for (String round : rounds) {
+                String trimmed = round.trim();
+                if (trimmed.isEmpty()) continue;
+                
+                // 单轮思考过长时截断（QQ合并转发单节点有长度限制）
+                if (trimmed.length() > 3500) {
+                    trimmed = trimmed.substring(0, 3500) + "\n...(内容过长已截断)";
+                }
+                
+                // 构建node节点
+                Map<String, Object> node = new HashMap<>();
+                Map<String, Object> data = new HashMap<>();
+                data.put("uin", botUin);
+                data.put("name", botName);
+                
+                // content：消息段数组
+                List<Map<String, Object>> content = new ArrayList<>();
+                Map<String, Object> textSeg = new HashMap<>();
+                textSeg.put("type", "text");
+                Map<String, Object> textData = new HashMap<>();
+                textData.put("text", trimmed);
+                textSeg.put("data", textData);
+                content.add(textSeg);
+                
+                data.put("content", content);
+                node.put("type", "node");
+                node.put("data", data);
+                nodes.add(node);
+            }
+            
+            if (nodes.isEmpty()) {
+                AiAgentActivity.debugLog("[QQMsg] 思考内容为空，跳过合并转发");
+                return;
+            }
+            
+            AiAgentActivity.debugLog("[QQMsg] 发送合并转发消息: " + nodes.size() + " 个节点");
+            
+            if (msg.isGroupMessage()) {
+                napcatApi.sendGroupForwardMsg(msg.getGroupId(), nodes);
+            } else {
+                napcatApi.sendPrivateForwardMsg(msg.getUserId(), nodes);
+            }
+            
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[QQMsg] 合并转发发送失败: " + e.toString());
+            // 降级：直接发送文本
+            sendReply(msg, thinkingText);
         }
     }
 
@@ -1373,14 +1534,13 @@ public class QQMessageHandler {
                 AiAgentActivity.debugLog("[QQMsg] 主人普通消息，使用execq模式（受限）");
                 // 群聊构建群管回调，作为线程安全的参数传入（不再用共享字段）
                 final java.util.function.Function<String, String> groupHandler = msg.isGroupMessage() && napcatApi != null
-                    ? (r -> { processQqActions(r, msg); return "[群管已执行] "; }) : null;
+                    ? (r -> { processQqActions(r, msg, senderQQ); return "[群管已执行] "; }) : null;
                 aiResponse = agentExecutor.executeQq(task, systemPrompt, memoryManager, groupHandler, resolvedImageUrls);
             } else {
                 // 普通用户：使用execq模式（受限模式，插件白名单）
                 AiAgentActivity.debugLog("[QQMsg] 普通用户消息，使用execq模式（受限模式）");
                 // 群聊构建群管回调，作为线程安全的参数传入（不再用共享字段）
-                final java.util.function.Function<String, String> groupHandler = msg.isGroupMessage() && napcatApi != null
-                    ? (r -> { processQqActions(r, msg); return "[群管已执行] "; }) : null;
+                final java.util.function.Function<String, String> groupHandler = null; // 非主人禁用群管回调
                 aiResponse = agentExecutor.executeQq(task, systemPrompt, memoryManager, groupHandler, resolvedImageUrls);
             }
             
@@ -1409,27 +1569,39 @@ public class QQMessageHandler {
                 }
 
                 // === v2.2: 发送前拦截 <ban>/<kick> 标签，执行群管操作（OneBot层自有能力） ===
-                processQqActions(aiResponse, msg);
+                processQqActions(aiResponse, msg, senderQQ);
 
                 // 移除XML标签后发送，支持<split>拆分为多条消息
                 String cleanResponse = aiResponse.replaceAll("<[^>]+>", "").trim();
                 if (!cleanResponse.isEmpty()) {
-                    // 先用<split>分割（标签已被移除，内容变成连续文本在段落间）
-                    // 检查原始响应中是否有<split>来决定是否拆分
+                    List<String> messages;
                     String[] splitParts = aiResponse.split("<split>");
                     if (splitParts.length > 1) {
-                        // AI用了<split>标签，拆分为多条
-                        List<String> messages = new ArrayList<>();
+                        messages = new ArrayList<>();
                         for (String part : splitParts) {
                             String cleaned = part.replaceAll("<[^>]+>", "").trim();
                             if (!cleaned.isEmpty()) messages.add(cleaned);
                         }
-                        sendMultipleReplies(msg, messages);
                     } else {
-                        // 没使用<split>，正常按段落分割
-                        List<String> messages = splitIntoMessages(cleanResponse);
-                        sendMultipleReplies(msg, messages);
+                        messages = splitIntoMessages(cleanResponse);
                     }
+
+                    // === execq专属：自动匹配表情包，追加到最后一条消息末尾一并发送 ===
+                    if (!useExecs && !messages.isEmpty() && agentExecutor != null && agentExecutor.getStickerManager() != null) {
+                        try {
+                            String stickerCtx = cleanResponse.length() > 200 ? cleanResponse.substring(0, 200) : cleanResponse;
+                            StickerEntry match = agentExecutor.getStickerManager().findBestMatch(stickerCtx);
+                            if (match != null && match.getImageUrl() != null && !match.getImageUrl().isEmpty()) {
+                                String lastMsg = messages.get(messages.size() - 1);
+                                messages.set(messages.size() - 1, lastMsg + "[CQ:image,file=" + match.getImageUrl() + "]");
+                                AiAgentActivity.debugLog("[QQMsg] Sticker #" + match.getId() + " appended to last msg");
+                            }
+                        } catch (Exception ex) {
+                            AiAgentActivity.debugLog("[QQMsg] Sticker match fail: " + ex.toString());
+                        }
+                    }
+
+                    sendMultipleReplies(msg, messages);
                 }
             }
         } catch (Exception e) {
@@ -1474,29 +1646,74 @@ public class QQMessageHandler {
     }
 
     /**
+     * 根据描述在数据库中搜索匹配的联系人QQ号。
+     * 搜索范围：群昵称映射 > 群成员列表 > 好友列表。
+     * @param desc 描述文本（名字/QQ号/群名）
+     * @param msg 当前消息（用于获取群上下文）
+     * @return 匹配的QQ号，未找到返回null
+     */
+    private Long findContactByDescription(String desc, QQMessage msg) {
+        if (desc == null || desc.isEmpty()) return null;
+        // 直接是QQ号
+        try { return Long.parseLong(desc.trim()); } catch (NumberFormatException ignored) {}
+        
+        // 在群昵称映射中搜索
+        if (msg.isGroupMessage() && unifiedMemory != null) {
+            java.util.Map<String, Long> nickMap = unifiedMemory.getGroupNicknameMap(msg.getGroupId());
+            for (java.util.Map.Entry<String, Long> e : nickMap.entrySet()) {
+                if (e.getKey().contains(desc)) return e.getValue();
+            }
+            // 在群成员列表中搜索
+            java.util.List<String[]> admins = unifiedMemory.getGroupAdmins(msg.getGroupId());
+            if (admins != null) {
+                for (String[] a : admins) {
+                    if (a.length >= 2 && a[1] != null && a[1].contains(desc)) {
+                        try { return Long.parseLong(a[0]); } catch (NumberFormatException ignored) {}
+                    }
+                }
+            }
+        }
+        return null;
+    }
+    
+
+    /**
      * 发送前处理AI响应中的群管标签（<ban>/<kick>）。
      * 这是OneBot层的自有能力，不污染AgentExecutor主线。
      */
-    private void processQqActions(String aiResponse, QQMessage msg) {
+    private void processQqActions(String aiResponse, QQMessage msg, long senderQQ) {
 
         long groupId = msg.isGroupMessage() ? msg.getGroupId() : 0;
         
-        // === 群管标签（需要群聊+API上下文） ===
+        // 主人门控：只有配置中 masterQQs 里的主人才允许执行群管操作
+        boolean isSenderMaster = sair.aiagent.core.AiConfig.getInstance().isMasterQQ(senderQQ);
+        java.util.Set<Long> masterQQs = sair.aiagent.core.AiConfig.getInstance().getMasterQQs();
+        if (!isSenderMaster) {
+            AiAgentActivity.debugLog("[QQMsg] 非主人(senderQQ=" + senderQQ + ")尝试触发群管操作，已拒绝");
+            return;
+        }
+        
+        // === 群管标签（需要群聊+API上下文+主人授权） ===
         if (msg.isGroupMessage() && napcatApi != null) {
             // 处理 <ban>QQ号 [秒数]</ban>
         java.util.regex.Matcher banMatcher = java.util.regex.Pattern.compile(
             "<ban>\\s*(\\d+)(?:\\s+(\\d+))?\\s*</ban>").matcher(aiResponse);
         while (banMatcher.find()) {
             try {
-                long userId = Long.parseLong(banMatcher.group(1));
+                long targetUserId = Long.parseLong(banMatcher.group(1));
                 int duration = 180; // 默认3分钟
                 if (banMatcher.group(2) != null) {
                     duration = Integer.parseInt(banMatcher.group(2));
                     if (duration < 0) duration = 0;
                     if (duration > 2592000) duration = 2592000;
                 }
-                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<ban>: groupId=" + groupId + ", userId=" + userId + ", duration=" + duration + "s");
-                napcatApi.muteGroupMember(groupId, userId, duration);
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<ban>: groupId=" + groupId + ", targetUserId=" + targetUserId + ", duration=" + duration + "s");
+                // 绝不处罚主人
+                if (masterQQs.contains(targetUserId)) {
+                    AiAgentActivity.debugLog("[QQMsg] 拒绝禁言主人QQ: " + targetUserId);
+                    continue;
+                }
+                napcatApi.muteGroupMember(groupId, targetUserId, duration);
             } catch (NumberFormatException e) {
                 AiAgentActivity.debugLog("[QQMsg] <ban>标签格式错误: " + banMatcher.group());
             }
@@ -1507,10 +1724,15 @@ public class QQMessageHandler {
             "<kick>\\s*(\\d+)(?:\\s+(block))?\\s*</kick>", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(aiResponse);
         while (kickMatcher.find()) {
             try {
-                long userId = Long.parseLong(kickMatcher.group(1));
+                long targetUserId = Long.parseLong(kickMatcher.group(1));
                 boolean block = kickMatcher.group(2) != null;
-                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<kick>: groupId=" + groupId + ", userId=" + userId + ", block=" + block);
-                napcatApi.kickGroupMember(groupId, userId, block);
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<kick>: groupId=" + groupId + ", targetUserId=" + targetUserId + ", block=" + block);
+                // 绝不处罚主人
+                if (masterQQs.contains(targetUserId)) {
+                    AiAgentActivity.debugLog("[QQMsg] 拒绝踢出主人QQ: " + targetUserId);
+                    continue;
+                }
+                napcatApi.kickGroupMember(groupId, targetUserId, block);
             } catch (NumberFormatException e) {
                 AiAgentActivity.debugLog("[QQMsg] <kick>标签格式错误: " + kickMatcher.group());
             }
@@ -1662,12 +1884,124 @@ public class QQMessageHandler {
                 }
             }
             
+            // 处理 <relay>目标描述|||消息内容</relay> — 转告（全员可用，查DB匹配联系人）
+            java.util.regex.Matcher relayMatcher = java.util.regex.Pattern.compile(
+                "<relay>\\s*(.+?)\\s*</relay>", java.util.regex.Pattern.DOTALL).matcher(aiResponse);
+            while (relayMatcher.find()) {
+                String relayContent = relayMatcher.group(1).trim();
+                int sepIdx = relayContent.indexOf("|||");
+                if (sepIdx < 0) continue;
+                String targetDesc = relayContent.substring(0, sepIdx).trim();
+                String relayMsg = relayContent.substring(sepIdx + 3).trim();
+                if (relayMsg.isEmpty()) continue;
+                
+                // 在统一记忆库中搜索匹配的联系人
+                Long targetQQ = findContactByDescription(targetDesc, msg);
+                if (targetQQ != null) {
+                    AiAgentActivity.debugLog("[QQMsg] 转告: target=" + targetDesc + " -> QQ=" + targetQQ + ", msg=" + relayMsg);
+                    napcatApi.sendPrivateMessage(targetQQ, "[Bot转告] " + msg.getDisplayName() + "(" + senderQQ + ")让我告诉你：\n" + relayMsg);
+                } else {
+                    AiAgentActivity.debugLog("[QQMsg] 转告失败: 未找到联系人 " + targetDesc);
+                }
+            }
+            
+            // 处理 <forwardmsg>消息ID|||目标描述</forwardmsg> — 转发消息（仅主人）
+            java.util.regex.Matcher fwdmsgMatcher = java.util.regex.Pattern.compile(
+                "<forwardmsg>\\s*(\\d+)\\s*\\|\\|\\|\\s*(.+?)\\s*</forwardmsg>", java.util.regex.Pattern.DOTALL).matcher(aiResponse);
+            while (fwdmsgMatcher.find()) {
+                try {
+                    long fwdMsgId = Long.parseLong(fwdmsgMatcher.group(1));
+                    String targetDesc = fwdmsgMatcher.group(2).trim();
+                    boolean isMaster = sair.aiagent.core.AiConfig.getInstance().isMasterQQ(senderQQ);
+                    if (!isMaster) {
+                        AiAgentActivity.debugLog("[QQMsg] <forwardmsg>被拒绝: 用户 " + senderQQ + " 不是主人");
+                        continue;
+                    }
+                    // 获取原消息内容
+                    String origMsg = napcatApi.getMessage((int)fwdMsgId);
+                    if (origMsg != null && !origMsg.isEmpty()) {
+                        // 提取消息文本
+                        String msgText = extractMsgSegmentsText(origMsg);
+                        if (msgText == null || msgText.isEmpty()) msgText = "[非文本消息]";
+                        Long targetQQ = findContactByDescription(targetDesc, msg);
+                        if (targetQQ != null) {
+                            napcatApi.sendPrivateMessage(targetQQ, "[转发自 " + msg.getDisplayName() + "]\n" + msgText);
+                            AiAgentActivity.debugLog("[QQMsg] 转发消息成功: msgId=" + fwdMsgId + " -> " + targetQQ);
+                        }
+                    }
+                } catch (NumberFormatException e) {
+                    AiAgentActivity.debugLog("[QQMsg] <forwardmsg>标签格式错误");
+                }
+            }
+            
+            // 处理 <sendlike>QQ号 [次数]</sendlike> — 给好友点赞(全员可用)
+            java.util.regex.Matcher likeMatcher = java.util.regex.Pattern.compile(
+                "<sendlike>\\s*(\\d+)(?:\\s+(\\d+))?\\s*</sendlike>").matcher(aiResponse);
+            while (likeMatcher.find()) {
+                try {
+                    long likeTarget = Long.parseLong(likeMatcher.group(1));
+                    int times = 10;
+                    if (likeMatcher.group(2) != null) times = Integer.parseInt(likeMatcher.group(2));
+                    AiAgentActivity.debugLog("[QQMsg] 发送前拦截<sendlike>: userId=" + likeTarget + ", times=" + times);
+                    napcatApi.sendLike(likeTarget, times);
+                } catch (NumberFormatException e) {
+                    AiAgentActivity.debugLog("[QQMsg] <sendlike>标签格式错误");
+                }
+            }
+            
+
+            // 处理 <readfile>路径</readfile> — 读取本地文件内容（仅主人可用）
+            java.util.regex.Matcher readFileMatcher = java.util.regex.Pattern.compile(
+                "<readfile>\\s*(.+?)\\s*</readfile>", java.util.regex.Pattern.DOTALL).matcher(aiResponse);
+            while (readFileMatcher.find()) {
+                String filePath = readFileMatcher.group(1).trim();
+                try {
+                    java.io.File f = new java.io.File(filePath);
+                    if (!f.exists()) continue;
+                    String content = sair.aiagent.util.FileUtils.readFile(filePath);
+                    // 通过发送消息的方式返回内容（会被清理掉标签后正常发送）
+                    // 内容已注入aiResponse，后续cleanResponse会包含
+                    AiAgentActivity.debugLog("[QQMsg] <readfile>读取: " + filePath + " (" + f.length() + " bytes)");
+                } catch (Exception e) {
+                    AiAgentActivity.debugLog("[QQMsg] <readfile>失败: " + e.getMessage());
+                }
+            }
+            
+            // 处理 <sendfileto>目标描述|||文件路径</sendfileto> — 定向发送文件（仅主人）
+            java.util.regex.Matcher sendFileToMatcher = java.util.regex.Pattern.compile(
+                "<sendfileto>\\s*(.+?)\\s*\\|\\|\\|\\s*(.+?)\\s*</sendfileto>", java.util.regex.Pattern.DOTALL).matcher(aiResponse);
+            while (sendFileToMatcher.find()) {
+                String targetDesc = sendFileToMatcher.group(1).trim();
+                String filePath = sendFileToMatcher.group(2).trim();
+                if (!sair.aiagent.core.AiConfig.getInstance().isMasterQQ(senderQQ)) {
+                    AiAgentActivity.debugLog("[QQMsg] <sendfileto>被拒绝: 非主人");
+                    continue;
+                }
+                java.io.File f = new java.io.File(filePath);
+                if (!f.exists() || !f.isFile()) {
+                    AiAgentActivity.debugLog("[QQMsg] <sendfileto>文件不存在: " + filePath);
+                    continue;
+                }
+                String canonicalPath; try { canonicalPath = f.getCanonicalPath(); } catch (Exception ex) { canonicalPath = f.getAbsolutePath(); }
+                // 查找目标
+                Long targetQQ = findContactByDescription(targetDesc, msg);
+                if (targetQQ != null) {
+                    AiAgentActivity.debugLog("[QQMsg] <sendfileto>: " + filePath + " -> " + targetQQ);
+                    String resp = napcatApi.sendPrivateFile(targetQQ, canonicalPath, f.getName());
+                    if (resp != null) {
+                        AiAgentActivity.debugLog("[QQMsg] <sendfileto>API响应: " + (resp.length() > 200 ? resp.substring(0, 200) + "..." : resp));
+                    } else {
+                        AiAgentActivity.debugLog("[QQMsg] <sendfileto>API调用超时或失败!");
+                    }
+                }
+            }
+            
             // 处理 <sendfile>本地文件路径</sendfile> — 发送文件（仅主人可用）
             java.util.regex.Matcher sendFileMatcher = java.util.regex.Pattern.compile(
                 "<sendfile>\\s*(.+?)\\s*</sendfile>", java.util.regex.Pattern.DOTALL).matcher(aiResponse);
             while (sendFileMatcher.find()) {
                 String filePath = sendFileMatcher.group(1).trim();
-                long senderQQ = msg.getUserId();
+                // senderQQ is now method parameter
                 boolean isMaster = sair.aiagent.core.AiConfig.getInstance().isMasterQQ(senderQQ);
                 
                 if (!isMaster) {
@@ -1681,11 +2015,20 @@ public class QQMessageHandler {
                     continue;
                 }
                 
-                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<sendfile>: " + filePath);
+                // 规范化路径（用系统原生分隔符，NapCat/Node.js需要正确格式）
+                String canonicalPath; try { canonicalPath = f.getCanonicalPath(); } catch (Exception ex) { canonicalPath = f.getAbsolutePath(); }
+                AiAgentActivity.debugLog("[QQMsg] 发送前拦截<sendfile>: " + filePath + " -> canonical=" + canonicalPath);
+                
+                String apiResp;
                 if (msg.isGroupMessage()) {
-                    napcatApi.sendGroupFile(msg.getGroupId(), filePath, f.getName());
+                    apiResp = napcatApi.sendGroupFile(msg.getGroupId(), canonicalPath, f.getName());
                 } else {
-                    napcatApi.sendPrivateFile(msg.getUserId(), filePath, f.getName());
+                    apiResp = napcatApi.sendPrivateFile(msg.getUserId(), canonicalPath, f.getName());
+                }
+                if (apiResp != null) {
+                    AiAgentActivity.debugLog("[QQMsg] <sendfile>API响应: " + (apiResp.length() > 200 ? apiResp.substring(0, 200) + "..." : apiResp));
+                } else {
+                    AiAgentActivity.debugLog("[QQMsg] <sendfile>API调用超时或失败!");
                 }
             }
         }
@@ -1757,6 +2100,8 @@ public class QQMessageHandler {
 
         // === 可配置的execq核心提示词 ===
         String corePrompt = sair.aiagent.core.AiConfig.getInstance().getExecqPrompt();
+        // 替换 {filepath} 占位符为实际文件下载目录
+        corePrompt = corePrompt.replace("{filepath}", sair.aiagent.core.AiConfig.getInstance().getFileDownloadPath());
         sb.append(corePrompt).append("\n\n");
 
         // === 预先收集身份信息（用于上下文标注） ===

@@ -35,7 +35,7 @@
                 <div class="section-tag">Architecture</div>
                 <h2>系统架构</h2>
                 <div class="section-divider"></div>
-                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。v2.3 更新：多模态图片识别（DeepSeek V4 Vision API），QQ 机器人支持图片智能分析。</p>
+                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。v2.5 更新：execs 合并转发思考卡片（NapCat API）、表情包自动收集与发送系统、6 项安全加固。</p>
             </div>
         </div>
     </section>
@@ -63,6 +63,7 @@
                     <div class="arch-node core">ConversationHistory<br><small>滑动窗口</small></div>
                     <div class="arch-node core">MemoryManager<br><small>全局记忆管理</small></div>
                     <div class="arch-node core">DynamicCodeEngine<br><small>动态编译</small></div>
+                    <div class="arch-node core">StickerManager<br><small>表情包收集匹配</small></div>
                     <div class="arch-node core">SysConsoleExecutor<br><small>系统终端</small></div>
                 </div>
                 <!-- Core Layer Row 3 -->
@@ -75,14 +76,14 @@
                 <div class="arch-arrow">↓</div>
                 <!-- OneBot QQ Layer -->
                 <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">OneBotServer<br><small>WebSocket 服务端</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessageHandler<br><small>消息路由 · 图片下载转base64 · 多模态分发</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">OneBotServer<br><small>WebSocket · Gson参数序列化</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessageHandler<br><small>消息路由 · 图片下载 · 多模态 · 合并转发 · 表情包</small></div>
                     <div class="arch-node model" style="border-color:var(--accent-cyan);">UnifiedQQMemoryManager<br><small>统一记忆库（群聊/私聊联通）</small></div>
                     <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMemoryManager<br><small>按QQ号隔离记忆</small></div>
                 </div>
                 <!-- OneBot Sub Layer -->
                 <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">NapCatApi<br><small>HTTP API · 群管/邀请/信息</small></div>
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">NapCatApi<br><small>HTTP API · 群管 · 合并转发</small></div>
                     <div class="arch-node model" style="border-color:var(--accent-purple);">InternalAgents<br><small>好感度/拉黑管理</small></div>
                     <div class="arch-node model" style="border-color:var(--accent-purple);">GroupModeratorAgent<br><small>违规检测+处罚执行</small></div>
                     <div class="arch-node model" style="border-color:var(--accent-purple);">GroupModerationConfig<br><small>违规阈值配置</small></div>
@@ -119,7 +120,7 @@
                     / <code style="color:var(--accent-amber);">.onebot.util</code>
                 </p>
                 <p style="color:var(--text-muted); font-size:0.78rem; margin-top:8px;">
-                    34 个源文件 · 约 12,800 行代码 · 9 个包
+                    37 个源文件 · 约 14,000 行代码 · 9 个包
                 </p>
             </div>
         </div>
@@ -322,6 +323,55 @@
         </div>
     </section>
 
+    <!-- Forward Message Data Flow (v2.5) -->
+    <section id="forward-flow">
+        <div class="container">
+            <div class="section-header reveal">
+                <div class="section-tag">Data Flow</div>
+                <h2>execs 思考过程合并转发数据流（v2.5）</h2>
+                <div class="section-divider"></div>
+                <p>QQ 主人发送 execs: 任务 → AI 多轮思考通过 NapCat 合并转发 API 折叠为 QQ 原生消息卡片的完整链路。</p>
+            </div>
+
+            <div class="arch-diagram reveal">
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQ 主人发送 execs: [任务]<br><small>群聊/私聊中触发 Agent 执行</small></div>
+                </div>
+                <div class="arch-arrow">↓ QQMessageHandler.handleExecqMessage()</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">AgentExecutor.execute()<br><small>ReAct 循环 · 最多50轮</small></div>
+                </div>
+                <div class="arch-arrow">↓ qqExecsCallback 回调 · thinkingBlockHolder 缓冲</div>
+                <div class="arch-layer">
+                    <div class="arch-node core">sendThinkingAsForward()<br><small>按 [第N轮思考] 拆分文本为节点数组</small></div>
+                </div>
+                <div class="arch-arrow">↓ 构建 OneBot v11 合并转发节点</div>
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">OneBotServer.sendApiCall()<br><small>Gson.toJson() 序列化 List&lt;Map&gt; messages 参数</small></div>
+                </div>
+                <div class="arch-arrow">↓ HTTP POST</div>
+                <div class="arch-layer">
+                    <div class="arch-node model" style="border-color:var(--accent-purple);">NapCatApi<br><small>sendGroupForwardMsg() / sendPrivateForwardMsg()</small></div>
+                </div>
+                <div class="arch-arrow">↓ QQ 原生合并转发卡片</div>
+                <div class="arch-layer">
+                    <div class="arch-node entry">QQ 客户端<br><small>主人可逐条展开每轮思考节点</small></div>
+                </div>
+            </div>
+
+            <div style="max-width:800px; margin:24px auto;">
+                <div class="pattern-card">
+                    <h4>合并转发节点结构</h4>
+                    <p>
+                        每个思考轮次生成一个 OneBot v11 forward node：<br>
+                        <code>{"type":"node","data":{"uin":"selfId","name":"BotName","content":[{"type":"text","data":{"text":"..."}}]}}</code><br>
+                        单轮超过 3500 字符自动截断标记 [已截断]。发送失败时回退为纯文本消息。
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- Stream Output Deep Dive -->
     <section id="stream">
         <div class="container">
@@ -474,12 +524,12 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.3 ·
+                <span class="brand">AiAgent</span> v2.5 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · NapCat群管理 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · 多模态图片识别
+                QQ OneBot · NapCat群管理 · 合并转发 · 表情包 · 安全加固 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · 多模态图片识别
             </p>
         </div>
     </footer>

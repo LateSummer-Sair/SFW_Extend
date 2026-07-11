@@ -161,6 +161,20 @@ public class EmotionManager {
         return state.happiness <= PAUSE_THRESHOLD || state.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES;
     }
 
+    /**
+     * 原子化检查并暂停 —— 将检查与暂停合为一步，消除 TOCTOU 竞态。
+     * @param reason 暂停原因
+     * @return true=已暂停（调用方应执行 awaitResume），false=无需暂停
+     */
+    public synchronized boolean checkAndPause(String reason) {
+        if (!shouldPauseAgent()) return false;
+        state.agentPaused = true;
+        state.pauseReason = reason;
+        pauseLatch = new CountDownLatch(1);
+        save();
+        return true;
+    }
+
     public synchronized boolean shouldShowSurprise() {
         if (state.happiness >= SURPRISE_THRESHOLD && state.consecutivePraise >= MIN_CONSECUTIVE_PRAISE) {
             // 消费情绪：展示彩蛋后重置，避免连续弹出

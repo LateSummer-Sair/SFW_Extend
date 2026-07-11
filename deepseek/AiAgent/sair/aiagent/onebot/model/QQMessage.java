@@ -86,6 +86,8 @@ public class QQMessage {
         public boolean isImage() { return "image".equals(type); }
         /** 是否是折叠消息段 */
         public boolean isForward() { return "forward".equals(type); }
+        /** 是否是文件消息段 */
+        public boolean isFile() { return "file".equals(type); }
     }
 
     // === Getters/Setters ===

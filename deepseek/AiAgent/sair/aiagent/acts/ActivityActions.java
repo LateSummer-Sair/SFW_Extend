@@ -2,8 +2,6 @@ package sair.aiagent.acts;
 
 import java.awt.Color;
 import java.io.File;
-import java.io.FileWriter;
-import java.io.PrintWriter;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;

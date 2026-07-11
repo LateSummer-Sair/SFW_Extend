@@ -29,7 +29,7 @@ public class AiConfig {
     public static final String DEFAULT_API_URL = "https://api.deepseek.com";
 
     /** 默认模型 */
-    public static final String DEFAULT_MODEL = "deepseek-v4-flash";
+    public static final String DEFAULT_MODEL = "auto";
 
     // 提示词默认值由 PromptManager 硬编码提供，config.properties 可覆盖
 
@@ -78,6 +78,9 @@ public class AiConfig {
 
     /** AI机器人名字（用于检测群聊中提到名字时触发回复） */
     private String botName = "";
+
+    /** 文件下载目录（接收主人发送的文件存储位置） */
+    private String fileDownloadPath = "";
 
     /** execq <cmd> 插件白名单（逗号分隔持久化），为空则不限制 */
     private final Set<String> execqCmdWhitelist = new LinkedHashSet<>();
@@ -157,6 +160,8 @@ public class AiConfig {
             }
             // AI机器人名字
             botName = p.getProperty("botName", "");
+            // 文件下载目录
+            fileDownloadPath = p.getProperty("fileDownloadPath", "");
         } catch (Exception ignored) {
             // 读取失败则使用默认值
         }
@@ -196,12 +201,17 @@ public class AiConfig {
             p.setProperty("masterQQs", String.join(",", masterList));
             // AI机器人名字
             p.setProperty("botName", botName);
+            p.setProperty("fileDownloadPath", fileDownloadPath);
             try (FileOutputStream fos = new FileOutputStream(configFile)) {
                 p.store(new OutputStreamWriter(fos, StandardCharsets.UTF_8),
                         "AiAgent Configuration");
             }
-        } catch (Exception ignored) {
-            // 保存失败静默
+        } catch (Exception e) {
+            // 保存失败记录日志，防止静默丢配置
+            System.err.println("[AiConfig] 保存配置失败: " + e.toString());
+            try {
+                sair.aiagent.AiAgentActivity.debugLog("[AiConfig] save() FAILED: " + e.toString());
+            } catch (Exception ignored) {}
         }
     }
 
@@ -250,6 +260,54 @@ public class AiConfig {
 
     public long getOnebotSelfId()               { return onebotSelfId; }
     public void setOnebotSelfId(long id)        { this.onebotSelfId = id; }
+    
+    /** 获取文件下载目录（优先返回配置值，否则根据系统自动选择），保证以分隔符结尾 */
+    public String getFileDownloadPath() {
+        String path;
+        if (fileDownloadPath != null && !fileDownloadPath.isEmpty()) {
+            path = fileDownloadPath;
+        } else {
+            // 自动检测系统默认下载目录
+            String os = System.getProperty("os.name", "").toLowerCase();
+            String home = System.getProperty("user.home", ".");
+            path = os.contains("win") ? home + "\\Downloads" : home + "/Downloads";
+        }
+        // 确保以分隔符结尾，方便路径拼接
+        if (!path.endsWith("/") && !path.endsWith("\\")) {
+            path += java.io.File.separator;
+        }
+        return path;
+    }
+    
+    /** 设置文件下载目录 */
+    public void setFileDownloadPath(String path) { this.fileDownloadPath = (path != null) ? path.trim() : ""; }
+    
+    // ==================== 模型智能路由 (v2.4) ====================
+    
+    /** 默认 execq/chat 模型（轻量快速） */
+    private static final String DEFAULT_EXECQ_MODEL = "deepseek-v4-flash";
+    /** 默认 agent 模型（深度推理） */
+    private static final String DEFAULT_AGENT_MODEL = "deepseek-v4-pro";
+    /** auto 模式标记 */
+    private static final String AUTO_MODEL = "auto";
+    
+    /**
+     * 获取 execq/Chat 通道应使用的模型。
+     * <p>model=auto 时返回 flash（轻量快速），否则返回配置的模型。</p>
+     */
+    public String getExecqModel() {
+        if (AUTO_MODEL.equalsIgnoreCase(model)) return DEFAULT_EXECQ_MODEL;
+        return model.isEmpty() ? DEFAULT_EXECQ_MODEL : model;
+    }
+    
+    /**
+     * 获取 Agent(exec/execs) 通道应使用的模型。
+     * <p>model=auto 时返回 pro（深度推理），否则返回配置的模型。</p>
+     */
+    public String getAgentModel() {
+        if (AUTO_MODEL.equalsIgnoreCase(model)) return DEFAULT_AGENT_MODEL;
+        return model.isEmpty() ? DEFAULT_AGENT_MODEL : model;
+    }
     
     /** 获取主人QQ号列表 */
     public Set<Long> getMasterQQs()             { return Collections.unmodifiableSet(masterQQs); }
@@ -341,11 +399,36 @@ public class AiConfig {
 
     // ==================== AES 加密 ====================
 
-    /** AES 密钥（固定种子，防止重启后密钥变化导致无法解密） */
-    private static final String AES_KEY = "AiAgent@SFW2024!";
+    /**
+     * AES 密钥派生种子 —— 基于多因子组合，防止仅靠反编译获取密钥。
+     * <p>种子来源：系统属性 + 机器名 + 用户目录，三者组合后取 hash 作为密钥基础。
+     * 重启后所有因子不变，密钥稳定。</p>
+     */
+    private static final String KEY_SEED = deriveKeySeed();
+
+    private static String deriveKeySeed() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(System.getProperty("java.vm.name", ""));
+        sb.append(System.getProperty("os.arch", ""));
+        sb.append(System.getProperty("user.name", ""));
+        try { sb.append(java.net.InetAddress.getLocalHost().getHostName()); } catch (Exception ignored) {}
+        sb.append(System.getProperty("user.dir", ""));
+        // 固定盐值作为最后防线
+        sb.append("AiAgent@SFW2024!");
+        // 对组合字符串取简单 hash，保证 16 字节密钥
+        String raw = sb.toString();
+        int hash = raw.hashCode();
+        // 扩展 hash 到 16 字节可重复模式
+        StringBuilder extended = new StringBuilder(32);
+        extended.append(String.format("%08x", hash));
+        extended.append(String.format("%08x", ~hash));
+        extended.append(String.format("%08x", hash * 31 + raw.length()));
+        extended.append(String.format("%08x", raw.length() * 7 + hash));
+        return extended.toString();
+    }
 
     private static byte[] getAesKey() {
-        byte[] raw = AES_KEY.getBytes(StandardCharsets.UTF_8);
+        byte[] raw = KEY_SEED.getBytes(StandardCharsets.UTF_8);
         byte[] key = new byte[16];
         System.arraycopy(raw, 0, key, 0, Math.min(raw.length, 16));
         return key;

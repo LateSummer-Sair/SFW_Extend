@@ -23,6 +23,7 @@ import com.google.gson.reflect.TypeToken;
 
 import sair.aiagent.model.ChatMessage;
 import sair.aiagent.model.MemoryEntry;
+import sair.aiagent.model.StickerEntry;
 
 /**
  * SQLite 统一持久化管理器 —— 替代 5 个独立 JSON 文件。
@@ -175,6 +176,20 @@ public class PersistenceManager {
                     "  updated_at INTEGER NOT NULL" +
                     ")"
                 );
+
+                // 表情包表
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS stickers (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  image_url TEXT NOT NULL DEFAULT ''," +
+                    "  file_path TEXT NOT NULL DEFAULT ''," +
+                    "  context TEXT NOT NULL DEFAULT ''," +
+                    "  keywords TEXT NOT NULL DEFAULT ''," +
+                    "  usage_count INTEGER NOT NULL DEFAULT 0," +
+                    "  created_at INTEGER NOT NULL" +
+                    ")"
+                );
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_sticker_created ON stickers(created_at)");
             }
         }
     }
@@ -670,6 +685,98 @@ public class PersistenceManager {
 
     /** @return 数据库文件路径 */
     public File getDbFile() { return dbFile; }
+
+    // ==================== Stickers ====================
+
+    /** 添加表情包条目 */
+    public StickerEntry addSticker(String imageUrl, String filePath, String context, String keywords) {
+        if (imageUrl == null || imageUrl.trim().isEmpty()) return null;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO stickers (image_url, file_path, context, keywords, usage_count, created_at) "
+                    + "VALUES (?,?,?,?,0,?)",
+                    Statement.RETURN_GENERATED_KEYS)) {
+                long now = System.currentTimeMillis();
+                ps.setString(1, imageUrl.trim());
+                ps.setString(2, filePath != null ? filePath : "");
+                ps.setString(3, context != null ? context : "");
+                String kw = (keywords != null && !keywords.trim().isEmpty())
+                        ? keywords.trim() : StickerEntry.extractKeywords(context);
+                ps.setString(4, kw);
+                ps.setLong(5, now);
+                ps.executeUpdate();
+                try (ResultSet rs = ps.getGeneratedKeys()) {
+                    if (rs.next()) {
+                        return new StickerEntry(rs.getInt(1), imageUrl.trim(), filePath, context, kw, now);
+                    }
+                }
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[Persistence] addSticker FAILED: " + e.getMessage());
+            }
+            return null;
+        }
+    }
+
+    /** 增加表情包使用计数 */
+    public void incrementStickerUsage(int id) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE stickers SET usage_count = usage_count + 1 WHERE id=?")) {
+                ps.setInt(1, id);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    /** 列出所有表情包（按时间倒序） */
+    public List<StickerEntry> listAllStickers() {
+        synchronized (lock) {
+            List<StickerEntry> list = new ArrayList<>();
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(
+                         "SELECT id, image_url, file_path, context, keywords, usage_count, created_at "
+                         + "FROM stickers ORDER BY created_at DESC")) {
+                while (rs.next()) {
+                    StickerEntry se = new StickerEntry(
+                            rs.getInt(1), rs.getString(2), rs.getString(3),
+                            rs.getString(4), rs.getString(5), rs.getLong(7));
+                    se.setUsageCount(rs.getInt(6));
+                    list.add(se);
+                }
+            } catch (SQLException ignored) {}
+            return list;
+        }
+    }
+
+    /** 获取表情包总数 */
+    public int stickerCount() {
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM stickers")) {
+                return rs.next() ? rs.getInt(1) : 0;
+            } catch (SQLException e) { return 0; }
+        }
+    }
+
+    /** 删除最旧的 N 条表情包（保留最近 maxKeep 条） */
+    public void trimStickers(int maxKeep) {
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM stickers WHERE id NOT IN "
+                        + "(SELECT id FROM stickers ORDER BY created_at DESC LIMIT " + maxKeep + ")");
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    /** 删除指定表情包 */
+    public boolean removeSticker(int id) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement("DELETE FROM stickers WHERE id=?")) {
+                ps.setInt(1, id);
+                return ps.executeUpdate() > 0;
+            } catch (SQLException e) { return false; }
+        }
+    }
 
     private static String trunc(String s, int maxLen) {
         if (s == null || s.isEmpty()) return "";

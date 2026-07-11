@@ -26,11 +26,11 @@
                 <div class="section-tag">Class Structure</div>
                 <h2>类结构详解</h2>
                 <div class="section-divider"></div>
-                <p>34 个核心类，按职责划分为 9 个包，总计约 12,800 行代码。</p>
+                <p>37 个核心类，按职责划分为 9 个包，总计约 14,000 行代码。</p>
                 <p style="margin-top:8px; font-size:0.85rem; color:var(--text-muted);">
                     <code style="color:var(--accent-cyan);">sair.aiagent</code> (1 类) ·
-                    <code style="color:var(--accent-purple);">.core</code> (13 类) ·
-                    <code style="color:var(--accent-green);">.model</code> (3 类) ·
+                    <code style="color:var(--accent-purple);">.core</code> (14 类) ·
+                    <code style="color:var(--accent-green);">.model</code> (4 类) ·
                     <code style="color:var(--accent-amber);">.util</code> (3 类) ·
                     <code style="color:var(--accent-cyan);">.ui</code> (2 类) ·
                     <code style="color:var(--accent-purple);">.acts</code> (1 类) ·
@@ -65,8 +65,13 @@
             </div>
             <div class="pattern-card reveal">
                 <div class="p-header"><span class="p-badge cyan">Core</span><h4>AgentExecutor</h4></div>
-                <div class="p-class">sair.aiagent.core · 1100 行</div>
-                <p>ReAct 推理-行动循环引擎。最多 30 轮循环，execq 通道 50 轮。15 种 XML 标签：cmd/readfile/readdir/sys/evaljs/eval/web/remember/download/superise/editprompt/stop/sendimage/sendrecord/sendfile。execq 受限白名单（cmd/web/readdir/setname/stop），自动绕过确认门控。v2.3 新增 executeQq() 多模态重载，支持传入图片列表创建 Vision API 格式消息。</p>
+                <div class="p-class">sair.aiagent.core · 1229 行</div>
+                <p>ReAct 推理-行动循环引擎。最多 30 轮循环，execq 通道 50 轮。15 种 XML 标签：cmd/readfile/readdir/sys/evaljs/eval/web/remember/download/superise/editprompt/stop/sendimage/sendrecord/sendfile。execq 受限白名单（cmd/web/readdir/setname/stop），自动绕过确认门控。v2.3 新增 executeQq() 多模态重载。v2.5 新增 qqExecsCallback 回调机制，思考过程缓冲后以合并转发卡片发送。</p>
+            </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge green">Core (v2.5)</span><h4>StickerManager</h4></div>
+                <div class="p-class">sair.aiagent.core · 163 行</div>
+                <p>表情包管理器。管理 SQLite stickers 表（通过 PersistenceManager）：collectSticker() 自动收集 QQ 聊天中的图片到表情库（存储文件路径、上下文对话、关键词、时间戳），findMatchingSticker() 根据语境关键词匹配最相关表情包，cleanupOldStickers() 清理过期表情。支持按关键词检索和按时间排序。</p>
             </div>
             <div class="pattern-card reveal">
                 <div class="p-header"><span class="p-badge green">Core</span><h4>ActivityActions</h4></div>
@@ -163,6 +168,11 @@
                 <div class="p-class">sair.aiagent.model · 71 行</div>
                 <p>记忆条目 POJO。字段：id(自增)、timestamp(Unix 毫秒)、category(分类)、importance(0-10)、content。toString() 使用静态缓存 SimpleDateFormat。</p>
             </div>
+            <div class="pattern-card reveal">
+                <div class="p-header"><span class="p-badge green">Model (v2.5)</span><h4>StickerEntry</h4></div>
+                <div class="p-class">sair.aiagent.model · 104 行</div>
+                <p>表情包条目 POJO，实现 Serializable。字段：id(自增)、filePath(表情包本地路径)、context(收集时的上下文对话)、keywords(提取的关键词)、timestamp(Unix毫秒)、imageUrl(原始图片URL)。用于 StickerManager 的数据库存取和语境匹配检索。</p>
+            </div>
         </div>
     </section>
     <section style="padding-top:10px;">
@@ -175,13 +185,13 @@
             </div>
             <div class="pattern-card reveal">
                 <div class="p-header"><span class="p-badge cyan">OneBot</span><h4>OneBotServer</h4></div>
-                <div class="p-class">sair.aiagent.onebot · 519 行</div>
-                <p>OneBot v11 反向 WebSocket 服务器，RFC 6455 协议手动实现，JDK 8 兼容。WebSocket 握手/帧解析/消息发送/鉴权。start()/stop() 管理连接生命周期。</p>
+                <div class="p-class">sair.aiagent.onebot · 523 行</div>
+                <p>OneBot v11 反向 WebSocket 服务器，RFC 6455 协议手动实现，JDK 8 兼容。WebSocket 握手/帧解析/消息发送/鉴权。v2.5 sendApiCall() 集成 Gson 序列化，支持 List/Map 复杂嵌套参数（如合并转发的 messages 数组）。start()/stop() 管理连接生命周期。</p>
             </div>
             <div class="pattern-card reveal">
                 <div class="p-header"><span class="p-badge cyan">OneBot</span><h4>QQMessageHandler</h4></div>
-                <div class="p-class">sair.aiagent.onebot · 2042 行</div>
-                <p>QQ 消息处理核心 —— 消息解析、过滤、路由到 AI Agent，好友/群邀请好感度决策。无依赖 JSON 解析(JsonUtil)。消息过滤：群消息仅响应 @机器人 或提到名字。v2.3 新增多模态图片处理：downloadImageAsBase64() 下载腾讯内部图片转 base64（5MB/8s/15s限制）、resolveImageForVision() 智能域名解析路由（腾讯内部→下载转base64，外部→直传URL）、executeQqAgent() 传入 resolvedImageUrls 调用 Vision API。execq 通道：独立提示词、统一记忆库。群管标签处理：processQqActions() 在发送前拦截 AI 响应中的 10 种群管标签。</p>
+                <div class="p-class">sair.aiagent.onebot · 2381 行</div>
+                <p>QQ 消息处理核心 —— 消息解析、过滤、路由到 AI Agent，好友/群邀请好感度决策。无依赖 JSON 解析(JsonUtil)。消息过滤：群消息仅响应 @机器人 或提到名字。v2.3 新增多模态图片处理。v2.5 新增折叠消息上下文感知：forward_id 同步调用 NapCat get_forward_msg API 预展开内容，确保存入统一记忆库的 plainText 包含完整折叠消息文本；引用消息中的折叠消息递归展开。execs 合并转发：sendThinkingAsForward() 将多轮思考按 [第N轮思考] 拆分构建 OneBot v11 forward nodes，通过 NapCatApi 发送原生折叠消息卡片。表情包集成：图片消息自动收集到 StickerManager，AI 回复末尾自动匹配发送表情包。</p>
             </div>
             <div class="pattern-card reveal">
                 <div class="p-header"><span class="p-badge cyan">OneBot</span><h4>QQMemoryManager</h4></div>
@@ -195,8 +205,8 @@
             </div>
             <div class="pattern-card reveal">
                 <div class="p-header"><span class="p-badge purple">OneBot</span><h4>NapCatApi</h4></div>
-                <div class="p-class">sair.aiagent.onebot · 465 行</div>
-                <p>NapCat QQ 框架 HTTP API 封装层。群管理 API：muteGroupMember / kickGroupMember / muteAll / setGroupAdmin / setGroupCard / setGroupName / leaveGroup。消息 API：sendGroupMsg / sendPrivateMsg。信息 API：getGroupInfo / getGroupMemberInfo / getStrangerInfo / getFriendList / getGroupList / getGroupMemberList。好友管理：addFriend / deleteFriend / handleFriendRequest / handleGroupInvite。</p>
+                <div class="p-class">sair.aiagent.onebot · 600 行</div>
+                <p>NapCat QQ 框架 HTTP API 封装层。群管理 API：muteGroupMember / kickGroupMember / muteAll / setGroupAdmin / setGroupCard / setGroupName / leaveGroup。消息 API：sendGroupMsg / sendPrivateMsg。v2.5 新增 sendGroupForwardMsg / sendPrivateForwardMsg（合并转发 API）+ getForwardMsg（折叠消息内容获取）+ getMessage（引用消息获取）。信息 API：getGroupInfo / getGroupMemberInfo / getStrangerInfo / getFriendList / getGroupList / getGroupMemberList。好友管理：addFriend / deleteFriend / handleFriendRequest / handleGroupInvite。</p>
             </div>
             <div class="pattern-card reveal">
                 <div class="p-header"><span class="p-badge amber">OneBot</span><h4>InternalAgents</h4></div>
@@ -237,8 +247,8 @@
     </section>
     <footer class="footer">
         <div class="container">
-            <p><span class="brand">AiAgent</span> v2.3 · 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span></p>
-            <p style="margin-top:6px; font-size:0.78rem;">QQ OneBot · NapCat群管理 · 10种群管标签 · 好感度决策 · 反滥用 · stop · 群上下文 · SQLite 双库 · 情绪系统 · 彩蛋弹窗 · FTS5 · 流式排空 · 动态注入 · 多模态图片识别</p>
+            <p><span class="brand">AiAgent</span> v2.5 · 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span></p>
+            <p style="margin-top:6px; font-size:0.78rem;">QQ OneBot · NapCat群管理 · 合并转发 · 表情包 · 安全加固 · 好感度决策 · 反滥用 · stop · 群上下文 · SQLite 双库 · 情绪系统 · 彩蛋弹窗 · FTS5 · 流式排空 · 动态注入 · 多模态图片识别</p>
         </div>
     </footer>
     <div class="back-to-top" title="回到顶部">↑</div>

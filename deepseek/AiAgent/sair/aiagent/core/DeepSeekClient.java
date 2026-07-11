@@ -78,12 +78,32 @@ public class DeepSeekClient {
      * @return 完整的AI回复文本
      * @throws IOException 网络或API错误
      */
+    /**
+     * 流式聊天 — 指定模型版本。
+     * @param modelOverride 覆盖配置中的模型（null则使用默认）
+     */
+    public String chatStream(List<ChatMessage> messages, String modelOverride) throws IOException {
+        String jsonBody = buildRequestBody(messages, true, modelOverride);
+        HttpURLConnection conn = createConnection(true);
+        try {
+            sendRequest(conn, jsonBody);
+            checkResponse(conn);
+            return readStreamResponse(conn);
+        } finally {
+            conn.disconnect();
+        }
+    }
+    
     public String chatStream(List<ChatMessage> messages) throws IOException {
         String jsonBody = buildRequestBody(messages, true);
         HttpURLConnection conn = createConnection(true);
-        sendRequest(conn, jsonBody);
-        checkResponse(conn);
-        return readStreamResponse(conn);
+        try {
+            sendRequest(conn, jsonBody);
+            checkResponse(conn);
+            return readStreamResponse(conn);
+        } finally {
+            conn.disconnect();
+        }
     }
 
     /**
@@ -96,13 +116,34 @@ public class DeepSeekClient {
      * @return AI回复文本
      * @throws IOException 网络或API错误
      */
+    /**
+     * 非流式聊天 — 指定模型版本。
+     * @param modelOverride 覆盖配置中的模型（null则使用默认）
+     */
+    public String chatSync(List<ChatMessage> messages, String modelOverride) throws IOException {
+        String jsonBody = buildRequestBody(messages, false, modelOverride);
+        HttpURLConnection conn = createConnection(false);
+        try {
+            sendRequest(conn, jsonBody);
+            checkResponse(conn);
+            String json = readAll(conn.getInputStream());
+            return extractFirstContent(json);
+        } finally {
+            conn.disconnect();
+        }
+    }
+    
     public String chatSync(List<ChatMessage> messages) throws IOException {
         String jsonBody = buildRequestBody(messages, false);
         HttpURLConnection conn = createConnection(false);
-        sendRequest(conn, jsonBody);
-        checkResponse(conn);
-        String json = readAll(conn.getInputStream());
-        return extractFirstContent(json);
+        try {
+            sendRequest(conn, jsonBody);
+            checkResponse(conn);
+            String json = readAll(conn.getInputStream());
+            return extractFirstContent(json);
+        } finally {
+            conn.disconnect();
+        }
     }
 
     // ==================== HTTP通信 ====================
@@ -166,8 +207,14 @@ public class DeepSeekClient {
      * content 字段输出为 Vision API 数组格式。</p>
      */
     private String buildRequestBody(List<ChatMessage> messages, boolean stream) {
+        return buildRequestBody(messages, stream, null);
+    }
+    
+    /** 构建请求体，可指定模型覆盖 */
+    private String buildRequestBody(List<ChatMessage> messages, boolean stream, String modelOverride) {
+        String effectiveModel = (modelOverride != null && !modelOverride.isEmpty()) ? modelOverride : config.getModel();
         StringBuilder sb = new StringBuilder(2048);
-        sb.append("{\"model\":\"").append(jsonEscape(config.getModel())).append("\",");
+        sb.append("{\"model\":\"").append(jsonEscape(effectiveModel)).append("\",");
         sb.append("\"messages\":[");
         for (int i = 0; i < messages.size(); i++) {
             if (i > 0) sb.append(",");
