@@ -43,9 +43,11 @@ public class ActivityActions {
     // ==================== Activity 引用 ====================
 
     private final AiAgentActivity act;
+    private final OneBotCommandActions oneBotCmd;
 
     public ActivityActions(AiAgentActivity act) {
         this.act = act;
+        this.oneBotCmd = new OneBotCommandActions(act);
     }
 
     // ==================== 命令路由 ====================
@@ -71,24 +73,27 @@ public class ActivityActions {
             case "stop":       return handleStop();
             case "mood":       return handleMood();
             // === OneBot QQ 通道 ===
-            case "execq":               return handleExecq(args);
-            case "onebotconnect":      return handleOneBotConnect();
-            case "onebotdisconnect":   return handleOneBotDisconnect();
-            case "onebotstatus":       return handleOneBotStatus();
-            case "onebotsetport":      return handleOneBotSetPort(args);
-            case "onebotsettoken":     return handleOneBotSetToken(args);
-            case "onebotsetselfid":    return handleOneBotSetSelfId(args);
-            case "onebotsetprompt":   return handleOneBotSetPrompt(args);
-            case "onebotshowprompt":  return handleOneBotShowPrompt();
-            case "onebotwhitelist":      return handleOneBotWhitelist();
-            case "onebotwhitelistadd":   return handleOneBotWhitelistAdd(args);
-            case "onebotwhitelistremove": return handleOneBotWhitelistRemove(args);
+            case "execq":               return oneBotCmd.handleExecq(args);
+            case "onebotconnect":      return oneBotCmd.handleOneBotConnect();
+            case "onebotdisconnect":   return oneBotCmd.handleOneBotDisconnect();
+            case "onebotstatus":       return oneBotCmd.handleOneBotStatus();
+            case "onebotsetport":      return oneBotCmd.handleOneBotSetPort(args);
+            case "onebotsettoken":     return oneBotCmd.handleOneBotSetToken(args);
+            case "onebotsetselfid":    return oneBotCmd.handleOneBotSetSelfId(args);
+            case "onebotsetprompt":   return oneBotCmd.handleOneBotSetPrompt(args);
+            case "onebotshowprompt":  return oneBotCmd.handleOneBotShowPrompt();
+            case "onebotwhitelist":      return oneBotCmd.handleOneBotWhitelist();
+            case "onebotwhitelistadd":   return oneBotCmd.handleOneBotWhitelistAdd(args);
+            case "onebotwhitelistremove": return oneBotCmd.handleOneBotWhitelistRemove(args);
             // === 主动查看配置 ===
-            case "onebotenableproactive": return handleOneBotEnableProactive();
-            case "onebotdisableproactive": return handleOneBotDisableProactive();
-            case "onebotaddgroup":       return handleOneBotAddGroup(args);
-            case "onebotremovegroup":    return handleOneBotRemoveGroup(args);
-            case "onebotlistgroups":     return handleOneBotListGroups();
+            case "onebotenableproactive": return oneBotCmd.handleOneBotEnableProactive();
+            case "onebotdisableproactive": return oneBotCmd.handleOneBotDisableProactive();
+            case "onebotaddgroup":       return oneBotCmd.handleOneBotAddGroup(args);
+            case "onebotremovegroup":    return oneBotCmd.handleOneBotRemoveGroup(args);
+            case "onebotlistgroups":     return oneBotCmd.handleOneBotListGroups();
+            // === 自动清屏 ===
+            case "autoclearon":  return handleAutoClearOn();
+            case "autoclearoff": return handleAutoClearOff();
             default:           return false;
         }
     }
@@ -294,7 +299,8 @@ public class ActivityActions {
                     }
 
                     AiAgentActivity.debugLog("ChatThread: 调用chatStream...");
-                    String fullResponse = act.getClient().chatStream(messages);
+                    String execqModel = sair.aiagent.core.AiConfig.getInstance().getExecqModel();
+                    String fullResponse = act.getClient().chatStream(messages, execqModel);
                     AiAgentActivity.debugLog("ChatThread: chatStream返回, 长度=" + fullResponse.length());
                     capturedResponse[0] = fullResponse;
                     act.getHistory().add(new ChatMessage("assistant", fullResponse));
@@ -423,6 +429,28 @@ public class ActivityActions {
         return true;
     }
 
+    // ==================== 自动清屏 ====================
+
+    public Object handleAutoClearOn() {
+        if (act.isAutoClearEnabled()) {
+            println(C_INFO, "[AutoClear] 已在运行中（每3分钟自动清屏）");
+            return true;
+        }
+        act.startAutoClear();
+        println(C_INFO, "[AutoClear] 已启用 — 每3分钟自动执行 /clear，防止日志OOM");
+        return true;
+    }
+
+    public Object handleAutoClearOff() {
+        if (!act.isAutoClearEnabled()) {
+            println(C_INFO, "[AutoClear] 未在运行");
+            return true;
+        }
+        act.stopAutoClear();
+        println(C_INFO, "[AutoClear] 已停止");
+        return true;
+    }
+
     // ==================== 上下文同步 ====================
 
     /**
@@ -470,6 +498,10 @@ public class ActivityActions {
     // ==================== 工具方法 ====================
 
     private boolean checkKey() {
+        return checkKey(act);
+    }
+
+    static boolean checkKey(AiAgentActivity act) {
         if (!act.getConfig().hasApiKey()) {
             println(C_ERR, "请先设置API密钥: ai/setkey [你的密钥]");
             return false;
@@ -477,258 +509,12 @@ public class ActivityActions {
         return true;
     }
 
-    private static boolean isEmpty(String s) {
+    static boolean isEmpty(String s) {
         return s == null || s.trim().isEmpty();
     }
 
-    private static boolean err(String msg) {
+    static boolean err(String msg) {
         println(C_ERR, msg);
         return false;
-    }
-
-    // ==================== OneBot QQ 命令 ====================
-
-    /** execq —— QQ通道Agent模式（受限标签，自动允许） */
-    public Object handleExecq(String args) {
-        // execq 通过QQ消息处理器调用，不直接从控制台使用
-        // 这里提供一个手动入口用于测试
-        if (isEmpty(args)) return err("用法: ai/execq [QQ消息内容]\n注意：execq通常由QQ消息自动触发，此命令仅用于测试。");
-        if (!checkKey()) return false;
-
-        final String task = args.trim();
-        println(C_INFO, "[execq测试] " + task);
-
-        // 如果OneBot已连接，通过QQMessageHandler处理
-        // 否则直接使用execq模式进行测试
-        act.getGate().setBypassConfirm(true);
-        return handleExec(args); // 回退到exec模式
-    }
-
-    public Object handleOneBotConnect() {
-        sair.aiagent.onebot.OneBotServer server = act.getOneBotServer();
-        if (server == null) {
-            println(C_ERR, "OneBot服务未初始化。");
-            return false;
-        }
-        if (server.isRunning()) {
-            println(C_INFO, "OneBot服务已在运行中，端口: " + server.getPort());
-            return true;
-        }
-        server.setPort(act.getConfig().getOnebotPort());
-        server.setAccessToken(act.getConfig().getOnebotToken());
-        if (server.start()) {
-            act.getConfig().setOnebotEnabled(true);
-            act.getConfig().save();
-            println(new Color(100, 255, 100), "OneBot服务已启动，监听端口: " + server.getPort());
-            println(C_INFO, "请在OneBot实现端配置反向WebSocket连接到: ws://127.0.0.1:" + server.getPort() + "/");
-        } else {
-            println(C_ERR, "OneBot服务启动失败，端口 " + server.getPort() + " 可能被占用。");
-        }
-        return true;
-    }
-
-    public Object handleOneBotDisconnect() {
-        sair.aiagent.onebot.OneBotServer server = act.getOneBotServer();
-        if (server == null) {
-            println(C_ERR, "OneBot服务未初始化。");
-            return false;
-        }
-        server.stop();
-        act.getConfig().setOnebotEnabled(false);
-        act.getConfig().save();
-        println(C_INFO, "OneBot服务已停止。");
-        return true;
-    }
-
-    public Object handleOneBotStatus() {
-        sair.aiagent.onebot.OneBotServer server = act.getOneBotServer();
-        if (server == null) {
-            println(C_ERR, "OneBot服务未初始化。");
-            return false;
-        }
-        println(C_INFO, "== OneBot QQ 状态 ==");
-        println(C_INFO, "运行状态: " + (server.isRunning() ? "运行中" : "已停止"));
-        println(C_INFO, "监听端口: " + server.getPort());
-        println(C_INFO, "连接数  : " + server.getConnectionCount());
-        println(C_INFO, "Token   : " + (act.getConfig().getOnebotToken().isEmpty() ? "(未设置)" : "已设置"));
-        println(C_INFO, "机器人QQ: " + (act.getConfig().getOnebotSelfId() > 0 ? String.valueOf(act.getConfig().getOnebotSelfId()) : "(未设置)"));
-        return true;
-    }
-
-    public Object handleOneBotSetPort(String args) {
-        if (isEmpty(args)) return err("用法: ai/onebot/setport [端口号]");
-        try {
-            int port = Integer.parseInt(args.trim());
-            act.getConfig().setOnebotPort(port);
-            act.getConfig().save();
-            println(C_INFO, "OneBot端口 -> " + port);
-        } catch (NumberFormatException e) {
-            return err("端口号必须是数字。");
-        }
-        return true;
-    }
-
-    public Object handleOneBotSetToken(String args) {
-        if (isEmpty(args)) return err("用法: ai/onebot/settoken [Token]");
-        act.getConfig().setOnebotToken(args.trim());
-        act.getConfig().save();
-        println(C_INFO, "OneBot Token已设置。");
-        return true;
-    }
-
-    public Object handleOneBotSetSelfId(String args) {
-        if (isEmpty(args)) return err("用法: ai/onebot/setselfid [QQ号]");
-        try {
-            long qq = Long.parseLong(args.trim());
-            act.getConfig().setOnebotSelfId(qq);
-            act.getConfig().save();
-            if (act.getOneBotMessageHandler() != null) {
-                act.getOneBotMessageHandler().setSelfId(qq);
-            }
-            println(C_INFO, "机器人QQ号 -> " + qq);
-        } catch (NumberFormatException e) {
-            return err("QQ号必须是数字。");
-        }
-        return true;
-    }
-
-    public Object handleOneBotSetPrompt(String args) {
-        if (isEmpty(args)) return err("用法: ai/onebot/setprompt [提示词]");
-        act.getConfig().setExecqPrompt(args);
-        act.getConfig().save();
-        println(C_INFO, "execq提示词已更新 (长度: " + act.getConfig().getExecqPrompt().length() + ")");
-        return true;
-    }
-
-    public Object handleOneBotShowPrompt() {
-        print(new Color(100, 255, 180), "[execq 系统提示词]");
-        println(C_INFO, "\n" + act.getConfig().getExecqPrompt());
-        return true;
-    }
-
-    // ==================== execq 插件白名单管理 ====================
-
-    /** 显示当前白名单 */
-    public Object handleOneBotWhitelist() {
-        java.util.Set<String> wl = act.getConfig().getExecqCmdWhitelist();
-        print(new Color(100, 255, 180), "[execq 插件白名单]");
-        if (wl.isEmpty()) {
-            println(C_INFO, "\n(空 — 所有 <cmd> 命令均被拒绝。使用 ai/onebot/whitelist/add 添加插件)");
-        } else {
-            println(C_INFO, "\n允许的插件: " + wl);
-            println(C_INFO, "配置文件: config.properties → execqCmdWhitelist");
-        }
-        return true;
-    }
-
-    /** 添加插件到白名单 */
-    public Object handleOneBotWhitelistAdd(String args) {
-        if (isEmpty(args)) return err("用法: ai/onebot/whitelist/add [插件名]");
-        String pluginName = args.trim();
-        if (act.getConfig().addExecqCmdPlugin(pluginName)) {
-            act.getConfig().save();
-            act.getAgent().setCmdWhitelist(act.getConfig().getExecqCmdWhitelist());
-            println(C_INFO, "execq白名单已添加: [" + pluginName + "]，当前白名单: " + act.getConfig().getExecqCmdWhitelist());
-        } else {
-            println(C_INFO, "插件 [" + pluginName + "] 已在白名单中，当前: " + act.getConfig().getExecqCmdWhitelist());
-        }
-        return true;
-    }
-
-    /** 从白名单移除插件 */
-    public Object handleOneBotWhitelistRemove(String args) {
-        if (isEmpty(args)) return err("用法: ai/onebotwhitelistremove [插件名]");
-        String pluginName = args.trim();
-        if (act.getConfig().removeExecqCmdPlugin(pluginName)) {
-            act.getConfig().save();
-            act.getAgent().setCmdWhitelist(act.getConfig().getExecqCmdWhitelist());
-            println(C_INFO, "execq白名单已移除: [" + pluginName + "]，当前白名单: " + act.getConfig().getExecqCmdWhitelist());
-        } else {
-            println(C_INFO, "插件 [" + pluginName + "] 不在白名单中，当前: " + act.getConfig().getExecqCmdWhitelist());
-        }
-        return true;
-    }
-
-    // ==================== 主动查看配置命令 ====================
-
-    /** 启用主动查看功能 */
-    public Object handleOneBotEnableProactive() {
-        act.getConfig().setProactiveCheckEnabled(true);
-        act.getConfig().save();
-        
-        if (act.getOneBotMessageHandler() != null) {
-            act.getOneBotMessageHandler().enableProactiveCheck();
-            println(C_INFO, "主动查看功能已启用（每5分钟检查一次）");
-        } else {
-            println(C_INFO, "主动查看配置已保存，下次启动OneBot时生效");
-        }
-        return true;
-    }
-
-    /** 禁用主动查看功能 */
-    public Object handleOneBotDisableProactive() {
-        act.getConfig().setProactiveCheckEnabled(false);
-        act.getConfig().save();
-        
-        if (act.getOneBotMessageHandler() != null) {
-            act.getOneBotMessageHandler().disableProactiveCheck();
-        }
-        println(C_INFO, "主动查看功能已禁用");
-        return true;
-    }
-
-    /** 添加监听的群号 */
-    public Object handleOneBotAddGroup(String args) {
-        if (isEmpty(args)) return err("用法: ai/onebotaddgroup [群号]");
-        try {
-            long groupId = Long.parseLong(args.trim());
-            if (act.getConfig().addMonitoredGroup(groupId)) {
-                act.getConfig().save();
-                if (act.getOneBotMessageHandler() != null) {
-                    act.getOneBotMessageHandler().addMonitoredGroup(groupId);
-                }
-                println(C_INFO, "已添加监听群: " + groupId);
-            } else {
-                println(C_INFO, "群号已在监听列表中: " + groupId);
-            }
-        } catch (NumberFormatException e) {
-            return err("群号必须是数字。");
-        }
-        return true;
-    }
-
-    /** 移除监听的群号 */
-    public Object handleOneBotRemoveGroup(String args) {
-        if (isEmpty(args)) return err("用法: ai/onebotremovegroup [群号]");
-        try {
-            long groupId = Long.parseLong(args.trim());
-            if (act.getConfig().removeMonitoredGroup(groupId)) {
-                act.getConfig().save();
-                if (act.getOneBotMessageHandler() != null) {
-                    act.getOneBotMessageHandler().removeMonitoredGroup(groupId);
-                }
-                println(C_INFO, "已移除监听群: " + groupId);
-            } else {
-                println(C_INFO, "群号不在监听列表中: " + groupId);
-            }
-        } catch (NumberFormatException e) {
-            return err("群号必须是数字。");
-        }
-        return true;
-    }
-
-    /** 列出所有监听的群号 */
-    public Object handleOneBotListGroups() {
-        java.util.Set<Long> groups = act.getConfig().getMonitoredGroups();
-        if (groups.isEmpty()) {
-            println(C_INFO, "当前没有监听的群");
-        } else {
-            println(C_INFO, "监听的群列表 (共" + groups.size() + "个):");
-            for (Long g : groups) {
-                println(C_INFO, "  - " + g);
-            }
-        }
-        println(C_INFO, "主动查看状态: " + (act.getConfig().isProactiveCheckEnabled() ? "已启用" : "已禁用"));
-        return true;
     }
 }

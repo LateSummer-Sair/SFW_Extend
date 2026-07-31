@@ -9,18 +9,24 @@
 <body>
     <canvas id="particles-canvas"></canvas>
 
-    <nav class="top-nav">
-        <div class="nav-inner">
-            <div class="nav-logo"><div class="icon">⚡</div><span>AiAgent</span></div>
-            <div class="nav-links">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+            <div class="icon">⚡</div>
+            <span class="logo-text">AiAgent</span>
+        </div>
+        <nav class="sidebar-nav">
                 <a href="index.html">概述</a>
                 <a href="architecture.html">架构</a>
                 <a href="patterns.html">设计模式</a>
                 <a href="classes.html">类结构</a>
                 <a href="commands.html" class="active">命令</a>
-            </div>
-        </div>
-    </nav>
+                <a href="feedback.html">反馈</a>
+        </nav>
+        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航菜单">
+            <span></span><span></span><span></span>
+        </button>
+    </aside>
 
     <!-- CLI Reference -->
     <section style="padding-top:140px; padding-bottom:40px;">
@@ -29,7 +35,7 @@
                 <div class="section-tag">CLI Reference</div>
                 <h2>用户命令参考</h2>
                 <div class="section-divider"></div>
-                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 33 个用户命令（含 16 个 OneBot QQ 机器人命令）。AiAgent 主线 15 个 XML 标签，QQ execq 通道 16 个标签（10 种群管标签 + 6 种工具标签）。v2.5 更新：execs 思考过程合并转发折叠卡片、表情包自动收集与语境匹配发送、6 项安全加固。</p>
+                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 36 个用户命令（含 17 个 OneBot QQ 机器人命令）。AiAgent 主线 20 个 XML 标签，QQ execq 通道 21 个标签（11 种工具标签 + 10 种群管标签）。v2.6 新增 5 个标签：&lt;schedule&gt; 定时任务、&lt;note&gt; 知识笔记、&lt;searchnote&gt; 全文检索、&lt;batchrename&gt; 批量重命名、&lt;batchconvert&gt; 批量编码转换。v2.5 更新：execs 合并转发、表情包系统、6 项安全加固。</p>
             </div>
         </div>
     </section>
@@ -63,7 +69,7 @@
                             <td class="cmd-name">ai/setmodel</td>
                             <td>[模型名]</td>
                             <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">设置模型，默认 deepseek-chat。旧值自动升级到新默认值</td>
+                            <td class="cmd-desc">设置模型，默认 auto。auto 模式下 Chat/Execq 通道走 deepseek-v4-flash、Agent 通道走 deepseek-v4-pro（智能路由，日志输出提示）。设置非 auto 模型时全通道严格遵守配置值</td>
                         </tr>
                         <tr>
                             <td class="cmd-name">ai/setprompt</td>
@@ -138,6 +144,18 @@
                             <td class="cmd-desc">清空所有持久化记忆</td>
                         </tr>
                         <tr>
+                            <td class="cmd-name">ai/autoclearon</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-green);">系统</td>
+                            <td class="cmd-desc">启用自动清屏：守护线程每 3 分钟执行 /clear，防止日志 OOM</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">ai/autoclearoff</td>
+                            <td>—</td>
+                            <td style="color:var(--accent-green);">系统</td>
+                            <td class="cmd-desc">停止自动清屏守护线程</td>
+                        </tr>
+                        <tr>
                             <td class="cmd-name">ai/yes</td>
                             <td>—</td>
                             <td style="color:var(--accent-amber);">安全</td>
@@ -162,9 +180,9 @@
                 <div class="section-tag">QQ Bot</div>
                 <h2>OneBot v11 QQ 机器人命令</h2>
                 <div class="section-divider"></div>
-                <p>通过反向 WebSocket 连接 QQ，execq 独立通道：独立提示词、统一记忆库（所有对话历史统一管理）、插件白名单门控。共 16 个 OneBot 命令。</p>
+                <p>通过反向 WebSocket 连接 QQ，execq 独立通道：独立提示词、统一记忆库（所有对话历史统一管理）、插件白名单门控。共 17 个 OneBot 命令（含 execq 通道测试命令）。</p>
                 <p><strong>v2.5 新增：</strong>execs 合并转发 —— 主人发送 <code>execs:</code> 前缀触发完整 execs 链路后，AI 多轮思考通过 NapCat <code>send_group_forward_msg</code>/<code>send_private_forward_msg</code> API 折叠为 QQ 原生合并转发消息卡片，每轮思考为独立节点可逐条展开。表情包自动管理 —— 聊天中图片自动收集到 SQLite 表情库（stickers 表），AI 回复时根据语境关键词自动匹配发送最相关表情包。6 项安全加固（AES 密钥多因子派生 / 路径穿越防护 / Nashorn 沙箱 / HTTP 防泄漏 / TOCTOU 原子化 / execq 引用计数）。</p>
-                <p><strong>v2.1 新增：</strong>主人消息添加 <code>execs:</code> 前缀可触发完整 execs 链路，静默执行所有操作，实时推送每轮思考结果给主人。支持 <code>&lt;stop&gt;</code> 标签紧急停止。群管理中 AI 可执行 10 种群管标签（<code>&lt;ban&gt;</code> 禁言/<code>&lt;kick&gt;</code> 踢出/<code>&lt;muteall&gt;</code> 全禁/<code>&lt;setadmin&gt;</code> 设管/<code>&lt;setcard&gt;</code> 改名/<code>&lt;setgroupname&gt;</code> 改群/<code>&lt;leavegroup&gt;</code> 退群/<code>&lt;block&gt;</code> 拉黑/<code>&lt;unblock&gt;</code> 解黑/<code>&lt;delfriend&gt;</code> 删友）。提示词完全分层隔离（主线 15 标签 vs OneBot 16 标签）。</p>
+                <p><strong>v2.1 新增：</strong>主人消息添加 <code>execs:</code> 前缀可触发完整 execs 链路，静默执行所有操作，实时推送每轮思考结果给主人。支持 <code>&lt;stop&gt;</code> 标签紧急停止。群管理中 AI 可执行 10 种群管标签（<code>&lt;ban&gt;</code> 禁言/<code>&lt;kick&gt;</code> 踢出/<code>&lt;muteall&gt;</code> 全禁/<code>&lt;setadmin&gt;</code> 设管/<code>&lt;setcard&gt;</code> 改名/<code>&lt;setgroupname&gt;</code> 改群/<code>&lt;leavegroup&gt;</code> 退群/<code>&lt;block&gt;</code> 拉黑/<code>&lt;unblock&gt;</code> 解黑/<code>&lt;delfriend&gt;</code> 删友）。提示词完全分层隔离（主线 20 标签 vs OneBot 19 标签）。</p>
             </div>
 
             <div style="overflow-x:auto;">
@@ -285,7 +303,7 @@
                         execq 是专门为 QQ 消息设计的独立 Agent 通道，<b>完全隔离于主 AiAgent 通道</b>：<br><br>
                         <b>独立提示词</b> — 通过 <code>ai/onebotsetprompt</code> 独立配置，不影响主通道<br>
                         <b>统一记忆库</b> — 使用 UnifiedQQMemoryManager，所有对话存储在 unified_memory.db，通过 source_type/source_id 标记区分群聊/私聊<br>
-                        <b>受限标签</b> — execq 共 16 个标签：<code>&lt;stop&gt;</code> <code>&lt;split&gt;</code> <code>&lt;cmd&gt;</code> <code>&lt;web&gt;</code> <code>&lt;readdir&gt;</code> <code>&lt;setname&gt;</code>（工具类，自动绕过确认）<br>
+                        <b>受限标签</b> — execq 共 21 个标签（工具类 11 个 + 群管类 10 个）：<code>&lt;stop&gt;</code> <code>&lt;split&gt;</code> <code>&lt;cmd&gt;</code> <code>&lt;web&gt;</code> <code>&lt;readdir&gt;</code> <code>&lt;readfile&gt;</code> <code>&lt;setname&gt;</code> <code>&lt;schedule&gt;</code> <code>&lt;note&gt;</code> <code>&lt;searchnote&gt;</code> <code>&lt;sendsticker&gt;</code> <code>&lt;collectsticker&gt;</code>（工具类，自动绕过确认）<br>
                                                     <b>群管标签</b> — <code>&lt;ban&gt;</code> <code>&lt;kick&gt;</code> <code>&lt;muteall&gt;</code> <code>&lt;setadmin&gt;</code> <code>&lt;setcard&gt;</code> <code>&lt;setgroupname&gt;</code> <code>&lt;leavegroup&gt;</code>（群管类，仅群聊生效）<br>
                                                     <b>用户管理</b> — <code>&lt;block&gt;</code> <code>&lt;unblock&gt;</code> <code>&lt;delfriend&gt;</code>（用户管理类，OneBot 层拦截）
                         <b>插件白名单</b> — <code>&lt;cmd&gt;</code> 受插件级白名单门控，空白名单=全部拒绝，通过 <code>ai/onebotwhitelist</code> 系列命令管理<br>
@@ -308,7 +326,7 @@
                 <div class="section-tag">Internal API</div>
                 <h2>Agent XML 操作标签</h2>
                 <div class="section-divider"></div>
-                <p>AI Agent 通过 XML 标签发出操作指令，由 <code>AgentExecutor.parseActions()</code> 正则解析。共 15 种标签。</p>
+                <p>AI Agent 通过 XML 标签发出操作指令，由 <code>TagExecutor.parseActions()</code> 正则解析。共 20 种标签。</p>
             </div>
 
             <div style="overflow-x:auto;">
@@ -412,6 +430,36 @@
                             <td style="color:var(--accent-green);">否</td>
                             <td class="cmd-desc">AI 修改自身 system prompt。要求 ≥ 30 字符，实现性格自我演化</td>
                         </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;schedule&gt;</td>
+                            <td>&lt;schedule action="add" cron="0 */5 * * * *" task="..."&gt;&lt;/schedule&gt;</td>
+                            <td style="color:var(--accent-rose);">是</td>
+                            <td class="cmd-desc">CronScheduler 定时任务管理。支持 add/list/delete/enable/disable。cron 表达式 6 段式（秒分时日月周），任务持久化 SQLite cron_jobs 表</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;note&gt;</td>
+                            <td>&lt;note title="标题" category="分类"&gt;内容&lt;/note&gt;</td>
+                            <td style="color:var(--accent-green);">否</td>
+                            <td class="cmd-desc">创建知识库笔记。标题+内容+分类，持久化到 aiagent.db notes 表（FTS5 全文索引）</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;searchnote&gt;</td>
+                            <td>&lt;searchnote&gt;关键词&lt;/searchnote&gt;</td>
+                            <td style="color:var(--accent-green);">否</td>
+                            <td class="cmd-desc">FTS5 全文检索笔记。按关键词搜索标题+内容，结果按相关性排序返回</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;batchrename&gt;</td>
+                            <td>&lt;batchrename dir="path" pattern="regex" replacement="str"&gt;&lt;/batchrename&gt;</td>
+                            <td style="color:var(--accent-rose);">是</td>
+                            <td class="cmd-desc">批量文件重命名。支持正则替换/前缀/后缀/序号补零（如 %03d）。需确认门控</td>
+                        </tr>
+                        <tr>
+                            <td class="cmd-name">&lt;batchconvert&gt;</td>
+                            <td>&lt;batchconvert dir="path" from="GBK" to="UTF-8"&gt;&lt;/batchconvert&gt;</td>
+                            <td style="color:var(--accent-rose);">是</td>
+                            <td class="cmd-desc">批量文件编码转换。支持 GBK→UTF-8/UTF-16，自动检测 BOM，递归子目录。需确认门控</td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -433,7 +481,7 @@
                     <div class="card-icon cyan">1</div>
                     <h3>编译</h3>
                     <p>
-                        使用 SFW 内置 JDK (8x64) 编译全部 37 个源文件。
+                        使用 SFW 内置 JDK (8x64) 编译全部 44 个源文件。
                         classpath 需包含 SFW.jar、sqlite-jdbc-3.42.0.0.jar 和 gson-2.8.6.jar。
                     </p>
                     <div class="code-block" style="margin-top:14px;">
@@ -528,7 +576,10 @@ ai/onebotshowprompt
 <span class="cmt"># 11. 管理插件白名单（execq安全门控）</span>
 ai/onebotwhitelist
 ai/onebotwhitelistadd Filer
-ai/onebotwhitelistadd IDE</code></pre>
+ai/onebotwhitelistadd IDE
+
+<span class="cmt"># 12. AutoClear 自动清屏（防日志OOM）</span>
+ai/autoclearon</code></pre>
             </div>
         </div>
     </section>
@@ -536,12 +587,12 @@ ai/onebotwhitelistadd IDE</code></pre>
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.5 ·
+                <span class="brand">AiAgent</span> v2.6 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · NapCat群管理 · 合并转发 · 表情包 · 安全加固 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 15种XML标签 · 多模态图片识别 · 部署三步骤
+                QQ OneBot · NapCat群管理 · 合并转发 · 表情包 · 安全加固 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 20种XML标签 · 模型路由 · 自动清屏 · 多模态图片识别 · 部署三步骤
             </p>
         </div>
     </footer>

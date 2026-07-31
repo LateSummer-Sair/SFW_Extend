@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>意见与建议 - AiAgent 技术文档</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .feedback-hero { text-align: center; padding: 20px 0 32px; }
+        .feedback-hero h2 { font-size: 2.2rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 8px; }
+        .feedback-hero .sub { color: var(--text-muted); font-size: 0.88rem; }
+        .feedback-input-area {
+            max-width: 680px; margin: 0 auto 40px;
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 24px;
+            backdrop-filter: blur(8px); position: relative; overflow: hidden;
+        }
+        .feedback-input-area::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
+        }
+        .feedback-input-area textarea {
+            width: 100%; min-height: 120px; background: rgba(0,0,0,0.3);
+            border: 1px solid var(--border); border-radius: var(--radius-sm);
+            color: var(--text-primary); font-family: var(--font-sans);
+            font-size: 0.92rem; padding: 14px 16px; resize: vertical;
+            transition: var(--transition); line-height: 1.6;
+        }
+        .feedback-input-area textarea:focus {
+            outline: none; border-color: var(--accent-cyan);
+            box-shadow: 0 0 20px rgba(0,240,255,0.1), inset 0 0 20px rgba(0,240,255,0.03);
+        }
+        .feedback-input-area textarea::placeholder { color: var(--text-muted); }
+        .feedback-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
+        .feedback-hint { color: var(--text-muted); font-size: 0.75rem; }
+        .feedback-submit {
+            padding: 10px 28px; background: transparent;
+            border: 1px solid var(--accent-cyan); color: var(--accent-cyan);
+            font-family: var(--font-mono); font-size: 0.82rem; font-weight: 700;
+            letter-spacing: 2px; text-transform: uppercase; cursor: pointer;
+            border-radius: 2px; transition: var(--transition);
+            clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+        }
+        .feedback-submit:hover {
+            background: rgba(0,240,255,0.08);
+            box-shadow: 0 0 24px var(--glow-cyan), 0 0 48px rgba(0,240,255,0.1);
+            text-shadow: 0 0 8px var(--glow-cyan);
+        }
+        .feedback-list { max-width: 680px; margin: 0 auto; }
+        .feedback-list-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border);
+        }
+        .feedback-list-header h3 { font-size: 1rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--accent-purple); }
+        .feedback-list-header .count { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); }
+        .feedback-msg {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 20px 24px; margin-bottom: 12px;
+            transition: var(--transition); position: relative; backdrop-filter: blur(8px);
+            animation: msgSlideIn 0.4s cubic-bezier(0.16,1,0.3,1);
+        }
+        @keyframes msgSlideIn { from { opacity:0; transform:translateY(-16px); filter:blur(4px); } to { opacity:1; transform:translateY(0); filter:blur(0); } }
+        .feedback-msg:hover { border-color: var(--border-accent); box-shadow: 0 4px 24px rgba(0,0,0,0.3), 0 0 40px rgba(0,240,255,0.03); }
+        .feedback-msg .msg-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .feedback-msg .msg-avatar {
+            width: 32px; height: 32px; border-radius: 50%;
+            background: rgba(180,77,255,0.15); border: 1px solid rgba(180,77,255,0.3);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.75rem; color: var(--accent-purple); flex-shrink: 0;
+        }
+        .feedback-msg .msg-time { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0.5px; }
+        .feedback-msg .msg-id { font-family: var(--font-mono); font-size: 0.65rem; color: rgba(0,240,255,0.3); margin-left: auto; }
+        .feedback-msg .msg-content { color: var(--text-secondary); font-size: 0.9rem; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
+        .feedback-empty { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+        .feedback-empty .empty-icon { font-size: 3rem; margin-bottom: 16px; opacity: 0.4; }
+        .feedback-empty p { font-size: 0.9rem; }
+        .feedback-toast {
+            position: fixed; bottom: 40px; left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: rgba(0,240,255,0.08); border: 1px solid var(--accent-cyan);
+            color: var(--accent-cyan); padding: 10px 24px; border-radius: 2px;
+            font-size: 0.82rem; font-family: var(--font-mono); letter-spacing: 1px;
+            z-index: 2000; transition: transform 0.35s cubic-bezier(0.16,1,0.3,1);
+            pointer-events: none; backdrop-filter: blur(12px);
+        }
+        .feedback-toast.show { transform: translateX(-50%) translateY(0); }
+    </style>
+</head>
+<body>
+
+    <canvas id="particles-canvas"></canvas>
+
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo"><div class="icon">&#x26A1;</div><span class="logo-text">AiAgent</span></div>
+        <nav class="sidebar-nav">
+            <a href="index.html">概述</a>
+            <a href="architecture.html">架构</a>
+            <a href="patterns.html">设计模式</a>
+            <a href="classes.html">类结构</a>
+            <a href="commands.html">命令</a>
+            <a href="feedback.html" class="active">反馈</a>
+        </nav>
+        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航菜单">
+            <span></span><span></span><span></span>
+        </button>
+    </aside>
+
+    <section style="padding-top:60px; padding-bottom:40px;">
+        <div class="container">
+            <div class="feedback-hero reveal">
+                <div class="section-tag">Feedback</div>
+                <h2>意见与建议</h2>
+                <div class="section-divider"></div>
+                <p class="sub">匿名留言板 &#183; 内容公开可见 &#183; 仅显示时间日期</p>
+            </div>
+
+            <div class="feedback-input-area reveal">
+                <textarea id="feedback-text" placeholder="输入你的意见或建议..." maxlength="2000"></textarea>
+                <div class="feedback-actions">
+                    <span class="feedback-hint" id="char-count">0 / 2000</span>
+                    <button class="feedback-submit" id="feedback-submit">发送</button>
+                </div>
+            </div>
+
+            <div class="feedback-list reveal" id="feedback-list">
+                <div class="feedback-list-header">
+                    <h3>全部留言</h3>
+                    <span class="count" id="msg-count">0 条</span>
+                </div>
+                <div id="feedback-messages"></div>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <p><span class="brand">AiAgent</span> v2.6 &#183; 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> &#183; 对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span></p>
+        </div>
+    </footer>
+
+    <div class="feedback-toast" id="feedback-toast"></div>
+    <div class="back-to-top" title="回到顶部">&#x2191;</div>
+    <script src="js/main.js"></script>
+
+        <script>
+    (function () {
+        'use strict';
+        var API = '/api/feedback';
+        var POLL_MS = 2000;
+        var textarea = document.getElementById('feedback-text');
+        var submitBtn = document.getElementById('feedback-submit');
+        var msgContainer = document.getElementById('feedback-messages');
+        var msgCount = document.getElementById('msg-count');
+        var charCount = document.getElementById('char-count');
+        var toast = document.getElementById('feedback-toast');
+        var allMessages = [];
+        var lastHash = '';
+        var busy = false;
+        var pollTimer = null;
+
+        // --- network ---
+
+        async function fetchJson() {
+            try {
+                var resp = await fetch(API, { cache: 'no-cache' });
+                if (!resp.ok) return null;
+                var data = await resp.json();
+                return Array.isArray(data) ? data : [];
+            } catch (e) { return null; }
+        }
+
+        async function postJson(msgs) {
+            try {
+                var resp = await fetch(API, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(msgs)
+                });
+                return resp.ok;
+            } catch (e) { return false; }
+        }
+
+        // --- helpers ---
+
+        function formatTime(ts) {
+            var d = new Date(ts);
+            var pad = function (n) { return String(n).padStart(2, '0'); };
+            return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+                + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+        }
+
+        function shortId() {
+            return Math.random().toString(36).substring(2, 8).toUpperCase();
+        }
+
+        var toastTimer;
+        function showToast(text) {
+            toast.textContent = text;
+            toast.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 2200);
+        }
+
+        function escapeHtml(str) {
+            var div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // --- render ---
+
+        function render() {
+            msgCount.textContent = allMessages.length + ' \u6761';
+            if (allMessages.length === 0) {
+                msgContainer.innerHTML =
+                    '<div class="feedback-empty">' +
+                    '<div class="empty-icon">\U0001F4AC</div>' +
+                    '<p>\u8fd8\u6ca1\u6709\u7559\u8a00\uff0c\u6765\u8bf4\u70b9\u4ec0\u4e48\u5427</p>' +
+                    '</div>';
+                return;
+            }
+            var html = '', i, m;
+            for (i = 0; i < allMessages.length; i++) {
+                m = allMessages[i];
+                html +=
+                    '<div class="feedback-msg">' +
+                    '<div class="msg-meta">' +
+                    '<div class="msg-avatar">?</div>' +
+                    '<span class="msg-time">' + formatTime(m.time) + '</span>' +
+                    '<span class="msg-id">#' + m.id + '</span>' +
+                    '</div>' +
+                    '<div class="msg-content">' + escapeHtml(m.content) + '</div>' +
+                    '</div>';
+            }
+            msgContainer.innerHTML = html;
+        }
+
+        // --- poll & sync ---
+
+        async function poll() {
+            var data = await fetchJson();
+            if (data === null) {
+                // server unreachable, keep existing display
+                return;
+            }
+            if (data.length === 0 && allMessages.length > 0) {
+                // JSON was cleared/deleted -> clear local too
+                allMessages = [];
+                lastHash = '';
+                render();
+                return;
+            }
+            var hash = JSON.stringify(data);
+            if (hash !== lastHash) {
+                lastHash = hash;
+                allMessages = data;
+                allMessages.sort(function (a, b) { return b.time - a.time; });
+                render();
+            }
+        }
+
+        function startPoll() {
+            stopPoll();
+            poll();
+            pollTimer = setInterval(poll, POLL_MS);
+        }
+
+        function stopPoll() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+
+        // --- submit ---
+
+        async function submit() {
+            if (busy) return;
+            var text = textarea.value.trim();
+            if (!text) { showToast('\u8bf7\u8f93\u5165\u5185\u5bb9'); return; }
+            if (text.length < 2) { showToast('\u5185\u5bb9\u592a\u77ed\uff0c\u81f3\u5c11 2 \u4e2a\u5b57\u7b26'); return; }
+
+            busy = true;
+            submitBtn.disabled = true;
+            submitBtn.textContent = '...';
+            stopPoll();
+
+            try {
+                // fetch latest from server
+                var latest = await fetchJson();
+                if (latest === null) {
+                    showToast('\u670d\u52a1\u5668\u65e0\u54cd\u5e94\uff0c\u8bf7\u5148\u542f\u52a8 feedback_server.py');
+                    return;
+                }
+
+                // if server has data we haven't seen, merge it
+                var serverHash = JSON.stringify(latest);
+                if (serverHash !== lastHash) {
+                    // merge: server data as base, append our own unsaved messages
+                    allMessages = merge(allMessages, latest);
+                }
+
+                // append new message
+                var msg = { id: shortId(), content: text, time: Date.now() };
+                allMessages.unshift(msg);
+                if (allMessages.length > 200) { allMessages.length = 200; }
+
+                var ok = await postJson(allMessages);
+                if (!ok) {
+                    // rollback the append
+                    allMessages.shift();
+                    showToast('\u53d1\u9001\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
+                    startPoll();
+                    return;
+                }
+
+                lastHash = JSON.stringify(allMessages);
+                textarea.value = '';
+                charCount.textContent = '0 / 2000';
+                charCount.style.color = '';
+                render();
+                showToast('\u2713 \u7559\u8a00\u5df2\u53d1\u9001');
+                document.getElementById('feedback-list').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (e) {
+                showToast('\u53d1\u9001\u5f02\u5e38\uff0c\u8bf7\u91cd\u8bd5');
+            } finally {
+                busy = false;
+                submitBtn.disabled = false;
+                submitBtn.textContent = '\u53d1\u9001';
+                startPoll();
+            }
+        }
+
+        // merge: keep local messages that server doesn't have yet (by id)
+        function merge(localMsgs, serverMsgs) {
+            var map = {}, i, m;
+            for (i = 0; i < serverMsgs.length; i++) { map[serverMsgs[i].id] = true; }
+            for (i = 0; i < localMsgs.length; i++) {
+                m = localMsgs[i];
+                if (!map[m.id]) { serverMsgs.unshift(m); }
+            }
+            serverMsgs.sort(function (a, b) { return b.time - a.time; });
+            return serverMsgs;
+        }
+
+        // --- events ---
+
+        submitBtn.addEventListener('click', submit);
+        textarea.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); }
+        });
+        textarea.addEventListener('input', function () {
+            var len = this.value.length;
+            charCount.textContent = len + ' / 2000';
+            charCount.style.color = len > 1900 ? 'var(--accent-rose)' : '';
+        });
+
+        // --- boot ---
+        startPoll();
+    })();
+    </script>
+</body>
+</html>

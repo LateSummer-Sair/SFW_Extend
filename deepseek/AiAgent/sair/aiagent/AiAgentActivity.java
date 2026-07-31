@@ -22,6 +22,7 @@ import sair.aiagent.core.EmotionManager;
 import sair.aiagent.core.JournalManager;
 import sair.aiagent.core.MemoryManager;
 import sair.aiagent.core.PersistenceManager;
+import sair.aiagent.core.CronScheduler;
 import sair.aiagent.core.StickerManager;
 import sair.aiagent.core.StreamPrinter;
 import sair.aiagent.onebot.OneBotServer;
@@ -72,7 +73,12 @@ public class AiAgentActivity extends Activity {
 
     /** OneBot QQ 集成 */
     private volatile OneBotServer oneBotServer;
+    private CronScheduler cronScheduler;
     private volatile QQMessageHandler oneBotMessageHandler;
+
+    /** 自动清屏守护线程 — 每3分钟执行一次 /clear 防止日志OOM */
+    private volatile Thread autoClearThread;
+    private volatile boolean autoClearEnabled = false;
 
     private volatile PersistenceManager persistenceManager;
     private volatile Thread activeThread;
@@ -128,6 +134,11 @@ public class AiAgentActivity extends Activity {
             journal.load(dataDir);
             history.loadFromFile();
             emotionManager.load(dataDir);
+
+            // === CronScheduler 初始化 ===
+            cronScheduler = new CronScheduler(persistenceManager);
+            agent.setCronScheduler(cronScheduler);
+            cronScheduler.start();
 
             debugLog("历史加载: " + history.size() + " 条消息");
 
@@ -203,6 +214,9 @@ public class AiAgentActivity extends Activity {
             "\t" + n + "/onebotaddgroup [群号]   添加监听的群",
             "\t" + n + "/onebotremovegroup [群号] 移除监听的群",
             "\t" + n + "/onebotlistgroups        列出监听的群",
+            "自动清屏:",
+            "\t" + n + "/autoclearon           启用自动清屏（每3分钟 /clear 防OOM）",
+            "\t" + n + "/autoclearoff          停止自动清屏",
             "\t" + n + "/execq [消息]         QQ通道Agent (受限标签自动允许)",
             Pathes.printSplit,
         };
@@ -210,6 +224,7 @@ public class AiAgentActivity extends Activity {
 
     @Override
     public void exit() {
+        stopAutoClear();
         // === 停止OneBot ===
         if (oneBotServer != null) {
             oneBotServer.stop();
@@ -223,6 +238,44 @@ public class AiAgentActivity extends Activity {
             persistenceManager = null;
         }
     }
+
+    // ==================== 自动清屏守护线程 ====================
+
+    /** 启动自动清屏守护线程 — 每3分钟执行 SairCons.runner(false, "/clear") */
+    public synchronized void startAutoClear() {
+        if (autoClearEnabled) return;
+        autoClearEnabled = true;
+        autoClearThread = new Thread(() -> {
+            debugLog("[AutoClear] 守护线程启动，每3分钟清屏一次");
+            while (autoClearEnabled) {
+                try { Thread.sleep(180_000); } catch (InterruptedException e) { break; }
+                if (!autoClearEnabled) break;
+                try {
+                    javax.swing.SwingUtilities.invokeLater(() -> {
+                        try { SairCons.runner(false, "/clear"); } catch (Exception ignored) {}
+                    });
+                    debugLog("[AutoClear] 已执行清屏");
+                } catch (Exception e) {
+                    debugLog("[AutoClear] 清屏失败: " + e.toString());
+                }
+            }
+            debugLog("[AutoClear] 守护线程退出");
+        }, "AiAgent-AutoClear");
+        autoClearThread.setDaemon(true);
+        autoClearThread.start();
+    }
+
+    /** 停止自动清屏守护线程 */
+    public synchronized void stopAutoClear() {
+        autoClearEnabled = false;
+        if (autoClearThread != null) {
+            autoClearThread.interrupt();
+            autoClearThread = null;
+        }
+    }
+
+    /** @return 自动清屏是否已启用 */
+    public boolean isAutoClearEnabled() { return autoClearEnabled; }
 
     /** 初始化 OneBot QQ 集成 */
     private void initOneBot(String dataDir) {

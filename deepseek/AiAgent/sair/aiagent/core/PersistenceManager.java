@@ -47,10 +47,15 @@ public class PersistenceManager {
     private static final int FTS_MAX_RESULTS = 5;
     private static final int CTX_MAX_CHARS = 2000;
 
+    private static PersistenceManager instance;
     private final Gson gson = new Gson();
     private final Object lock = new Object();
     private Connection conn;
     private File dbFile;
+
+    public static PersistenceManager getInstance() {
+        return instance;
+    }
 
     // ==================== 初始化 ====================
 
@@ -61,6 +66,7 @@ public class PersistenceManager {
      */
     public boolean init(String dataDir) {
         if (dataDir == null) return false;
+        instance = this;
         try {
             Class.forName("org.sqlite.JDBC");
         } catch (ClassNotFoundException e) {
@@ -190,6 +196,66 @@ public class PersistenceManager {
                     ")"
                 );
                 stmt.execute("CREATE INDEX IF NOT EXISTS idx_sticker_created ON stickers(created_at)");
+
+                // 定时任务表
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS cron_tasks (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  cron_expr TEXT NOT NULL DEFAULT ''," +
+                    "  command TEXT NOT NULL DEFAULT ''," +
+                    "  description TEXT NOT NULL DEFAULT ''," +
+                    "  enabled INTEGER NOT NULL DEFAULT 1," +
+                    "  last_run INTEGER NOT NULL DEFAULT 0," +
+                    "  created_at INTEGER NOT NULL" +
+                    ")");
+
+                // 笔记表
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS notes (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  title TEXT NOT NULL DEFAULT ''," +
+                    "  content TEXT NOT NULL DEFAULT ''," +
+                    "  tags TEXT NOT NULL DEFAULT ''," +
+                    "  created_at INTEGER NOT NULL," +
+                    "  updated_at INTEGER NOT NULL" +
+                    ")"
+                );
+
+                // FTS5 笔记全文索引
+                stmt.execute(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(" +
+                    "  title, content, tags," +
+                    "  content='notes'," +
+                    "  content_rowid='id'" +
+                    ")"
+                );
+
+                // 触发器（INSERT）
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS nft_ai AFTER INSERT ON notes BEGIN " +
+                    "  INSERT INTO notes_fts(rowid, title, content, tags) " +
+                    "  VALUES (new.id, new.title, new.content, new.tags); " +
+                    "END"
+                );
+
+                // 触发器（DELETE）
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS nft_ad AFTER DELETE ON notes BEGIN " +
+                    "  INSERT INTO notes_fts(notes_fts, rowid, title, content, tags) " +
+                    "  VALUES ('delete', old.id, old.title, old.content, old.tags); " +
+                    "END"
+                );
+
+                // 触发器（UPDATE）
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS nft_au AFTER UPDATE ON notes BEGIN " +
+                    "  INSERT INTO notes_fts(notes_fts, rowid, title, content, tags) " +
+                    "  VALUES ('delete', old.id, old.title, old.content, old.tags); " +
+                    "  INSERT INTO notes_fts(rowid, title, content, tags) " +
+                    "  VALUES (new.id, new.title, new.content, new.tags); " +
+                    "END"
+                );
+
             }
         }
     }
@@ -778,7 +844,207 @@ public class PersistenceManager {
         }
     }
 
+    // ==================== Cron Tasks (定时任务) ====================
+
+    /** 添加定时任务，返回自增 ID */
+    public int addCronTask(String cronExpr, String command, String description) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO cron_tasks (cron_expr, command, description, enabled, last_run, created_at) VALUES (?,?,?,1,0,?)")) {
+                ps.setString(1, cronExpr != null ? cronExpr : "");
+                ps.setString(2, command != null ? command : "");
+                ps.setString(3, description != null ? description : "");
+                ps.setLong(4, System.currentTimeMillis());
+                ps.executeUpdate();
+                try (ResultSet rs = ps.getGeneratedKeys()) {
+                    if (rs.next()) return rs.getInt(1);
+                }
+            } catch (SQLException e) { return -1; }
+        }
+        return -1;
+    }
+
+    /** 列出所有定时任务 */
+    public List<sair.aiagent.core.CronScheduler.CronTask> listCronTasks() {
+        List<sair.aiagent.core.CronScheduler.CronTask> list = new ArrayList<>();
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT * FROM cron_tasks ORDER BY created_at")) {
+                while (rs.next()) {
+                    list.add(new sair.aiagent.core.CronScheduler.CronTask(
+                            rs.getInt("id"), rs.getString("cron_expr"),
+                            rs.getString("command"), rs.getString("description"),
+                            rs.getInt("enabled") != 0, rs.getLong("created_at")));
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+
+    /** 获取单个定时任务 */
+    public sair.aiagent.core.CronScheduler.CronTask getCronTask(int id) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement("SELECT * FROM cron_tasks WHERE id=?")) {
+                ps.setInt(1, id);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        return new sair.aiagent.core.CronScheduler.CronTask(
+                                rs.getInt("id"), rs.getString("cron_expr"),
+                                rs.getString("command"), rs.getString("description"),
+                                rs.getInt("enabled") != 0, rs.getLong("created_at"));
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return null;
+    }
+
+    /** 删除定时任务 */
+    public boolean removeCronTask(int id) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement("DELETE FROM cron_tasks WHERE id=?")) {
+                ps.setInt(1, id);
+                return ps.executeUpdate() > 0;
+            } catch (SQLException e) { return false; }
+        }
+    }
+
+    /** 设置任务启用/禁用 */
+    public void setCronTaskEnabled(int id, boolean enabled) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement("UPDATE cron_tasks SET enabled=? WHERE id=?")) {
+                ps.setInt(1, enabled ? 1 : 0);
+                ps.setInt(2, id);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    /** 更新最后执行时间 */
+    public void updateCronTaskLastRun(int id) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement("UPDATE cron_tasks SET last_run=? WHERE id=?")) {
+                ps.setLong(1, System.currentTimeMillis());
+                ps.setInt(2, id);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    // ==================== Notes (knowledge base) ====================
+
+    /** add note, returns auto-inc id */
+    public int addNote(String title, String content, String tags) {
+        synchronized (lock) {
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO notes (title, content, tags, created_at, updated_at) VALUES (?,?,?,?,?)")) {
+                long now = System.currentTimeMillis();
+                ps.setString(1, title != null ? title : "");
+                ps.setString(2, content != null ? content : "");
+                ps.setString(3, tags != null ? tags : "");
+                ps.setLong(4, now);
+                ps.setLong(5, now);
+                ps.executeUpdate();
+                try (java.sql.ResultSet rs = ps.getGeneratedKeys()) {
+                    if (rs.next()) return rs.getInt(1);
+                }
+            } catch (java.sql.SQLException e) { return -1; }
+        }
+        return -1;
+    }
+
+    /** search notes by FTS5, returns list of [id, title, snippet] */
+    public java.util.List<String[]> searchNotes(String query, int limit) {
+        java.util.List<String[]> list = new java.util.ArrayList<>();
+        synchronized (lock) {
+            try {
+                String sql = "SELECT n.id, n.title, snippet(notes_fts, 2, '<b>', '</b>', '...', 32) as sn " +
+                             "FROM notes_fts f JOIN notes n ON f.rowid = n.id " +
+                             "WHERE notes_fts MATCH ? ORDER BY rank LIMIT ?";
+                java.sql.PreparedStatement ps = conn.prepareStatement(sql);
+                ps.setString(1, query);
+                ps.setInt(2, limit > 0 ? limit : 10);
+                java.sql.ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    list.add(new String[]{String.valueOf(rs.getInt("id")), 
+                                          rs.getString("title"), rs.getString("sn")});
+                }
+                rs.close(); ps.close();
+            } catch (java.sql.SQLException e) {
+                // FTS5 match failure, try LIKE fallback
+                try (java.sql.Statement stmt = conn.createStatement();
+                     java.sql.ResultSet rs = stmt.executeQuery(
+                         "SELECT id, title, substr(content,1,200) FROM notes WHERE title LIKE '%" +
+                         query.replace("'","''") + "%' OR content LIKE '%" + 
+                         query.replace("'","''") + "%' ORDER BY updated_at DESC LIMIT " + limit)) {
+                    while (rs.next()) {
+                        list.add(new String[]{String.valueOf(rs.getInt(1)), 
+                                              rs.getString(2), rs.getString(3)});
+                    }
+                } catch (java.sql.SQLException ignored) {}
+            }
+        }
+        return list;
+    }
+
+    /** list recent notes */
+    public java.util.List<String[]> listNotes(int limit) {
+        java.util.List<String[]> list = new java.util.ArrayList<>();
+        synchronized (lock) {
+            try (java.sql.Statement stmt = conn.createStatement();
+                 java.sql.ResultSet rs = stmt.executeQuery(
+                     "SELECT id, title, substr(content,1,100), tags FROM notes ORDER BY updated_at DESC LIMIT " + limit)) {
+                while (rs.next()) {
+                    list.add(new String[]{String.valueOf(rs.getInt(1)), rs.getString(2),
+                                          rs.getString(3), rs.getString(4)});
+                }
+            } catch (java.sql.SQLException ignored) {}
+        }
+        return list;
+    }
+
+    /** get note by id */
+    public String[] getNote(int id) {
+        synchronized (lock) {
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                    "SELECT title, content, tags FROM notes WHERE id=?")) {
+                ps.setInt(1, id);
+                java.sql.ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    return new String[]{rs.getString("title"), rs.getString("content"), rs.getString("tags")};
+                }
+            } catch (java.sql.SQLException ignored) {}
+        }
+        return null;
+    }
+
+    /** delete note */
+    public boolean removeNote(int id) {
+        synchronized (lock) {
+            try (java.sql.PreparedStatement ps = conn.prepareStatement("DELETE FROM notes WHERE id=?")) {
+                ps.setInt(1, id);
+                return ps.executeUpdate() > 0;
+            } catch (java.sql.SQLException e) { return false; }
+        }
+    }
+
+    /** update note */
+    public boolean updateNote(int id, String title, String content, String tags) {
+        synchronized (lock) {
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE notes SET title=?, content=?, tags=?, updated_at=? WHERE id=?")) {
+                ps.setString(1, title != null ? title : "");
+                ps.setString(2, content != null ? content : "");
+                ps.setString(3, tags != null ? tags : "");
+                ps.setLong(4, System.currentTimeMillis());
+                ps.setInt(5, id);
+                return ps.executeUpdate() > 0;
+            } catch (java.sql.SQLException e) { return false; }
+        }
+    }
+
     private static String trunc(String s, int maxLen) {
+
         if (s == null || s.isEmpty()) return "";
         if (s.length() <= maxLen) return s;
         return s.substring(0, maxLen) + "…";

@@ -95,15 +95,7 @@ public class DeepSeekClient {
     }
     
     public String chatStream(List<ChatMessage> messages) throws IOException {
-        String jsonBody = buildRequestBody(messages, true);
-        HttpURLConnection conn = createConnection(true);
-        try {
-            sendRequest(conn, jsonBody);
-            checkResponse(conn);
-            return readStreamResponse(conn);
-        } finally {
-            conn.disconnect();
-        }
+        return chatStream(messages, AiConfig.getInstance().getExecqModel());
     }
 
     /**
@@ -134,16 +126,7 @@ public class DeepSeekClient {
     }
     
     public String chatSync(List<ChatMessage> messages) throws IOException {
-        String jsonBody = buildRequestBody(messages, false);
-        HttpURLConnection conn = createConnection(false);
-        try {
-            sendRequest(conn, jsonBody);
-            checkResponse(conn);
-            String json = readAll(conn.getInputStream());
-            return extractFirstContent(json);
-        } finally {
-            conn.disconnect();
-        }
+        return chatSync(messages, AiConfig.getInstance().getExecqModel());
     }
 
     // ==================== HTTP通信 ====================
@@ -212,7 +195,7 @@ public class DeepSeekClient {
     
     /** 构建请求体，可指定模型覆盖 */
     private String buildRequestBody(List<ChatMessage> messages, boolean stream, String modelOverride) {
-        String effectiveModel = (modelOverride != null && !modelOverride.isEmpty()) ? modelOverride : config.getModel();
+        String effectiveModel = (modelOverride != null && !modelOverride.isEmpty()) ? modelOverride : AiConfig.getInstance().getExecqModel();
         StringBuilder sb = new StringBuilder(2048);
         sb.append("{\"model\":\"").append(jsonEscape(effectiveModel)).append("\",");
         sb.append("\"messages\":[");

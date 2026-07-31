@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SFW Web Console</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>">
+</head>
+<body>
+    <canvas id="particleCanvas"></canvas>
+
+    <!-- 登录界面 -->
+    <div id="loginScreen" class="screen active">
+        <div class="login-container">
+            <div class="login-header">
+                <div class="login-logo">
+                    <span class="logo-bracket">{</span>
+                    <span class="logo-text">SFW</span>
+                    <span class="logo-bracket">}</span>
+                </div>
+                <div class="login-subtitle">Web Remote Console</div>
+            </div>
+            <div id="setupForm" class="login-form" style="display:none;">
+                <div class="form-title">
+                    <span class="glitch-text" data-text="INITIAL SETUP">INITIAL SETUP</span>
+                </div>
+                <p class="form-desc">首次使用，请设置登录密码（至少6位）</p>
+                <div class="input-group">
+                    <input type="password" id="setupPassword" placeholder="设置密码" autocomplete="new-password">
+                    <span class="input-border"></span>
+                </div>
+                <div class="input-group">
+                    <input type="password" id="setupConfirm" placeholder="确认密码" autocomplete="new-password">
+                    <span class="input-border"></span>
+                </div>
+                <button class="btn-neon" onclick="doSetup()">
+                    <span>SET PASSWORD</span><span class="btn-glow"></span>
+                </button>
+                <div id="setupError" class="error-msg"></div>
+            </div>
+            <div id="loginForm" class="login-form" style="display:none;">
+                <div class="form-title">
+                    <span class="glitch-text" data-text="AUTHENTICATION">AUTHENTICATION</span>
+                </div>
+                <p class="form-desc">请输入密码以访问 SFW 控制台</p>
+                <div class="input-group">
+                    <input type="password" id="loginPassword" placeholder="输入密码" autocomplete="current-password">
+                    <span class="input-border"></span>
+                </div>
+                <button class="btn-neon" onclick="doLogin()">
+                    <span>LOGIN</span><span class="btn-glow"></span>
+                </button>
+                <div id="loginError" class="error-msg"></div>
+            </div>
+            <div id="loadingIndicator" class="loading-spinner" style="display:none;">
+                <div class="spinner"></div><span>Connecting...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主控制台 -->
+    <div id="mainScreen" class="screen">
+        <header class="titlebar">
+            <div class="titlebar-left">
+                <span class="titlebar-icon">⚡</span>
+                <span class="titlebar-text">SFW Web Console</span>
+                <span class="titlebar-version">v1.0</span>
+            </div>
+            <div class="titlebar-center">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">CONNECTED</span>
+                </div>
+            </div>
+            <div class="titlebar-right">
+                <button class="titlebar-btn" onclick="toggleSettings()" title="设置">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                    </svg>
+                </button>
+                <button class="titlebar-btn" onclick="clearConsole()" title="清空控制台">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
+                <button class="titlebar-btn" onclick="doLogout()" title="退出登录">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <div class="console-wrapper">
+            <div class="console-border-inner">
+                <div class="console-border-corner corner-tl"></div>
+                <div class="console-border-corner corner-tr"></div>
+                <div class="console-border-corner corner-bl"></div>
+                <div class="console-border-corner corner-br"></div>
+                <div id="consoleOutput" class="console-output"></div>
+            </div>
+            <div class="console-scroll-hint" id="scrollHint"><span>▼ 自动滚动</span></div>
+        </div>
+
+        <div class="input-wrapper">
+            <div class="input-container">
+                <span class="input-prompt" id="inputPrompt">&gt;</span>
+                <input type="text" id="commandInput" placeholder="输入 SFW 命令... (如 /help, /list)" autocomplete="off" spellcheck="false">
+                <button class="input-send-btn" onclick="sendCommand()" title="发送命令">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="input-hint"><span>Enter 发送 · ↑↓ 历史命令 · Ctrl+L 清屏</span></div>
+        </div>
+    </div>
+
+    <!-- 设置面板 -->
+    <div id="settingsOverlay" class="settings-overlay" onclick="if(event.target===this)toggleSettings()">
+        <div class="settings-panel">
+            <div class="settings-header">
+                <h2><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:8px;"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>SETTINGS</h2>
+                <button class="settings-close" onclick="toggleSettings()">✕</button>
+            </div>
+            <div class="settings-body">
+                <div class="settings-section">
+                    <h3>🔒 密码管理</h3>
+                    <div class="settings-row"><label>当前密码</label><input type="password" id="settingsOldPassword" placeholder="输入当前密码"></div>
+                    <div class="settings-row"><label>新密码</label><input type="password" id="settingsNewPassword" placeholder="输入新密码（至少6位）"></div>
+                    <button class="btn-neon small" onclick="changePassword()">更新密码</button>
+                    <span id="passwordMsg" class="settings-msg"></span>
+                </div>
+                <div class="settings-section">
+                    <h3>🎨 主题定制</h3>
+                    <div class="settings-row color-row"><label>背景颜色</label><input type="color" id="themeBgColor" onchange="applyThemeLive()"><input type="text" id="themeBgColorText" class="color-text" onchange="syncColorFromText('themeBgColor')"></div>
+                    <div class="settings-row color-row"><label>文字颜色</label><input type="color" id="themeFontColor" onchange="applyThemeLive()"><input type="text" id="themeFontColorText" class="color-text" onchange="syncColorFromText('themeFontColor')"></div>
+                    <div class="settings-row color-row"><label>边框颜色</label><input type="color" id="themeBorderColor" onchange="applyThemeLive()"><input type="text" id="themeBorderColorText" class="color-text" onchange="syncColorFromText('themeBorderColor')"></div>
+                    <div class="settings-row color-row"><label>强调色</label><input type="color" id="themeAccentColor" onchange="applyThemeLive()"><input type="text" id="themeAccentColorText" class="color-text" onchange="syncColorFromText('themeAccentColor')"></div>
+                    <div class="settings-row"><label>字体大小</label><input type="range" id="themeFontSize" min="10" max="24" value="14" oninput="applyThemeLive()"><span id="fontSizeValue">14px</span></div>
+                    <div class="settings-row"><label>背景透明度</label><input type="range" id="themeOpacity" min="0.3" max="1" step="0.05" value="1" oninput="applyThemeLive()"><span id="opacityValue">1.0</span></div>
+                    <button class="btn-neon small" onclick="saveTheme()">保存主题</button>
+                    <button class="btn-neon small secondary" onclick="resetTheme()">恢复默认</button>
+                    <span id="themeMsg" class="settings-msg"></span>
+                </div>
+                <div class="settings-section">
+                    <h3>⚙️ 服务器配置</h3>
+                    <div class="settings-row"><label>会话超时（分钟）</label><input type="number" id="settingsTimeout" min="5" max="1440" value="30"></div>
+                    <div class="settings-row"><label>最大输出行数</label><input type="number" id="settingsMaxLines" min="100" max="50000" value="5000"></div>
+                    <button class="btn-neon small" onclick="saveServerConfig()">保存配置</button>
+                    <span id="serverConfigMsg" class="settings-msg"></span>
+                </div>
+                <div class="settings-section">
+                    <h3>🌐 网络与安全</h3>
+                    <div class="settings-row"><label>HTTP 端口</label><input type="number" id="settingsPort" min="1" max="65535" value="8080"></div>
+                    <div class="settings-row"><label>启用 HTTPS</label><select id="settingsHttps" onchange="htsToggle()"><option value="false">关闭</option><option value="true">启用</option></select><span style="font-size:10px;color:#555;margin-left:8px">需 PEM 证书+私钥，自动重启</span></div>
+                    <div id="ksRow" class="settings-row" style="display:none"><label>证书文件(PEM)</label><input type="text" id="settingsCertFile" placeholder="C:\path\to\cert.pem"></div>
+                    <div id="kpRow" class="settings-row" style="display:none"><label>私钥文件(KEY)</label><input type="password" id="settingsKeyFile" placeholder="C:\path\to\key.pem"></div>
+                    <div class="settings-row"><label>Web 根目录</label><input type="text" id="settingsWebRoot" placeholder="留空=使用JAR内置页面"></div>
+                    <button class="btn-neon small" onclick="saveNetworkConfig()">保存网络配置</button>
+                    <span id="networkConfigMsg" class="settings-msg"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+    <script src="/js/app.js"></script>
+</body>
+</html>

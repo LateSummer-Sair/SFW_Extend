@@ -1,4 +1,4 @@
 Manifest-Version: 1.0
-ACT: sair.aiagent.AiAgentActivity;
-Created-By: SFW-AiAgent
+ACT: sair.aiagent.AiAgentActivity
+Created-By: AiAgent Build
 

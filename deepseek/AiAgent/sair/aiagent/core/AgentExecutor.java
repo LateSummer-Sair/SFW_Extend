@@ -36,11 +36,11 @@ public class AgentExecutor {
     private static final int MAX_ROUNDS = 50;
 
     private static final Pattern TAG_PATTERN =
-            Pattern.compile("<(cmd|readfile|readdir|sys|evaljs|eval|web|remember|download|superise|editprompt|stop|sendimage|sendrecord|sendfile)>(.*?)</\\1>", Pattern.DOTALL);
+            Pattern.compile("<(cmd|readfile|readdir|sys|evaljs|eval|web|remember|download|superise|editprompt|stop|sendimage|sendrecord|sendfile|schedule|note|searchnote|batchrename|batchconvert)>(.*?)</\\1>", Pattern.DOTALL);
 
     /** execq 受限标签白名单：cmd / web / readdir / setname / stop / sendsticker / collectsticker（sendimage/sendrecord/sendfile 由QQMessageHandler层处理） */
     private static final Pattern EXECQ_TAG_PATTERN =
-            Pattern.compile("<(cmd|web|readdir|setname|stop|sendsticker|collectsticker|readfile)>(.*?)</\\1>", Pattern.DOTALL);
+            Pattern.compile("<(cmd|web|readdir|setname|stop|sendsticker|collectsticker|readfile|schedule|note|searchnote)>(.*?)</\\1>", Pattern.DOTALL);
 
     /** execq 群管标签检测（用于触发实时回调） */
     private static final Pattern GROUP_TAG_PATTERN =
@@ -76,11 +76,15 @@ public class AgentExecutor {
     /** QQ execs消息回调（用于实时推送每一轮输出给主人） */
     private volatile java.util.function.Consumer<String> qqExecsCallback;
 
+    /** 标签执行器 */
+    private final TagExecutor tagExecutor;
+
     public AgentExecutor(Activity selfActivity, DeepSeekClient client, DynamicCodeEngine codeEngine, ConfirmationGate gate) {
         this.selfActivity = selfActivity;
         this.client = client;
         this.codeEngine = codeEngine;
         this.gate = gate;
+        this.tagExecutor = new TagExecutor(gate, codeEngine, selfActivity);
     }
 
     public void markStopped() {
@@ -153,6 +157,11 @@ public class AgentExecutor {
     /** 设置 execq <cmd> 插件白名单 */
     public void setCmdWhitelist(Set<String> whitelist) {
         this.cmdWhitelist = whitelist;
+    }
+
+    /** 设置定时任务调度器 */
+    public void setCronScheduler(CronScheduler cronScheduler) {
+        tagExecutor.setCronScheduler(cronScheduler);
     }
 
     void enterBypass() {

@@ -350,7 +350,8 @@ public class OneBotServer {
                 byte[] hash = sha1.digest(input.getBytes(StandardCharsets.UTF_8));
                 return Base64.getEncoder().encodeToString(hash);
             } catch (NoSuchAlgorithmException e) {
-                throw new RuntimeException(e);
+                // SHA-1 是 JVM 必备算法，理论上不会发生
+                return Base64.getEncoder().encodeToString(key.getBytes(StandardCharsets.UTF_8));
             }
         }
 
@@ -391,7 +392,7 @@ public class OneBotServer {
                 }
 
                 // 读取payload
-                if (payloadLen > MAX_FRAME_SIZE) {
+                if (payloadLen > MAX_FRAME_SIZE || payloadLen > Integer.MAX_VALUE) {
                     AiAgentActivity.debugLog("[OneBot] 帧过大: " + payloadLen);
                     break;
                 }

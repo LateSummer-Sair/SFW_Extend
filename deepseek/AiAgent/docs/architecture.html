@@ -11,22 +11,24 @@
     <!-- Particle Background -->
     <canvas id="particles-canvas"></canvas>
 
-    <!-- Top Navigation -->
-    <nav class="top-nav">
-        <div class="nav-inner">
-            <div class="nav-logo">
-                <div class="icon">⚡</div>
-                <span>AiAgent</span>
-            </div>
-            <div class="nav-links">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">
+            <div class="icon">⚡</div>
+            <span class="logo-text">AiAgent</span>
+        </div>
+        <nav class="sidebar-nav">
                 <a href="index.html">概述</a>
                 <a href="architecture.html" class="active">架构</a>
                 <a href="patterns.html">设计模式</a>
                 <a href="classes.html">类结构</a>
                 <a href="commands.html">命令</a>
-            </div>
-        </div>
-    </nav>
+                <a href="feedback.html">反馈</a>
+        </nav>
+        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航菜单">
+            <span></span><span></span><span></span>
+        </button>
+    </aside>
 
     <!-- Page Header -->
     <section style="padding-top:140px; padding-bottom:40px;">
@@ -35,7 +37,7 @@
                 <div class="section-tag">Architecture</div>
                 <h2>系统架构</h2>
                 <div class="section-divider"></div>
-                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。v2.5 更新：execs 合并转发思考卡片（NapCat API）、表情包自动收集与发送系统、6 项安全加固。</p>
+                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。v2.6 更新：CronScheduler 定时任务调度、知识库/笔记系统、增强网页抓取、批量文件操作、模型智能路由（auto→flash/pro自动分派）、AutoClear 自动清屏（守护线程每3分钟 /clear 防日志OOM）。v2.5 更新：execs 合并转发思考卡片（NapCat API）、表情包自动收集与发送系统、6 项安全加固。</p>
             </div>
         </div>
     </section>
@@ -71,6 +73,9 @@
                     <div class="arch-node core">ConfirmationGate<br><small>确认门控</small></div>
                     <div class="arch-node core">ActivityActions<br><small>命令委托</small></div>
                     <div class="arch-node core">JournalManager<br><small>会话日志</small></div>
+                    <div class="arch-node core">CronScheduler<br><small>定时任务调度</small></div>
+                </div>
+                <div class="arch-layer">
                     <div class="arch-node core">EmotionManager<br><small>情绪状态机</small></div>
                 </div>
                 <div class="arch-arrow">↓</div>
@@ -120,7 +125,7 @@
                     / <code style="color:var(--accent-amber);">.onebot.util</code>
                 </p>
                 <p style="color:var(--text-muted); font-size:0.78rem; margin-top:8px;">
-                    37 个源文件 · 约 14,000 行代码 · 9 个包
+                    44 个源文件 · 约 16,500 行代码 · 9 个包
                 </p>
             </div>
         </div>
@@ -247,7 +252,7 @@
                 </div>
                 <div class="arch-arrow">↓</div>
                 <div class="arch-layer">
-                    <div class="arch-node core">③ parseActions() → ConfirmationGate<br><small>正则匹配XML → 确认门控</small></div>
+                    <div class="arch-node core">③ parseActions() → ConfirmationGate<br><small>正则匹配 20 种 XML → 确认门控</small></div>
                 </div>
                 <div class="arch-arrow">↓</div>
                 <div class="arch-layer">
@@ -512,7 +517,6 @@
                         <b>JournalManager</b>：最近 25 条会话日志（跨重启持久化，SQLite）→ 注入 system prompt<br>
                         <b>EmotionManager</b>：当前情绪状态（心情+性别，持久化到 app_state）→ 注入 system prompt<br>
                         <b>PromptManager</b>：集中式提示词管理器（单例），三段提示词统一入口（systemPrompt/execqPrompt/agentStaticPrompt），硬编码默认 + config.properties 追加模式持久化<br>
-                                                <b>UnifiedQQMemoryManager</b>：QQ机器人统一记忆库，存储所有对话历史、群聊记录、AI独立记忆，通过来源标记实现记忆联通<br>
                         以上所有上下文在 <code>buildSystemPrompt()</code> 中一次性融合。
                     </p>
                 </div>
@@ -524,12 +528,12 @@
     <footer class="footer">
         <div class="container">
             <p>
-                <span class="brand">AiAgent</span> v2.5 ·
+                <span class="brand">AiAgent</span> v2.6 ·
                 基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
                 对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
             </p>
             <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · NapCat群管理 · 合并转发 · 表情包 · 安全加固 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · 多模态图片识别
+                QQ OneBot · NapCat群管理 · 合并转发 · 表情包 · 安全加固 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 模型路由 · 自动清屏 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · 多模态图片识别
             </p>
         </div>
     </footer>

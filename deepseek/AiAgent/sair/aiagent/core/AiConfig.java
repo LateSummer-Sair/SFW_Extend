@@ -293,20 +293,37 @@ public class AiConfig {
     
     /**
      * 获取 execq/Chat 通道应使用的模型。
-     * <p>model=auto 时返回 flash（轻量快速），否则返回配置的模型。</p>
+     * <p>model=auto 时返回 flash（轻量快速），否则严格遵守配置值。</p>
      */
     public String getExecqModel() {
-        if (AUTO_MODEL.equalsIgnoreCase(model)) return DEFAULT_EXECQ_MODEL;
-        return model.isEmpty() ? DEFAULT_EXECQ_MODEL : model;
+        if (AUTO_MODEL.equalsIgnoreCase(model)) {
+            logModelRoute("Chat/Execq", DEFAULT_EXECQ_MODEL);
+            return DEFAULT_EXECQ_MODEL;
+        }
+        logModelRoute("Chat/Execq", model);
+        return model;
     }
     
     /**
      * 获取 Agent(exec/execs) 通道应使用的模型。
-     * <p>model=auto 时返回 pro（深度推理），否则返回配置的模型。</p>
+     * <p>model=auto 时返回 pro（深度推理），否则严格遵守配置值。</p>
      */
     public String getAgentModel() {
-        if (AUTO_MODEL.equalsIgnoreCase(model)) return DEFAULT_AGENT_MODEL;
-        return model.isEmpty() ? DEFAULT_AGENT_MODEL : model;
+        if (AUTO_MODEL.equalsIgnoreCase(model)) {
+            logModelRoute("Agent", DEFAULT_AGENT_MODEL);
+            return DEFAULT_AGENT_MODEL;
+        }
+        logModelRoute("Agent", model);
+        return model;
+    }
+
+    /** 模型路由日志（仅在 model=auto 时输出提示） */
+    private static void logModelRoute(String channel, String resolved) {
+        if (AUTO_MODEL.equalsIgnoreCase(getInstance().model)) {
+            String msg = "[模型路由] auto模式: " + channel + "通道使用 " + resolved;
+            System.out.println(msg);
+            try { sair.aiagent.AiAgentActivity.debugLog(msg); } catch (Exception ignored) {}
+        }
     }
     
     /** 获取主人QQ号列表 */
@@ -404,34 +421,30 @@ public class AiConfig {
      * <p>种子来源：系统属性 + 机器名 + 用户目录，三者组合后取 hash 作为密钥基础。
      * 重启后所有因子不变，密钥稳定。</p>
      */
-    private static final String KEY_SEED = deriveKeySeed();
+    private static final byte[] AES_KEY = deriveAesKey();
 
-    private static String deriveKeySeed() {
-        StringBuilder sb = new StringBuilder();
-        sb.append(System.getProperty("java.vm.name", ""));
-        sb.append(System.getProperty("os.arch", ""));
-        sb.append(System.getProperty("user.name", ""));
-        try { sb.append(java.net.InetAddress.getLocalHost().getHostName()); } catch (Exception ignored) {}
-        sb.append(System.getProperty("user.dir", ""));
-        // 固定盐值作为最后防线
-        sb.append("AiAgent@SFW2024!");
-        // 对组合字符串取简单 hash，保证 16 字节密钥
-        String raw = sb.toString();
-        int hash = raw.hashCode();
-        // 扩展 hash 到 16 字节可重复模式
-        StringBuilder extended = new StringBuilder(32);
-        extended.append(String.format("%08x", hash));
-        extended.append(String.format("%08x", ~hash));
-        extended.append(String.format("%08x", hash * 31 + raw.length()));
-        extended.append(String.format("%08x", raw.length() * 7 + hash));
-        return extended.toString();
+    private static byte[] deriveAesKey() {
+        try {
+            java.security.MessageDigest sha256 = java.security.MessageDigest.getInstance("SHA-256");
+            sha256.update(System.getProperty("java.vm.name", "").getBytes(StandardCharsets.UTF_8));
+            sha256.update(System.getProperty("os.arch", "").getBytes(StandardCharsets.UTF_8));
+            sha256.update(System.getProperty("user.name", "").getBytes(StandardCharsets.UTF_8));
+            try { sha256.update(java.net.InetAddress.getLocalHost().getHostName().getBytes(StandardCharsets.UTF_8)); } catch (Exception ignored) {}
+            sha256.update(System.getProperty("user.dir", "").getBytes(StandardCharsets.UTF_8));
+            sha256.update("AiAgent@SFW2024!".getBytes(StandardCharsets.UTF_8));
+            byte[] fullHash = sha256.digest();
+            // 取前16字节作为 AES-128 密钥
+            byte[] key = new byte[16];
+            System.arraycopy(fullHash, 0, key, 0, 16);
+            return key;
+        } catch (Exception e) {
+            // 回退：绝不会发生，SHA-256 是所有 JVM 的必备算法
+            throw new RuntimeException("SHA-256 not available", e);
+        }
     }
 
     private static byte[] getAesKey() {
-        byte[] raw = KEY_SEED.getBytes(StandardCharsets.UTF_8);
-        byte[] key = new byte[16];
-        System.arraycopy(raw, 0, key, 0, Math.min(raw.length, 16));
-        return key;
+        return AES_KEY;
     }
 
     private static String encrypt(String plain) {
