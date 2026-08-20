@@ -1,547 +1,192 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>系统架构 — AiAgent 技术文档</title>
-    <link rel="stylesheet" href="css/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>系统架构 — AiAgent 技术文档</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-    <!-- Particle Background -->
-    <canvas id="particles-canvas"></canvas>
+  <canvas id="bg-canvas"></canvas>
+  <div class="aurora"><span></span><span></span><span></span></div>
+  <div class="progress-bar"></div>
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航"><span></span><span></span><span></span></button>
 
-    <!-- Sidebar Navigation -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-logo">
-            <div class="icon">⚡</div>
-            <span class="logo-text">AiAgent</span>
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <header class="page-hero">
+      <div class="container">
+        <div class="crumb"><a href="index.html">Home</a> / 系统架构</div>
+        <h1>系统<span class="gradient-text">架构</span></h1>
+        <p class="lead">
+          AiAgent 采用「路由与命令实现分离 + Function Calling 统一执行」的分层架构。
+          从命令入口 → 上下文注入 → 多轮工具调用 → 结果流式输出，形成完整闭环。
+        </p>
+      </div>
+    </header>
+
+    <div class="container">
+
+      <section class="section" id="overview">
+        <div class="section-head reveal">
+          <div class="section-tag">Layers</div>
+          <h2>分层架构</h2>
+          <p class="desc">10 个包 · 94 个类，按职责划分为 4 层。</p>
         </div>
-        <nav class="sidebar-nav">
-                <a href="index.html">概述</a>
-                <a href="architecture.html" class="active">架构</a>
-                <a href="patterns.html">设计模式</a>
-                <a href="classes.html">类结构</a>
-                <a href="commands.html">命令</a>
-                <a href="feedback.html">反馈</a>
-        </nav>
-        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航菜单">
-            <span></span><span></span><span></span>
-        </button>
-    </aside>
-
-    <!-- Page Header -->
-    <section style="padding-top:140px; padding-bottom:40px;">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Architecture</div>
-                <h2>系统架构</h2>
-                <div class="section-divider"></div>
-                <p>采用分层架构，通过门面模式统一入口，各核心模块独立职责、松耦合协作。v2.6 更新：CronScheduler 定时任务调度、知识库/笔记系统、增强网页抓取、批量文件操作、模型智能路由（auto→flash/pro自动分派）、AutoClear 自动清屏（守护线程每3分钟 /clear 防日志OOM）。v2.5 更新：execs 合并转发思考卡片（NapCat API）、表情包自动收集与发送系统、6 项安全加固。</p>
-            </div>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node core"><span class="fn-title">入口层</span><span class="fn-sub">AiAgentActivity（SFW Activity）+ ActivityActions + OneBotCommandActions</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node data"><span class="fn-title">执行层</span><span class="fn-sub">AgentExecutor + AgentOrchestrator + FunctionCallingBridge + ToolDispatcher + AgentActionHandler + ThreadManager</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node core"><span class="fn-title">能力层</span><span class="fn-sub">SkillBank / DeepSeekClient / DynamicCodeEngine / PersistenceManager / MemoryManager</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node data"><span class="fn-title">通道层</span><span class="fn-sub">OneBotServer / QQMessageHandler / QQAgentBridge / NapCatApi（QQ OneBot）</span></div>
+          </div>
+          <div class="flow-caption">四层架构：入口路由 → 执行编排 → 核心能力 → 多通道接入</div>
         </div>
-    </section>
+      </section>
 
-    <!-- Architecture Diagram -->
-    <section style="padding-top:20px;">
-        <div class="container">
-            <div class="arch-diagram reveal">
-                <!-- Entry Layer -->
-                <div class="arch-layer">
-                    <div class="arch-node entry">AiAgentActivity<br><small>门面 · 命令路由</small></div>
-                </div>
-                <div class="arch-arrow">↓</div>
-                <!-- Core Layer Row 1 -->
-                <div class="arch-layer">
-                    <div class="arch-node core">PersistenceManager<br><small>SQLite · FTS5 · 统一持久化</small></div>
-                    <div class="arch-node core">AiConfig<br><small>单例配置</small></div>
-                    <div class="arch-node core">PromptManager<br><small>提示词集中管理</small></div>
-                    <div class="arch-node core">StreamPrinter<br><small>生产者-消费者</small></div>
-                    <div class="arch-node core">DeepSeekClient<br><small>策略 · Vision API</small></div>
-                    <div class="arch-node core">AgentExecutor<br><small>ReAct · execs回调</small></div>
-                </div>
-                <!-- Core Layer Row 2 -->
-                <div class="arch-layer">
-                    <div class="arch-node core">ConversationHistory<br><small>滑动窗口</small></div>
-                    <div class="arch-node core">MemoryManager<br><small>全局记忆管理</small></div>
-                    <div class="arch-node core">DynamicCodeEngine<br><small>动态编译</small></div>
-                    <div class="arch-node core">StickerManager<br><small>表情包收集匹配</small></div>
-                    <div class="arch-node core">SysConsoleExecutor<br><small>系统终端</small></div>
-                </div>
-                <!-- Core Layer Row 3 -->
-                <div class="arch-layer">
-                    <div class="arch-node core">ConfirmationGate<br><small>确认门控</small></div>
-                    <div class="arch-node core">ActivityActions<br><small>命令委托</small></div>
-                    <div class="arch-node core">JournalManager<br><small>会话日志</small></div>
-                    <div class="arch-node core">CronScheduler<br><small>定时任务调度</small></div>
-                </div>
-                <div class="arch-layer">
-                    <div class="arch-node core">EmotionManager<br><small>情绪状态机</small></div>
-                </div>
-                <div class="arch-arrow">↓</div>
-                <!-- OneBot QQ Layer -->
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">OneBotServer<br><small>WebSocket · Gson参数序列化</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessageHandler<br><small>消息路由 · 图片下载 · 多模态 · 合并转发 · 表情包</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">UnifiedQQMemoryManager<br><small>统一记忆库（群聊/私聊联通）</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMemoryManager<br><small>按QQ号隔离记忆</small></div>
-                </div>
-                <!-- OneBot Sub Layer -->
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">NapCatApi<br><small>HTTP API · 群管 · 合并转发</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">InternalAgents<br><small>好感度/拉黑管理</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">GroupModeratorAgent<br><small>违规检测+处罚执行</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">GroupModerationConfig<br><small>违规阈值配置</small></div>
-                </div>
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">EmotionStateManager<br><small>好感度情绪持久化</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">BotPersistenceManager<br><small>bot_data.db 统一管理</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">JsonUtil<br><small>公共JSON解析工具类</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessage<br><small>OneBot 消息模型</small></div>
-                </div>
-                <div class="arch-arrow">↓</div>
-                <!-- Model + Util + UI Layer -->
-                <div class="arch-layer">
-                    <div class="arch-node model">ChatMessage<br><small>消息模型 · contentParts多模态</small></div>
-                    <div class="arch-node model">AgentAction<br><small>操作模型</small></div>
-                    <div class="arch-node model">MemoryEntry<br><small>记忆模型</small></div>
-                    <div class="arch-node util">EdtUtils<br><small>EDT安全</small></div>
-                    <div class="arch-node util">FileUtils<br><small>文件工具</small></div>
-                    <div class="arch-node util">SysConsolePanel<br><small>终端面板</small></div>
-                    <div class="arch-node util">SurpriseWindow<br><small>彩蛋弹窗</small></div>
-                </div>
-            </div>
-
-            <div style="text-align:center; margin-top:32px;">
-                <p style="color:var(--text-muted); font-size:0.85rem;">
-                    包结构：<code style="color:var(--accent-cyan);">sair.aiagent</code>
-                    → <code style="color:var(--accent-purple);">.core</code>
-                    / <code style="color:var(--accent-green);">.model</code>
-                    / <code style="color:var(--accent-amber);">.util</code>
-                    / <code style="color:var(--accent-cyan);">.ui</code>
-                    / <code style="color:var(--accent-purple);">.acts</code>
-                    / <code style="color:var(--accent-cyan);">.onebot</code>
-                    / <code style="color:var(--accent-green);">.onebot.model</code>
-                    / <code style="color:var(--accent-amber);">.onebot.util</code>
-                </p>
-                <p style="color:var(--text-muted); font-size:0.78rem; margin-top:8px;">
-                    44 个源文件 · 约 16,500 行代码 · 9 个包
-                </p>
-            </div>
+      <section class="section" id="dataflow">
+        <div class="section-head reveal">
+          <div class="section-tag">Data Flow</div>
+          <h2>数据流全景</h2>
+          <p class="desc">一次本地 execs 任务的完整数据流：从用户输入到流式输出。</p>
         </div>
-    </section>
-
-    <!-- Friend/Group Invite Flow -->
-    <section id="invite-flow">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Data Flow</div>
-                <h2>好友/群邀请 好感度决策链</h2>
-                <div class="section-divider"></div>
-                <p>当收到好友申请或群邀请时，AI 依据 7 步优先级决策链智能处理，含反滥用保护。</p>
-            </div>
-
-            <div class="arch-diagram reveal">
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">OneBotServer<br><small>检测 request/friend/add<br>request/group/invite 事件</small></div>
-                </div>
-                <div class="arch-arrow">↓ 路由到 QQMessageHandler</div>
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQMessageHandler<br><small>handleFriendRequest() / handleGroupInviteRequest()</small></div>
-                </div>
-                <div class="arch-arrow">↓ 7步优先级决策</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">① 主人? → 无条件接受</div>
-                    <div class="arch-node core">② 5分钟内好友? → 拒绝+警告</div>
-                    <div class="arch-node core">③ 查询好感度</div>
-                    <div class="arch-node core">④ 背叛者? → 拒绝</div>
-                </div>
-                <div class="arch-layer">
-                    <div class="arch-node core">⑤ 好感度>600 → 接受</div>
-                    <div class="arch-node core">⑥ 200-600 → 忽略</div>
-                    <div class="arch-node core">⑦ ≤200 → 拒绝</div>
-                </div>
-                <div class="arch-arrow">↓ NapCatApi HTTP 调用</div>
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">NapCatApi.setGroupAddRequest()<br><small>发送 approve/reject</small></div>
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">NapCatApi.handleFriendRequest()<br><small>同意/拒绝好友申请</small></div>
-                </div>
-            </div>
-
-            <div style="max-width:800px; margin:24px auto;">
-                <div class="pattern-card">
-                    <h4>反滥用保护机制</h4>
-                    <p><b>好友申请通过后，5 分钟内如果该用户发起群邀请，立即拒绝并回复警告</b>："请不要厚着脸皮拉我进群，我还没认可你，也更没充分了解你。"<br>通过 <code>ConcurrentHashMap&lt;Long, Long&gt; friendAcceptTimestamps</code> 跟踪好友通过时间戳，5 分钟后异步清理。</p>
-                </div>
-            </div>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">用户输入</span><span class="fn-sub">SFW 控制台 ai/execs [任务]</span></div>
+            <div class="flow-edge label"><span class="el">路由到 handleExecs</span></div>
+            <div class="flow-node core"><span class="fn-title">情绪检测</span><span class="fn-sub">EmotionManager.detectEmotion()，暂停则中断</span></div>
+            <div class="flow-edge label"><span class="el">上下文注入</span></div>
+            <div class="flow-node data"><span class="fn-title">构建 System Prompt</span><span class="fn-sub">记忆 + 笔记 + 技能 + 纠正 + 情绪 + 日志 + 对话历史</span></div>
+            <div class="flow-edge label"><span class="el">tools + tool_choice</span></div>
+            <div class="flow-node core"><span class="fn-title">Function Calling 循环</span><span class="fn-sub">FunctionCallingBridge 多轮 tools/tool_calls</span></div>
+            <div class="flow-edge label"><span class="el">执行工具</span></div>
+            <div class="flow-node core"><span class="fn-title">ToolDispatcher 分发</span><span class="fn-sub">统一执行 + 权限门禁 + 结果回传</span></div>
+            <div class="flow-edge label"><span class="el">最终文本</span></div>
+            <div class="flow-node end"><span class="fn-title">流式输出</span><span class="fn-sub">StreamPrinter 打字机效果 + Journal 记录</span></div>
+          </div>
+          <div class="flow-caption">本地通道完整数据流</div>
         </div>
-    </section>
+      </section>
 
-    <!-- Data Flow: Chat Mode -->
-    <section id="dataflow">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Data Flow</div>
-                <h2>Chat 模式数据流</h2>
-                <div class="section-divider"></div>
-                <p>用户输入 <code>ai/chat</code> → AI 逐字响应的完整调用链。</p>
-            </div>
-
-            <div class="arch-diagram reveal">
-                <div class="arch-layer">
-                    <div class="arch-node entry">ai/chat [消息]<br><small>SFW控制台输入</small></div>
-                </div>
-                <div class="arch-arrow">↓ AiAgentActivity.main("ai/chat", args)</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">ActivityActions.handleChat()<br><small>参数校验 + 情绪检测</small></div>
-                </div>
-                <div class="arch-arrow">↓ 新线程 AiAgent-Chat</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">DeepSeekClient.chatStream()<br><small>SSE流式HTTP请求</small></div>
-                </div>
-                <div class="arch-arrow">↓ printer.offer(ch)</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">StreamPrinter<br><small>LinkedBlockingQueue → 10ms → EDT</small></div>
-                </div>
-                <div class="arch-arrow">↓ EdtUtils / SairCons.print()</div>
-                <div class="arch-layer">
-                    <div class="arch-node entry">SFW Console<br><small>JTextPane 逐字渲染</small></div>
-                </div>
-            </div>
+      <section class="section" id="fc-loop">
+        <div class="section-head reveal">
+          <div class="section-tag">Function Calling</div>
+          <h2>Function Calling 多轮循环</h2>
+          <p class="desc">无轮次上限，连续失败 / 无进展自动终止，失败 5 次切 eval 兜底。</p>
         </div>
-    </section>
-
-    <!-- Data Flow: Agent Mode -->
-    <section id="agent-flow">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Data Flow</div>
-                <h2>Agent 执行循环数据流</h2>
-                <div class="section-divider"></div>
-                <p>用户输入 <code>ai/exec</code> → ReAct 推理-行动循环的完整链路。</p>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">开始</span><span class="fn-sub">携带 system prompt + tools 发起请求</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node core"><span class="fn-title">调用 DeepSeek API</span><span class="fn-sub">chatSyncWithTools(tools)</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node decision"><span class="fn-title">返回结果判定</span><span class="fn-sub">是否包含 tool_calls？</span></div>
+            <div class="flow-branch">
+              <div>
+                <div class="flow-branch-label">是（调工具）</div>
+                <div class="flow-node core"><span class="fn-title">多工具并发执行</span><span class="fn-sub">本地通道并行 + ToolDispatcher.execute()</span></div>
+              </div>
+              <div>
+                <div class="flow-branch-label">否（纯文本）</div>
+                <div class="flow-node end"><span class="fn-title">结束</span><span class="fn-sub">返回最终答案</span></div>
+              </div>
             </div>
-
-            <div class="arch-diagram reveal">
-                <div class="arch-layer">
-                    <div class="arch-node entry">ai/exec [任务]<br><small>SFW控制台输入</small></div>
-                </div>
-                <div class="arch-arrow">↓ AiAgentActivity.main("ai/exec", args)</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">ActivityActions.handleExec()<br><small>参数校验 + 情绪检测 + 上下文注入</small></div>
-                </div>
-                <div class="arch-arrow">↓ 上下文注入链</div>
-                <div class="arch-layer">
-                    <div class="arch-node model">MemoryManager<br><small>检索相关记忆</small></div>
-                    <div class="arch-node model">ConversationHistory<br><small>Chat历史摘要</small></div>
-                    <div class="arch-node model">JournalManager<br><small>跨会话日志</small></div>
-                    <div class="arch-node model">EmotionManager<br><small>当前情绪状态</small></div>
-                    <div class="arch-node model">上一轮Agent<br><small>层层递进总结</small></div>
-                </div>
-                <div class="arch-arrow">↓ 所有上下文融合于 PersistenceManager (SQLite)</div>
-                <div class="arch-arrow">↓ AgentExecutor.runLoop() — 最多30轮</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">① buildSystemPrompt()<br><small>融合所有上下文</small></div>
-                </div>
-                <div class="arch-arrow">↓</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">② DeepSeekClient.chatStream()<br><small>SSE流式 → StreamPrinter</small></div>
-                </div>
-                <div class="arch-arrow">↓ v2.0：支持 &lt;stop&gt; 标签自停 + execs回调机制</div>
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">qqExecsCallback<br><small>每轮AI响应后实时推送给QQ主人</small></div>
-                </div>
-                <div class="arch-arrow">↓</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">③ parseActions() → ConfirmationGate<br><small>正则匹配 20 种 XML → 确认门控</small></div>
-                </div>
-                <div class="arch-arrow">↓</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">④ executeAction() → 结果注入<br><small>cmd/readfile/sys/eval/web...</small></div>
-                </div>
-                <div class="arch-arrow">↓ 循环回到①（直到无XML标签或超过30轮）</div>
-            </div>
+            <div class="flow-edge label"><span class="el">结果回传 tool 角色消息</span></div>
+            <div class="flow-node core"><span class="fn-title">继续循环</span><span class="fn-sub">成功归零 / 连续失败 10 次终止 / stop 中断</span></div>
+          </div>
+          <div class="flow-caption">原生 Function Calling 多轮循环引擎</div>
         </div>
-    </section>
+      </section>
 
-    <!-- Multimodal Vision Data Flow -->
-    <section id="multimodal-flow">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Data Flow</div>
-                <h2>多模态图片识别数据流（v2.3）</h2>
-                <div class="section-divider"></div>
-                <p>QQ 用户发送图片 → AI 通过 DeepSeek V4 Vision API 分析图片内容并给出上下文回复的完整链路。</p>
-            </div>
-
-            <div class="arch-diagram reveal">
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQ 用户发送图片<br><small>群聊/私聊 CQ码 [CQ:image]</small></div>
-                </div>
-                <div class="arch-arrow">↓ QQMessageHandler 解析消息段</div>
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">extractImageUrls()<br><small>提取 CQ:image 的 url 字段</small></div>
-                </div>
-                <div class="arch-arrow">↓ resolveImageForVision(url)</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">① 域名检测<br><small>腾讯内部域名? (qpic.cn 等)</small></div>
-                    <div class="arch-node core">② 下载→Base64<br><small>HTTP GET → data:image/xxx;base64,...</small></div>
-                    <div class="arch-node core">③ 直传 URL<br><small>外部图片直接传原URL</small></div>
-                </div>
-                <div class="arch-arrow">↓ resolvedImageUrls 传入 AgentExecutor.executeQq()</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">ChatMessage.createMultimodal()<br><small>文本 + contentParts[{type:"image_url",...}]</small></div>
-                </div>
-                <div class="arch-arrow">↓ DeepSeekClient.buildRequestBody()</div>
-                <div class="arch-layer">
-                    <div class="arch-node entry">Vision API content 数组格式<br><small>[{"type":"text","text":"..."},{"type":"image_url","image_url":{"url":"..."}}]</small></div>
-                </div>
-                <div class="arch-arrow">↓ DeepSeek V4 Vision API → AI 分析图片内容</div>
-                <div class="arch-layer">
-                    <div class="arch-node util">StreamPrinter → QQ NapCatApi<br><small>AI 理解图片并结合上下文回复</small></div>
-                </div>
-            </div>
-
-            <div style="max-width:800px; margin:24px auto;">
-                <div class="pattern-card">
-                    <h4>图片域名解析策略</h4>
-                    <p>
-                        <b>腾讯内部域名</b>（qpic.cn / gchat.qpic.cn / c2cpicdw.qpic.cn / multimedia.nt.qq.com）：<br>
-                        这些域名的图片外网不可直接访问，QQMessageHandler 通过 <code>downloadImageAsBase64()</code> 
-                        使用 QQ Bot 所在网络的 HTTP GET 下载图片字节流，转为 base64 data URI 后传入 Vision API。<br>
-                        限制：最大 5MB，连接超时 8s，读取超时 15s。<br><br>
-                        <b>外部域名</b>（其他公网 URL）：<br>
-                        直接传递图片 URL 给 DeepSeek V4 Vision API，无需本地下载中转。
-                    </p>
-                </div>
-                <div class="pattern-card">
-                    <h4>多模态消息模型</h4>
-                    <p>
-                        <code>ChatMessage</code> 新增 <code>contentParts</code> 字段（List&lt;Map&lt;String,Object&gt;&gt;）：<br>
-                        • 纯文本消息：contentParts = null，使用传统 content 字段<br>
-                        • 多模态消息：contentParts 非 null，存储 Vision API content 数组<br>
-                        • <code>createMultimodal(text, imageUrls)</code> 工厂方法自动构建 contentParts<br>
-                        • <code>hasImages()</code> 快速判断是否包含图片<br>
-                        • <code>estimateTokens()</code> 自动适配 —— 图片按 85 token/张 额外估算
-                    </p>
-                </div>
-            </div>
+      <section class="section" id="context">
+        <div class="section-head reveal">
+          <div class="section-tag">Context</div>
+          <h2>上下文注入链</h2>
+          <p class="desc">buildSystemPrompt() 融合多层上下文，动态分配 token 预算。</p>
         </div>
-    </section>
-
-    <!-- Forward Message Data Flow (v2.5) -->
-    <section id="forward-flow">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Data Flow</div>
-                <h2>execs 思考过程合并转发数据流（v2.5）</h2>
-                <div class="section-divider"></div>
-                <p>QQ 主人发送 execs: 任务 → AI 多轮思考通过 NapCat 合并转发 API 折叠为 QQ 原生消息卡片的完整链路。</p>
-            </div>
-
-            <div class="arch-diagram reveal">
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-cyan);">QQ 主人发送 execs: [任务]<br><small>群聊/私聊中触发 Agent 执行</small></div>
-                </div>
-                <div class="arch-arrow">↓ QQMessageHandler.handleExecqMessage()</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">AgentExecutor.execute()<br><small>ReAct 循环 · 最多50轮</small></div>
-                </div>
-                <div class="arch-arrow">↓ qqExecsCallback 回调 · thinkingBlockHolder 缓冲</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">sendThinkingAsForward()<br><small>按 [第N轮思考] 拆分文本为节点数组</small></div>
-                </div>
-                <div class="arch-arrow">↓ 构建 OneBot v11 合并转发节点</div>
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">OneBotServer.sendApiCall()<br><small>Gson.toJson() 序列化 List&lt;Map&gt; messages 参数</small></div>
-                </div>
-                <div class="arch-arrow">↓ HTTP POST</div>
-                <div class="arch-layer">
-                    <div class="arch-node model" style="border-color:var(--accent-purple);">NapCatApi<br><small>sendGroupForwardMsg() / sendPrivateForwardMsg()</small></div>
-                </div>
-                <div class="arch-arrow">↓ QQ 原生合并转发卡片</div>
-                <div class="arch-layer">
-                    <div class="arch-node entry">QQ 客户端<br><small>主人可逐条展开每轮思考节点</small></div>
-                </div>
-            </div>
-
-            <div style="max-width:800px; margin:24px auto;">
-                <div class="pattern-card">
-                    <h4>合并转发节点结构</h4>
-                    <p>
-                        每个思考轮次生成一个 OneBot v11 forward node：<br>
-                        <code>{"type":"node","data":{"uin":"selfId","name":"BotName","content":[{"type":"text","data":{"text":"..."}}]}}</code><br>
-                        单轮超过 3500 字符自动截断标记 [已截断]。发送失败时回退为纯文本消息。
-                    </p>
-                </div>
-            </div>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">系统提示词</span><span class="fn-sub">PromptManager（基础人设 + 约束）</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node data"><span class="fn-title">记忆上下文</span><span class="fn-sub">memories FTS5 全文检索 + 重要性加权</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node data"><span class="fn-title">笔记上下文</span><span class="fn-sub">notes 知识库 FTS5 检索</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node data"><span class="fn-title">技能索引</span><span class="fn-sub">SkillBank.buildCompactIndex() 按通道注入</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node data"><span class="fn-title">纠正 + 情绪 + 日志</span><span class="fn-sub">corrections / emotion / journal / 对话历史</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node end"><span class="fn-title">最终 System Prompt</span><span class="fn-sub">动态 token 预算跨层分配</span></div>
+          </div>
+          <div class="flow-caption">多层上下文按预算融合注入</div>
         </div>
-    </section>
+      </section>
 
-    <!-- Stream Output Deep Dive -->
-    <section id="stream">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Deep Dive</div>
-                <h2>流式逐字输出原理</h2>
-                <div class="section-divider"></div>
-                <p>从 API 字节流到控制台逐字渲染的完整数据流，含排空策略与线程模型。</p>
-            </div>
-
-            <div class="arch-diagram reveal">
-                <div class="arch-layer">
-                    <div class="arch-node entry">DeepSeek API<br><small>SSE Stream (text/event-stream)</small></div>
-                </div>
-                <div class="arch-arrow">↓ data: {"choices":[{"delta":{"content":"你"}}]}</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">DeepSeekClient<br><small>BufferedReader逐行读 → 正则解析 delta.content</small></div>
-                </div>
-                <div class="arch-arrow">↓ printer.offer("你好世界") — 逐字符入队</div>
-                <div class="arch-layer">
-                    <div class="arch-node core">LinkedBlockingQueue&lt;Item&gt;<br><small>['你','好','世','界'] — FIFO有序</small></div>
-                </div>
-                <div class="arch-arrow">↓ daemon线程: take()阻塞 → sleep(10ms)</div>
-                <div class="arch-layer">
-                    <div class="arch-node util">SairCons.print(C_AI, ch)<br><small>逐字 · 翠绿色 · EDT安全</small></div>
-                </div>
-                <div class="arch-arrow">↓</div>
-                <div class="arch-layer">
-                    <div class="arch-node entry">SFW Console (JTextPane)<br><small>打字机效果 · 10ms间隔</small></div>
-                </div>
-            </div>
-
-            <div style="max-width:800px; margin:40px auto 0;">
-                <h3 style="color:var(--accent-cyan); margin-bottom:16px;">核心机制</h3>
-                <div class="pattern-card">
-                    <h4>单例守护线程</h4>
-                    <p>
-                        StreamPrinter 通过 <code>getInstance()</code> 返回全局唯一实例。内部 daemon 线程
-                        在首次实例化时启动，永续运行，无需手动启停。所有 Chat 和 Agent 模式共享同一输出队列，
-                        无竞态覆盖风险。
-                    </p>
-                </div>
-                <div class="pattern-card">
-                    <h4>双通道输出</h4>
-                    <p>
-                        <b>行输出</b>（系统消息）：通过 <code>offerLine()</code> 入队，消费者 <b>无延迟直出</b>。<br>
-                        <b>字符输出</b>（AI流式）：通过 <code>offer(char)</code> 入队，消费者 <b>10ms 延迟逐字</b>打印。<br>
-                        两种类型通过 <code>LinkedBlockingQueue</code> 严格保证 FIFO 顺序。
-                    </p>
-                </div>
-                <div class="pattern-card">
-                    <h4>流式排空策略</h4>
-                    <p>
-                        每次 <code>start()</code> 调用时：<br>
-                        ① 生产者线程先 <code>offerLine("…")</code> 放入排空标记<br>
-                        ② 消费者检测到标记后，全速从队列取出剩余元素（无延迟）<br>
-                        ③ 排空完成后，设置新流颜色，恢复正常 10ms 延迟输出<br>
-                        此机制确保新流到来时旧内容完整输出，不截断不丢失。
-                    </p>
-                </div>
-                <div class="pattern-card">
-                    <h4>EDT 线程安全</h4>
-                    <p>
-                        SFW 控制台基于 Swing JTextPane，仅 EDT 线程可安全写入。<br>
-                        StreamPrinter 的 daemon 线程不在 EDT 中运行，所有输出均通过
-                        <code>EdtUtils</code> 路由，内部统一调用 <code>SairCons.print()</code>（已在 EDT 安全包装内）。
-                    </p>
-                </div>
-            </div>
-
-            <div style="text-align:center; margin-top:40px; color:var(--text-muted); font-size:0.9rem;">
-                <p>
-                    <span style="color:var(--accent-cyan);">API 线程</span>（生产者）
-                    → <span style="color:var(--accent-purple);">阻塞队列</span>
-                    → <span style="color:var(--accent-green);">打印 daemon 线程</span>（消费者）
-                    → <span style="color:var(--accent-amber);">SairCons</span>
-                    → <span style="color:var(--accent-rose);">控制台</span>
-                </p>
-                <p style="margin-top:8px;">
-                    队列空 + 生产者结束 → 自动停止 · 新流到来 → <code>start()</code> 全速排空旧队列<br>
-                    单例守护线程永续运行，FIFO 队列保证行输出与字符输出严格有序
-                </p>
-            </div>
+      <section class="section" id="onebot">
+        <div class="section-head reveal">
+          <div class="section-tag">QQ Bot</div>
+          <h2>OneBot QQ 架构</h2>
+          <p class="desc">反向 WebSocket 接入 NapCat，群聊私聊统一处理。</p>
         </div>
-    </section>
-
-    <!-- Context Injection Chain -->
-    <section id="context">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Context Chain</div>
-                <h2>三模式上下文注入链</h2>
-                <div class="section-divider"></div>
-                <p>chat ↔ exec ↔ execs ↔ QQ 之间多向上下文同步，实现跨模式记忆穿透。统一记忆库架构确保AI不会失忆。</p>
-            </div>
-
-            <div class="arch-diagram reveal">
-                <div class="arch-layer">
-                    <div class="arch-node core">Chat 模式<br><small>ai/chat</small></div>
-                    <div class="arch-node entry" style="font-size:0.7rem;">← Agent结果注入 →</div>
-                    <div class="arch-node core">Agent 模式<br><small>ai/exec / ai/execs</small></div>
-                </div>
-                <div class="arch-arrow">↓ 上传</div>
-                <div class="arch-layer">
-                    <div class="arch-node model">ConversationHistory<br><small>持久化 aiagent.db</small></div>
-                </div>
-            </div>
-
-            <div style="max-width:800px; margin:24px auto;">
-                <div class="pattern-card">
-                    <h4>① Chat → Agent</h4>
-                    <p>
-                        <code>handleExec()</code> 调用 <code>agent.setChatHistoryContext(buildChatContextForAgent())</code>，
-                        取最近 6 条 Chat 消息（每条截断 200 字符）构建摘要，注入到 Agent 的 system prompt
-                        的 "Recent Chat History" 段。
-                    </p>
-                </div>
-                <div class="pattern-card">
-                    <h4>② Agent → Chat</h4>
-                    <p>
-                        Agent 执行完成后，<code>getLastSummary()</code> 获取本轮操作摘要，
-                        在 Chat 的 system prompt 中注入，Chat 模式可感知 Agent 做了什么。
-                    </p>
-                </div>
-                <div class="pattern-card">
-                    <h4>③ Agent → 下一轮 Agent（层层递进）</h4>
-                    <p>
-                        每轮 Agent 结束后，<code>handleExec()</code> 调用 <code>agent.setPreviousSessionSummary(lastSummary)</code>，
-                        将本轮总结注入下一轮的 system prompt 的 "Previous Agent Session" 段。
-                        配合 JournalManager 的跨会话日志，形成完整记忆链。
-                    </p>
-                </div>
-                <div class="pattern-card">
-                    <h4>④ 辅助上下文注入口</h4>
-                    <p>
-                        <b>MemoryManager</b>：FTS5 全文搜索检索相关记忆 → 注入 system prompt<br>
-                        <b>UnifiedQQMemoryManager</b>：统一记忆库，所有对话存储在 unified_memory.db，通过 source_type/source_id 标记区分群聊/私聊，实现记忆联通<br>
-                        <b>JournalManager</b>：最近 25 条会话日志（跨重启持久化，SQLite）→ 注入 system prompt<br>
-                        <b>EmotionManager</b>：当前情绪状态（心情+性别，持久化到 app_state）→ 注入 system prompt<br>
-                        <b>PromptManager</b>：集中式提示词管理器（单例），三段提示词统一入口（systemPrompt/execqPrompt/agentStaticPrompt），硬编码默认 + config.properties 追加模式持久化<br>
-                        以上所有上下文在 <code>buildSystemPrompt()</code> 中一次性融合。
-                    </p>
-                </div>
-            </div>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">NapCat 反向连接</span><span class="fn-sub">WebSocket 握手 + Access Token 鉴权</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node core"><span class="fn-title">OneBotServer 解析</span><span class="fn-sub">RFC 6455 帧解析 → JSON 事件</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node core"><span class="fn-title">QQMessageHandler 过滤</span><span class="fn-sub">@机器人 / 提到名字 / 引用回复 / 好感度决策</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node data"><span class="fn-title">QQPromptBuilder 构建提示词</span><span class="fn-sub">群聊/私聊历史 + 印象 + 技能（execq 仅 NapCat）</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node core"><span class="fn-title">QQAgentBridge 执行</span><span class="fn-sub">execq 受限 / execs: 全权限提升</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node end"><span class="fn-title">NapCatApi 发送回复</span><span class="fn-sub">群发 / 私发 / 合并转发卡片</span></div>
+          </div>
+          <div class="flow-caption">QQ 通道完整链路</div>
         </div>
-    </section>
+      </section>
 
-    <!-- Footer -->
+      <section class="section" id="structure">
+        <div class="section-head reveal">
+          <div class="section-tag">Structure</div>
+          <h2>目录结构</h2>
+          <p class="desc">10 个包，94 个 Java 源文件，共 29,345 行代码。</p>
+        </div>
+        <div class="table-wrap reveal">
+          <table>
+            <thead><tr><th>包</th><th>文件数</th><th>行数</th><th>职责</th></tr></thead>
+            <tbody>
+              <tr><td class="cmd-name">sair.aiagent</td><td>1</td><td>520</td><td>插件入口 AiAgentActivity</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.core</td><td>45</td><td>14,397</td><td>核心引擎：Agent / FC / 工具 / 持久化 / 技能 / Harness</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.model</td><td>12</td><td>1,353</td><td>数据模型 POJO</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.acts</td><td>2</td><td>837</td><td>命令委托层</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.onebot</td><td>20</td><td>9,661</td><td>QQ OneBot 机器人模块</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.util</td><td>7</td><td>1,140</td><td>工具：网页抓取 / 天气 / 图片渲染 / 文件</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.ocr</td><td>3</td><td>235</td><td>在线 OCR 门面与引擎</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.ui</td><td>2</td><td>274</td><td>彩蛋窗口 / 系统控制台面板</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.onebot.model</td><td>1</td><td>212</td><td>QQMessage 消息模型</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.onebot.util</td><td>1</td><td>180</td><td>JsonUtil JSON 解析</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </div>
+
     <footer class="footer">
-        <div class="container">
-            <p>
-                <span class="brand">AiAgent</span> v2.6 ·
-                基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
-                对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
-            </p>
-            <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · NapCat群管理 · 合并转发 · 表情包 · 安全加固 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · SQLite 持久化 · 情绪系统 · 彩蛋弹窗 · 系统终端 · FTS5 · 模型路由 · 自动清屏 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · 多模态图片识别
-            </p>
-        </div>
+      <div class="container">
+        <p><span class="brand">AiAgent</span> v3.3 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
+        <p style="margin-top:6px">分层架构 · Function Calling 循环 · 上下文注入链 · 拟人化监听态 · OneBot QQ 模块 · 目录结构</p>
+      </div>
     </footer>
+  </main>
 
-    <!-- Back to Top -->
-    <div class="back-to-top" title="回到顶部">↑</div>
-
-    <!-- Scripts -->
-    <script src="js/main.js"></script>
+  <div class="back-to-top" title="回到顶部">↑</div>
+  <script src="js/main.js"></script>
 </body>
 </html>

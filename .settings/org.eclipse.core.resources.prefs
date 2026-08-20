@@ -2,6 +2,7 @@ eclipse.preferences.version=1
 encoding//deepseek/AiAgent=UTF-8
 encoding//deepseek/AiAgent/sair/aiagent/AiAgentActivity.java=UTF-8
 encoding//deepseek/QrCode=UTF-8
+encoding//deepseek/SFW_WEB=UTF-8
 encoding//exec_codes/reconstitution/musicplayer=UTF-8
 encoding//exec_codes/reconstitution/musicplayer/META-INF/MANIFEST.MF=GBK
 encoding//exec_codes/\u4E2D\u6587\u5C01\u88C5\u4EE3\u7801=UTF-8
@@ -11,3 +12,4 @@ encoding//exec_codes/\u4E2D\u6587\u5C01\u88C5\u4EE3\u7801/\u590F\u5E0C\u5C14/\u5
 encoding//exec_codes/\u5C42\u538B\u7EC4\u80DA\u8BA1\u7B97\u5668=UTF-8
 encoding//exec_codes/\u5C42\u538B\u7EC4\u80DA\u8BA1\u7B97\u5668/\u5C42\u538B\u7EC4\u80DA\u8BA1\u7B97\u5668=UTF-8
 encoding/README.md=UTF-8
+encoding/deepseek=UTF-8

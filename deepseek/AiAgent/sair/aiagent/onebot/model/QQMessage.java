@@ -44,6 +44,10 @@ public class QQMessage {
     private final List<String> imageUrls = new ArrayList<>();
     /** 图片本地文件路径列表 */
     private final List<String> imageFilePaths = new ArrayList<>();
+    /** 表情包图片URL列表（仅 sub_type=1/3/7 的 image 段 + mface/sticker 段，用于自动收藏） */
+    private final List<String> stickerUrls = new ArrayList<>();
+    /** 引用消息中的图片URL列表（用于OCR识别，不参与自动收藏） */
+    private final List<String> quotedImageUrls = new ArrayList<>();
     /** 是否包含折叠/转发消息 */
     private boolean hasForward;
     /** 折叠消息中提取的文本内容 */
@@ -88,6 +92,16 @@ public class QQMessage {
         public boolean isForward() { return "forward".equals(type); }
         /** 是否是文件消息段 */
         public boolean isFile() { return "file".equals(type); }
+        /** 是否是超级表情/商城表情消息段 */
+        public boolean isMface() { return "mface".equals(type); }
+        /** 是否是贴纸消息段 */
+        public boolean isSticker() { return "sticker".equals(type); }
+        /** 是否是图片段且为表情包子类型(sub_type=1/3/7) */
+        public boolean isStickerImage() {
+            if (!"image".equals(type) || subType == null) return false;
+            String s = subType.trim();
+            return "1".equals(s) || "3".equals(s) || "7".equals(s);
+        }
     }
 
     // === Getters/Setters ===
@@ -148,6 +162,16 @@ public class QQMessage {
     
     public List<String> getImageFilePaths() { return imageFilePaths; }
     public void addImageFilePath(String path) { if (path != null && !path.isEmpty()) this.imageFilePaths.add(path); }
+    
+    /** 获取表情包图片URL列表（仅 sub_type=1/3/7 的 image 段 + mface/sticker 段） */
+    public List<String> getStickerUrls() { return stickerUrls; }
+    public void addStickerUrl(String url) { if (url != null && !url.isEmpty()) this.stickerUrls.add(url); }
+    /** 是否存在可自动收藏的表情包图片 */
+    public boolean hasStickerImages() { return !stickerUrls.isEmpty(); }
+    
+    /** 获取引用消息中的图片URL列表（用于OCR识别） */
+    public List<String> getQuotedImageUrls() { return quotedImageUrls; }
+    public void addQuotedImageUrl(String url) { if (url != null && !url.isEmpty()) this.quotedImageUrls.add(url); }
     
     public boolean hasForward() { return hasForward; }
     public void setHasForward(boolean v) { this.hasForward = v; }

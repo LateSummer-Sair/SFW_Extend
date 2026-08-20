@@ -121,12 +121,36 @@ public class BotPersistenceManager {
                 ")"
             );
             
+            // 捐赠记录表（主人私聊告知捐赠时，AI 调用 recorddonation 工具记录）
+            stmt.execute(
+                "CREATE TABLE IF NOT EXISTS donations (" +
+                "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "  user_id INTEGER NOT NULL DEFAULT 0," +
+                "  user_name TEXT," +
+                "  amount INTEGER NOT NULL," +
+                "  note TEXT," +
+                "  created_at INTEGER NOT NULL" +
+                ")"
+            );
+            
+            // 群成员关系表（group_id + user_id → 好感度排行按群号直接调取）
+            stmt.execute(
+                "CREATE TABLE IF NOT EXISTS group_members_relation (" +
+                "  group_id INTEGER NOT NULL," +
+                "  user_id INTEGER NOT NULL," +
+                "  updated_at INTEGER NOT NULL," +
+                "  PRIMARY KEY (group_id, user_id)" +
+                ")"
+            );
+            
             // 创建索引
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_warnings_user ON warnings(user_id)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_warnings_active ON warnings(is_active)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_logs_time ON action_logs(performed_at)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_affections_user ON user_affections(user_id)");
             stmt.execute("CREATE INDEX IF NOT EXISTS idx_romance_user ON romance_relations(user_id)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_donations_user ON donations(user_id)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_gmr_group ON group_members_relation(group_id)");
         }
     }
     
@@ -573,6 +597,128 @@ public class BotPersistenceManager {
         }
         return result;
     }
+
+    /**
+     * 清空所有用户的好感度记录
+     */
+    public void clearAllAffections() {
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM user_affections");
+                AiAgentActivity.debugLog("[BotPersistence] 已清空所有好感度记录");
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[BotPersistence] 清空好感度失败: " + e.toString());
+            }
+        }
+    }
+
+    /**
+     * 清空所有捐赠记录（从数据库层面彻底重置，含自增 ID 归零）。
+     */
+    public void clearAllDonations() {
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM donations");
+                try {
+                    stmt.execute("DELETE FROM sqlite_sequence WHERE name='donations'");
+                } catch (SQLException ignored) {
+                    // sqlite_sequence 可能不存在，忽略自增 ID 归零失败
+                }
+                AiAgentActivity.debugLog("[BotPersistence] 已清空所有捐赠记录");
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[BotPersistence] 清空捐赠记录失败: " + e.toString());
+            }
+        }
+    }
+    
+    // ==================== 群成员关系与好感度排行 ====================
+    
+    /**
+     * 记录群成员关系（group_id + user_id），用于好感度排行按群查询。幂等：已存在则忽略。
+     */
+    public void recordGroupMember(long groupId, long userId) {
+        if (groupId <= 0 || userId <= 0) return;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT OR IGNORE INTO group_members_relation (group_id, user_id, updated_at) VALUES (?, ?, ?)")) {
+                ps.setLong(1, groupId);
+                ps.setLong(2, userId);
+                ps.setLong(3, System.currentTimeMillis());
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[BotPersistence] 记录群成员失败: " + e.toString());
+            }
+        }
+    }
+    
+    /**
+     * 按群号查询好感度排行（Top N），通过 group_members_relation 关联 user_affections，按好感度降序。
+     * 返回 List&lt;long[]&gt;，每个元素为 [user_id, affection]。
+     */
+    public List<long[]> getGroupAffectionRanking(long groupId, int limit) {
+        List<long[]> result = new ArrayList<>();
+        if (groupId <= 0) return result;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT ua.user_id, ua.affection FROM user_affections ua " +
+                    "JOIN group_members_relation gmr ON ua.user_id = gmr.user_id " +
+                    "WHERE gmr.group_id = ? ORDER BY ua.affection DESC LIMIT ?")) {
+                ps.setLong(1, groupId);
+                ps.setInt(2, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        result.add(new long[]{rs.getLong(1), rs.getInt(2)});
+                    }
+                }
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[BotPersistence] 查询群好感度排行失败: " + e.toString());
+            }
+        }
+        return result;
+    }
+    
+    /**
+     * 查询全局好感度排行（Top N），按好感度降序。
+     */
+    public List<long[]> getGlobalAffectionRanking(int limit) {
+        List<long[]> result = new ArrayList<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT user_id, affection FROM user_affections ORDER BY affection DESC LIMIT ?")) {
+                ps.setInt(1, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        result.add(new long[]{rs.getLong(1), rs.getInt(2)});
+                    }
+                }
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[BotPersistence] 查询全局好感度排行失败: " + e.toString());
+            }
+        }
+        return result;
+    }
+    
+    /**
+     * 加载全部群成员关系到内存（groupId -&gt; userId 集合），供缓存层按群快速查询。
+     */
+    public Map<Long, Set<Long>> loadGroupMembers() {
+        Map<Long, Set<Long>> result = new HashMap<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT group_id, user_id FROM group_members_relation")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        long gid = rs.getLong(1);
+                        long uid = rs.getLong(2);
+                        result.computeIfAbsent(gid, k -> new HashSet<>()).add(uid);
+                    }
+                }
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[BotPersistence] 加载群成员关系失败: " + e.toString());
+            }
+        }
+        return result;
+    }
     
     // ==================== 恋爱关系持久化 ====================
     
@@ -697,5 +843,88 @@ public class BotPersistenceManager {
             }
         }
         return null;
+    }
+    
+    // ==================== 捐赠记录持久化 ====================
+    
+    /**
+     * 记录一条捐赠（主人私聊告知 Bot 时，AI 调用 recorddonation 工具记录）。
+     */
+    public void recordDonation(long userId, String userName, int amount, String note) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO donations (user_id, user_name, amount, note, created_at) VALUES (?, ?, ?, ?, ?)")) {
+                ps.setLong(1, userId);
+                ps.setString(2, userName);
+                ps.setInt(3, amount);
+                ps.setString(4, note);
+                ps.setLong(5, System.currentTimeMillis());
+                ps.executeUpdate();
+                AiAgentActivity.debugLog("[BotPersistence] 记录捐赠: userId=" + userId + ", amount=" + amount + ", note=" + note);
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[BotPersistence] 记录捐赠失败: " + e.toString());
+            }
+        }
+    }
+    
+    /**
+     * 获取指定用户的捐赠总额。
+     */
+    public int getTotalDonation(long userId) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT COALESCE(SUM(amount), 0) FROM donations WHERE user_id = ?")) {
+                ps.setLong(1, userId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt(1);
+                    }
+                }
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[BotPersistence] 查询捐赠总额失败: " + e.toString());
+            }
+        }
+        return 0;
+    }
+    
+    /**
+     * 删除指定用户的全部捐赠记录（重置捐赠名单），返回删除条数。
+     */
+    public int deleteDonations(long userId) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM donations WHERE user_id = ?")) {
+                ps.setLong(1, userId);
+                return ps.executeUpdate();
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[BotPersistence] 删除捐赠记录失败: " + e.toString());
+                return -1;
+            }
+        }
+    }
+    
+    /**
+     * 按人聚合捐赠总额 Top N（返回 {userId, userName, totalAmount} 三元组）。
+     */
+    public java.util.List<String[]> getDonationTop(int limit) {
+        java.util.List<String[]> result = new java.util.ArrayList<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT user_id, MAX(user_name), SUM(amount) AS total " +
+                    "FROM donations GROUP BY user_id ORDER BY total DESC LIMIT ?")) {
+                ps.setInt(1, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        long uid = rs.getLong(1);
+                        String name = rs.getString(2);
+                        int total = rs.getInt(3);
+                        result.add(new String[]{String.valueOf(uid), name, String.valueOf(total)});
+                    }
+                }
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[BotPersistence] 查询捐赠Top失败: " + e.toString());
+            }
+        }
+        return result;
     }
 }

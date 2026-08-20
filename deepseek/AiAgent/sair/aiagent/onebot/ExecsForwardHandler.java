@@ -41,12 +41,12 @@ public class ExecsForwardHandler {
         }
 
         try {
-            AiAgentActivity.debugLog("[QQMsg] 开始执行真实execs链路: " + task);
+            AiAgentActivity.qqLog("[QQMsg] 开始执行真实execs链路: " + task);
 
             Thread execThread = new Thread(() -> {
                 final String[] thinkingBlockHolder = new String[1];
                 try {
-                    AiAgentActivity.debugLog("[QQMsg-Execs] execs线程启动，开始执行任务");
+                    AiAgentActivity.qqLog("[QQMsg-Execs] execs线程启动，开始执行任务");
 
                     agentExecutor.setQqExecsCallback((roundOutput) -> {
                         if (roundOutput != null && roundOutput.startsWith("[THINKING_BLOCK]")) {
@@ -56,18 +56,23 @@ public class ExecsForwardHandler {
                         }
                     });
 
-                    agentExecutor.execute(task);
+                    agentExecutor.enterBypass();
+                    try {
+                        agentExecutor.executeFcLocal(task);
+                    } finally {
+                        agentExecutor.exitBypass();
+                    }
                     agentExecutor.setQqExecsCallback(null);
 
                     if (thinkingBlockHolder[0] != null && !thinkingBlockHolder[0].isEmpty()) {
                         sendThinkingAsForward(msg, thinkingBlockHolder[0]);
                     }
 
-                    AiAgentActivity.debugLog("[QQMsg-Execs] execs执行完成");
+                    AiAgentActivity.qqLog("[QQMsg-Execs] execs执行完成");
 
                 } catch (Exception e) {
                     agentExecutor.setQqExecsCallback(null);
-                    AiAgentActivity.debugLog("[QQMsg-Execs] execs执行异常: " + e.toString());
+                    AiAgentActivity.qqLog("[QQMsg-Execs] execs执行异常: " + e.toString());
                     sendReply(msg, "\n[" + botLabel + "execs] 任务执行失败: " + e.getMessage() + "\n详细错误请查看SFW控制台");
                 }
             }, "QQ-Execs-" + msg.getUserId());
@@ -75,11 +80,11 @@ public class ExecsForwardHandler {
             execThread.setDaemon(true);
             execThread.start();
 
-            AiAgentActivity.debugLog("[QQMsg] execs任务已提交到后台线程");
+            AiAgentActivity.qqLog("[QQMsg] execs任务已提交到后台线程");
             return "好的，马上处理~";
 
         } catch (Exception e) {
-            AiAgentActivity.debugLog("[QQMsg] execs提交失败: " + e.toString());
+            AiAgentActivity.qqLog("[QQMsg] execs提交失败: " + e.toString());
             return "[错误] execs任务提交失败: " + e.getMessage();
         }
     }
@@ -91,7 +96,7 @@ public class ExecsForwardHandler {
     public void sendThinkingAsForward(QQMessage msg, String thinkingText) {
         if (napcatApi == null) {
             sendReply(msg, thinkingText);
-            AiAgentActivity.debugLog("[QQMsg] NapCatApi未就绪，思考过程以纯文本发送");
+            AiAgentActivity.qqLog("[QQMsg] NapCatApi未就绪，思考过程以纯文本发送");
             return;
         }
 
@@ -131,11 +136,11 @@ public class ExecsForwardHandler {
             }
 
             if (nodes.isEmpty()) {
-                AiAgentActivity.debugLog("[QQMsg] 思考内容为空，跳过合并转发");
+                AiAgentActivity.qqLog("[QQMsg] 思考内容为空，跳过合并转发");
                 return;
             }
 
-            AiAgentActivity.debugLog("[QQMsg] 发送合并转发消息: " + nodes.size() + " 个节点");
+            AiAgentActivity.qqLog("[QQMsg] 发送合并转发消息: " + nodes.size() + " 个节点");
 
             if (msg.isGroupMessage()) {
                 napcatApi.sendGroupForwardMsg(msg.getGroupId(), nodes);
@@ -144,7 +149,7 @@ public class ExecsForwardHandler {
             }
 
         } catch (Exception e) {
-            AiAgentActivity.debugLog("[QQMsg] 合并转发发送失败: " + e.toString());
+            AiAgentActivity.qqLog("[QQMsg] 合并转发发送失败: " + e.toString());
             sendReply(msg, thinkingText);
         }
     }

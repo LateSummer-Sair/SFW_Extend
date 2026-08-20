@@ -159,11 +159,11 @@ class JCPMod {
 		input = new Urler(input).getUrl();
 		/*
 		 * if (javac.run(null, null, null, input) == 0) SairCons.println(input +
-		 * "  编译通过！"); else SairCons.println(FCM.Error_Color, input +
-		 * "  编译失败！");
+		 * "  compile ok!"); else SairCons.println(FCM.Error_Color, input +
+		 * "  compile fail!");
 		 */
 		Boolean r = false;
-		String info = "文件IO错误！";
+		String info = "file IO error!";
 		try {
 			String[] arrs = FileMana.getFileToStringArr(input, Key.creatKey(code));
 			UDFParse up = new UDFParse(StrEdit.toStr(arrs, true));
@@ -173,7 +173,7 @@ class JCPMod {
 			r = null;
 		}
 		if (r == null)
-			SairCons.println(FCM.Error_Color, "有没有一种可能，只有JDK才能编译java，而你用的是JRE");
+			SairCons.println(FCM.Error_Color, "only JDK can compile java, you are using JRE");
 		else if (r == false)
 			SairCons.println(FCM.Error_Color, info);
 	}

@@ -1,603 +1,191 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>命令参考 & 部署 — AiAgent 技术文档</title>
-    <link rel="stylesheet" href="css/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>命令参考 — AiAgent 技术文档</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <canvas id="particles-canvas"></canvas>
 
-    <!-- Sidebar Navigation -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-logo">
-            <div class="icon">⚡</div>
-            <span class="logo-text">AiAgent</span>
+  <canvas id="bg-canvas"></canvas>
+  <div class="aurora"><span></span><span></span><span></span></div>
+  <div class="progress-bar"></div>
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航"><span></span><span></span><span></span></button>
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <header class="page-hero">
+      <div class="container">
+        <div class="crumb"><a href="index.html">Home</a> / 命令参考</div>
+        <h1>命令<span class="gradient-text">参考</span></h1>
+        <p class="lead">
+          所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 52 个用户命令 + 67 个 FC 工具。
+          v3.3 新增 Harness 多智能体编排（/orchestrate）+ 可观测性评测（/harnesseval）。
+        </p>
+      </div>
+    </header>
+
+    <div class="container">
+
+      <section class="section" id="core-cmds">
+        <div class="section-head reveal">
+          <div class="section-tag">Core</div>
+          <h2>核心命令</h2>
+          <p class="desc">配置、对话、记忆、安全、系统命令。</p>
         </div>
-        <nav class="sidebar-nav">
-                <a href="index.html">概述</a>
-                <a href="architecture.html">架构</a>
-                <a href="patterns.html">设计模式</a>
-                <a href="classes.html">类结构</a>
-                <a href="commands.html" class="active">命令</a>
-                <a href="feedback.html">反馈</a>
-        </nav>
-        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航菜单">
-            <span></span><span></span><span></span>
-        </button>
-    </aside>
-
-    <!-- CLI Reference -->
-    <section style="padding-top:140px; padding-bottom:40px;">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">CLI Reference</div>
-                <h2>用户命令参考</h2>
-                <div class="section-divider"></div>
-                <p>所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 36 个用户命令（含 17 个 OneBot QQ 机器人命令）。AiAgent 主线 20 个 XML 标签，QQ execq 通道 21 个标签（11 种工具标签 + 10 种群管标签）。v2.6 新增 5 个标签：&lt;schedule&gt; 定时任务、&lt;note&gt; 知识笔记、&lt;searchnote&gt; 全文检索、&lt;batchrename&gt; 批量重命名、&lt;batchconvert&gt; 批量编码转换。v2.5 更新：execs 合并转发、表情包系统、6 项安全加固。</p>
-            </div>
+        <div class="table-wrap reveal">
+          <table>
+            <thead><tr><th>命令</th><th>参数</th><th>分类</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td class="cmd-name">ai/setkey</td><td>[API Key]</td><td><span class="badge b-purple">配置</span></td><td>设置 DeepSeek API 密钥，AES-GCM 加密存储（兼容旧 ECB），持久化到 config.properties</td></tr>
+              <tr><td class="cmd-name">ai/seturl</td><td>[URL]</td><td><span class="badge b-purple">配置</span></td><td>设置 API 地址，默认 https://api.deepseek.com</td></tr>
+              <tr><td class="cmd-name">ai/setmodel</td><td>[模型名]</td><td><span class="badge b-purple">配置</span></td><td>设置模型，默认 auto。auto 下本地 execs 走 deepseek-v4-pro、QQ execq 走 deepseek-v4-flash（智能路由）</td></tr>
+              <tr><td class="cmd-name">ai/setocrkey</td><td>[OCR Key]</td><td><span class="badge b-purple">配置</span></td><td>设置在线 OCR（EasyOCR）Access Key，启用图片文字识别</td></tr>
+              <tr><td class="cmd-name">ai/setthirdpartycode</td><td>on|off</td><td><span class="badge b-purple">配置</span></td><td>三方技能代码段权限：on=放权（含 QQ）；off=仅 execs/本地</td></tr>
+              <tr><td class="cmd-name">ai/setprompt</td><td>[提示词]</td><td><span class="badge b-purple">配置</span></td><td>设置系统提示词（持久化），AI 也可通过 editprompt 工具修改</td></tr>
+              <tr><td class="cmd-name">ai/showprompt</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看当前系统提示词全文</td></tr>
+              <tr><td class="cmd-name">ai/info</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看配置摘要 + 对话统计 + 记忆条数 + 数据目录</td></tr>
+              <tr><td class="cmd-name">ai/execs</td><td>[任务]</td><td><span class="badge b-cyan">对话</span></td><td>唯一 Agent 入口（合并 chat/exec/execs/execfc），原生 Function Calling 免确认全能模式</td></tr>
+              <tr><td class="cmd-name">ai/chat / exec / execfc</td><td>[消息]</td><td><span class="badge b-cyan">对话</span></td><td>execs 的别名，统一走 Function Calling 链路</td></tr>
+              <tr><td class="cmd-name">ai/orchestrate</td><td>[pipeline|fanout|expert] [任务]</td><td><span class="badge b-cyan">对话</span></td><td>多智能体编排：流水线 / 扇出扇入 / 专家池三种模式，任务分解为子步骤并聚合结果</td></tr>
+              <tr><td class="cmd-name">ai/harnesseval</td><td>—</td><td><span class="badge b-cyan">对话</span></td><td>输出最近 Harness 执行轨迹评测报告（成功率 / 平均工具调用 / 耗时）</td></tr>
+              <tr><td class="cmd-name">ai/criticon</td><td>—</td><td><span class="badge b-cyan">对话</span></td><td>开启 Harness 验证闭环审查（每次最终回复增加一次独立审查，opt-in）</td></tr>
+              <tr><td class="cmd-name">ai/criticoff</td><td>—</td><td><span class="badge b-cyan">对话</span></td><td>关闭 Harness 验证闭环审查（默认）</td></tr>
+              <tr><td class="cmd-name">ai/reset</td><td>—</td><td><span class="badge b-cyan">对话</span></td><td>清空对话上下文 + Agent 记忆链</td></tr>
+              <tr><td class="cmd-name">ai/stop</td><td>—</td><td><span class="badge b-cyan">对话</span></td><td>立即中断当前流式输出</td></tr>
+              <tr><td class="cmd-name">ai/mood</td><td>—</td><td><span class="badge b-magenta">情绪</span></td><td>查询 AI 当前心情 + 开心值 + 连续失败/夸赞次数</td></tr>
+              <tr><td class="cmd-name">ai/memories</td><td>—</td><td><span class="badge b-green">记忆</span></td><td>列出所有持久化记忆</td></tr>
+              <tr><td class="cmd-name">ai/forget</td><td>[ID]</td><td><span class="badge b-green">记忆</span></td><td>按 ID 删除指定记忆</td></tr>
+              <tr><td class="cmd-name">ai/forgetall</td><td>—</td><td><span class="badge b-green">记忆</span></td><td>清空所有持久化记忆</td></tr>
+              <tr><td class="cmd-name">ai/yes / no</td><td>—</td><td><span class="badge b-amber">安全</span></td><td>确认 / 拒绝 AI 请求的高危操作（ConfirmationGate）</td></tr>
+              <tr><td class="cmd-name">ai/autoclearon</td><td>—</td><td><span class="badge b-green">系统</span></td><td>启用自动清屏，每 3 分钟 /clear 防日志 OOM</td></tr>
+              <tr><td class="cmd-name">ai/autoclearoff</td><td>—</td><td><span class="badge b-green">系统</span></td><td>停止自动清屏</td></tr>
+              <tr><td class="cmd-name">ai/qqlogon / qqlogoff</td><td>—</td><td><span class="badge b-green">系统</span></td><td>开启 / 关闭 QQ 消息控制台输出</td></tr>
+              <tr><td class="cmd-name">ai/clearstickers</td><td>—</td><td><span class="badge b-green">系统</span></td><td>清空表情包图片库（数据库 + 本地文件）</td></tr>
+            </tbody>
+          </table>
         </div>
-    </section>
+      </section>
 
-    <section style="padding-top:10px;">
-        <div class="container">
-            <div style="overflow-x:auto;">
-                <table class="cmd-table reveal">
-                    <thead>
-                        <tr>
-                            <th>命令</th>
-                            <th>参数</th>
-                            <th>分类</th>
-                            <th>说明</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td class="cmd-name">ai/setkey</td>
-                            <td>[API Key]</td>
-                            <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">设置 DeepSeek API 密钥，AES 加密存储，自动持久化到 config.properties</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/seturl</td>
-                            <td>[URL]</td>
-                            <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">设置 API 地址，默认 https://api.deepseek.com，带 URL 格式校验</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/setmodel</td>
-                            <td>[模型名]</td>
-                            <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">设置模型，默认 auto。auto 模式下 Chat/Execq 通道走 deepseek-v4-flash、Agent 通道走 deepseek-v4-pro（智能路由，日志输出提示）。设置非 auto 模型时全通道严格遵守配置值</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/setprompt</td>
-                            <td>[提示词]</td>
-                            <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">设置系统提示词（追加到硬编码默认后，持久化到 config.properties）。AI 也可通过 &lt;editprompt&gt; 自行修改</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/showprompt</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">查看当前系统提示词全文</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/info</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">查看配置摘要（Model / URL / Key状态）+ 对话统计 + 数据目录路径（aiagent.db）</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/chat</td>
-                            <td>[消息]</td>
-                            <td style="color:var(--accent-cyan);">对话</td>
-                            <td class="cmd-desc">与 AI 对话，流式打字机输出。自动注入 Agent 执行结果作为上下文。触发情绪检测</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/exec</td>
-                            <td>[任务]</td>
-                            <td style="color:var(--accent-amber);">Agent</td>
-                            <td class="cmd-desc">Agent 安全模式。高危操作需 ai/yes ai/no 确认（60s超时自动拒绝）。注入：Chat历史 + 上轮Agent总结 + 日志 + 情绪</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/execs</td>
-                            <td>[任务]</td>
-                            <td style="color:var(--accent-amber);">Agent</td>
-                            <td class="cmd-desc">Agent 自由模式。绕过所有确认，自动执行。注入的上下文与 exec 相同</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/reset</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-cyan);">对话</td>
-                            <td class="cmd-desc">清空对话上下文（ConversationHistory）+ Agent 记忆链 + 清空磁盘缓存</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/stop</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-cyan);">对话</td>
-                            <td class="cmd-desc">立即中断当前流式输出：中断 API 线程 → 全速排空打印机 → 丢弃剩余队列</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/mood</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-rose);">情绪</td>
-                            <td class="cmd-desc">查询 AI 当前心情（emoji + 描述）+ 开心值 + 连续失败/夸赞次数 + 性别</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/memories</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-green);">记忆</td>
-                            <td class="cmd-desc">列出所有已存储的持久化记忆（SQLite aiagent.db）</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/forget</td>
-                            <td>[ID]</td>
-                            <td style="color:var(--accent-green);">记忆</td>
-                            <td class="cmd-desc">按 ID 删除指定记忆</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/forgetall</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-green);">记忆</td>
-                            <td class="cmd-desc">清空所有持久化记忆</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/autoclearon</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-green);">系统</td>
-                            <td class="cmd-desc">启用自动清屏：守护线程每 3 分钟执行 /clear，防止日志 OOM</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/autoclearoff</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-green);">系统</td>
-                            <td class="cmd-desc">停止自动清屏守护线程</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/yes</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-amber);">安全</td>
-                            <td class="cmd-desc">确认 AI 请求的高危操作（通过 ConfirmationGate 释放 latch，Agent 继续执行）</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/no</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-amber);">安全</td>
-                            <td class="cmd-desc">拒绝 AI 请求的高危操作（latch 释放但返回 false，Agent 跳过此操作）</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+      <section class="section" id="onebot-cmds">
+        <div class="section-head reveal">
+          <div class="section-tag">QQ Bot</div>
+          <h2>OneBot QQ 机器人命令</h2>
+          <p class="desc">反向 WebSocket 连接 QQ。execs: 关键字触发权限提升（全工具 + 全技能）。</p>
         </div>
-    </section>
-
-    <!-- OneBot QQ Commands -->
-    <section id="onebot-cmds">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">QQ Bot</div>
-                <h2>OneBot v11 QQ 机器人命令</h2>
-                <div class="section-divider"></div>
-                <p>通过反向 WebSocket 连接 QQ，execq 独立通道：独立提示词、统一记忆库（所有对话历史统一管理）、插件白名单门控。共 17 个 OneBot 命令（含 execq 通道测试命令）。</p>
-                <p><strong>v2.5 新增：</strong>execs 合并转发 —— 主人发送 <code>execs:</code> 前缀触发完整 execs 链路后，AI 多轮思考通过 NapCat <code>send_group_forward_msg</code>/<code>send_private_forward_msg</code> API 折叠为 QQ 原生合并转发消息卡片，每轮思考为独立节点可逐条展开。表情包自动管理 —— 聊天中图片自动收集到 SQLite 表情库（stickers 表），AI 回复时根据语境关键词自动匹配发送最相关表情包。6 项安全加固（AES 密钥多因子派生 / 路径穿越防护 / Nashorn 沙箱 / HTTP 防泄漏 / TOCTOU 原子化 / execq 引用计数）。</p>
-                <p><strong>v2.1 新增：</strong>主人消息添加 <code>execs:</code> 前缀可触发完整 execs 链路，静默执行所有操作，实时推送每轮思考结果给主人。支持 <code>&lt;stop&gt;</code> 标签紧急停止。群管理中 AI 可执行 10 种群管标签（<code>&lt;ban&gt;</code> 禁言/<code>&lt;kick&gt;</code> 踢出/<code>&lt;muteall&gt;</code> 全禁/<code>&lt;setadmin&gt;</code> 设管/<code>&lt;setcard&gt;</code> 改名/<code>&lt;setgroupname&gt;</code> 改群/<code>&lt;leavegroup&gt;</code> 退群/<code>&lt;block&gt;</code> 拉黑/<code>&lt;unblock&gt;</code> 解黑/<code>&lt;delfriend&gt;</code> 删友）。提示词完全分层隔离（主线 20 标签 vs OneBot 19 标签）。</p>
-            </div>
-
-            <div style="overflow-x:auto;">
-                <table class="cmd-table reveal">
-                    <thead>
-                        <tr>
-                            <th>命令</th>
-                            <th>参数</th>
-                            <th>分类</th>
-                            <th>说明</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td class="cmd-name">ai/onebotconnect</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-cyan);">连接</td>
-                            <td class="cmd-desc">启动 OneBot 反向 WebSocket 服务，等待 QQ 端连接</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotdisconnect</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-cyan);">连接</td>
-                            <td class="cmd-desc">停止 OneBot 服务，断开所有 QQ 连接</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotstatus</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-cyan);">连接</td>
-                            <td class="cmd-desc">查看 OneBot 服务运行状态（监听端口、连接数等）</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotsetport</td>
-                            <td>[端口号]</td>
-                            <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">设置 WebSocket 监听端口，默认 5800</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotsettoken</td>
-                            <td>[Token]</td>
-                            <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">设置 Access Token 用于鉴权（与 QQ 端保持一致）</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotsetselfid</td>
-                            <td>[QQ号]</td>
-                            <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">设置机器人自身 QQ 号，用于群消息 @ 检测与过滤</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotsetprompt</td>
-                            <td>[提示词]</td>
-                            <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">设置 execq 通道独立系统提示词（追加到硬编码默认后，持久化到 config.properties）</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotshowprompt</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-purple);">配置</td>
-                            <td class="cmd-desc">显示当前 execq 通道的系统提示词全文</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotwhitelist</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-amber);">安全</td>
-                            <td class="cmd-desc">显示 execq <code>&lt;cmd&gt;</code> 插件白名单及配置文件路径（config.properties）</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotwhitelistadd</td>
-                            <td>[插件名]</td>
-                            <td style="color:var(--accent-amber);">安全</td>
-                            <td class="cmd-desc">添加插件到 execq 白名单（如 Filer），自动保存配置并立即生效</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotwhitelistremove</td>
-                            <td>[插件名]</td>
-                            <td style="color:var(--accent-amber);">安全</td>
-                            <td class="cmd-desc">从 execq 白名单移除插件，自动保存配置并立即生效</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotenableproactive</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-green);">功能</td>
-                            <td class="cmd-desc">启用主动查看功能：AI 每 5 分钟自动检查群聊并参与讨论</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotdisableproactive</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-green);">功能</td>
-                            <td class="cmd-desc">禁用主动查看功能</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotaddgroup</td>
-                            <td>[群号]</td>
-                            <td style="color:var(--accent-green);">功能</td>
-                            <td class="cmd-desc">添加监听的群号到主动查看列表</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotremovegroup</td>
-                            <td>[群号]</td>
-                            <td style="color:var(--accent-green);">功能</td>
-                            <td class="cmd-desc">从主动查看列表中移除群号</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">ai/onebotlistgroups</td>
-                            <td>—</td>
-                            <td style="color:var(--accent-green);">功能</td>
-                            <td class="cmd-desc">列出所有已添加监听的群号</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div style="max-width:800px; margin:32px auto;">
-                <div class="pattern-card">
-                    <h4>⚙️ execq 通道机制</h4>
-                    <p>
-                        execq 是专门为 QQ 消息设计的独立 Agent 通道，<b>完全隔离于主 AiAgent 通道</b>：<br><br>
-                        <b>独立提示词</b> — 通过 <code>ai/onebotsetprompt</code> 独立配置，不影响主通道<br>
-                        <b>统一记忆库</b> — 使用 UnifiedQQMemoryManager，所有对话存储在 unified_memory.db，通过 source_type/source_id 标记区分群聊/私聊<br>
-                        <b>受限标签</b> — execq 共 21 个标签（工具类 11 个 + 群管类 10 个）：<code>&lt;stop&gt;</code> <code>&lt;split&gt;</code> <code>&lt;cmd&gt;</code> <code>&lt;web&gt;</code> <code>&lt;readdir&gt;</code> <code>&lt;readfile&gt;</code> <code>&lt;setname&gt;</code> <code>&lt;schedule&gt;</code> <code>&lt;note&gt;</code> <code>&lt;searchnote&gt;</code> <code>&lt;sendsticker&gt;</code> <code>&lt;collectsticker&gt;</code>（工具类，自动绕过确认）<br>
-                                                    <b>群管标签</b> — <code>&lt;ban&gt;</code> <code>&lt;kick&gt;</code> <code>&lt;muteall&gt;</code> <code>&lt;setadmin&gt;</code> <code>&lt;setcard&gt;</code> <code>&lt;setgroupname&gt;</code> <code>&lt;leavegroup&gt;</code>（群管类，仅群聊生效）<br>
-                                                    <b>用户管理</b> — <code>&lt;block&gt;</code> <code>&lt;unblock&gt;</code> <code>&lt;delfriend&gt;</code>（用户管理类，OneBot 层拦截）
-                        <b>插件白名单</b> — <code>&lt;cmd&gt;</code> 受插件级白名单门控，空白名单=全部拒绝，通过 <code>ai/onebotwhitelist</code> 系列命令管理<br>
-                        <b>群管理能力</b> — AI 可通过 NapCatApi 执行警告/禁言/踢出/拉黑操作<br>
-                        <b>群消息过滤</b> — 仅响应 @机器人 或提到机器人名字或引用回复的消息<br>
-                        <b>好感度决策</b> — 7步优先级链处理群邀请：主人→反滥用→好感度→背叛者→阈值判断<br>
-                        <b>&lt;stop&gt; 检测</b> — 主人可通过发送含 <code>&lt;stop&gt;</code> 的消息直接停止 Agent 执行<br>
-                        <b>execs 合并转发（v2.5）</b> — 主人发送 <code>execs:</code> 前缀消息后，AI 多轮思考通过 NapCat 合并转发 API 折叠为 QQ 原生消息卡片，每轮 [第N轮思考] 为独立节点<br>
-                        <b>表情包自动管理（v2.5）</b> — 聊天中图片自动收集到 SQLite stickers 表，AI 回复时根据语境关键词自动匹配发送表情包
-                    </p>
-                </div>
-            </div>
+        <div class="table-wrap reveal">
+          <table>
+            <thead><tr><th>命令</th><th>参数</th><th>分类</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td class="cmd-name">ai/execq</td><td>[消息]</td><td><span class="badge b-cyan">测试</span></td><td>execq 通道测试（通常由 QQ 消息自动触发）</td></tr>
+              <tr><td class="cmd-name">ai/onebotconnect</td><td>—</td><td><span class="badge b-cyan">连接</span></td><td>启动 OneBot 反向 WebSocket 服务</td></tr>
+              <tr><td class="cmd-name">ai/onebotdisconnect</td><td>—</td><td><span class="badge b-cyan">连接</span></td><td>停止 OneBot 服务，断开所有 QQ 连接</td></tr>
+              <tr><td class="cmd-name">ai/onebotstatus</td><td>—</td><td><span class="badge b-cyan">连接</span></td><td>查看运行状态（端口、连接数、Token、机器人 QQ）</td></tr>
+              <tr><td class="cmd-name">ai/onebotsetport</td><td>[端口]</td><td><span class="badge b-purple">配置</span></td><td>设置 WebSocket 监听端口，默认 5800</td></tr>
+              <tr><td class="cmd-name">ai/onebotsettoken</td><td>[Token]</td><td><span class="badge b-purple">配置</span></td><td>设置 Access Token 鉴权</td></tr>
+              <tr><td class="cmd-name">ai/onebotsetselfid</td><td>[QQ号]</td><td><span class="badge b-purple">配置</span></td><td>设置机器人自身 QQ 号</td></tr>
+              <tr><td class="cmd-name">ai/onebotsetprompt</td><td>[提示词]</td><td><span class="badge b-purple">配置</span></td><td>设置 execq 通道独立系统提示词</td></tr>
+              <tr><td class="cmd-name">ai/onebotshowprompt</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>显示当前 execq 提示词</td></tr>
+              <tr><td class="cmd-name">ai/onebotenableproactive</td><td>—</td><td><span class="badge b-green">功能</span></td><td>启用主动查看（每 5 分钟检查群聊）</td></tr>
+              <tr><td class="cmd-name">ai/onebotdisableproactive</td><td>—</td><td><span class="badge b-green">功能</span></td><td>禁用主动查看</td></tr>
+              <tr><td class="cmd-name">ai/onebotenablelisten</td><td>—</td><td><span class="badge b-green">功能</span></td><td>启用拟人化监听态（仅对监听群生效）</td></tr>
+              <tr><td class="cmd-name">ai/onebotdisablelisten</td><td>—</td><td><span class="badge b-green">功能</span></td><td>禁用拟人化监听态</td></tr>
+              <tr><td class="cmd-name">ai/onebotaddgroup</td><td>[群号1 群号2 ...]</td><td><span class="badge b-green">功能</span></td><td>添加监听的群（空格分隔多个）</td></tr>
+              <tr><td class="cmd-name">ai/onebotremovegroup</td><td>[群号1 群号2 ...]</td><td><span class="badge b-green">功能</span></td><td>移除监听的群（空格分隔多个）</td></tr>
+              <tr><td class="cmd-name">ai/onebotlistgroups</td><td>—</td><td><span class="badge b-green">功能</span></td><td>列出监听的群及主动查看状态</td></tr>
+              <tr><td class="cmd-name">ai/resetaffection</td><td>—</td><td><span class="badge b-green">功能</span></td><td>置空所有人的好感度（清空内存缓存 + 数据库）</td></tr>
+            </tbody>
+          </table>
         </div>
-    </section>
+      </section>
 
-    <!-- Internal XML Tags -->
-    <section id="xml-tags">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Internal API</div>
-                <h2>Agent XML 操作标签</h2>
-                <div class="section-divider"></div>
-                <p>AI Agent 通过 XML 标签发出操作指令，由 <code>TagExecutor.parseActions()</code> 正则解析。共 20 种标签。</p>
-            </div>
-
-            <div style="overflow-x:auto;">
-                <table class="cmd-table reveal">
-                    <thead>
-                        <tr>
-                            <th>标签</th>
-                            <th>格式</th>
-                            <th>需确认</th>
-                            <th>说明</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td class="cmd-name">&lt;cmd&gt;</td>
-                            <td>&lt;cmd&gt;plugin/func args&lt;/cmd&gt;</td>
-                            <td style="color:var(--accent-rose);">是</td>
-                            <td class="cmd-desc">执行 SFW 插件命令（如 Filer/read、IDE/open）</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;sys&gt;</td>
-                            <td>&lt;sys&gt;dir /s&lt;/sys&gt;</td>
-                            <td style="color:var(--accent-rose);">是</td>
-                            <td class="cmd-desc">执行系统命令（Windows cmd / Linux sh），30 秒超时，UTF-8 输出</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;readfile&gt;</td>
-                            <td>&lt;readfile&gt;path/to/file&lt;/readfile&gt;</td>
-                            <td style="color:var(--accent-rose);">是</td>
-                            <td class="cmd-desc">读取文本文件，UTF-8/GBK 自动识别，上限 10MB / 50000 字符</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;readdir&gt;</td>
-                            <td>&lt;readdir&gt;path/to/dir&lt;/readdir&gt;</td>
-                            <td style="color:var(--accent-rose);">是</td>
-                            <td class="cmd-desc">递归列出目录结构，目录优先排序</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;evaljs&gt;</td>
-                            <td>&lt;evaljs&gt;js code&lt;/evaljs&gt;</td>
-                            <td style="color:var(--accent-rose);">是</td>
-                            <td class="cmd-desc">Nashorn 引擎即时执行 JavaScript，返回值自动转字符串</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;eval&gt;</td>
-                            <td>&lt;eval&gt;java code&lt;/eval&gt;</td>
-                            <td style="color:var(--accent-rose);">是</td>
-                            <td class="cmd-desc">JavaCompiler 即时编译执行。须定义 public void run() 方法。一次性：编译→加载→执行→GC</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;web&gt;</td>
-                            <td>&lt;web&gt;https://...&lt;/web&gt;</td>
-                            <td style="color:var(--accent-rose);">是</td>
-                            <td class="cmd-desc">HTTP GET 获取网页内容。SSRF 黑名单：拒绝 localhost/127.0.0.1/内网地址</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;download&gt;</td>
-                            <td>&lt;download&gt;https://...&lt;/download&gt;</td>
-                            <td style="color:var(--accent-rose);">是</td>
-                            <td class="cmd-desc">下载文件到 dataDir/downloads/，自动创建目录</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;remember&gt;</td>
-                            <td>&lt;remember&gt;重要信息&lt;/remember&gt;</td>
-                            <td style="color:var(--accent-green);">否</td>
-                            <td class="cmd-desc">记录重要信息到持久化记忆（MemoryManager），后续自动检索注入</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;superise&gt;</td>
-                            <td>&lt;superise&gt;🎉 太棒了！&lt;/superise&gt;</td>
-                            <td style="color:var(--accent-green);">否</td>
-                            <td class="cmd-desc">弹出彩蛋/撒娇窗口。支持 emoji + 文案。粉色（撒娇）/ 橘色（惊喜），3-8 秒自动关闭</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;sendimage&gt;</td>
-                            <td>&lt;sendimage&gt;文字/路径/URL&lt;/sendimage&gt;</td>
-                            <td style="color:var(--accent-green);">否</td>
-                            <td class="cmd-desc">AWT/Graphics2D 将文字渲染为 PNG 图片发送，或直接发送已有图片文件/URL。QQ 通道发送到聊天，控制台模式保存到 dataDir/rendered/</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;sendrecord&gt;</td>
-                            <td>&lt;sendrecord&gt;路径或URL&lt;/sendrecord&gt;</td>
-                            <td style="color:var(--accent-green);">否</td>
-                            <td class="cmd-desc">发送语音/音频消息。支持本地文件路径或网络 URL，格式 .amr/.silk/.mp3</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;sendfile&gt;</td>
-                            <td>&lt;sendfile&gt;本地路径&lt;/sendfile&gt;</td>
-                            <td style="color:var(--accent-green);">否</td>
-                            <td class="cmd-desc">发送本地文件到 QQ 聊天。⚠ 仅主人（masterQQ）可用，非主人调用将被拒绝</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;stop&gt;</td>
-                            <td>&lt;stop&gt;&lt;/stop&gt;</td>
-                            <td style="color:var(--accent-green);">否</td>
-                            <td class="cmd-desc">立即停止 Agent 执行循环。AI 输出此标签后 AgentExecutor 调用 <code>markStopped()</code> 中断。QQ 消息中主人可直接发送 <code>&lt;stop&gt;</code> 停止 Agent。三通道覆盖：QQ直接检测 + execq AI输出 + 控制台TAG_PATTERN</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;editprompt&gt;</td>
-                            <td>&lt;editprompt&gt;新提示词&lt;/editprompt&gt;</td>
-                            <td style="color:var(--accent-green);">否</td>
-                            <td class="cmd-desc">AI 修改自身 system prompt。要求 ≥ 30 字符，实现性格自我演化</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;schedule&gt;</td>
-                            <td>&lt;schedule action="add" cron="0 */5 * * * *" task="..."&gt;&lt;/schedule&gt;</td>
-                            <td style="color:var(--accent-rose);">是</td>
-                            <td class="cmd-desc">CronScheduler 定时任务管理。支持 add/list/delete/enable/disable。cron 表达式 6 段式（秒分时日月周），任务持久化 SQLite cron_jobs 表</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;note&gt;</td>
-                            <td>&lt;note title="标题" category="分类"&gt;内容&lt;/note&gt;</td>
-                            <td style="color:var(--accent-green);">否</td>
-                            <td class="cmd-desc">创建知识库笔记。标题+内容+分类，持久化到 aiagent.db notes 表（FTS5 全文索引）</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;searchnote&gt;</td>
-                            <td>&lt;searchnote&gt;关键词&lt;/searchnote&gt;</td>
-                            <td style="color:var(--accent-green);">否</td>
-                            <td class="cmd-desc">FTS5 全文检索笔记。按关键词搜索标题+内容，结果按相关性排序返回</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;batchrename&gt;</td>
-                            <td>&lt;batchrename dir="path" pattern="regex" replacement="str"&gt;&lt;/batchrename&gt;</td>
-                            <td style="color:var(--accent-rose);">是</td>
-                            <td class="cmd-desc">批量文件重命名。支持正则替换/前缀/后缀/序号补零（如 %03d）。需确认门控</td>
-                        </tr>
-                        <tr>
-                            <td class="cmd-name">&lt;batchconvert&gt;</td>
-                            <td>&lt;batchconvert dir="path" from="GBK" to="UTF-8"&gt;&lt;/batchconvert&gt;</td>
-                            <td style="color:var(--accent-rose);">是</td>
-                            <td class="cmd-desc">批量文件编码转换。支持 GBK→UTF-8/UTF-16，自动检测 BOM，递归子目录。需确认门控</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+      <section class="section" id="skills-cmds">
+        <div class="section-head reveal">
+          <div class="section-tag">Skills</div>
+          <h2>技能管理命令</h2>
+          <p class="desc">技能自进化系统的 8 个管理命令。</p>
         </div>
-    </section>
-
-    <!-- Deployment -->
-    <section id="deploy">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Deployment</div>
-                <h2>部署指南</h2>
-                <div class="section-divider"></div>
-                <p>编译、打包、部署三步完成。</p>
-            </div>
-
-            <div class="card-grid">
-                <div class="card reveal">
-                    <div class="card-icon cyan">1</div>
-                    <h3>编译</h3>
-                    <p>
-                        使用 SFW 内置 JDK (8x64) 编译全部 44 个源文件。
-                        classpath 需包含 SFW.jar、sqlite-jdbc-3.42.0.0.jar 和 gson-2.8.6.jar。
-                    </p>
-                    <div class="code-block" style="margin-top:14px;">
-                        <div class="code-header"><span class="lang">PowerShell</span><button class="copy-btn">Copy</button></div>
-<pre><code>javac -encoding UTF-8 \
-  -cp "SFW.jar;plugins/bootlib/sqlite-jdbc-3.42.0.0.jar;plugins/bootlib/gson-2.8.6.jar" \
-  -d build \
-  sair/aiagent/**/*.java</code></pre>
-                    </div>
-                </div>
-
-                <div class="card reveal">
-                    <div class="card-icon purple">2</div>
-                    <h3>打包</h3>
-                    <p>
-                        使用 jar 命令打包，MANIFEST.MF 必须包含
-                        <code>ACT: sair.aiagent.AiAgentActivity;</code>
-                    </p>
-                    <div class="code-block" style="margin-top:14px;">
-                        <div class="code-header"><span class="lang">PowerShell</span><button class="copy-btn">Copy</button></div>
-<pre><code>jar cfm AiAgent.jar \
-  META-INF/MANIFEST.MF \
-  -C build .</code></pre>
-                    </div>
-                </div>
-
-                <div class="card reveal">
-                    <div class="card-icon green">3</div>
-                    <h3>部署</h3>
-                    <p>
-                        将 AiAgent.jar 复制到 SFW 的 plugins/exection/ 目录，
-                        启动 SFW 后即可使用 <code>ai/</code> 命令。
-                    </p>
-                    <div class="code-block" style="margin-top:14px;">
-                        <div class="code-header"><span class="lang">PowerShell</span><button class="copy-btn">Copy</button></div>
-<pre><code>Copy-Item AiAgent.jar \
-  plugins/exection/AiAgent.jar</code></pre>
-                    </div>
-                </div>
-            </div>
+        <div class="table-wrap reveal">
+          <table>
+            <thead><tr><th>命令</th><th>参数</th><th>分类</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td class="cmd-name">ai/skills</td><td>—</td><td><span class="badge b-purple">技能</span></td><td>列出所有已学习的技能</td></tr>
+              <tr><td class="cmd-name">ai/skillsearch</td><td>[关键词]</td><td><span class="badge b-purple">技能</span></td><td>FTS5 全文搜索技能库</td></tr>
+              <tr><td class="cmd-name">ai/skillinfo</td><td>[ID]</td><td><span class="badge b-purple">技能</span></td><td>查看技能详情</td></tr>
+              <tr><td class="cmd-name">ai/skilldelete</td><td>[ID]</td><td><span class="badge b-purple">技能</span></td><td>删除指定技能</td></tr>
+              <tr><td class="cmd-name">ai/skillextract</td><td>—</td><td><span class="badge b-purple">技能</span></td><td>从最近日志 LLM 蒸馏提取新技能</td></tr>
+              <tr><td class="cmd-name">ai/skillevolve</td><td>—</td><td><span class="badge b-purple">技能</span></td><td>LLM 分析失败模式进化技能</td></tr>
+              <tr><td class="cmd-name">ai/skillexport</td><td>[ID]</td><td><span class="badge b-purple">技能</span></td><td>导出单个技能为 Markdown</td></tr>
+              <tr><td class="cmd-name">ai/skillexportall</td><td>—</td><td><span class="badge b-purple">技能</span></td><td>导出全部技能为 Markdown</td></tr>
+            </tbody>
+          </table>
         </div>
-    </section>
+      </section>
 
-    <!-- Quick Start -->
-    <section id="quickstart">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Quick Start</div>
-                <h2>快速开始</h2>
-                <div class="section-divider"></div>
-                <p>部署后在 SFW 控制台输入以下命令开始使用。</p>
-            </div>
-
-            <div class="code-block reveal">
-                <div class="code-header"><span class="lang">SFW Console</span><button class="copy-btn">Copy</button></div>
-<pre><code><span class="cmt"># 1. 设置 API Key</span>
-ai/setkey sk-your-deepseek-api-key
-
-<span class="cmt"># 2. 与 AI 对话（自动感知 Agent 历史 + 情绪状态）</span>
-ai/chat 你好，请介绍一下你自己
-
-<span class="cmt"># 3. Agent 安全模式 —— 高危操作需确认（ai/yes）</span>
-ai/exec 列出所有已加载的插件
-
-<span class="cmt"># 4. Agent 自由模式 —— 无需确认，自动执行</span>
-ai/execs 分析插件功能并分类
-
-<span class="cmt"># 5. Chat 自动感知 Agent —— 询问之前做了什么</span>
-ai/chat 刚才exec分析了哪些插件？
-
-<span class="cmt"># 6. 查询 AI 心情</span>
-ai/mood
-
-<span class="cmt"># 7. 查看配置和统计</span>
-ai/info
-ai/memories
-
-<span class="cmt"># === OneBot QQ 机器人 ===</span>
-<span class="cmt"># 8. 配置并启动QQ机器人</span>
-ai/onebotsetport 5800
-ai/onebotsettoken my-secret-token
-ai/onebotsetselfid 123456789
-ai/onebotconnect
-
-<span class="cmt"># 9. 设置execq提示词（可选）</span>
-ai/onebotsetprompt 你是Sair的QQ助手，请用中文友好回复
-
-<span class="cmt"># 10. 查看状态</span>
-ai/onebotstatus
-ai/onebotshowprompt
-
-<span class="cmt"># 11. 管理插件白名单（execq安全门控）</span>
-ai/onebotwhitelist
-ai/onebotwhitelistadd Filer
-ai/onebotwhitelistadd IDE
-
-<span class="cmt"># 12. AutoClear 自动清屏（防日志OOM）</span>
-ai/autoclearon</code></pre>
-            </div>
+      <section class="section" id="tools-local">
+        <div class="section-head reveal">
+          <div class="section-tag">Tools</div>
+          <h2>FC 工具清单</h2>
+          <p class="desc">ToolDispatcher 注册的三套工具集：本地全量 / execq 受限 / execs 全权限。</p>
         </div>
-    </section>
+
+        <div class="card-grid cols-2 reveal">
+          <div class="card"><div class="card-icon ic-cyan">📦</div><h3>本地全量工具（31 个）</h3>
+            <p style="margin-bottom:6px"><b>系统/文件</b>：<code>cmd</code> <code>readfile</code> <code>readdir</code> <code>sys</code> <code>evaljs</code> <code>eval</code> <code>download</code> <code>batchrename</code> <code>batchconvert</code></p>
+            <p style="margin-bottom:6px"><b>网络/信息</b>：<code>web</code> <code>search</code> <code>weather</code> <code>time</code> <code>balance</code></p>
+            <p style="margin-bottom:6px"><b>记忆/知识</b>：<code>remember</code> <code>correct</code> <code>note</code> <code>searchnote</code> <code>schedule</code> <code>alarm</code> <code>skillextract</code> <code>skillinfo</code></p>
+            <p style="margin-bottom:6px"><b>媒体/文件</b>：<code>sendimage</code> <code>sendrecord</code> <code>sendfile</code> <code>setimageremark</code></p>
+            <p><b>三方/其他</b>：<code>thirdskill</code> <code>callskill</code> <code>tp_*</code> <code>superise</code> <code>editprompt</code> <code>stop</code></p>
+          </div>
+          <div class="card" id="tools-execq"><div class="card-icon ic-magenta">🔒</div><h3>execq 受限工具（55 个）</h3>
+            <p style="margin-bottom:6px"><b>基础/信息（13）</b>：<code>cmd</code>（仅help）<code>eval</code>（仅搜索抓取）<code>web</code> <code>search</code> <code>readdir</code> <code>readfile</code> <code>weather</code> <code>time</code> <code>remember</code> <code>correct</code> <code>note</code> <code>searchnote</code> <code>balance</code></p>
+            <p style="margin-bottom:6px"><b>表情包（4）</b>：<code>sendsticker</code> <code>collectsticker</code> <code>clearsticker</code> <code>setimageremark</code></p>
+            <p style="margin-bottom:6px"><b>群管（12，仅主人）</b>：<code>ban</code> <code>kick</code> <code>muteall</code> <code>setadmin</code> <code>setcard</code> <code>setgroupname</code> <code>setname</code> <code>setsignature</code> <code>leavegroup</code> <code>block</code> <code>unblock</code> <code>delfriend</code></p>
+            <p style="margin-bottom:6px"><b>媒体/互动（9）</b>：<code>poke</code> <code>sendlike</code> <code>sendfileto</code> <code>sendimage</code> <code>sendrecord</code> <code>sendfile</code> <code>relay</code> <code>forwardmsg</code> <code>skillinfo</code></p>
+            <p><b>跨群（4）</b>：<code>grouplist</code> <code>groupmembers</code> <code>sendgroupmsg</code> <code>friendlist</code></p>
+            <p style="margin-bottom:6px"><b>好友申请/群邀请（6）</b>：<code>pendingrequests</code> <code>approvefriend</code> <code>rejectfriend</code> <code>acceptgroupinvite</code> <code>rejectgroupinvite</code> <code>getselfinfo</code></p>
+            <p><b>捐赠/好感度（6）</b>：<code>recorddonation</code>（仅主人）<code>donationlist</code> <code>resetdonation</code>（仅主人）<code>queryaffection</code> <code>setaffection</code>（仅主人）<code>affectionrank</code>（全局仅主人）</p>
+            <p><b>定时（1）</b>：<code>alarm</code>（系统闹钟，普通用户到点提醒、主人 AI 任务）</p>
+          </div>
+        </div>
+
+        <div class="callout reveal" id="tools-execs"><div class="co-icon">🛡️</div><div><b>execs 全权限工具（67 个）</b> = 本地全量 31 个 + QQ 专属工具去重合并。QQ 主人发送 <code>execs:</code> 前缀消息后，AI 进入全工具 + 全技能模式。</div></div>
+      </section>
+
+      <section class="section" id="deploy">
+        <div class="section-head reveal">
+          <div class="section-tag">Deployment</div>
+          <h2>部署指南</h2>
+          <p class="desc">编译、打包、部署三步完成。</p>
+        </div>
+        <div class="card-grid reveal">
+          <div class="card"><div class="card-icon ic-cyan">1</div><h3>编译</h3>
+            <p>使用 SFW 内置 JDK (8x64) 编译全部 94 个源文件。classpath 需包含 SFW.jar、gson、zxing、jsoup。</p>
+            <pre style="margin-top:12px"><code>javac -encoding UTF-8 -cp "SFW.jar;gson.jar;zxing-core.jar;zxing-javase.jar;jsoup.jar" -d out sair/aiagent/**/*.java</code></pre>
+          </div>
+          <div class="card"><div class="card-icon ic-purple">2</div><h3>打包</h3>
+            <p>使用 jar 命令打包，MANIFEST.MF 必须包含 <code>ACT: sair.aiagent.AiAgentActivity;</code></p>
+            <pre style="margin-top:12px"><code>jar cfm AiAgent.jar META-INF/MANIFEST.MF -C out .</code></pre>
+          </div>
+          <div class="card"><div class="card-icon ic-green">3</div><h3>部署</h3>
+            <p>将 AiAgent.jar 复制到 SFW 的 plugins/exection/ 目录，启动 SFW 后即可使用 ai/ 命令。</p>
+            <pre style="margin-top:12px"><code>Copy-Item AiAgent.jar plugins/exection/AiAgent.jar</code></pre>
+          </div>
+        </div>
+      </section>
+
+    </div>
 
     <footer class="footer">
-        <div class="container">
-            <p>
-                <span class="brand">AiAgent</span> v2.6 ·
-                基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
-                对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
-            </p>
-            <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · NapCat群管理 · 合并转发 · 表情包 · 安全加固 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 20种XML标签 · 模型路由 · 自动清屏 · 多模态图片识别 · 部署三步骤
-            </p>
-        </div>
+      <div class="container">
+        <p><span class="brand">AiAgent</span> v3.3 · 52 命令 · 67 FC 工具 · 部署三步骤</p>
+      </div>
     </footer>
+  </main>
 
-    <div class="back-to-top" title="回到顶部">↑</div>
-    <script src="js/main.js"></script>
+  <div class="back-to-top" title="回到顶部">↑</div>
+  <script src="js/main.js"></script>
 </body>
 </html>

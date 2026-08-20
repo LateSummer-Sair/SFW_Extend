@@ -1,458 +1,438 @@
 /* ============================================================
-   AiAgent — Cyberpunk Interactive Scripts
-   Features:
-     - Particle canvas with neon glow
-     - Mouse cursor trail (neon cyber lines)
-     - Glitch text effect (random triggers)
-     - Scroll reveal with blur fade
-     - Nav highlight + shadow
-     - Copy code feedback
-     - Stats counter animation
-     - Parallax on hero
+   AiAgent 技术文档 v5.0 — 交互脚本
+   粒子连线 · 极光 · 多级菜单 · 滚动进度 · 数字滚动 · reveal
+   流程图顺序点亮 · 3D 倾斜 · 打字机 · 代码复制
    ============================================================ */
 
 (function () {
-    'use strict';
+  "use strict";
 
-    // ==================== Mouse Trail Canvas ====================
-    const trailCanvas = document.createElement('canvas');
-    trailCanvas.id = 'mouse-trail-canvas';
-    document.body.appendChild(trailCanvas);
-    const tCtx = trailCanvas.getContext('2d');
+  /* ============ 全局导航数据（多级缩进菜单） ============ */
+  const NAV = [
+    { type: "link", href: "index.html", icon: "🏠", label: "首页" },
 
-    let tWidth, tHeight;
-    const trailPoints = [];
-    const MAX_TRAIL = 40;
+    { type: "group", icon: "🏗", label: "系统架构", children: [
+      { type: "link", href: "architecture.html", label: "架构总览" },
+      { type: "link", href: "architecture.html#dataflow", label: "数据流全景" },
+      { type: "link", href: "architecture.html#fc-loop", label: "Function Calling 循环" },
+      { type: "link", href: "architecture.html#context", label: "上下文注入链" },
+      { type: "link", href: "architecture.html#structure", label: "目录结构" },
+    ]},
 
-    function resizeTrail() {
-        tWidth = trailCanvas.width = window.innerWidth;
-        tHeight = trailCanvas.height = window.innerHeight;
+    { type: "group", icon: "🔐", label: "权限与通道", children: [
+      { type: "link", href: "permissions.html", label: "三层权限模型" },
+      { type: "link", href: "permissions.html#matrix", label: "工具权限矩阵" },
+      { type: "link", href: "permissions.html#gate", label: "越权拦截流程" },
+      { type: "link", href: "permissions.html#confirm", label: "高危操作确认门控" },
+    ]},
+
+    { type: "group", icon: "🧠", label: "技能系统", children: [
+      { type: "link", href: "skills.html", label: "技能总览" },
+      { type: "link", href: "skills.html#builtin", label: "内置技能库" },
+      { type: "link", href: "skills.html#thirdparty", label: "三方技能" },
+      { type: "link", href: "skills.html#package", label: "技能包" },
+      { type: "link", href: "skills.html#distill", label: "技能蒸馏" },
+      { type: "link", href: "skills.html#route", label: "路径路由" },
+    ]},
+
+    { type: "group", icon: "💾", label: "记忆系统", children: [
+      { type: "link", href: "memory.html", label: "记忆总览" },
+      { type: "link", href: "memory.html#layers", label: "六库存储" },
+      { type: "link", href: "memory.html#impression", label: "人格印象" },
+      { type: "link", href: "memory.html#correct", label: "纠正记录" },
+      { type: "link", href: "memory.html#lifecycle", label: "记忆生命周期" },
+    ]},
+
+    { type: "group", icon: "🤖", label: "QQ 机器人", children: [
+      { type: "link", href: "architecture.html#onebot", label: "OneBot 架构" },
+      { type: "link", href: "permissions.html#qq", label: "QQ 通道权限" },
+      { type: "link", href: "commands.html#onebot-cmds", label: "QQ 命令" },
+      { type: "link", href: "memory.html#qq-memory", label: "统一 QQ 记忆" },
+    ]},
+
+    { type: "group", icon: "📋", label: "命令参考", children: [
+      { type: "link", href: "commands.html", label: "命令总览" },
+      { type: "link", href: "commands.html#core-cmds", label: "核心命令" },
+      { type: "link", href: "commands.html#onebot-cmds", label: "QQ 命令" },
+      { type: "link", href: "commands.html#skills-cmds", label: "技能命令" },
+      { type: "group", icon: "🔧", label: "工具清单", children: [
+        { type: "link", href: "commands.html#tools-local", label: "本地全量工具" },
+        { type: "link", href: "commands.html#tools-execq", label: "execq 受限工具" },
+        { type: "link", href: "commands.html#tools-execs", label: "execs 全权限工具" },
+      ]},
+      { type: "link", href: "commands.html#deploy", label: "部署指南" },
+    ]},
+
+    { type: "group", icon: "📦", label: "类结构", children: [
+      { type: "link", href: "classes.html", label: "类结构总览" },
+      { type: "link", href: "classes.html#core", label: "core 核心模块" },
+      { type: "link", href: "classes.html#onebot", label: "onebot QQ 模块" },
+      { type: "link", href: "classes.html#model", label: "model 模型" },
+      { type: "link", href: "classes.html#util", label: "工具 / UI / 命令层" },
+    ]},
+
+    { type: "link", href: "patterns.html", icon: "🎨", label: "设计模式" },
+  ];
+
+  /* ============ 渲染多级导航 ============ */
+  function renderNav() {
+    const sidebar = document.getElementById("sidebar");
+    if (!sidebar) return;
+    const here = location.pathname.split("/").pop() || "index.html";
+
+    const logo = document.createElement("div");
+    logo.className = "sidebar-logo";
+    logo.innerHTML = '<div class="icon">⚡</div><span class="logo-text">AiAgent<span class="ver">v3.1</span></span>';
+    sidebar.appendChild(logo);
+
+    const nav = document.createElement("nav");
+    nav.className = "sidebar-nav";
+
+    function buildLink(item) {
+      const a = document.createElement("a");
+      a.href = item.href;
+      a.className = "nav-link";
+      if (item.icon) {
+        a.innerHTML = '<span class="nicon">' + item.icon + "</span>" + item.label;
+      } else {
+        a.textContent = item.label;
+      }
+      const base = item.href.split("#")[0];
+      if (base === here) a.classList.add("active");
+      return a;
     }
-    resizeTrail();
 
-    let mouseTrailX = -100, mouseTrailY = -100;
-    let targetTrailX = -100, targetTrailY = -100;
+    function buildGroup(group, depth) {
+      const g = document.createElement("div");
+      g.className = "nav-group" + (depth > 0 ? " nested" : "");
+      g.style.setProperty("--depth", depth);
 
-    document.addEventListener('mousemove', function (e) {
-        targetTrailX = e.clientX;
-        targetTrailY = e.clientY;
-        // Spawn trail points
-        trailPoints.push({
-            x: e.clientX,
-            y: e.clientY,
-            life: 1.0,
-            size: Math.random() * 3 + 1.5
-        });
-        if (trailPoints.length > MAX_TRAIL) {
-            trailPoints.splice(0, trailPoints.length - MAX_TRAIL);
+      const title = document.createElement("button");
+      title.className = "nav-title";
+      title.innerHTML =
+        '<span class="gico">' + (group.icon || "•") + '</span><span class="glabel">' + group.label +
+        '</span><span class="arrow">▾</span>';
+      g.appendChild(title);
+
+      const sub = document.createElement("div");
+      sub.className = "nav-sub";
+      const inner = document.createElement("div");
+      inner.className = "nav-sub-inner";
+
+      let hasActive = false;
+      group.children.forEach(function (child) {
+        if (child.type === "group") {
+          const cg = buildGroup(child, depth + 1);
+          inner.appendChild(cg);
+          if (cg.dataset.hasActive === "1") hasActive = true;
+        } else {
+          inner.appendChild(buildLink(child));
+          if (child.href.split("#")[0] === here) hasActive = true;
         }
+      });
+
+      sub.appendChild(inner);
+      g.appendChild(sub);
+
+      if (hasActive) {
+        g.classList.add("open");
+        g.dataset.hasActive = "1";
+      }
+
+      title.addEventListener("click", function () {
+        const wasOpen = g.classList.contains("open");
+        // 手风琴：只关闭同级其他组
+        const siblings = g.parentElement.children;
+        Array.prototype.forEach.call(siblings, function (s) {
+          if (s !== g && s.classList && s.classList.contains("nav-group")) {
+            s.classList.remove("open");
+          }
+        });
+        g.classList.toggle("open", !wasOpen);
+      });
+
+      return g;
+    }
+
+    NAV.forEach(function (item) {
+      if (item.type === "link") nav.appendChild(buildLink(item));
+      else nav.appendChild(buildGroup(item, 0));
     });
 
-    document.addEventListener('mouseleave', function () {
-        targetTrailX = -100;
-        targetTrailY = -100;
+    sidebar.appendChild(nav);
+  }
+
+  /* ============ 粒子连线背景 ============ */
+  function initParticles() {
+    const canvas = document.getElementById("bg-canvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    let w, h, particles = [];
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const COUNT = Math.min(100, Math.floor((window.innerWidth * window.innerHeight) / 17000));
+    const mouse = { x: -9999, y: -9999 };
+
+    function resize() {
+      w = window.innerWidth; h = window.innerHeight;
+      canvas.width = w * DPR; canvas.height = h * DPR;
+      canvas.style.width = w + "px"; canvas.style.height = h + "px";
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    resize();
+
+    function rand(a, b) { return a + Math.random() * (b - a); }
+    const colors = ["0,229,255", "168,85,247", "255,45,120", "16,185,129"];
+    for (let i = 0; i < COUNT; i++) {
+      particles.push({
+        x: rand(0, w), y: rand(0, h),
+        vx: rand(-0.35, 0.35), vy: rand(-0.35, 0.35),
+        r: rand(1, 2.8),
+        c: colors[Math.floor(Math.random() * colors.length)]
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, w, h);
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0 || p.x > w) p.vx *= -1;
+        if (p.y < 0 || p.y > h) p.vy *= -1;
+
+        const dxm = mouse.x - p.x, dym = mouse.y - p.y;
+        const dm = Math.hypot(dxm, dym);
+        if (dm < 150) { p.x += dxm * 0.002; p.y += dym * 0.002; }
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(" + p.c + ",0.72)";
+        ctx.fill();
+
+        for (let j = i + 1; j < particles.length; j++) {
+          const q = particles[j];
+          const dx = p.x - q.x, dy = p.y - q.y;
+          const d = Math.hypot(dx, dy);
+          if (d < 135) {
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y);
+            ctx.strokeStyle = "rgba(" + p.c + "," + (0.17 * (1 - d / 135)) + ")";
+            ctx.lineWidth = 0.6;
+            ctx.stroke();
+          }
+        }
+        if (dm < 170) {
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y); ctx.lineTo(mouse.x, mouse.y);
+          ctx.strokeStyle = "rgba(0,229,255," + (0.26 * (1 - dm / 170)) + ")";
+          ctx.lineWidth = 0.7;
+          ctx.stroke();
+        }
+      }
+      requestAnimationFrame(draw);
+    }
+    draw();
+
+    window.addEventListener("resize", resize);
+    window.addEventListener("mousemove", function (e) { mouse.x = e.clientX; mouse.y = e.clientY; });
+    window.addEventListener("mouseleave", function () { mouse.x = -9999; mouse.y = -9999; });
+  }
+
+  /* ============ 滚动进度条 ============ */
+  function initProgress() {
+    const bar = document.querySelector(".progress-bar");
+    if (!bar) return;
+    function update() {
+      const h = document.documentElement;
+      const sc = h.scrollTop / (h.scrollHeight - h.clientHeight);
+      bar.style.width = (sc * 100) + "%";
+    }
+    window.addEventListener("scroll", update, { passive: true });
+    update();
+  }
+
+  /* ============ 数字滚动动画 ============ */
+  function initCounters() {
+    const nums = document.querySelectorAll("[data-target]");
+    if (!nums.length) return;
+    const io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        const el = en.target;
+        io.unobserve(el);
+        const target = parseInt(el.getAttribute("data-target"), 10);
+        const dur = 1700; const t0 = performance.now();
+        function tick(t) {
+          const p = Math.min((t - t0) / dur, 1);
+          const eased = 1 - Math.pow(1 - p, 3);
+          el.textContent = Math.floor(target * eased).toLocaleString();
+          if (p < 1) requestAnimationFrame(tick);
+          else el.textContent = target.toLocaleString();
+        }
+        requestAnimationFrame(tick);
+      });
+    }, { threshold: 0.4 });
+    nums.forEach(function (n) { io.observe(n); });
+  }
+
+  /* ============ 滚动显现 ============ */
+  function initReveal() {
+    const els = document.querySelectorAll(".reveal");
+    if (!els.length) return;
+    const io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) { en.target.classList.add("visible"); io.unobserve(en.target); }
+      });
+    }, { threshold: 0.12 });
+    els.forEach(function (el) { io.observe(el); });
+  }
+
+  /* ============ 流程图顺序点亮 ============ */
+  function initFlow() {
+    const flows = document.querySelectorAll(".flow");
+    flows.forEach(function (flow) {
+      const items = flow.querySelectorAll(".flow-node, .flow-edge");
+      if (!items.length) return;
+      const io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (!en.isIntersecting) return;
+          io.unobserve(en.target);
+          let delay = 0;
+          items.forEach(function (it, idx) {
+            setTimeout(function () { it.classList.add("on"); }, 150 * idx);
+            delay = 150 * idx;
+          });
+          // 补充分支内的节点
+          flow.querySelectorAll(".flow-branch .flow-node").forEach(function (it, idx) {
+            setTimeout(function () { it.classList.add("on"); }, delay + 150 * (idx + 1));
+          });
+        });
+      }, { threshold: 0.25 });
+      io.observe(flow);
     });
+  }
 
-    function drawTrail() {
-        tCtx.clearRect(0, 0, tWidth, tHeight);
-
-        // Smooth mouse follow
-        mouseTrailX += (targetTrailX - mouseTrailX) * 0.15;
-        mouseTrailY += (targetTrailY - mouseTrailY) * 0.15;
-
-        // Neon cursor glow
-        if (targetTrailX > 0) {
-            const g = tCtx.createRadialGradient(mouseTrailX, mouseTrailY, 0, mouseTrailX, mouseTrailY, 50);
-            g.addColorStop(0, 'rgba(0, 240, 255, 0.12)');
-            g.addColorStop(0.5, 'rgba(0, 240, 255, 0.04)');
-            g.addColorStop(1, 'rgba(0, 240, 255, 0)');
-            tCtx.fillStyle = g;
-            tCtx.beginPath();
-            tCtx.arc(mouseTrailX, mouseTrailY, 50, 0, Math.PI * 2);
-            tCtx.fill();
-
-            // Crosshair
-            tCtx.strokeStyle = 'rgba(0, 240, 255, 0.25)';
-            tCtx.lineWidth = 1;
-            tCtx.beginPath();
-            tCtx.moveTo(mouseTrailX - 15, mouseTrailY);
-            tCtx.lineTo(mouseTrailX + 15, mouseTrailY);
-            tCtx.moveTo(mouseTrailX, mouseTrailY - 15);
-            tCtx.lineTo(mouseTrailX, mouseTrailY + 15);
-            tCtx.stroke();
-        }
-
-        // Trail particles
-        for (let i = trailPoints.length - 1; i >= 0; i--) {
-            const p = trailPoints[i];
-            p.life -= 0.025;
-            if (p.life <= 0) {
-                trailPoints.splice(i, 1);
-                continue;
-            }
-            const alpha = p.life * 0.5;
-            tCtx.fillStyle = 'rgba(0, 240, 255, ' + alpha + ')';
-            tCtx.shadowColor = 'rgba(0, 240, 255, ' + (alpha * 0.6) + ')';
-            tCtx.shadowBlur = 6;
-            tCtx.beginPath();
-            tCtx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
-            tCtx.fill();
-            tCtx.shadowBlur = 0;
-        }
-
-        requestAnimationFrame(drawTrail);
-    }
-    drawTrail();
-
-    window.addEventListener('resize', resizeTrail);
-
-    // ==================== Particle Canvas (Enhanced) ====================
-    const canvas = document.getElementById('particles-canvas');
-    if (canvas) {
-        const ctx = canvas.getContext('2d');
-        let particles = [];
-        let pMouseX = -1000, pMouseY = -1000;
-
-        function pResize() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        }
-
-        class Particle {
-            constructor() {
-                this.reset();
-                this.y = Math.random() * canvas.height;
-            }
-
-            reset() {
-                this.x = Math.random() * canvas.width;
-                this.y = -20;
-                this.size = Math.random() * 2.5 + 0.5;
-                this.speedY = Math.random() * 0.6 + 0.2;
-                this.speedX = (Math.random() - 0.5) * 0.35;
-                this.opacity = Math.random() * 0.5 + 0.15;
-                // Mix of cyan and purple hues
-                const r = Math.random();
-                this.hue = r < 0.35 ? 190 : r < 0.55 ? 270 : r < 0.7 ? 300 : 130;
-            }
-
-            update() {
-                this.y += this.speedY;
-                this.x += this.speedX;
-
-                // Mouse repulsion
-                const dx = this.x - pMouseX;
-                const dy = this.y - pMouseY;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < 140) {
-                    const force = (1 - dist / 140) * 1.2;
-                    this.x += (dx / dist) * force;
-                    this.y += (dy / dist) * force;
-                }
-
-                if (this.y > canvas.height + 30) { this.reset(); this.y = -20; }
-                if (this.x < -30) this.x = canvas.width + 30;
-                if (this.x > canvas.width + 30) this.x = -30;
-            }
-
-            draw(ctx) {
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-                const hsl = 'hsla(' + this.hue + ', 85%, 65%, ' + this.opacity + ')';
-                ctx.fillStyle = hsl;
-                // Neon glow on larger particles
-                if (this.size > 1.5) {
-                    ctx.shadowColor = 'hsla(' + this.hue + ', 90%, 55%, ' + (this.opacity * 0.6) + ')';
-                    ctx.shadowBlur = 8;
-                }
-                ctx.fill();
-                ctx.shadowBlur = 0;
-            }
-        }
-
-        function initParticles(count) {
-            particles = [];
-            for (let i = 0; i < count; i++) {
-                particles.push(new Particle());
-            }
-        }
-
-        function drawConnections() {
-            for (let i = 0; i < particles.length; i++) {
-                for (let j = i + 1; j < particles.length; j++) {
-                    const dx = particles[i].x - particles[j].x;
-                    const dy = particles[i].y - particles[j].y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < 120) {
-                        ctx.beginPath();
-                        ctx.moveTo(particles[i].x, particles[i].y);
-                        ctx.lineTo(particles[j].x, particles[j].y);
-                        const alpha = 0.05 * (1 - dist / 120);
-                        ctx.strokeStyle = 'rgba(0, 240, 255, ' + alpha + ')';
-                        ctx.lineWidth = 0.6;
-                        ctx.stroke();
-                    }
-                }
-            }
-        }
-
-        function pAnimate() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            for (const p of particles) { p.update(); p.draw(ctx); }
-            drawConnections();
-            requestAnimationFrame(pAnimate);
-        }
-
-        let resizeTimeout;
-        window.addEventListener('resize', function () {
-            pResize();
-            clearTimeout(resizeTimeout);
-            resizeTimeout = setTimeout(function () {
-                initParticles(Math.floor((canvas.width * canvas.height) / 13000));
-            }, 200);
-        });
-
-        canvas.addEventListener('mousemove', function (e) { pMouseX = e.clientX; pMouseY = e.clientY; });
-        canvas.addEventListener('mouseleave', function () { pMouseX = -1000; pMouseY = -1000; });
-
-        // Touch support
-        canvas.addEventListener('touchmove', function (e) {
-            if (e.touches.length > 0) { pMouseX = e.touches[0].clientX; pMouseY = e.touches[0].clientY; }
-        });
-        canvas.addEventListener('touchend', function () { pMouseX = -1000; pMouseY = -1000; });
-
-        pResize();
-        initParticles(Math.floor((canvas.width * canvas.height) / 13000));
-        pAnimate();
-    }
-
-    // ==================== Glitch Text Effect ====================
-    function glitchText(el) {
-        const orig = el.textContent;
-        const chars = '!@#$%^&*()_+-=[]{}|;:,.<>?/~`0123456789';
-        let iterations = 0;
-        const maxIter = 8;
-        const interval = setInterval(function () {
-            el.textContent = orig.split('').map(function (c, i) {
-                if (i < iterations) return orig[i];
-                return chars[Math.floor(Math.random() * chars.length)];
-            }).join('');
-            iterations += 0.7;
-            if (iterations >= orig.length) {
-                el.textContent = orig;
-                clearInterval(interval);
-            }
-        }, 40);
-    }
-
-    // Glitch random headings on load
-    window.addEventListener('load', function () {
-        setTimeout(function () {
-            const headings = document.querySelectorAll('.section-header h2, .pattern-card h4');
-            if (headings.length > 0) {
-                const randomH = headings[Math.floor(Math.random() * headings.length)];
-                if (randomH) glitchText(randomH);
-            }
-        }, 600);
-
-        // Periodic random glitch
-        setInterval(function () {
-            if (Math.random() < 0.25) {
-                const cards = document.querySelectorAll('.pattern-card h4, .card h3');
-                if (cards.length > 0) {
-                    const rc = cards[Math.floor(Math.random() * cards.length)];
-                    if (rc && rc.closest('.pattern-card:hover, .card:hover') === null) {
-                        glitchText(rc);
-                    }
-                }
-            }
-        }, 12000);
+  /* ============ 3D 倾斜卡 ============ */
+  function initTilt() {
+    if (window.matchMedia("(max-width: 960px)").matches) return;
+    document.querySelectorAll(".tilt").forEach(function (card) {
+      card.addEventListener("mousemove", function (e) {
+        const r = card.getBoundingClientRect();
+        const x = (e.clientX - r.left) / r.width - 0.5;
+        const y = (e.clientY - r.top) / r.height - 0.5;
+        card.style.transform = "perspective(800px) rotateY(" + (x * 8) + "deg) rotateX(" + (-y * 8) + "deg) translateY(-4px)";
+      });
+      card.addEventListener("mouseleave", function () {
+        card.style.transform = "perspective(800px) rotateY(0) rotateX(0) translateY(0)";
+      });
     });
+  }
 
-    // ==================== Hero Parallax ====================
-    const hero = document.querySelector('.hero');
-    if (hero) {
-        window.addEventListener('scroll', function () {
-            const scrollY = window.scrollY;
-            if (scrollY < hero.offsetHeight) {
-                const rate = scrollY * 0.4;
-                hero.style.setProperty('--parallax-y', rate + 'px');
-                const content = hero.querySelector('.hero-content');
-                if (content) {
-                    content.style.transform = 'translateY(' + (rate * 0.3) + 'px)';
-                }
-            }
-        }, { passive: true });
-    }
-
-    // ==================== Scroll Reveal ====================
-    const revealElements = document.querySelectorAll('.reveal');
-
-    function checkReveal() {
-        const trigger = window.innerHeight * 0.9;
-        for (const el of revealElements) {
-            const top = el.getBoundingClientRect().top;
-            if (top < trigger) {
-                el.classList.add('visible');
-            }
+  /* ============ 打字机效果 ============ */
+  function initTyping() {
+    document.querySelectorAll("[data-type]").forEach(function (el) {
+      const text = el.getAttribute("data-type");
+      const speed = parseInt(el.getAttribute("data-speed") || "40", 10);
+      let i = 0;
+      el.textContent = "";
+      el.insertAdjacentHTML("beforeend", '<span class="type-cursor"></span>');
+      const cursor = el.querySelector(".type-cursor");
+      function type() {
+        if (i < text.length) {
+          cursor.insertAdjacentText("beforebegin", text.charAt(i));
+          i++;
+          setTimeout(type, speed);
+        } else {
+          cursor.remove();
         }
-    }
-
-    // ==================== Sidebar Navigation ====================
-    const sidebarNavLinks = document.querySelectorAll('.sidebar-nav a');
-    const sidebarSections = [];
-    sidebarNavLinks.forEach(function (link) {
-        const href = link.getAttribute('href');
-        if (href && href.startsWith('#')) {
-            const target = document.querySelector(href);
-            if (target) sidebarSections.push({ link: link, target: target });
-        }
+      }
+      setTimeout(type, 400);
     });
+  }
 
-    function highlightNav() {
-        const scrollY = window.scrollY + 140;
-        let current = sidebarSections[0];
-        for (const s of sidebarSections) {
-            if (s.target.offsetTop <= scrollY) current = s;
-        }
-        sidebarNavLinks.forEach(function (l) { l.classList.remove('active'); });
-        if (current) current.link.classList.add('active');
-    }
-
-    // ==================== Sidebar Toggle (Mobile) ====================
-    const sidebar = document.getElementById('sidebar');
-    const sidebarToggle = document.getElementById('sidebar-toggle');
-    if (sidebar && sidebarToggle) {
-        sidebarToggle.addEventListener('click', function () {
-            sidebar.classList.toggle('open');
-            sidebarToggle.classList.toggle('open');
-        });
-
-        // Close sidebar when clicking a link (mobile)
-        document.querySelectorAll('.sidebar-nav a').forEach(function (link) {
-            link.addEventListener('click', function () {
-                if (window.innerWidth <= 768) {
-                    sidebar.classList.remove('open');
-                    sidebarToggle.classList.remove('open');
-                }
-            });
-        });
-
-        // Close sidebar when clicking outside
-        document.addEventListener('click', function (e) {
-            if (window.innerWidth <= 768 &&
-                sidebar.classList.contains('open') &&
-                !sidebar.contains(e.target) &&
-                !sidebarToggle.contains(e.target)) {
-                sidebar.classList.remove('open');
-                sidebarToggle.classList.remove('open');
-            }
-        });
-    }
-
-    // ==================== Back to Top ====================
-    const backTop = document.querySelector('.back-to-top');
-    function checkBackTop() {
-        backTop.classList.toggle('show', window.scrollY > 600);
-    }
-    backTop.addEventListener('click', function () {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+  /* ============ 代码复制 ============ */
+  function initCopy() {
+    document.querySelectorAll(".copy-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const pre = btn.closest("pre") || btn.parentElement.querySelector("pre");
+        if (!pre) return;
+        const text = pre.innerText;
+        const done = function () {
+          const old = btn.textContent;
+          btn.textContent = "已复制 ✓";
+          setTimeout(function () { btn.textContent = old; }, 1600);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done).catch(function () { fallbackCopy(text); done(); });
+        } else { fallbackCopy(text); done(); }
+      });
     });
+    function fallbackCopy(text) {
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+  }
 
-    // ==================== Combined Scroll ====================
-    window.addEventListener('scroll', function () {
-        checkReveal();
-        highlightNav();
-        checkBackTop();
+  /* ============ 返回顶部 ============ */
+  function initBackTop() {
+    const btn = document.querySelector(".back-to-top");
+    if (!btn) return;
+    window.addEventListener("scroll", function () {
+      btn.classList.toggle("show", window.scrollY > 500);
     }, { passive: true });
-
-    checkReveal();
-    highlightNav();
-    checkBackTop();
-
-    // ==================== Copy Code ====================
-    document.querySelectorAll('.copy-btn').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            const pre = this.closest('.code-block').querySelector('pre');
-            const text = pre.textContent;
-            navigator.clipboard.writeText(text).then(function () {
-                const orig = btn.textContent;
-                btn.textContent = '✓ COPIED';
-                btn.style.color = '#39ff14';
-                btn.style.borderColor = '#39ff14';
-                btn.style.boxShadow = '0 0 10px rgba(57, 255, 20, 0.3)';
-                setTimeout(function () {
-                    btn.textContent = orig;
-                    btn.style.color = '';
-                    btn.style.borderColor = '';
-                    btn.style.boxShadow = '';
-                }, 2000);
-            }).catch(function () {
-                btn.textContent = 'FAILED';
-                btn.style.color = '#ff2d6b';
-                setTimeout(function () { btn.textContent = 'Copy'; btn.style.color = ''; }, 1500);
-            });
-        });
+    btn.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
     });
+  }
 
-    // ==================== Stats Counter Animation ====================
-    const statNums = document.querySelectorAll('.hero-stat .num');
-    let statsAnimated = false;
-
-    function animateStats() {
-        if (statsAnimated) return;
-        const h = document.querySelector('.hero');
-        if (!h) return;
-        const rect = h.getBoundingClientRect();
-        if (rect.bottom < 0) return;
-
-        statsAnimated = true;
-        statNums.forEach(function (el) {
-            const target = parseInt(el.getAttribute('data-target'), 10);
-            const duration = 1800;
-            const start = performance.now();
-
-            function tick(now) {
-                const elapsed = now - start;
-                const progress = Math.min(elapsed / duration, 1);
-                const eased = 1 - Math.pow(1 - progress, 4);
-                const current = Math.round(eased * target);
-                el.textContent = current;
-                if (progress < 1) {
-                    requestAnimationFrame(tick);
-                } else {
-                    el.textContent = target;
-                }
-            }
-            requestAnimationFrame(tick);
-        });
-    }
-
-    window.addEventListener('scroll', animateStats, { passive: true });
-    window.addEventListener('load', animateStats);
-
-    // ==================== Cyber Card Hover Glow ====================
-    document.querySelectorAll('.card, .pattern-card, .feature-list li').forEach(function (el) {
-        el.addEventListener('mousemove', function (e) {
-            const rect = el.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            el.style.setProperty('--mx', x + 'px');
-            el.style.setProperty('--my', y + 'px');
-        });
-    });
-
-    // ==================== Initial Glitch - Hero Title ====================
-    window.addEventListener('load', function () {
-        const heroTitle = document.querySelector('.hero h1 .gradient-text');
-        if (heroTitle) {
-            heroTitle.classList.add('glitch');
-            heroTitle.setAttribute('data-text', heroTitle.textContent);
-            // Remove glitch after initial effect
-            setTimeout(function () {
-                heroTitle.classList.remove('glitch');
-            }, 2500);
+  /* ============ 锚点滚动偏移 ============ */
+  function initAnchor() {
+    document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        const id = a.getAttribute("href").slice(1);
+        if (!id) return;
+        const el = document.getElementById(id);
+        if (el) {
+          e.preventDefault();
+          const y = el.getBoundingClientRect().top + window.scrollY - 20;
+          window.scrollTo({ top: y, behavior: "smooth" });
+          history.replaceState(null, "", "#" + id);
         }
+      });
     });
+  }
 
+  /* ============ 移动端侧边栏 ============ */
+  function initMobileSidebar() {
+    const toggle = document.getElementById("sidebar-toggle");
+    const sidebar = document.getElementById("sidebar");
+    if (toggle && sidebar) {
+      toggle.addEventListener("click", function () {
+        sidebar.classList.toggle("open");
+      });
+      document.addEventListener("click", function (e) {
+        if (sidebar.classList.contains("open") && !sidebar.contains(e.target) && !toggle.contains(e.target)) {
+          sidebar.classList.remove("open");
+        }
+      });
+    }
+  }
+
+  /* ============ 启动 ============ */
+  document.addEventListener("DOMContentLoaded", function () {
+    renderNav();
+    initParticles();
+    initProgress();
+    initCounters();
+    initReveal();
+    initFlow();
+    initTilt();
+    initTyping();
+    initCopy();
+    initBackTop();
+    initAnchor();
+    initMobileSidebar();
+  });
 })();

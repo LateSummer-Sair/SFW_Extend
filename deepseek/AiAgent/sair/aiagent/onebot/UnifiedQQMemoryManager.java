@@ -10,6 +10,7 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -97,6 +98,39 @@ public class UnifiedQQMemoryManager {
                     "  created_at INTEGER NOT NULL" +
                     ")"
                 );
+
+                // FTS5 全文索引（升级：替代 LIKE 搜索，支持 BM25 相关性排序）
+                stmt.execute(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(" +
+                    "  content," +
+                    "  content='memories'," +
+                    "  content_rowid='id'" +
+                    ")"
+                );
+
+                // 触发器（INSERT）
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS umft_ai AFTER INSERT ON memories BEGIN " +
+                    "  INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content); " +
+                    "END"
+                );
+
+                // 触发器（DELETE）
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS umft_ad AFTER DELETE ON memories BEGIN " +
+                    "  INSERT INTO memories_fts(memories_fts, rowid, content) " +
+                    "  VALUES ('delete', old.id, old.content); " +
+                    "END"
+                );
+
+                // 触发器（UPDATE）
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS umft_au AFTER UPDATE ON memories BEGIN " +
+                    "  INSERT INTO memories_fts(memories_fts, rowid, content) " +
+                    "  VALUES ('delete', old.id, old.content); " +
+                    "  INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content); " +
+                    "END"
+                );
                 
                 // 群聊完整历史表（持久化保存所有群消息）
                 stmt.execute(
@@ -108,6 +142,26 @@ public class UnifiedQQMemoryManager {
                     "  group_id INTEGER NOT NULL," +
                     "  created_at INTEGER NOT NULL" +
                     ")"
+                );
+                
+                // 群聊历史 FTS5 全文索引（支持跨群检索群聊内容）
+                stmt.execute(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS group_chat_history_fts USING fts5(" +
+                    "  content," +
+                    "  content='group_chat_history'," +
+                    "  content_rowid='id'" +
+                    ")"
+                );
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS umft_gch_ai AFTER INSERT ON group_chat_history BEGIN " +
+                    "  INSERT INTO group_chat_history_fts(rowid, content) VALUES (new.id, new.content); " +
+                    "END"
+                );
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS umft_gch_ad AFTER DELETE ON group_chat_history BEGIN " +
+                    "  INSERT INTO group_chat_history_fts(group_chat_history_fts, rowid, content) " +
+                    "  VALUES ('delete', old.id, old.content); " +
+                    "END"
                 );
                 
                 // 群昵称关联表（群号+昵称→QQ号映射）
@@ -249,27 +303,27 @@ public class UnifiedQQMemoryManager {
                 sql += " ORDER BY created_at ASC LIMIT ?";
                 params.add(limit);
                 
-                PreparedStatement ps = conn.prepareStatement(sql);
-                for (int i = 0; i < params.size(); i++) {
-                    if (params.get(i) instanceof String) {
-                        ps.setString(i + 1, (String) params.get(i));
-                    } else if (params.get(i) instanceof Long) {
-                        ps.setLong(i + 1, (Long) params.get(i));
-                    } else if (params.get(i) instanceof Integer) {
-                        ps.setInt(i + 1, (Integer) params.get(i));
+                try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                    for (int i = 0; i < params.size(); i++) {
+                        if (params.get(i) instanceof String) {
+                            ps.setString(i + 1, (String) params.get(i));
+                        } else if (params.get(i) instanceof Long) {
+                            ps.setLong(i + 1, (Long) params.get(i));
+                        } else if (params.get(i) instanceof Integer) {
+                            ps.setInt(i + 1, (Integer) params.get(i));
+                        }
                     }
-                }
-                
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        list.add(new String[] { 
-                            rs.getString(1),  // role
-                            rs.getString(2),  // content
-                            rs.getString(3),  // source_type
-                            String.valueOf(rs.getLong(4)),  // source_id
-                            rs.getString(5),  // sender_id
-                            rs.getString(6)   // sender_name
-                        });
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            list.add(new String[] { 
+                                rs.getString(1),  // role
+                                rs.getString(2),  // content
+                                rs.getString(3),  // source_type
+                                String.valueOf(rs.getLong(4)),  // source_id
+                                rs.getString(5),  // sender_id
+                                rs.getString(6)   // sender_name
+                            });
+                        }
                     }
                 }
             } catch (SQLException ignored) {}
@@ -328,24 +382,119 @@ public class UnifiedQQMemoryManager {
         return list;
     }
 
-    /** 搜索相关记忆 */
+    /** 搜索相关记忆（FTS5 全文搜索 + LIKE 回退） */
     public List<String> searchMemories(String query, int maxResults) {
         List<String> list = new ArrayList<>();
         if (query == null || query.trim().isEmpty()) return list;
         synchronized (lock) {
-            String pattern = "%" + query.trim() + "%";
+            // 优先 FTS5：清理特殊字符后执行全文搜索
+            String ftsQuery = query.trim()
+                .replaceAll("[*\"()\\-:]", " ")
+                .replaceAll("\\s+", " OR ")
+                .trim();
             try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT content FROM memories WHERE content LIKE ? ORDER BY created_at DESC LIMIT ?")) {
-                ps.setString(1, pattern);
+                    "SELECT m.content FROM memories_fts f " +
+                    "JOIN memories m ON f.rowid = m.id " +
+                    "WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?")) {
+                ps.setString(1, ftsQuery);
                 ps.setInt(2, maxResults);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
                         list.add(rs.getString(1));
                     }
                 }
-            } catch (SQLException ignored) {}
+            } catch (SQLException ftsErr) {
+                // FTS5 失败回退 LIKE
+                list.clear();
+                String pattern = "%" + query.trim() + "%";
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT content FROM memories WHERE content LIKE ? ORDER BY created_at DESC LIMIT ?")) {
+                    ps.setString(1, pattern);
+                    ps.setInt(2, maxResults);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            list.add(rs.getString(1));
+                        }
+                    }
+                } catch (SQLException ignored) {}
+            }
         }
         return list;
+    }
+
+    /** 跨群全文检索群聊历史（返回 "[群X] 昵称: 内容" 格式化结果，用于群与群之间的记忆共享） */
+    public List<String> searchGroupChatHistory(String query, int maxResults) {
+        List<String> list = new ArrayList<>();
+        if (query == null || query.trim().isEmpty()) return list;
+        String q = query.trim();
+        synchronized (lock) {
+            LinkedHashSet<String> matched = new LinkedHashSet<>();
+            // 1. FTS5 全文检索（英文/空格分词）
+            String ftsQuery = q.replaceAll("[*\"()\\-:]", " ")
+                    .replaceAll("\\s+", " OR ").trim();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT gch.nickname, gch.group_id, gch.content FROM group_chat_history_fts f " +
+                    "JOIN group_chat_history gch ON f.rowid = gch.id " +
+                    "WHERE group_chat_history_fts MATCH ? ORDER BY rank LIMIT ?")) {
+                ps.setString(1, ftsQuery);
+                ps.setInt(2, maxResults);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next() && matched.size() < maxResults) {
+                        matched.add(formatHistoryHit(rs));
+                    }
+                }
+            } catch (SQLException ignored) {}
+            // 2. 中文 N-gram 子串匹配（覆盖无空格中文长句的关键词召回，单次 SQL）
+            if (matched.size() < maxResults) {
+                List<String> grams = extractNGrams(q);
+                if (!grams.isEmpty()) {
+                    StringBuilder where = new StringBuilder("content LIKE ?");
+                    for (int i = 1; i < grams.size(); i++) where.append(" OR content LIKE ?");
+                    try (PreparedStatement ps = conn.prepareStatement(
+                            "SELECT nickname, group_id, content FROM group_chat_history WHERE " +
+                            where + " ORDER BY created_at DESC LIMIT ?")) {
+                        for (int i = 0; i < grams.size(); i++) ps.setString(i + 1, "%" + grams.get(i) + "%");
+                        ps.setInt(grams.size() + 1, maxResults);
+                        try (ResultSet rs = ps.executeQuery()) {
+                            while (rs.next() && matched.size() < maxResults) {
+                                matched.add(formatHistoryHit(rs));
+                            }
+                        }
+                    } catch (SQLException ignored) {}
+                }
+            }
+            list.addAll(matched);
+        }
+        return list;
+    }
+
+    /** 将历史命中行格式化为 "[群X] 昵称: 内容"（截断内容长度） */
+    private String formatHistoryHit(ResultSet rs) throws SQLException {
+        String nick = rs.getString(1);
+        long groupId = rs.getLong(2);
+        String content = rs.getString(3);
+        if (content == null) content = "";
+        if (content.length() > 160) content = content.substring(0, 160) + "...";
+        return "[群" + groupId + "] " + (nick != null && !nick.isEmpty() ? nick : "某人") + ": " + content;
+    }
+
+    /** 提取中文 N-gram（2-gram 与 3-gram），用于无空格中文长句的关键词召回 */
+    private List<String> extractNGrams(String text) {
+        LinkedHashSet<String> grams = new LinkedHashSet<>();
+        if (text == null) return new ArrayList<>();
+        String t = text.replaceAll("[\\s\\p{Punct}]+", "");
+        for (int n = 2; n <= 3; n++) {
+            for (int i = 0; i + n <= t.length(); i++) {
+                grams.add(t.substring(i, i + n));
+            }
+        }
+        List<String> result = new ArrayList<>(grams);
+        // 限制数量（最多 16 个），避免 SQL 过长
+        int limit = Math.min(result.size(), 16);
+        if (result.size() > limit) {
+            result = new ArrayList<>(result.subList(result.size() - limit, result.size()));
+        }
+        return result;
     }
 
     // ==================== 群聊历史记录（持久化） ====================
@@ -574,5 +723,61 @@ public class UnifiedQQMemoryManager {
     /** 获取缓存的群名（无缓存返回 null） */
     public String getGroupName(long groupId) {
         return getState("group_name_" + groupId);
+    }
+
+    /** 获取所有已知群（群号→群名），从 app_state 表 group_name_ 前缀查询。 */
+    public Map<Long, String> getAllKnownGroups() {
+        Map<Long, String> result = new LinkedHashMap<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT key, value FROM app_state WHERE key LIKE 'group_name_%'")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String key = rs.getString(1);
+                        String name = rs.getString(2);
+                        if (key == null || key.length() <= "group_name_".length()) continue;
+                        String idStr = key.substring("group_name_".length());
+                        try {
+                            result.put(Long.parseLong(idStr), name);
+                        } catch (NumberFormatException ignored) {}
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return result;
+    }
+
+    /** 缓存好友昵称（备注优先） */
+    public void setFriendName(long userId, String name) {
+        if (name != null && !name.trim().isEmpty()) {
+            setState("friend_name_" + userId, name.trim());
+        }
+    }
+
+    /** 获取缓存的好友昵称（无缓存返回 null） */
+    public String getFriendName(long userId) {
+        return getState("friend_name_" + userId);
+    }
+
+    /** 获取所有已知好友（QQ号→昵称），从 app_state 表 friend_name_ 前缀查询。 */
+    public Map<Long, String> getAllKnownFriends() {
+        Map<Long, String> result = new LinkedHashMap<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT key, value FROM app_state WHERE key LIKE 'friend_name_%'")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String key = rs.getString(1);
+                        String name = rs.getString(2);
+                        if (key == null || key.length() <= "friend_name_".length()) continue;
+                        String idStr = key.substring("friend_name_".length());
+                        try {
+                            result.put(Long.parseLong(idStr), name);
+                        } catch (NumberFormatException ignored) {}
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return result;
     }
 }

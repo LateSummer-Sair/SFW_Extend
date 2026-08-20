@@ -128,8 +128,11 @@ public class ImageRenderer {
         }
         
         // 写入文件
-        outputFile.getParentFile().mkdirs();
-        ImageIO.write(image, "png", outputFile);
+        java.io.File parent = outputFile.getParentFile();
+        if (parent != null) parent.mkdirs();
+        if (!ImageIO.write(image, "png", outputFile)) {
+            throw new IOException("Failed to write PNG: " + outputFile.getAbsolutePath());
+        }
         return outputFile;
     }
 
@@ -216,8 +219,11 @@ public class ImageRenderer {
             g2d.dispose();
         }
         
-        outputFile.getParentFile().mkdirs();
-        ImageIO.write(image, "png", outputFile);
+        java.io.File parent = outputFile.getParentFile();
+        if (parent != null) parent.mkdirs();
+        if (!ImageIO.write(image, "png", outputFile)) {
+            throw new IOException("Failed to write PNG: " + outputFile.getAbsolutePath());
+        }
         return outputFile;
     }
 

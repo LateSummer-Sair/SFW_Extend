@@ -5,6 +5,7 @@ import sair.sys.SairCons;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -15,6 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class CommandHandler {
 
     private static final int MAX_HISTORY = 500;
+    private static final long COMMAND_TIMEOUT_MS = 60000; // 60 秒超时
 
     private final List<String> commandHistory = Collections.synchronizedList(new ArrayList<String>());
     private final SfwConsoleCapture consoleCapture;
@@ -34,8 +36,8 @@ public class CommandHandler {
             return new CommandResult(false, "Empty command");
         }
 
-        command = command.trim();
-        addHistory(command);
+        final String cmd = command.trim();
+        addHistory(cmd);
 
         if (isExecuting.get()) {
             return new CommandResult(false, "Another command is already executing");
@@ -43,10 +45,22 @@ public class CommandHandler {
 
         isExecuting.set(true);
         try {
-            // 通过 SFW 的 runner 执行命令
-            Object result = SairCons.runner(true, command);
-
-            return new CommandResult(true, result != null ? result.toString() : "OK");
+            // 使用 Future + 超时防止命令永久挂起
+            ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "SFW_WEB_CmdExec");
+                t.setDaemon(true);
+                return t;
+            });
+            try {
+                Future<Object> future = executor.submit(() ->
+                    SairCons.runner(true, cmd));
+                Object result = future.get(COMMAND_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                return new CommandResult(true, result != null ? result.toString() : "OK");
+            } catch (TimeoutException e) {
+                return new CommandResult(false, "Command timed out after " + (COMMAND_TIMEOUT_MS / 1000) + "s");
+            } finally {
+                executor.shutdownNow();
+            }
         } catch (Exception e) {
             return new CommandResult(false, "Execution error: " + e.getMessage());
         } finally {

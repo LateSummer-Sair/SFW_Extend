@@ -26,5 +26,6 @@
 	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/bootlib/sqlite-jdbc-3.42.0.0.jar"/>
 	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/SaComS.jar"/>
 	<classpathentry kind="lib" path="E:/SairFrameWork/SFW.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/jsoup-1.18.3.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

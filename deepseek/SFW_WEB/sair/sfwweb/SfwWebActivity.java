@@ -6,6 +6,8 @@ import sair.sys.SairCons;
 import sair.user.Activity;
 import sair.sfwweb.core.*;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * SFW Web v1.0 — Web 远程控制台插件
  * 默认 HTTP，用户提供 PEM 证书+私钥后可通过 setcert/setkey + togglehttps 启用 HTTPS。
@@ -19,25 +21,31 @@ public class SfwWebActivity extends Activity {
     private WebServer webServer;
 
     private volatile boolean initialized = false;
+    private final AtomicBoolean initLock = new AtomicBoolean(false);
 
     public SfwWebActivity() {
         config = ConfigManager.getInstance();
         passwordManager = new PasswordManager(config);
         consoleCapture = new SfwConsoleCapture();
         commandHandler = new CommandHandler(consoleCapture);
-        webServer = new WebServer(config, passwordManager, commandHandler, consoleCapture);
+        // sessionManager 在 main() 中通过 setSessionManager 设置后，webServer 才能安全调用
+        webServer = new WebServer(config, passwordManager, commandHandler, consoleCapture, null);
     }
 
     // ==================== Activity 生命周期 ====================
 
     @Override
     public Object main(String funcName, String args) {
-        if (!initialized) {
+        if (initLock.compareAndSet(false, true)) {
             String dataDir = getDataDir();
             config.init(dataDir);
             consoleCapture.init(config.getMaxOutputLines());
+            // sessionManager 必须在 webServer.start() 之前设置，避免 NPE
+            webServer.setSessionManager(new SessionManager(new java.io.File(dataDir)));
 
             initialized = true;
+
+            // 不需要 initLock.set(true)，因为 compareAndSet 已原子设置
 
             String webRoot = config.getWebRoot();
             SairCons.println(FCM.EXECTION_help_Color,

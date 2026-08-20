@@ -3,6 +3,9 @@ package sair.sfwweb.core;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.Properties;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * SFW Web 配置管理器
@@ -24,17 +27,32 @@ public class ConfigManager {
     private File configFile;
     private String dataDir;
 
-    private static ConfigManager instance;
+    private static final ConfigManager instance = new ConfigManager();
 
     public static ConfigManager getInstance() {
-        if (instance == null)
-            instance = new ConfigManager();
         return instance;
     }
+
+    private volatile boolean savePending = false;
+    private final ScheduledExecutorService saveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "SFW_WEB_ConfigSaver");
+        t.setDaemon(true);
+        return t;
+    });
 
     private ConfigManager() {
         props = new Properties();
         setDefaults();
+    }
+
+    /** 延迟保存：500ms 内多次调用只写一次磁盘 */
+    private void saveDeferred() {
+        if (savePending) return;
+        savePending = true;
+        saveExecutor.schedule(() -> {
+            savePending = false;
+            save();
+        }, 500, TimeUnit.MILLISECONDS);
     }
 
     private void setDefaults() {
@@ -152,20 +170,20 @@ public class ConfigManager {
 
     // ==================== Setters ====================
 
-    public void setPort(int port) { props.setProperty("port", String.valueOf(port)); save(); }
-    public void setHttpsEnabled(boolean enabled) { props.setProperty("https.enabled", String.valueOf(enabled)); save(); }
-    public void setCertFile(String path) { props.setProperty("cert.file", path != null ? path : ""); save(); }
-    public void setKeyFile(String path) { props.setProperty("key.file", path != null ? path : ""); save(); }
-    public void setWebRoot(String root) { props.setProperty("web.root", root != null ? root : ""); save(); }
-    public void setPasswordHash(String hash) { props.setProperty("password.hash", hash); save(); }
-    public void setPasswordSalt(String salt) { props.setProperty("password.salt", salt); save(); }
-    public void setBgColor(String color) { props.setProperty("theme.bg_color", color); save(); }
-    public void setFontColor(String color) { props.setProperty("theme.font_color", color); save(); }
-    public void setBorderColor(String color) { props.setProperty("theme.border_color", color); save(); }
-    public void setAccentColor(String color) { props.setProperty("theme.accent_color", color); save(); }
-    public void setFontFamily(String family) { props.setProperty("theme.font_family", family); save(); }
-    public void setFontSize(int size) { props.setProperty("theme.font_size", String.valueOf(size)); save(); }
-    public void setBackgroundOpacity(double opacity) { props.setProperty("theme.background_opacity", String.valueOf(opacity)); save(); }
-    public void setSessionTimeoutMinutes(int minutes) { props.setProperty("session.timeout_minutes", String.valueOf(minutes)); save(); }
-    public void setMaxOutputLines(int lines) { props.setProperty("max_output_lines", String.valueOf(lines)); save(); }
+    public void setPort(int port) { props.setProperty("port", String.valueOf(port)); saveDeferred(); }
+    public void setHttpsEnabled(boolean enabled) { props.setProperty("https.enabled", String.valueOf(enabled)); saveDeferred(); }
+    public void setCertFile(String path) { props.setProperty("cert.file", path != null ? path : ""); saveDeferred(); }
+    public void setKeyFile(String path) { props.setProperty("key.file", path != null ? path : ""); saveDeferred(); }
+    public void setWebRoot(String root) { props.setProperty("web.root", root != null ? root : ""); saveDeferred(); }
+    public void setPasswordHash(String hash) { props.setProperty("password.hash", hash); saveDeferred(); }
+    public void setPasswordSalt(String salt) { props.setProperty("password.salt", salt); saveDeferred(); }
+    public void setBgColor(String color) { props.setProperty("theme.bg_color", color); saveDeferred(); }
+    public void setFontColor(String color) { props.setProperty("theme.font_color", color); saveDeferred(); }
+    public void setBorderColor(String color) { props.setProperty("theme.border_color", color); saveDeferred(); }
+    public void setAccentColor(String color) { props.setProperty("theme.accent_color", color); saveDeferred(); }
+    public void setFontFamily(String family) { props.setProperty("theme.font_family", family); saveDeferred(); }
+    public void setFontSize(int size) { props.setProperty("theme.font_size", String.valueOf(size)); saveDeferred(); }
+    public void setBackgroundOpacity(double opacity) { props.setProperty("theme.background_opacity", String.valueOf(opacity)); saveDeferred(); }
+    public void setSessionTimeoutMinutes(int minutes) { props.setProperty("session.timeout_minutes", String.valueOf(minutes)); saveDeferred(); }
+    public void setMaxOutputLines(int lines) { props.setProperty("max_output_lines", String.valueOf(lines)); saveDeferred(); }
 }

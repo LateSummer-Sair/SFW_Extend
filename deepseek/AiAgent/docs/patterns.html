@@ -1,270 +1,159 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>设计模式 — AiAgent 技术文档</title>
-    <link rel="stylesheet" href="css/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>设计模式 — AiAgent 技术文档</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <canvas id="particles-canvas"></canvas>
 
-    <!-- Sidebar Navigation -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-logo">
-            <div class="icon">⚡</div>
-            <span class="logo-text">AiAgent</span>
+  <canvas id="bg-canvas"></canvas>
+  <div class="aurora"><span></span><span></span><span></span></div>
+  <div class="progress-bar"></div>
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航"><span></span><span></span><span></span></button>
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <header class="page-hero">
+      <div class="container">
+        <div class="crumb"><a href="index.html">Home</a> / 设计模式</div>
+        <h1>设计<span class="gradient-text">模式</span></h1>
+        <p class="lead">
+          项目运用 16 种设计模式贯穿架构：单例、门面、策略、观察者、工厂、命令、模板方法、
+          桥接、门控、状态机、建造者、生产者消费者、守护线程、降级模式、多智能体编排、线程池模式。
+        </p>
+      </div>
+    </header>
+
+    <div class="container">
+
+      <section class="section" id="list">
+        <div class="section-head reveal">
+          <div class="section-tag">Patterns</div>
+          <h2>设计模式清单</h2>
         </div>
-        <nav class="sidebar-nav">
-                <a href="index.html">概述</a>
-                <a href="architecture.html">架构</a>
-                <a href="patterns.html" class="active">设计模式</a>
-                <a href="classes.html">类结构</a>
-                <a href="commands.html">命令</a>
-                <a href="feedback.html">反馈</a>
-        </nav>
-        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航菜单">
-            <span></span><span></span><span></span>
-        </button>
-    </aside>
-
-    <section style="padding-top:140px; padding-bottom:40px;">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Design Patterns</div>
-                <h2>设计模式</h2>
-                <div class="section-divider"></div>
-                <p>代码严格遵循标准设计模式，确保高内聚、低耦合、可扩展。共 11 种设计模式（v2.6 新增 CronScheduler 观察者/调度模式，v2.5 策略模式扩展支持合并转发消息构建 + 表情包语境匹配）。</p>
-            </div>
+        <div class="card-grid cols-2 reveal">
+          <div class="card"><div class="card-icon ic-cyan">1️⃣</div><h3>单例模式 Singleton</h3><p>AiConfig / PromptManager / SkillBank / StreamPrinter / OcrManager / RedisClient / FileServer 全局唯一实例。</p></div>
+          <div class="card"><div class="card-icon ic-purple">2️⃣</div><h3>门面模式 Facade</h3><p>PersistenceManager 统一管理 8+ 张表，OcrManager 门面封装 OcrEngine，MemoryManager 封装记忆 CRUD。</p></div>
+          <div class="card"><div class="card-icon ic-magenta">3️⃣</div><h3>策略模式 Strategy</h3><p>DeepSeekClient chatStream/chatSync/chatSyncWithTools 三种策略 + model=auto 智能路由（pro/flash）。</p></div>
+          <div class="card"><div class="card-icon ic-amber">4️⃣</div><h3>观察者模式 Observer</h3><p>WatchService 文件监听：ThirdPartySkillStore / AgentSkillStore 监听技能目录变化自动重载。</p></div>
+          <div class="card"><div class="card-icon ic-green">5️⃣</div><h3>工厂模式 Factory</h3><p>ToolDispatcher buildAllTools/buildExecqTools/buildExecsTools 三套工具工厂 + tp_ 动态工具注册。</p></div>
+          <div class="card"><div class="card-icon ic-blue">6️⃣</div><h3>命令模式 Command</h3><p>ActivityActions.route() 路由 52 个命令到 handle* 方法，命令与执行解耦。</p></div>
+          <div class="card"><div class="card-icon ic-cyan">7️⃣</div><h3>模板方法模式 Template Method</h3><p>AgentExecutor executeFcLocal/executeFcExecq/executeFcExecs 共享 buildSystemPrompt + FC 循环模板。</p></div>
+          <div class="card"><div class="card-icon ic-purple">8️⃣</div><h3>桥接模式 Bridge</h3><p>QQAgentBridge / FunctionCallingBridge 桥接 QQ 通道与 Agent 引擎。</p></div>
+          <div class="card"><div class="card-icon ic-magenta">9️⃣</div><h3>门控模式 Gate</h3><p>ConfirmationGate CountDownLatch 同步阻塞 + 60s 超时 + 引用计数 bypass。</p></div>
+          <div class="card"><div class="card-icon ic-amber">🔟</div><h3>状态机模式 State Machine</h3><p>EmotionManager / EmotionStateManager 情绪状态机，情绪阈值触发状态迁移。</p></div>
+          <div class="card"><div class="card-icon ic-green">1️⃣1️⃣</div><h3>建造者模式 Builder</h3><p>ToolDefinition addString/addOptionalString/addProperty 链式构建 JSON Schema。</p></div>
+          <div class="card"><div class="card-icon ic-blue">1️⃣2️⃣</div><h3>生产者消费者模式</h3><p>StreamPrinter LinkedBlockingQueue FIFO 队列，生产者 offer + 消费者逐字打印。</p></div>
+          <div class="card"><div class="card-icon ic-cyan">1️⃣3️⃣</div><h3>守护线程模式 Daemon</h3><p>AutoDistill（5min）/ MemoryLifecycleManager（30min）/ AutoClear（3min）/ CronScheduler。</p></div>
+          <div class="card"><div class="card-icon ic-purple">1️⃣4️⃣</div><h3>降级模式 Fallback</h3><p>FunctionCallingBridge eval 兜底 + Redis 旁路降级 + WebSocket 文件回退本地路径。</p></div>
+          <div class="card"><div class="card-icon ic-cyan">1️⃣5️⃣</div><h3>多智能体编排 Orchestrator</h3><p>AgentOrchestrator 流水线 / 扇出扇入 / 专家池三种模式，任务分解 + 子代理执行 + 结果聚合。</p></div>
+          <div class="card"><div class="card-icon ic-amber">1️⃣6️⃣</div><h3>线程池模式 Thread Pool</h3><p>ThreadManager 统一命名线程池 + OneBot 连接池 + FC 多工具并发 + execPool 可配置背压 + 工具超时。</p></div>
         </div>
-    </section>
+      </section>
 
-    <section style="padding-top:10px;">
-        <div class="container">
-
-            <!-- Facade -->
-            <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge cyan">Repository</span>
-                    <h4>Repository 持久化模式</h4>
-                </div>
-                <div class="p-class">PersistenceManager</div>
-                <p>
-                    PersistenceManager 作为 Repository 层统一管理 SQLite 数据库，MemoryManager / JournalManager /
-                    ConversationHistory / EmotionManager 均作为 Facade 委托给它。<br>
-                    5 张表 + FTS5 全文索引 + WAL 模式，替代 5 个独立 JSON 文件。
-                    所有写操作在 <code>synchronized(lock)</code> 下执行，保证多线程安全。
-                </p>
-            </div>
-
-            <!-- Facade -->
-            <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge cyan">Facade</span>
-                    <h4>门面模式</h4>
-                </div>
-                <div class="p-class">AiAgentActivity · MemoryManager · JournalManager</div>
-                <p>
-                    <b>三重门面：</b><br><br>
-                    <b>AiAgentActivity</b> — 作为 SFW 插件唯一入口，仅负责命令路由（<code>main()</code> 方法中 switch 分发）。
-                    所有业务逻辑委托给 <code>ActivityActions</code>、<code>AiConfig</code>、<code>DeepSeekClient</code> 等核心类处理。<br><br>
-                    <b>MemoryManager</b> — 记忆操作门面，内部委托 PersistenceManager 的 FTS5 全文搜索 + CRUD。<br><br>
-                    <b>JournalManager</b> — 日志操作门面，内部委托 PersistenceManager 的 journal 表操作。<br><br>
-                    调用者无需了解底层 SQLite 实现细节，只需调用 Facade 提供的简单接口。
-                </p>
-            </div>
-
-            <!-- Singleton -->
-            <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge purple">Singleton</span>
-                    <h4>单例模式</h4>
-                </div>
-                <div class="p-class">AiConfig · StreamPrinter</div>
-                <p>
-                    <b>双组件单例，各自独立：</b><br><br>
-                    <b>AiConfig</b> — 全局唯一配置实例，<b>双重检查锁定（DCL）</b>保证线程安全。
-                    管理 API Key、URL、Model、System Prompt 的读写与 Properties 文件持久化。
-                    API Key 使用 <b>AES 加密</b>存储，防止明文泄露。<br><br>
-                    <b>StreamPrinter</b> — 全局唯一流式输出实例，通过 <code>getInstance()</code> 获取。
-                    内部 daemon 线程在首次实例化时启动，永续运行。所有 Chat/Agent 模式
-                    共享同一 FIFO 队列，<b>无竞态覆盖风险</b>。
-                </p>
-            </div>
-
-            <!-- Producer-Consumer -->
-            <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge green">Producer-Consumer</span>
-                    <h4>生产者-消费者模式</h4>
-                </div>
-                <div class="p-class">StreamPrinter</div>
-                <p>
-                    API 线程（生产者）将输出通过 <code>offer(char)</code> 或 <code>offerLine()</code>
-                    写入 <code>LinkedBlockingQueue&lt;Item&gt;</code>，
-                    独立 daemon 线程（消费者）从队列取出并以 10ms 间隔逐字输出到控制台。<br>
-                    <code>start()</code> 先全速排空旧队列再启动新流；<b>行输出</b>（系统消息）无延迟直出，
-                    <b>字符输出</b>（AI 流式）10ms 延迟打字机效果。<br>
-                    队列容量无上限，确保高吞吐下不丢字符。
-                </p>
-            </div>
-
-            <!-- Strategy -->
-            <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge cyan">Strategy</span>
-                    <h4>策略模式</h4>
-                </div>
-                <div class="p-class">DeepSeekClient</div>
-                <p>
-                    封装两种 API 调用策略：<code>chatStream()</code>（SSE 流式 + StreamPrinter 逐字输出）
-                    和 <code>chatSync()</code>（标准 JSON 响应 + 完整解析）。
-                    Chat 与 Agent 模式均默认使用流式策略，打字机效果输出。
-                    <b>v2.3 多模态扩展</b>：<code>buildRequestBody()</code> 智能分发 —— 当 ChatMessage.hasImages() 时自动切换为 Vision API content 数组格式
-                    [{type:"text",...},{type:"image_url",...}]，纯文本消息沿用传统 JSON 格式。<br>
-                    <b>v2.6 模型路由扩展</b>：AiConfig 新增 <code>getExecqModel()</code> / <code>getAgentModel()</code> 智能路由方法，model=auto 时 Chat/Execq 走 flash（轻量快速）、Agent 走 pro（深度推理），非 auto 模式全通道统一严格遵守配置值，每次路由输出日志提示。
-                    <b>v2.5 合并转发扩展</b>：NapCatApi 新增 <code>sendGroupForwardMsg()</code> / <code>sendPrivateForwardMsg()</code> 两种合并转发策略，
-                    OneBotServer <code>sendApiCall()</code> 通过 Gson 序列化支持 List/Map 复杂嵌套参数。QQMessageHandler
-                    <code>sendThinkingAsForward()</code> 按 [第N轮思考] 构建 OneBot v11 forward nodes 数组，失败自动回退纯文本。
-                </p>
-            </div>
-
-            <!-- ReAct -->
-            <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge amber">ReAct</span>
-                    <h4>ReAct 模式（推理-行动循环）</h4>
-                </div>
-                <div class="p-class">AgentExecutor</div>
-                <p>
-                    推理-行动循环：AI 分析任务 → 通过 XML 标签发出指令 → 框架执行并捕获结果 → AI 根据反馈决定下一步。
-                    最多 30 轮循环（execq 上限 50 轮），每轮均为流式输出。支持 <b>20 种 XML 操作标签</b>：<br>
-                    <code>&lt;cmd&gt;</code>、<code>&lt;readfile&gt;</code>、<code>&lt;readdir&gt;</code>、
-                    <code>&lt;sys&gt;</code>、<code>&lt;evaljs&gt;</code>、<code>&lt;eval&gt;</code>、
-                    <code>&lt;web&gt;</code>、<code>&lt;remember&gt;</code>、<code>&lt;download&gt;</code>、
-                    <code>&lt;superise&gt;</code>、<code>&lt;editprompt&gt;</code>、<code>&lt;stop&gt;</code>、
-                    <code>&lt;schedule&gt;</code>（v2.6 定时任务）、<code>&lt;note&gt;</code>（v2.6 知识笔记）、
-                    <code>&lt;searchnote&gt;</code>（v2.6 全文检索）、<code>&lt;batchrename&gt;</code>（v2.6 批量重命名）、
-                    <code>&lt;batchconvert&gt;</code>（v2.6 批量编码转换）。<br>
-                    安全模式（ai/exec）下 <code>&lt;cmd&gt;</code> <code>&lt;sys&gt;</code> <code>&lt;readfile&gt;</code>
-                    <code>&lt;readdir&gt;</code> <code>&lt;evaljs&gt;</code> <code>&lt;eval&gt;</code>
-                    <code>&lt;web&gt;</code> <code>&lt;download&gt;</code> 需 ConfirmationGate 确认；<br>
-                    <code>&lt;remember&gt;</code> <code>&lt;superise&gt;</code> <code>&lt;editprompt&gt;</code>
-                    <code>&lt;stop&gt;</code> 为内部/自我表达操作，无需确认。自由模式（ai/execs）自动允许所有。<br><br>
-                    <b>&lt;stop&gt; 标签</b>（v2.0 新增）：三通道覆盖 — QQ 消息直接检测 + execq AI 输出 + 控制台 TAG_PATTERN，
-                    调用 <code>executeStop()</code> → <code>markStopped()</code> 立即中断 Agent 执行。
-                </p>
-            </div>
-
-            <!-- Confirmation Gate -->
-            <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge amber">Gatekeeper</span>
-                    <h4>确认门控模式</h4>
-                </div>
-                <div class="p-class">ConfirmationGate</div>
-                <p>
-                    统一高危操作确认机制。内部使用 <code>CountDownLatch(1)</code> 实现同步等待。
-                    Agent 线程调用 <code>await(type, desc)</code> 阻塞等待 → 用户通过
-                    <code>ai/yes</code> / <code>ai/no</code> 触发 <code>confirm(boolean)</code> →
-                    latch 释放，Agent 继续或跳过。支持 <b>60 秒超时自动拒绝</b>。
-                    <code>setBypassConfirm(true)</code>（execs 模式）跳过所有等待，直接返回 true。
-                    所有状态赋值在 <code>synchronized</code> 块内完成，保证线程安全。
-                </p>
-            </div>
-
-            <!-- EDT-Safe Wrapper -->
-            <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge purple">Thread-Safe</span>
-                    <h4>EDT 安全路由模式</h4>
-                </div>
-                <div class="p-class">EdtUtils</div>
-                <p>
-                    SFW 控制台基于 Swing JTextPane，仅 EDT 线程可安全写入。
-                    EdtUtils 作为统一的输出路由层，所有 <code>println()</code> / <code>print()</code>
-                    方法内部路由到单例 <code>StreamPrinter.getInstance()</code>，
-                    通过 <code>offerLine()</code> / <code>offer(char)</code> 将内容送入 FIFO 队列，
-                    由守护线程统一输出到 SFW 控制台。替代此前四处重复的 <code>invokeAndWait</code> 代码，
-                    统一管理、消除竞态。
-                </p>
-            </div>
-
-            <!-- CronScheduler Observer -->
-            <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge green">Scheduler</span>
-                    <h4>CronScheduler 定时调度模式（v2.6）</h4>
-                </div>
-                <div class="p-class">CronScheduler</div>
-                <p>
-                    基于 <code>ScheduledExecutorService</code> 的定时任务调度引擎。AI 通过 <code>&lt;schedule&gt;</code> 标签管理任务生命周期（add/list/delete/enable/disable）。<br>
-                    每个任务绑定 cron 表达式（6 段式：秒 分 时 日 月 周），持久化到 SQLite cron_jobs 表，服务重启自动恢复。<br>
-                    CronScheduler 在 AiAgentActivity.init() 中实例化并注入 AgentExecutor，任务触发时走完整 Agent 执行链路。
-                </p>
-            </div>
-
-            <!-- Emotion State Machine -->
-            <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge rose">Companion</span>
-                    <h4>情绪状态机 + 陪伴系统模式</h4>
-                </div>
-                <div class="p-class">EmotionManager · SurpriseWindow</div>
-                <p>
-                    AI 具备类人的情绪系统，影响其行为表现：<br><br>
-                    <b>情绪检测</b> — 用户消息与关键词词典匹配，识别辱骂（-20 happiness）、夸赞（+15）、安慰（+25）。<br>
-                    <b>操作反馈</b> — 每次 Agent 操作成功/失败自动调整 happiness（成功 +3，失败 -8）。<br>
-                    <b>暂停机制</b> — happiness ≤ -30 或连续 3 次失败触发 Agent 暂停，等待用户安慰或指导。超时 120 秒自动恢复。<br>
-                    <b>彩蛋系统</b> — happiness ≥ 95 且连续被夸 2 次触发彩蛋弹窗（SurpriseWindow），
-                    触发后消耗 happiness → 60 防止频繁触发（v2.0 阈值从 80 提升至 95）。
-                    支持撒娇模式（粉色）和惊喜模式（橘色），3-8 秒自动关闭。<br>
-                    <b>提示词自我进化</b> — AI 可通过 <code>&lt;editprompt&gt;</code> 标签修改自身 system prompt，
-                    实现性格的逐步演化。<br>
-                    <b>持久化</b> — 情绪状态保存到 <code>app_state("emotion")</code>（SQLite），重启后恢复。暂停状态重启后自动重置。
-                </p>
-            </div>
-
-            <!-- Anti-Abuse Chain -->
-            <div class="pattern-card reveal">
-                <div class="p-header">
-                    <span class="p-badge amber">Chain</span>
-                    <h4>反滥用责任链模式</h4>
-                </div>
-                <div class="p-class">QQMessageHandler</div>
-                <p>
-                    v2.0 新增，好友/群邀请处理中的多层防护机制：<br><br>
-                    <b>好友申请验证</b>：无验证消息 → 拒绝；有验证消息 → 接受 + 记录时间戳。<br>
-                    <b>5分钟反滥用窗口</b>：好友通过后 5 分钟内发起群邀请 → 立即拒绝 + 发送警告 "请不要厚着脸皮拉我进群"。<br>
-                    通过 <code>ConcurrentHashMap&lt;Long, Long&gt; friendAcceptTimestamps</code> 跟踪时间戳，
-                    异步任务在 5 分钟后自动清理过期记录。<br>
-                    <b>7步群邀请决策链</b>：①主人无条件接受 → ②反滥用检测 → ③好感度查询 → 
-                    ④背叛者拒绝 → ⑤ &gt;600 接受 → ⑥ 200-600 忽略 → ⑦ ≤200 拒绝。<br>
-                    每个步骤都是独立判断节点，任一命中即终止链，后续步骤不再执行。<br>
-                    <b>并发安全</b>：<code>ConcurrentHashMap</code> + <code>synchronized</code> 块保护决策过程，
-                    防止同一用户的多个邀请并发竞争。<br>
-                    <b>v2.5 表情包自动管理扩展</b>：QQMessageHandler 集成 StickerManager，聊天中图片消息自动调用
-                    <code>stickerManager.collectSticker()</code> 收集到 SQLite 表情库，AI 回复末尾自动
-                    <code>stickerManager.findMatchingSticker()</code> 根据语境关键词匹配发送表情包。
-                </p>
-            </div>
+      <section class="section" id="fc-flow">
+        <div class="section-head reveal">
+          <div class="section-tag">Strategy + Fallback</div>
+          <h2>策略 + 降级联合模式</h2>
+          <p class="desc">FunctionCallingBridge 的兜底机制：常规失败 5 次 → eval 兜底 → 再失败 5 次 → 告知原因。</p>
         </div>
-    </section>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">工具调用</span><span class="fn-sub">常规工具执行</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node decision"><span class="fn-title">连续失败 >= 5？</span><span class="fn-sub">常规路径</span></div>
+            <div class="flow-branch">
+              <div>
+                <div class="flow-branch-label">否</div>
+                <div class="flow-node core"><span class="fn-title">继续常规</span><span class="fn-sub">成功归零计数</span></div>
+              </div>
+              <div>
+                <div class="flow-branch-label">是</div>
+                <div class="flow-node core"><span class="fn-title">切换 eval 兜底</span><span class="fn-sub">动态 Java 注入</span></div>
+              </div>
+            </div>
+            <div class="flow-edge"></div>
+            <div class="flow-node decision"><span class="fn-title">兜底再失败 >= 5？</span><span class="fn-sub">execq 不越权</span></div>
+            <div class="flow-branch">
+              <div>
+                <div class="flow-branch-label">否</div>
+                <div class="flow-node core"><span class="fn-title">继续兜底</span><span class="fn-sub">重试</span></div>
+              </div>
+              <div>
+                <div class="flow-branch-label">是</div>
+                <div class="flow-node end"><span class="fn-title">异常终止</span><span class="fn-sub">告知原因</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="flow-caption">降级兜底策略</div>
+        </div>
+      </section>
+
+      <section class="section" id="state-flow">
+        <div class="section-head reveal">
+          <div class="section-tag">State Machine</div>
+          <h2>情绪状态机</h2>
+          <p class="desc">情绪词典驱动状态迁移：被夸开心 / 被骂难过 / 连续失败撒娇暂停。</p>
+        </div>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">用户消息</span><span class="fn-sub">detectEmotion()</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node core"><span class="fn-title">情绪词匹配</span><span class="fn-sub">辱骂 -20 / 夸赞 +15 / 安慰 +25</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node decision"><span class="fn-title">状态判定</span><span class="fn-sub">happiness 阈值</span></div>
+            <div class="flow-branch">
+              <div>
+                <div class="flow-branch-label">≤-30 或连败≥3</div>
+                <div class="flow-node sub"><span class="fn-title">暂停</span><span class="fn-sub">撒娇等待安慰</span></div>
+              </div>
+              <div>
+                <div class="flow-branch-label">≥95 且连夸≥2</div>
+                <div class="flow-node core"><span class="fn-title">彩蛋</span><span class="fn-sub">惊喜弹窗</span></div>
+              </div>
+            </div>
+            <div class="flow-edge"></div>
+            <div class="flow-node end"><span class="fn-title">持久化</span><span class="fn-sub">SQLite app_state</span></div>
+          </div>
+          <div class="flow-caption">情绪状态机迁移</div>
+        </div>
+      </section>
+
+      <section class="section" id="route-flow">
+        <div class="section-head reveal">
+          <div class="section-tag">Command + Routing</div>
+          <h2>命令路由 + 路径权重</h2>
+          <p class="desc">命令模式路由 + RouteCache 路径权重路由联合。</p>
+        </div>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">命令输入</span><span class="fn-sub">funcName + args</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node core"><span class="fn-title">ActivityActions.route()</span><span class="fn-sub">switch 路由 52 个命令</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node data"><span class="fn-title">handleExecs</span><span class="fn-sub">统一 FC 入口</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node core"><span class="fn-title">RouteCache 路由提示</span><span class="fn-sub">SHA-256 哈希 + 时间衰减</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node end"><span class="fn-title">执行 + 加权</span><span class="fn-sub">成功加权 / 失败降级切换</span></div>
+          </div>
+          <div class="flow-caption">命令路由 + 路径权重路由</div>
+        </div>
+      </section>
+
+    </div>
 
     <footer class="footer">
-        <div class="container">
-            <p>
-                <span class="brand">AiAgent</span> v2.6 ·
-                基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
-                对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
-            </p>
-            <p style="margin-top:6px; font-size:0.78rem;">
-                11 种设计模式 · Repository · 门面 · 单例 · 生产者消费者 · 策略(多模态+合并转发+模型路由) · ReAct · Cron调度 · 确认门控 · EDT路由 · 情绪状态机 · 反滥用责任链(表情包)
-            </p>
-        </div>
+      <div class="container">
+        <p><span class="brand">AiAgent</span> v3.3 · 16 种设计模式 · 策略降级 · 情绪状态机 · 多智能体编排 · 线程池</p>
+      </div>
     </footer>
+  </main>
 
-    <div class="back-to-top" title="回到顶部">↑</div>
-    <script src="js/main.js"></script>
+  <div class="back-to-top" title="回到顶部">↑</div>
+  <script src="js/main.js"></script>
 </body>
 </html>

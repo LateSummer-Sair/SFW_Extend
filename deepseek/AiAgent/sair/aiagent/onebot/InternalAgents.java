@@ -154,9 +154,12 @@ public class InternalAgents {
      */
     public int warnUser(long userId, long groupId, String reason) {
         // 持久化存储
-        int count = 0;
+        int count;
         if (persistence != null) {
             count = persistence.addWarning(userId, groupId, reason);
+            // sync local cache with persistence
+            warningCounts.put(userId, count);
+            lastWarningTime.put(userId, System.currentTimeMillis());
         } else {
             count = warningCounts.getOrDefault(userId, 0) + 1;
             warningCounts.put(userId, count);

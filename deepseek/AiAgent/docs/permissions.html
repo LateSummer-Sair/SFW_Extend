@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>权限与通道 — AiAgent 技术文档</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <canvas id="bg-canvas"></canvas>
+  <div class="aurora"><span></span><span></span><span></span></div>
+  <div class="progress-bar"></div>
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航"><span></span><span></span><span></span></button>
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <header class="page-hero">
+      <div class="container">
+        <div class="crumb"><a href="index.html">Home</a> / 权限与通道</div>
+        <h1>权限与<span class="gradient-text">通道</span></h1>
+        <p class="lead">
+          三层通道权限模型将「本地」与「QQ」隔离，按通道收缩工具集与技能范围。
+          越权调用立即终止并告知无权限，高危操作需确认门控放行。
+        </p>
+      </div>
+    </header>
+
+    <div class="container">
+
+      <section class="section" id="model">
+        <div class="section-head reveal">
+          <div class="section-tag">Model</div>
+          <h2>三层权限模型</h2>
+          <p class="desc">从最高权限到受限，逐层收紧。</p>
+        </div>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node core"><span class="fn-title">① 本地 execs（console）</span><span class="fn-sub">全量工具 buildAllTools + 技能（general/task/persona）· 免确认</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node core"><span class="fn-title">② QQ execs:（主人关键字）</span><span class="fn-sub">全量工具 + 全技能（含 NapCat）· 权限提升</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node sub"><span class="fn-title">③ QQ execq（普通消息）</span><span class="fn-sub">受限工具 buildExecqTools + 仅 NapCat 技能 · 越权立即终止</span></div>
+          </div>
+          <div class="flow-caption">权限从高到低：本地 execs → QQ execs: → QQ execq</div>
+        </div>
+      </section>
+
+      <section class="section" id="matrix">
+        <div class="section-head reveal">
+          <div class="section-tag">Matrix</div>
+          <h2>工具权限矩阵</h2>
+          <p class="desc">工具在三个通道的可见性。✓ 全可用 · △ 受限 / 仅主人 · ✗ 禁用。</p>
+        </div>
+        <div class="table-wrap reveal">
+          <table>
+            <thead><tr><th>工具分类</th><th>工具</th><th>本地 execs</th><th>QQ execs:</th><th>QQ execq</th><th>限制说明</th></tr></thead>
+            <tbody>
+              <tr><td rowspan="9">系统 / 文件</td><td class="cmd-name">cmd</td><td>✓</td><td>✓</td><td>△</td><td>execq 仅允许 help 查询</td></tr>
+              <tr><td class="cmd-name">readfile</td><td>✓</td><td>✓</td><td>✓</td><td>读取文件文本</td></tr>
+              <tr><td class="cmd-name">readdir</td><td>✓</td><td>✓</td><td>✓</td><td>列目录结构</td></tr>
+              <tr><td class="cmd-name">sys</td><td>✓</td><td>✓</td><td>✗</td><td>execq 不注册系统命令</td></tr>
+              <tr><td class="cmd-name">evaljs</td><td>✓</td><td>✓</td><td>✗</td><td>execq 彻底禁用动态执行</td></tr>
+              <tr><td class="cmd-name">eval</td><td>✓</td><td>✓</td><td>△</td><td>execq 仅限多对象拆分搜索抓取</td></tr>
+              <tr><td class="cmd-name">download</td><td>✓</td><td>✓</td><td>✗</td><td>execq 不注册下载</td></tr>
+              <tr><td class="cmd-name">batchrename</td><td>✓</td><td>✓</td><td>✗</td><td>批量重命名</td></tr>
+              <tr><td class="cmd-name">batchconvert</td><td>✓</td><td>✓</td><td>✗</td><td>批量图片转换</td></tr>
+
+              <tr><td rowspan="5">网络 / 信息</td><td class="cmd-name">web</td><td>✓</td><td>✓</td><td>✓</td><td>SSRF 防护</td></tr>
+              <tr><td class="cmd-name">search</td><td>✓</td><td>✓</td><td>✓</td><td>必应搜索</td></tr>
+              <tr><td class="cmd-name">weather</td><td>✓</td><td>✓</td><td>✓</td><td>Redis 缓存</td></tr>
+              <tr><td class="cmd-name">time</td><td>✓</td><td>✓</td><td>✓</td><td>当前时间</td></tr>
+              <tr><td class="cmd-name">balance</td><td>✓</td><td>✓</td><td>✓</td><td>账户余额</td></tr>
+
+              <tr><td rowspan="8">记忆 / 知识</td><td class="cmd-name">remember</td><td>✓</td><td>✓</td><td>✓</td><td>持久化记忆</td></tr>
+              <tr><td class="cmd-name">correct</td><td>✓</td><td>✓</td><td>✓</td><td>纠正记录</td></tr>
+              <tr><td class="cmd-name">note</td><td>✓</td><td>✓</td><td>✓</td><td>知识库</td></tr>
+              <tr><td class="cmd-name">searchnote</td><td>✓</td><td>✓</td><td>✓</td><td>知识库检索</td></tr>
+              <tr><td class="cmd-name">schedule</td><td>✓</td><td>✓</td><td>✗</td><td>execq 不注册定时</td></tr>
+              <tr><td class="cmd-name">alarm</td><td>✓</td><td>✓</td><td>△</td><td>系统闹钟，execq 普通用户仅提醒、主人 AI 任务</td></tr>
+              <tr><td class="cmd-name">skillextract</td><td>✓</td><td>✓</td><td>✗</td><td>execq 不注册蒸馏</td></tr>
+              <tr><td class="cmd-name">skillinfo</td><td>✓</td><td>✓</td><td>✓</td><td>技能查询</td></tr>
+
+              <tr><td rowspan="4">媒体 / 文件</td><td class="cmd-name">sendimage</td><td>✓</td><td>✓</td><td>△</td><td>execq 主人或好感度&gt;600</td></tr>
+              <tr><td class="cmd-name">sendrecord</td><td>✓</td><td>✓</td><td>△</td><td>同上</td></tr>
+              <tr><td class="cmd-name">sendfile</td><td>✓</td><td>✓</td><td>△</td><td>execq 仅主人</td></tr>
+              <tr><td class="cmd-name">setimageremark</td><td>✓</td><td>✓</td><td>✓</td><td>图片注释 MD5 绑定</td></tr>
+
+              <tr><td rowspan="5">三方技能</td><td class="cmd-name">thirdskill</td><td>✓</td><td>✓</td><td>✗</td><td>仅 execs 可用</td></tr>
+              <tr><td class="cmd-name">callskill</td><td>✓</td><td>✓</td><td>△</td><td>受 setthirdpartycode 控制</td></tr>
+              <tr><td class="cmd-name">tp_* 动态</td><td>✓</td><td>✓</td><td>△</td><td>三方技能代码段</td></tr>
+              <tr><td class="cmd-name">superise</td><td>✓</td><td>✓</td><td>✗</td><td>彩蛋弹窗</td></tr>
+              <tr><td class="cmd-name">editprompt / stop</td><td>✓</td><td>✓</td><td>✗</td><td>仅本地</td></tr>
+
+              <tr><td rowspan="5">表情包</td><td class="cmd-name">sendsticker</td><td>✗</td><td>✓</td><td>✓</td><td>QQ 专属</td></tr>
+              <tr><td class="cmd-name">collectsticker</td><td>✗</td><td>✓</td><td>✓</td><td>QQ 专属</td></tr>
+              <tr><td class="cmd-name">clearsticker</td><td>✗</td><td>✓</td><td>✓</td><td>QQ 专属</td></tr>
+              <tr><td class="cmd-name">poke</td><td>✗</td><td>✓</td><td>✓</td><td>戳一戳（全员）</td></tr>
+              <tr><td class="cmd-name">sendlike</td><td>✗</td><td>✓</td><td>△</td><td>主人或好感度&gt;600</td></tr>
+
+              <tr><td rowspan="12">群管（仅主人）</td><td class="cmd-name">ban</td><td>✗</td><td>✓</td><td>△</td><td>仅群内主人</td></tr>
+              <tr><td class="cmd-name">kick</td><td>✗</td><td>✓</td><td>△</td><td>仅群内主人</td></tr>
+              <tr><td class="cmd-name">muteall</td><td>✗</td><td>✓</td><td>△</td><td>仅群内主人</td></tr>
+              <tr><td class="cmd-name">setadmin</td><td>✗</td><td>✓</td><td>△</td><td>仅群内主人</td></tr>
+              <tr><td class="cmd-name">setcard</td><td>✗</td><td>✓</td><td>△</td><td>仅群内主人</td></tr>
+              <tr><td class="cmd-name">setgroupname</td><td>✗</td><td>✓</td><td>△</td><td>仅群内主人</td></tr>
+              <tr><td class="cmd-name">setname</td><td>✓</td><td>✓</td><td>△</td><td>execq 仅主人</td></tr>
+              <tr><td class="cmd-name">setsignature</td><td>✗</td><td>✓</td><td>△</td><td>execq 仅主人</td></tr>
+              <tr><td class="cmd-name">leavegroup</td><td>✗</td><td>✓</td><td>△</td><td>仅群内主人</td></tr>
+              <tr><td class="cmd-name">block / unblock</td><td>✗</td><td>✓</td><td>△</td><td>仅主人</td></tr>
+              <tr><td class="cmd-name">delfriend</td><td>✗</td><td>✓</td><td>△</td><td>仅主人</td></tr>
+              <tr><td class="cmd-name">forwardmsg</td><td>✗</td><td>✓</td><td>△</td><td>仅主人</td></tr>
+
+              <tr><td rowspan="4">跨群 / 转告</td><td class="cmd-name">grouplist</td><td>✗</td><td>✓</td><td>✓</td><td>群列表查询</td></tr>
+              <tr><td class="cmd-name">groupmembers</td><td>✗</td><td>✓</td><td>✓</td><td>成员列表查询</td></tr>
+              <tr><td class="cmd-name">sendgroupmsg</td><td>✗</td><td>✓</td><td>△</td><td>仅主人</td></tr>
+              <tr><td class="cmd-name">relay / sendfileto</td><td>✗</td><td>✓</td><td>△</td><td>主人或好感度&gt;600</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section" id="affection">
+        <div class="section-head reveal">
+          <div class="section-tag">Affection Levels</div>
+          <h2>好感度六级权限矩阵</h2>
+          <p class="desc">好感度 0~1000，决定用户能要求 Bot 执行的社交操作。主人始终无视限制。</p>
+        </div>
+        <div class="table-wrap reveal">
+          <table>
+            <thead><tr><th>等级</th><th>好感度</th><th>权限</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td>L0</td><td>&lt;100</td><td>仅聊天</td><td>只能正常对话</td></tr>
+              <tr><td>L1</td><td>≥100</td><td>可加好友</td><td>approvefriend 同意好友申请</td></tr>
+              <tr><td>L2</td><td>≥200</td><td>可改群马甲</td><td>setcard 修改群名片</td></tr>
+              <tr><td>L3</td><td>≥300</td><td>可入新群</td><td>acceptgroupinvite 同意群邀请</td></tr>
+              <tr><td>L4</td><td>≥400</td><td>挚友关注</td><td>监听态 2% 概率主动关注</td></tr>
+              <tr><td>L5</td><td>≥800</td><td>恋人 5% 监听</td><td>监听态 5% 概率主动响应</td></tr>
+              <tr><td>L6</td><td>≥1000</td><td>灵魂伴侣 10%</td><td>监听态 10% 概率主动响应</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout reveal"><div class="co-icon">💗</div><div>好感度积累：每天首次交流 +2~3（一天一次）· 夸赞 +1 · 捐赠按 1元=1好感度（主人私聊告知，AI 用 <code>recorddonation</code> 工具记录）。</div></div>
+      </section>
+
+      <section class="section" id="gate">
+        <div class="section-head reveal">
+          <div class="section-tag">Interception</div>
+          <h2>越权拦截流程</h2>
+          <p class="desc">execq 通道的工具调用先过权限门禁，越权立即终止。</p>
+        </div>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">工具调用请求</span><span class="fn-sub">模型发起 tool_calls</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node decision"><span class="fn-title">通道判定</span><span class="fn-sub">ctx.isExecq()？</span></div>
+            <div class="flow-branch">
+              <div>
+                <div class="flow-branch-label">否（本地/execs）</div>
+                <div class="flow-node core"><span class="fn-title">直接执行</span><span class="fn-sub">无门禁</span></div>
+              </div>
+              <div>
+                <div class="flow-branch-label">是（execq）</div>
+                <div class="flow-node decision"><span class="fn-title">权限校验</span><span class="fn-sub">cmd 仅 help / eval 仅搜索 / setname 仅主人</span></div>
+              </div>
+            </div>
+            <div class="flow-branch">
+              <div>
+                <div class="flow-branch-label">通过</div>
+                <div class="flow-node core"><span class="fn-title">执行</span><span class="fn-sub">返回工具结果</span></div>
+              </div>
+              <div>
+                <div class="flow-branch-label">越权</div>
+                <div class="flow-node end"><span class="fn-title">立即终止</span><span class="fn-sub">返回「无权限」提示</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="flow-caption">execq 通道越权拦截流程</div>
+        </div>
+      </section>
+
+      <section class="section" id="confirm">
+        <div class="section-head reveal">
+          <div class="section-tag">Confirm Gate</div>
+          <h2>高危操作确认门控</h2>
+          <p class="desc">ConfirmationGate 用 CountDownLatch 同步阻塞，60 秒超时自动拒绝。</p>
+        </div>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">高危操作请求</span><span class="fn-sub">反射 / 系统命令 / 动态注入</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node decision"><span class="fn-title">bypass 检查</span><span class="fn-sub">execs 模式 setBypassConfirm(true)？</span></div>
+            <div class="flow-branch">
+              <div>
+                <div class="flow-branch-label">是（免确认）</div>
+                <div class="flow-node core"><span class="fn-title">直接放行</span><span class="fn-sub">引用计数 enterBypass/exitBypass</span></div>
+              </div>
+              <div>
+                <div class="flow-branch-label">否（等待确认）</div>
+                <div class="flow-node core"><span class="fn-title">阻塞等待</span><span class="fn-sub">CountDownLatch 60s 超时</span></div>
+              </div>
+            </div>
+            <div class="flow-branch">
+              <div>
+                <div class="flow-branch-label">yes</div>
+                <div class="flow-node core"><span class="fn-title">确认执行</span><span class="fn-sub">latch 释放返回 true</span></div>
+              </div>
+              <div>
+                <div class="flow-branch-label">no / 超时</div>
+                <div class="flow-node end"><span class="fn-title">拒绝</span><span class="fn-sub">latch 释放返回 false</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="flow-caption">高危操作确认门控</div>
+        </div>
+      </section>
+
+      <section class="section" id="qq">
+        <div class="section-head reveal">
+          <div class="section-tag">QQ Permissions</div>
+          <h2>QQ 通道权限细节</h2>
+        </div>
+        <div class="card-grid cols-2 reveal">
+          <div class="card"><div class="card-icon ic-green">🛡️</div><h3>execq 工具集（55 个）</h3><p>仅保留 NapCat 群管/媒体工具 + web/readfile/readdir/weather/time/remember/correct/note/searchnote/balance + 表情包 + setimageremark + 好友申请/群邀请决策（pendingrequests/approvefriend 等 6 个）+ recorddonation/donationlist/resetdonation 捐赠工具（仅主人）+ queryaffection/setaffection/affectionrank 好感度三工具 + alarm 系统闹钟（普通用户到点提醒、主人 AI 任务）。移除 sys/evaljs/download/schedule/skillextract。</p></div>
+          <div class="card"><div class="card-icon ic-purple">🔐</div><h3>cmd 权限门禁</h3><p>execq 的 cmd 仅允许 <code>help</code>（格式：组件名/help 或 /help），其他命令越权立即终止并告知无权限。</p></div>
+          <div class="card"><div class="card-icon ic-magenta">⚡</div><h3>evaljs 彻底禁用</h3><p>execq 不注册 evaljs。eval 仅限多对象拆分搜索的联网抓取，禁止文件系统操作、进程执行、反射、类加载。</p></div>
+          <div class="card"><div class="card-icon ic-amber">👑</div><h3>修改型指令仅主人</h3><p>setname / setsignature 等修改型指令加 isMasterOnly 拒绝，非主人调用立即终止并告知无权。</p></div>
+        </div>
+      </section>
+
+    </div>
+
+    <footer class="footer">
+      <div class="container">
+        <p><span class="brand">AiAgent</span> v3.3 · 三层通道权限模型 · 工具权限矩阵 · 好感度六级权限 · 越权拦截 · 确认门控</p>
+      </div>
+    </footer>
+  </main>
+
+  <div class="back-to-top" title="回到顶部">↑</div>
+  <script src="js/main.js"></script>
+</body>
+</html>

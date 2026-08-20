@@ -205,6 +205,41 @@ public class DynamicCodeEngine {
         return execResult;
     }
 
+    /**
+     * 编译 Java 源码并返回其实例（不执行 run，不丢弃），供调用方缓存复用。
+     * <p>用于三方技能 java 代码段：编译一次、缓存实例，之后反复反射调用 {@code airun} 方法。
+     * 编译失败或加载失败返回 {@code null}，错误信息见 {@link #getLastCompilerMessage()}。</p>
+     *
+     * @param sourceCode Java 源码（无需 package，建议定义 {@code public Object airun(String)} 或 {@code public Object airun()}）
+     * @param objName    标识名（仅用于日志）
+     * @return 编译成功返回实例，失败返回 null
+     */
+    public synchronized Object compileAndCache(String sourceCode, String objName) {
+        if (compiler == null) {
+            lastCompilerMessage = "Java 编译器不可用：当前运行在 JRE 环境，需要 JDK。";
+            return null;
+        }
+        String className = compileJava(sourceCode);
+        if (className == null) return null;
+        Class<?> clazz = loadLastCompiled(className);
+        if (clazz == null) return null;
+        try {
+            Object instance = clazz.getConstructor().newInstance();
+            // 字节码引用已可释放（class 已加载进 JVM，实例持有其引用）
+            lastCompiledObject = null;
+            lastLoadError = "";
+            return instance;
+        } catch (NoSuchMethodException e) {
+            lastCompilerMessage = "类 [" + className + "] 缺少无参构造器。";
+            lastCompiledObject = null;
+            return null;
+        } catch (Exception e) {
+            lastCompilerMessage = "创建实例失败: " + e.toString();
+            lastCompiledObject = null;
+            return null;
+        }
+    }
+
     /** 通过反射调用 run() 方法（无需接口，协议约定即可） */
     private String invokeRun(Object instance, String className) {
         try {

@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import javax.crypto.Cipher;
+import java.security.SecureRandom;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
@@ -70,8 +71,33 @@ public class AiConfig {
     /** 主人QQ号列表（具备execs权限） */
     private Set<Long> masterQQs = new LinkedHashSet<>();
 
+    // === Redis 缓存配置（旁路缓存，未运行则静默降级，不影响主流程） ===
+    private boolean redisEnabled = true;
+    private String redisHost = "127.0.0.1";
+    private int redisPort = 6379;
+    private int redisDb = 1;                  // 与 YunzaiBot(db 0) 隔离
+    private String redisPrefix = "aiagent:";
+    private String redisPassword = "";
+
+    // === DeepSeek API 高级参数 ===
+    private String reasoningEffort = "";  // 空=不启用思考模式, high/max=启用
+    private double temperature = -1;        // -1=不设置, 0~2.0
+    private double topP = -1;               // -1=不设置
+    private String stopSequences = "";      // 逗号分隔的停止词
+    private String responseFormat = "";     // "json_object" 或空
+    private int maxOutputTokens = 0;        // 0=使用默认值
+    private String deepSeekUserId = "";     // 用于缓存隔离/内容安全
+    private double frequencyPenalty = -1;    // -1=不设置, -2.0~2.0
+    private double presencePenalty = -1;     // -1=不设置, -2.0~2.0
+
     /** 主动查看功能是否启用 */
     private boolean proactiveCheckEnabled = false;
+
+    /** 拟人化监听态是否启用（默认关闭；需手动开启，关闭时回到 execPool 并发处理消息） */
+    private boolean listenStateEnabled = false;
+
+    /** 三方技能代码段在 execq 通道的执行权限。默认 true=放权（所有通道可用，用户导入即视为刚需）；false=仅 execs/本地可用。 */
+    private boolean thirdPartyCodeExecq = true;
 
     /** 监听的群号列表（逗号分隔） */
     private final Set<Long> monitoredGroups = new LinkedHashSet<>();
@@ -82,8 +108,8 @@ public class AiConfig {
     /** 文件下载目录（接收主人发送的文件存储位置） */
     private String fileDownloadPath = "";
 
-    /** execq <cmd> 插件白名单（逗号分隔持久化），为空则不限制 */
-    private final Set<String> execqCmdWhitelist = new LinkedHashSet<>();
+    /** OCR Access Key（EasyOCR 等在线 OCR 服务），空=禁用 OCR */
+    private String ocrAccessKey = "";
 
     /** 配置文件路径（init后设置） */
     private File configFile;
@@ -126,19 +152,12 @@ public class AiConfig {
             try { onebotPort = Integer.parseInt(p.getProperty("onebotPort", "5800")); } catch (NumberFormatException ignored) {}
             onebotToken = p.getProperty("onebotToken", "");
             try { onebotSelfId = Long.parseLong(p.getProperty("onebotSelfId", "0")); } catch (NumberFormatException ignored) {}
-            // execq 插件白名单
-            String whitelist = p.getProperty("execqCmdWhitelist", "");
-            if (!whitelist.isEmpty()) {
-                execqCmdWhitelist.clear();
-                for (String item : whitelist.split(",")) {
-                    String trimmed = item.trim();
-                    if (!trimmed.isEmpty()) {
-                        execqCmdWhitelist.add(trimmed);
-                    }
-                }
-            }
             // 主动查看配置
             proactiveCheckEnabled = "true".equalsIgnoreCase(p.getProperty("proactiveCheckEnabled", "false"));
+            // 拟人化监听态（默认关闭，需手动开启）
+            listenStateEnabled = "true".equalsIgnoreCase(p.getProperty("listenStateEnabled", "false"));
+            // 三方技能代码段 execq 权限（默认放权 true，仅显式 false 才关闭）
+            thirdPartyCodeExecq = !"false".equalsIgnoreCase(p.getProperty("thirdPartyCodeExecq", "true"));
             String groupsStr = p.getProperty("monitoredGroups", "");
             if (!groupsStr.isEmpty()) {
                 monitoredGroups.clear();
@@ -158,10 +177,29 @@ public class AiConfig {
                     } catch (NumberFormatException ignored) {}
                 }
             }
+            // Redis 缓存配置
+            redisEnabled = "true".equalsIgnoreCase(p.getProperty("redisEnabled", "true"));
+            redisHost = p.getProperty("redisHost", "127.0.0.1");
+            try { redisPort = Integer.parseInt(p.getProperty("redisPort", "6379")); } catch (NumberFormatException ignored) {}
+            try { redisDb = Integer.parseInt(p.getProperty("redisDb", "1")); } catch (NumberFormatException ignored) {}
+            redisPrefix = p.getProperty("redisPrefix", "aiagent:");
+            redisPassword = p.getProperty("redisPassword", "");
             // AI机器人名字
             botName = p.getProperty("botName", "");
             // 文件下载目录
             fileDownloadPath = p.getProperty("fileDownloadPath", "");
+            // OCR Access Key（加密存储）
+            ocrAccessKey = decrypt(p.getProperty("ocrAccessKey", ""));
+            // DeepSeek 高级参数
+            reasoningEffort = p.getProperty("reasoningEffort", "");
+            try { temperature = Double.parseDouble(p.getProperty("temperature", "-1")); } catch (NumberFormatException ignored) {}
+            try { topP = Double.parseDouble(p.getProperty("topP", "-1")); } catch (NumberFormatException ignored) {}
+            stopSequences = p.getProperty("stopSequences", "");
+            responseFormat = p.getProperty("responseFormat", "");
+            try { maxOutputTokens = Integer.parseInt(p.getProperty("maxOutputTokens", "0")); } catch (NumberFormatException ignored) {}
+            deepSeekUserId = p.getProperty("deepSeekUserId", "");
+            try { frequencyPenalty = Double.parseDouble(p.getProperty("frequencyPenalty", "-1")); } catch (NumberFormatException ignored) {}
+            try { presencePenalty = Double.parseDouble(p.getProperty("presencePenalty", "-1")); } catch (NumberFormatException ignored) {}
         } catch (Exception ignored) {
             // 读取失败则使用默认值
         }
@@ -185,9 +223,10 @@ public class AiConfig {
             p.setProperty("onebotToken",   onebotToken);
             p.setProperty("onebotSelfId",  String.valueOf(onebotSelfId));
             p.setProperty("execqPrompt",   PromptManager.getInstance().getExecqPromptExtra());
-            p.setProperty("execqCmdWhitelist", String.join(",", execqCmdWhitelist));
             // 主动查看配置
             p.setProperty("proactiveCheckEnabled", String.valueOf(proactiveCheckEnabled));
+            p.setProperty("listenStateEnabled", String.valueOf(listenStateEnabled));
+            p.setProperty("thirdPartyCodeExecq", String.valueOf(thirdPartyCodeExecq));
             List<String> groupList = new ArrayList<>();
             for (Long g : monitoredGroups) {
                 groupList.add(String.valueOf(g));
@@ -199,9 +238,27 @@ public class AiConfig {
                 masterList.add(String.valueOf(qq));
             }
             p.setProperty("masterQQs", String.join(",", masterList));
+            // Redis 缓存配置
+            p.setProperty("redisEnabled", String.valueOf(redisEnabled));
+            p.setProperty("redisHost", redisHost);
+            p.setProperty("redisPort", String.valueOf(redisPort));
+            p.setProperty("redisDb", String.valueOf(redisDb));
+            p.setProperty("redisPrefix", redisPrefix);
+            p.setProperty("redisPassword", redisPassword);
             // AI机器人名字
             p.setProperty("botName", botName);
             p.setProperty("fileDownloadPath", fileDownloadPath);
+            p.setProperty("ocrAccessKey", encrypt(ocrAccessKey));
+            // DeepSeek 高级参数
+            p.setProperty("reasoningEffort", reasoningEffort);
+            p.setProperty("temperature", String.valueOf(temperature));
+            p.setProperty("topP", String.valueOf(topP));
+            p.setProperty("stopSequences", stopSequences);
+            p.setProperty("responseFormat", responseFormat);
+            p.setProperty("maxOutputTokens", String.valueOf(maxOutputTokens));
+            p.setProperty("deepSeekUserId", deepSeekUserId);
+            p.setProperty("frequencyPenalty", String.valueOf(frequencyPenalty));
+            p.setProperty("presencePenalty", String.valueOf(presencePenalty));
             try (FileOutputStream fos = new FileOutputStream(configFile)) {
                 p.store(new OutputStreamWriter(fos, StandardCharsets.UTF_8),
                         "AiAgent Configuration");
@@ -281,6 +338,17 @@ public class AiConfig {
     
     /** 设置文件下载目录 */
     public void setFileDownloadPath(String path) { this.fileDownloadPath = (path != null) ? path.trim() : ""; }
+
+    // === OCR 配置 ===
+
+    /** 获取 OCR Access Key（在线 OCR 服务）。 */
+    public String getOcrAccessKey() { return ocrAccessKey; }
+
+    /** 设置 OCR Access Key。 */
+    public void setOcrAccessKey(String key) { this.ocrAccessKey = (key != null) ? key.trim() : ""; }
+
+    /** 是否已设置 OCR Access Key（即 OCR 能力是否可用）。 */
+    public boolean hasOcrAccessKey() { return ocrAccessKey != null && !ocrAccessKey.isEmpty(); }
     
     // ==================== 模型智能路由 (v2.4) ====================
     
@@ -304,6 +372,19 @@ public class AiConfig {
         return model;
     }
     
+    /**
+     * 获取 Chat（本地对话）通道应使用的模型。
+     * <p>model=auto 时返回 flash（轻量快速），否则严格遵守配置值。</p>
+     */
+    public String getChatModel() {
+        if (AUTO_MODEL.equalsIgnoreCase(model)) {
+            logModelRoute("Chat（本地）", DEFAULT_EXECQ_MODEL);
+            return DEFAULT_EXECQ_MODEL;
+        }
+        logModelRoute("Chat（本地）", model);
+        return model;
+    }
+
     /**
      * 获取 Agent(exec/execs) 通道应使用的模型。
      * <p>model=auto 时返回 pro（深度推理），否则严格遵守配置值。</p>
@@ -337,6 +418,26 @@ public class AiConfig {
     
     /** 检查是否是主人 */
     public boolean isMasterQQ(long qq)          { return masterQQs.contains(qq); }
+
+    // === Redis Getters/Setters ===
+
+    public boolean isRedisEnabled()                { return redisEnabled; }
+    public void setRedisEnabled(boolean v)         { this.redisEnabled = v; }
+
+    public String getRedisHost()                   { return redisHost; }
+    public void setRedisHost(String v)             { this.redisHost = (v != null && !v.trim().isEmpty()) ? v.trim() : "127.0.0.1"; }
+
+    public int getRedisPort()                      { return redisPort; }
+    public void setRedisPort(int v)                { this.redisPort = v > 0 ? v : 6379; }
+
+    public int getRedisDb()                        { return redisDb; }
+    public void setRedisDb(int v)                  { this.redisDb = (v >= 0 && v <= 15) ? v : 1; }
+
+    public String getRedisPrefix()                 { return redisPrefix; }
+    public void setRedisPrefix(String v)           { this.redisPrefix = (v != null) ? v : "aiagent:"; }
+
+    public String getRedisPassword()               { return redisPassword; }
+    public void setRedisPassword(String v)         { this.redisPassword = (v != null) ? v.trim() : ""; }
     
     /** 设置主人QQ号列表（从配置文件加载） */
     public void setMasterQQs(Set<Long> qqList)  { 
@@ -358,29 +459,6 @@ public class AiConfig {
         }
     }
 
-    // === execq 插件白名单 ===
-
-    /** 获取 execq <cmd> 插件白名单（不可变视图） */
-    public Set<String> getExecqCmdWhitelist() { return Collections.unmodifiableSet(execqCmdWhitelist); }
-
-    /** 向白名单添加插件名 */
-    public boolean addExecqCmdPlugin(String pluginName) {
-        if (pluginName == null || pluginName.trim().isEmpty()) return false;
-        return execqCmdWhitelist.add(pluginName.trim());
-    }
-
-    /** 从白名单移除插件名 */
-    public boolean removeExecqCmdPlugin(String pluginName) {
-        if (pluginName == null || pluginName.trim().isEmpty()) return false;
-        return execqCmdWhitelist.remove(pluginName.trim());
-    }
-
-    /** 检查插件名是否在白名单中 */
-    public boolean isExecqCmdPluginAllowed(String pluginName) {
-        if (execqCmdWhitelist.isEmpty()) return false;
-        return execqCmdWhitelist.contains(pluginName);
-    }
-
     /** @return API Key 是否已设置 */
     public boolean hasApiKey() {
         return apiKey != null && !apiKey.isEmpty();
@@ -391,6 +469,12 @@ public class AiConfig {
     public boolean isProactiveCheckEnabled() { return proactiveCheckEnabled; }
     public void setProactiveCheckEnabled(boolean v) { this.proactiveCheckEnabled = v; }
 
+    public boolean isListenStateEnabled() { return listenStateEnabled; }
+    public void setListenStateEnabled(boolean v) { this.listenStateEnabled = v; }
+
+    public boolean isThirdPartyCodeExecq() { return thirdPartyCodeExecq; }
+    public void setThirdPartyCodeExecq(boolean v) { this.thirdPartyCodeExecq = v; }
+
     public Set<Long> getMonitoredGroups() { return Collections.unmodifiableSet(monitoredGroups); }
     public boolean addMonitoredGroup(long groupId) { return monitoredGroups.add(groupId); }
     public boolean removeMonitoredGroup(long groupId) { return monitoredGroups.remove(groupId); }
@@ -399,6 +483,41 @@ public class AiConfig {
 
     public String getBotName() { return botName != null ? botName.trim() : ""; }
     public void setBotName(String name) { this.botName = (name != null) ? name.trim() : ""; }
+
+    // === DeepSeek API 高级参数 Getters/Setters ===
+
+    /** 获取思考模式强度（空=不启用, low/high/xhigh/max） */
+    public String getReasoningEffort() { return reasoningEffort; }
+    public void setReasoningEffort(String v) { this.reasoningEffort = (v != null) ? v.trim() : ""; }
+
+    /** 获取 temperature（-1=不设置） */
+    public double getTemperature() { return temperature; }
+    public void setTemperature(double v) { this.temperature = v; }
+
+    /** 获取 top_p（-1=不设置） */
+    public double getTopP() { return topP; }
+    public void setTopP(double v) { this.topP = v; }
+
+    /** 获取停止序列（逗号分隔） */
+    public String getStopSequences() { return stopSequences; }
+    public void setStopSequences(String v) { this.stopSequences = (v != null) ? v.trim() : ""; }
+
+    /** 获取响应格式（"json_object" 或空） */
+    public String getResponseFormat() { return responseFormat; }
+    public void setResponseFormat(String v) { this.responseFormat = (v != null) ? v.trim() : ""; }
+
+    /** 获取最大输出 token 数（0=使用默认值） */
+    public int getMaxOutputTokens() { return maxOutputTokens; }
+    public void setMaxOutputTokens(int v) { this.maxOutputTokens = Math.max(0, v); }
+
+    /** 获取 DeepSeek user_id（用于缓存隔离和内容安全） */
+    public String getDeepSeekUserId() { return deepSeekUserId; }
+    public void setDeepSeekUserId(String v) { this.deepSeekUserId = (v != null) ? v.trim() : ""; }
+
+    public double getFrequencyPenalty() { return frequencyPenalty; }
+    public void setFrequencyPenalty(double v) { this.frequencyPenalty = Math.max(-2.0, Math.min(2.0, v)); }
+    public double getPresencePenalty() { return presencePenalty; }
+    public void setPresencePenalty(double v) { this.presencePenalty = Math.max(-2.0, Math.min(2.0, v)); }
 
     // ==================== 工具方法 ====================
 
@@ -421,6 +540,11 @@ public class AiConfig {
      * <p>种子来源：系统属性 + 机器名 + 用户目录，三者组合后取 hash 作为密钥基础。
      * 重启后所有因子不变，密钥稳定。</p>
      */
+    /** GCM IV length (12 bytes recommended by NIST) */
+    private static final int GCM_IV_LEN = 12;
+    /** GCM tag length in bits */
+    private static final int GCM_TAG_LEN = 128;
+
     private static final byte[] AES_KEY = deriveAesKey();
 
     private static byte[] deriveAesKey() {
@@ -447,17 +571,49 @@ public class AiConfig {
         return AES_KEY;
     }
 
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
     private static String encrypt(String plain) {
         if (plain == null || plain.isEmpty()) return "";
         try {
-            Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(getAesKey(), "AES"));
-            return Base64.getEncoder().encodeToString(cipher.doFinal(plain.getBytes(StandardCharsets.UTF_8)));
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            byte[] iv = new byte[GCM_IV_LEN];
+            SECURE_RANDOM.nextBytes(iv);
+            javax.crypto.spec.GCMParameterSpec spec = new javax.crypto.spec.GCMParameterSpec(GCM_TAG_LEN, iv);
+            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(getAesKey(), "AES"), spec);
+            byte[] ct = cipher.doFinal(plain.getBytes(StandardCharsets.UTF_8));
+            // IV(12) + ciphertext
+            byte[] combined = new byte[GCM_IV_LEN + ct.length];
+            System.arraycopy(iv, 0, combined, 0, GCM_IV_LEN);
+            System.arraycopy(ct, 0, combined, GCM_IV_LEN, ct.length);
+            return Base64.getEncoder().encodeToString(combined);
         } catch (Exception e) { return ""; }
     }
 
     private static String decrypt(String encrypted) {
         if (encrypted == null || encrypted.isEmpty()) return "";
+        try {
+            byte[] combined = Base64.getDecoder().decode(encrypted);
+            if (combined.length < GCM_IV_LEN + 16) {
+                // Too short for GCM → try legacy ECB fallback
+                return decryptLegacyEcb(encrypted);
+            }
+            byte[] iv = new byte[GCM_IV_LEN];
+            byte[] ct = new byte[combined.length - GCM_IV_LEN];
+            System.arraycopy(combined, 0, iv, 0, GCM_IV_LEN);
+            System.arraycopy(combined, GCM_IV_LEN, ct, 0, ct.length);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            javax.crypto.spec.GCMParameterSpec spec = new javax.crypto.spec.GCMParameterSpec(GCM_TAG_LEN, iv);
+            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(getAesKey(), "AES"), spec);
+            return new String(cipher.doFinal(ct), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            // GCM failed → try legacy ECB for old configs
+            return decryptLegacyEcb(encrypted);
+        }
+    }
+
+    /** Legacy AES/ECB decrypt for old config.properties compatibility */
+    private static String decryptLegacyEcb(String encrypted) {
         try {
             Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
             cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(getAesKey(), "AES"));

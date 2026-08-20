@@ -40,11 +40,27 @@ public class ChatMessage implements Serializable {
     /** 多模态内容部件列表（null=纯文本消息，非null=多模态消息） */
     private final List<Map<String, Object>> contentParts;
 
+    /** 思考链内容（DeepSeek thinking mode 返回的 reasoning_content） */
+    private String reasoningContent;
+
+    /** 工具调用列表（assistant 消息携带 tool_calls 时非空） */
+    private final List<ToolCall> toolCalls;
+
+    /** tool 角色消息的工具调用 ID（回传工具执行结果时需要） */
+    private final String toolCallId;
+
+    /** tool 角色消息的工具名 */
+    private final String toolName;
+
     /** 无参构造器，用于 JSON 反序列化 */
     private ChatMessage() {
         this.role = "user";
         this.content = "";
         this.contentParts = null;
+        this.reasoningContent = "";
+        this.toolCalls = null;
+        this.toolCallId = null;
+        this.toolName = null;
     }
 
     /**
@@ -57,6 +73,10 @@ public class ChatMessage implements Serializable {
         this.role = (role != null) ? role : "user";
         this.content = (content != null) ? content : "";
         this.contentParts = null;
+        this.reasoningContent = "";
+        this.toolCalls = null;
+        this.toolCallId = null;
+        this.toolName = null;
     }
 
     /**
@@ -72,6 +92,56 @@ public class ChatMessage implements Serializable {
         this.content = (content != null) ? content : "";
         this.contentParts = (contentParts != null && !contentParts.isEmpty()) ?
                 Collections.unmodifiableList(new ArrayList<>(contentParts)) : null;
+        this.reasoningContent = "";
+        this.toolCalls = null;
+        this.toolCallId = null;
+        this.toolName = null;
+    }
+
+    /**
+     * 构造一条带思考链的 assistant 消息。
+     * @param reasoningContent DeepSeek thinking mode 返回的 reasoning_content
+     */
+    public ChatMessage(String role, String content, String reasoningContent) {
+        this.role = (role != null) ? role : "user";
+        this.content = (content != null) ? content : "";
+        this.contentParts = null;
+        this.reasoningContent = (reasoningContent != null) ? reasoningContent : "";
+        this.toolCalls = null;
+        this.toolCallId = null;
+        this.toolName = null;
+    }
+
+    /** 内部构造：完整字段（用于 tool 角色消息 / assistant tool_calls 消息） */
+    private ChatMessage(String role, String content, String reasoningContent,
+                        List<ToolCall> toolCalls, String toolCallId, String toolName) {
+        this.role = (role != null) ? role : "user";
+        this.content = (content != null) ? content : "";
+        this.contentParts = null;
+        this.reasoningContent = (reasoningContent != null) ? reasoningContent : "";
+        this.toolCalls = (toolCalls != null && !toolCalls.isEmpty()) ?
+                Collections.unmodifiableList(new ArrayList<>(toolCalls)) : null;
+        this.toolCallId = toolCallId;
+        this.toolName = toolName;
+    }
+
+    /**
+     * 工厂方法：创建 assistant 消息，携带工具调用（Function Calling 多轮回传）。
+     * @param content   可选文本内容（可为 null）
+     * @param toolCalls 工具调用列表
+     */
+    public static ChatMessage createAssistantWithToolCalls(String content, List<ToolCall> toolCalls) {
+        return new ChatMessage("assistant", content, "", toolCalls, null, null);
+    }
+
+    /**
+     * 工厂方法：创建 tool 角色消息（工具执行结果回传）。
+     * @param toolCallId 工具调用 ID
+     * @param toolName   工具名
+     * @param result     工具执行结果字符串
+     */
+    public static ChatMessage createToolResult(String toolCallId, String toolName, String result) {
+        return new ChatMessage("tool", result, "", null, toolCallId, toolName);
     }
 
     /**
@@ -130,6 +200,41 @@ public class ChatMessage implements Serializable {
     /** @return 多模态内容部件列表（纯文本消息返回 null） */
     public List<Map<String, Object>> getContentParts() {
         return contentParts;
+    }
+
+    /** @return 思考链内容（DeepSeek thinking mode），可能为空 */
+    public String getReasoningContent() {
+        return reasoningContent;
+    }
+
+    /** 设置思考链内容 */
+    public void setReasoningContent(String v) {
+        this.reasoningContent = (v != null) ? v : "";
+    }
+
+    /** @return 是否有思考链内容 */
+    public boolean hasReasoning() {
+        return reasoningContent != null && !reasoningContent.isEmpty();
+    }
+
+    /** @return 工具调用列表 */
+    public List<ToolCall> getToolCalls() {
+        return toolCalls;
+    }
+
+    /** @return 是否有工具调用 */
+    public boolean hasToolCalls() {
+        return toolCalls != null && !toolCalls.isEmpty();
+    }
+
+    /** @return tool 角色消息的工具调用 ID */
+    public String getToolCallId() {
+        return toolCallId;
+    }
+
+    /** @return tool 角色消息的工具名 */
+    public String getToolName() {
+        return toolName;
     }
 
     /**

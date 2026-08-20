@@ -5,6 +5,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import sair.aiagent.AiAgentActivity;
+import java.io.*;
+import java.net.*;
 import sair.aiagent.model.StickerEntry;
 
 /**
@@ -25,7 +27,7 @@ import sair.aiagent.model.StickerEntry;
 public class StickerManager {
 
     /** 最多保留表情包数量 */
-    private static final int MAX_STICKERS = 20;
+    private static final int MAX_STICKERS = 5;
 
     /** 语境匹配最低得分阈值（0.0~1.0），低于此分不发送 */
     private static final double MATCH_THRESHOLD = 0.15;
@@ -35,6 +37,7 @@ public class StickerManager {
 
     private PersistenceManager pm;
     private String dataDir;
+    private final java.util.Random random = new java.util.Random();
 
     public void setPersistenceManager(PersistenceManager pm) {
         this.pm = pm;
@@ -45,6 +48,20 @@ public class StickerManager {
     }
 
     // ==================== 收集 ====================
+
+    /**
+     * 从本地文件路径收集表情包（QQ图片已下载到本地后调用）。
+     */
+    public synchronized StickerEntry collectFromLocal(String localPath, String context) {
+        if (pm == null || localPath == null || localPath.isEmpty()) return null;
+        String keywords = StickerEntry.extractKeywords(context);
+        StickerEntry entry = pm.addSticker(localPath, localPath, context, keywords, "");
+        if (entry != null) {
+            AiAgentActivity.debugLog("[Sticker] collected local #" + entry.getId());
+        }
+        cleanup();
+        return entry;
+    }
 
     /**
      * 收集一个表情包。
@@ -61,8 +78,15 @@ public class StickerManager {
         // 提取关键词
         String keywords = StickerEntry.extractKeywords(context);
 
-        // 保存到数据库
-        StickerEntry entry = pm.addSticker(imageUrl, null, context, keywords);
+        // 保存到数据库（downloadToLocalWithRemark 内部会先判断二维码，有二维码则返回 null；同时计算 MD5 查持久化注释随图保存）
+        String[] dl = downloadToLocalWithRemark(imageUrl);
+        if (dl == null) {
+            AiAgentActivity.debugLog("[Sticker] collect skipped (download failed or QR code detected): " + imageUrl);
+            return null;
+        }
+        String localPath = dl[0];
+        String remark = dl[1] != null ? dl[1] : "";
+        StickerEntry entry = pm.addSticker(imageUrl, localPath, context, keywords, remark);
         if (entry != null) {
             AiAgentActivity.debugLog("[Sticker] collected #" + entry.getId()
                     + " keywords=" + (keywords.length() > 40 ? keywords.substring(0, 40) + "..." : keywords));
@@ -142,6 +166,30 @@ public class StickerManager {
         return null;
     }
 
+    /**
+     * 随机返回一条库存表情包（用于 execq 随机触发，不依赖语义匹配）。
+     * <p>从所有拥有有效图片的表情包中随机挑一条，并记录使用次数。</p>
+     *
+     * @return 随机选中的 StickerEntry，库存为空或无有效图片时返回 null
+     */
+    public synchronized StickerEntry randomSticker() {
+        if (pm == null) return null;
+        List<StickerEntry> all = pm.listAllStickers();
+        if (all.isEmpty()) return null;
+
+        List<StickerEntry> valid = new ArrayList<>();
+        for (StickerEntry s : all) {
+            if (s.getImageUrl() != null && !s.getImageUrl().isEmpty()) valid.add(s);
+        }
+        if (valid.isEmpty()) return null;
+
+        StickerEntry picked = valid.get(random.nextInt(valid.size()));
+        pm.incrementStickerUsage(picked.getId());
+        picked.incrementUsage();
+        AiAgentActivity.debugLog("[Sticker] random picked #" + picked.getId());
+        return picked;
+    }
+
     // ==================== 清单 ====================
 
     /**
@@ -174,6 +222,67 @@ public class StickerManager {
         return pm.stickerCount();
     }
 
+
+    /**
+     * Download sticker image to local storage, compute remark, and return {localPath, remark}.
+     * Used so the sticker CQ code always references a valid local file, and the image's
+     * persistent remark (keyed by MD5) follows the image into long-term storage.
+     */
+    private String[] downloadToLocalWithRemark(String imageUrl) {
+        if (dataDir == null || imageUrl == null || imageUrl.isEmpty()) return null;
+        try {
+            File stickerDir = new File(dataDir, "stickers");
+            stickerDir.mkdirs();
+            String name = "sticker_" + Math.abs(imageUrl.hashCode());
+            // Try to keep extension
+            int qi = imageUrl.indexOf('?');
+            String cleanUrl = qi > 0 ? imageUrl.substring(0, qi) : imageUrl;
+            int dot = cleanUrl.lastIndexOf('.');
+            if (dot > 0 && dot < cleanUrl.length() - 1) {
+                String ext = cleanUrl.substring(dot);
+                if (ext.length() <= 5) name += ext;
+            }
+            File outFile = new File(stickerDir, name + ".png");
+            if (outFile.exists() && outFile.length() > 0) {
+                return new String[]{outFile.getAbsolutePath(), ""};
+            }
+
+            URL url = new URL(imageUrl);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(15000);
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+            InputStream is = conn.getInputStream();
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            try {
+                byte[] buf = new byte[4096]; int n;
+                while ((n = is.read(buf)) != -1) baos.write(buf, 0, n);
+            } finally {
+                try { is.close(); } catch (Exception ignored) {}
+                conn.disconnect();
+            }
+
+            byte[] bytes = baos.toByteArray();
+
+            // 计算图片 MD5 并查持久化注释（注释随图进入长期存储）
+            String remark = "";
+            try {
+                String md5 = sair.aiagent.onebot.ImageRecognizer.md5(bytes);
+                String persisted = pm != null ? pm.getImageRemark(md5) : null;
+                if (persisted != null && !persisted.isEmpty()) remark = persisted;
+            } catch (Exception ignored) {}
+
+            try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                fos.write(bytes);
+            }
+            return new String[]{outFile.getAbsolutePath(), remark};
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[Sticker] download failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+
     // ==================== 清理 ====================
 
     /**
@@ -185,11 +294,25 @@ public class StickerManager {
     }
 
     /**
-     * 清空所有表情包。
+     * 清空所有表情包（数据库记录 + 本地图片文件）。
      */
     public synchronized void clearAll() {
         if (pm == null) return;
-        // 逐条删除（简单实现）
+        // 删除本地文件
+        if (dataDir != null) {
+            try {
+                File dir = new File(dataDir, "stickers");
+                if (dir.exists() && dir.isDirectory()) {
+                    File[] files = dir.listFiles();
+                    if (files != null) {
+                        for (File f : files) {
+                            if (f.isFile()) f.delete();
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        // 删除数据库记录
         List<StickerEntry> all = pm.listAllStickers();
         for (StickerEntry s : all) {
             pm.removeSticker(s.getId());

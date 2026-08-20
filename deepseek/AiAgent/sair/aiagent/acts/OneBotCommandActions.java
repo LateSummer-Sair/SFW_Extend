@@ -1,6 +1,8 @@
 package sair.aiagent.acts;
 
 import java.awt.Color;
+import java.util.ArrayList;
+import java.util.List;
 
 import sair.aiagent.AiAgentActivity;
 import sair.aiagent.util.EdtUtils;
@@ -137,46 +139,6 @@ public class OneBotCommandActions {
         return true;
     }
 
-    // ==================== execq 插件白名单管理 ====================
-
-    public Object handleOneBotWhitelist() {
-        java.util.Set<String> wl = act.getConfig().getExecqCmdWhitelist();
-        ActivityActions.print(new Color(100, 255, 180), "[execq 插件白名单]");
-        if (wl.isEmpty()) {
-            EdtUtils.println(ActivityActions.C_INFO, "\n(空 — 所有 <cmd> 命令均被拒绝。使用 ai/onebot/whitelist/add 添加插件)");
-        } else {
-            EdtUtils.println(ActivityActions.C_INFO, "\n允许的插件: " + wl);
-            EdtUtils.println(ActivityActions.C_INFO, "配置文件: config.properties → execqCmdWhitelist");
-        }
-        return true;
-    }
-
-    public Object handleOneBotWhitelistAdd(String args) {
-        if (ActivityActions.isEmpty(args)) return ActivityActions.err("用法: ai/onebot/whitelist/add [插件名]");
-        String pluginName = args.trim();
-        if (act.getConfig().addExecqCmdPlugin(pluginName)) {
-            act.getConfig().save();
-            act.getAgent().setCmdWhitelist(act.getConfig().getExecqCmdWhitelist());
-            EdtUtils.println(ActivityActions.C_INFO, "execq白名单已添加: [" + pluginName + "]，当前白名单: " + act.getConfig().getExecqCmdWhitelist());
-        } else {
-            EdtUtils.println(ActivityActions.C_INFO, "插件 [" + pluginName + "] 已在白名单中，当前: " + act.getConfig().getExecqCmdWhitelist());
-        }
-        return true;
-    }
-
-    public Object handleOneBotWhitelistRemove(String args) {
-        if (ActivityActions.isEmpty(args)) return ActivityActions.err("用法: ai/onebotwhitelistremove [插件名]");
-        String pluginName = args.trim();
-        if (act.getConfig().removeExecqCmdPlugin(pluginName)) {
-            act.getConfig().save();
-            act.getAgent().setCmdWhitelist(act.getConfig().getExecqCmdWhitelist());
-            EdtUtils.println(ActivityActions.C_INFO, "execq白名单已移除: [" + pluginName + "]，当前白名单: " + act.getConfig().getExecqCmdWhitelist());
-        } else {
-            EdtUtils.println(ActivityActions.C_INFO, "插件 [" + pluginName + "] 不在白名单中，当前: " + act.getConfig().getExecqCmdWhitelist());
-        }
-        return true;
-    }
-
     // ==================== 主动查看配置命令 ====================
 
     public Object handleOneBotEnableProactive() {
@@ -201,41 +163,83 @@ public class OneBotCommandActions {
         return true;
     }
 
-    public Object handleOneBotAddGroup(String args) {
-        if (ActivityActions.isEmpty(args)) return ActivityActions.err("用法: ai/onebotaddgroup [群号]");
-        try {
-            long groupId = Long.parseLong(args.trim());
-            if (act.getConfig().addMonitoredGroup(groupId)) {
-                act.getConfig().save();
-                if (act.getOneBotMessageHandler() != null) {
-                    act.getOneBotMessageHandler().addMonitoredGroup(groupId);
-                }
-                EdtUtils.println(ActivityActions.C_INFO, "已添加监听群: " + groupId);
-            } else {
-                EdtUtils.println(ActivityActions.C_INFO, "群号已在监听列表中: " + groupId);
-            }
-        } catch (NumberFormatException e) {
-            return ActivityActions.err("群号必须是数字。");
+    // ==================== 拟人化监听态开关 ====================
+
+    public Object handleOneBotEnableListen() {
+        act.getConfig().setListenStateEnabled(true);
+        act.getConfig().save();
+        if (act.getOneBotMessageHandler() != null) {
+            act.getOneBotMessageHandler().enableListeningState();
+            EdtUtils.println(ActivityActions.C_INFO, "拟人化监听态已启用");
+        } else {
+            EdtUtils.println(ActivityActions.C_INFO, "监听态配置已保存，下次启动OneBot时生效");
         }
         return true;
     }
 
-    public Object handleOneBotRemoveGroup(String args) {
-        if (ActivityActions.isEmpty(args)) return ActivityActions.err("用法: ai/onebotremovegroup [群号]");
-        try {
-            long groupId = Long.parseLong(args.trim());
-            if (act.getConfig().removeMonitoredGroup(groupId)) {
-                act.getConfig().save();
-                if (act.getOneBotMessageHandler() != null) {
-                    act.getOneBotMessageHandler().removeMonitoredGroup(groupId);
-                }
-                EdtUtils.println(ActivityActions.C_INFO, "已移除监听群: " + groupId);
-            } else {
-                EdtUtils.println(ActivityActions.C_INFO, "群号不在监听列表中: " + groupId);
-            }
-        } catch (NumberFormatException e) {
-            return ActivityActions.err("群号必须是数字。");
+    public Object handleOneBotDisableListen() {
+        act.getConfig().setListenStateEnabled(false);
+        act.getConfig().save();
+        if (act.getOneBotMessageHandler() != null) {
+            act.getOneBotMessageHandler().disableListeningState();
+            EdtUtils.println(ActivityActions.C_INFO, "拟人化监听态已禁用");
+        } else {
+            EdtUtils.println(ActivityActions.C_INFO, "监听态配置已保存，下次启动OneBot时生效");
         }
+        return true;
+    }
+
+    public Object handleOneBotAddGroup(String args) {
+        if (ActivityActions.isEmpty(args)) return ActivityActions.err("用法: ai/onebotaddgroup [群号1 群号2 ...]（支持空格分隔多个群号）");
+        String[] tokens = args.trim().split("\\s+");
+        List<Long> added = new ArrayList<>();
+        List<Long> existed = new ArrayList<>();
+        List<String> invalid = new ArrayList<>();
+        for (String token : tokens) {
+            if (token.isEmpty()) continue;
+            try {
+                long groupId = Long.parseLong(token);
+                if (act.getConfig().addMonitoredGroup(groupId)) {
+                    added.add(groupId);
+                    if (act.getOneBotMessageHandler() != null) {
+                        act.getOneBotMessageHandler().addMonitoredGroup(groupId);
+                    }
+                } else {
+                    existed.add(groupId);
+                }
+            } catch (NumberFormatException e) {
+                invalid.add(token);
+            }
+        }
+        act.getConfig().save();
+        if (!added.isEmpty()) EdtUtils.println(ActivityActions.C_INFO, "已添加监听群: " + added);
+        if (!existed.isEmpty()) EdtUtils.println(ActivityActions.C_INFO, "已在监听列表: " + existed);
+        if (!invalid.isEmpty()) EdtUtils.println(ActivityActions.C_ERR, "无效群号(忽略): " + invalid);
+        return true;
+    }
+
+    public Object handleOneBotRemoveGroup(String args) {
+        if (ActivityActions.isEmpty(args)) return ActivityActions.err("用法: ai/onebotremovegroup [群号1 群号2 ...]（支持空格分隔多个群号）");
+        String[] tokens = args.trim().split("\\s+");
+        List<Long> removed = new ArrayList<>();
+        List<String> invalid = new ArrayList<>();
+        for (String token : tokens) {
+            if (token.isEmpty()) continue;
+            try {
+                long groupId = Long.parseLong(token);
+                if (act.getConfig().removeMonitoredGroup(groupId)) {
+                    removed.add(groupId);
+                    if (act.getOneBotMessageHandler() != null) {
+                        act.getOneBotMessageHandler().removeMonitoredGroup(groupId);
+                    }
+                }
+            } catch (NumberFormatException e) {
+                invalid.add(token);
+            }
+        }
+        act.getConfig().save();
+        if (!removed.isEmpty()) EdtUtils.println(ActivityActions.C_INFO, "已移除监听群: " + removed);
+        if (!invalid.isEmpty()) EdtUtils.println(ActivityActions.C_ERR, "无效群号(忽略): " + invalid);
         return true;
     }
 
@@ -250,6 +254,29 @@ public class OneBotCommandActions {
             }
         }
         EdtUtils.println(ActivityActions.C_INFO, "主动查看状态: " + (act.getConfig().isProactiveCheckEnabled() ? "已启用" : "已禁用"));
+        return true;
+    }
+
+    // ==================== 好感度复位 ====================
+
+    public Object handleResetAffection() {
+        if (act.getOneBotMessageHandler() != null && act.getOneBotMessageHandler().getEmotionManager() != null) {
+            act.getOneBotMessageHandler().getEmotionManager().resetAllAffections();
+            EdtUtils.println(ActivityActions.C_INFO, "已重置所有用户的好感度");
+        } else {
+            EdtUtils.println(ActivityActions.C_ERR, "情绪管理器未就绪，无法重置好感度");
+        }
+        return true;
+    }
+
+    /** 重置全部捐赠记录（从数据库层面彻底清空，含自增 ID 归零）。 */
+    public Object handleResetDonations() {
+        if (act.getOneBotMessageHandler() != null && act.getOneBotMessageHandler().getEmotionManager() != null) {
+            act.getOneBotMessageHandler().getEmotionManager().resetAllDonations();
+            EdtUtils.println(ActivityActions.C_INFO, "已重置全部捐赠记录（数据库已彻底清空）");
+        } else {
+            EdtUtils.println(ActivityActions.C_ERR, "情绪管理器未就绪，无法重置捐赠记录");
+        }
         return true;
     }
 }

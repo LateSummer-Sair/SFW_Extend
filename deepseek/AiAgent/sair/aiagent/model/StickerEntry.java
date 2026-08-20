@@ -31,6 +31,8 @@ public class StickerEntry implements Serializable {
     private String keywords;
     private long timestamp;
     private int usageCount;
+    /** 图片注释（随图持久化，AI 可修改，图片进入长期存储时一并保留） */
+    private String remark = "";
 
     /** 无参构造（Gson 反序列化） */
     public StickerEntry() {}
@@ -56,6 +58,7 @@ public class StickerEntry implements Serializable {
     public String getKeywords()  { return keywords; }
     public long getTimestamp()   { return timestamp; }
     public int getUsageCount()   { return usageCount; }
+    public String getRemark()    { return remark; }
 
     public void setId(int id)              { this.id = id; }
     public void setImageUrl(String url)    { this.imageUrl = url; }
@@ -64,6 +67,7 @@ public class StickerEntry implements Serializable {
     public void setKeywords(String kw)     { this.keywords = kw; }
     public void setTimestamp(long ts)      { this.timestamp = ts; }
     public void setUsageCount(int c)       { this.usageCount = c; }
+    public void setRemark(String r)        { this.remark = (r != null) ? r : ""; }
 
     /** 使用次数 +1 */
     public void incrementUsage() { this.usageCount++; }

@@ -23,7 +23,12 @@ import com.google.gson.reflect.TypeToken;
 
 import sair.aiagent.model.ChatMessage;
 import sair.aiagent.model.MemoryEntry;
+import sair.aiagent.model.SkillEntry;
 import sair.aiagent.model.StickerEntry;
+import sair.aiagent.model.ImpressionEntry;
+import sair.aiagent.model.GroupImpression;
+import sair.aiagent.model.CorrectionEntry;
+import sair.aiagent.model.AlarmEntry;
 
 /**
  * SQLite 统一持久化管理器 —— 替代 5 个独立 JSON 文件。
@@ -47,15 +52,37 @@ public class PersistenceManager {
     private static final int FTS_MAX_RESULTS = 5;
     private static final int CTX_MAX_CHARS = 2000;
 
+    /** Escape FTS5 special characters to prevent syntax errors in MATCH queries */
+    private static String sanitizeFtsQuery(String query) {
+        if (query == null || query.isEmpty()) return query;
+        // Remove FTS5 special chars: *, ", parentheses, -, :
+        return query.replaceAll("[*\"()\\-:]", " ")
+                    .replaceAll("\\s+", " OR ")
+                    .trim();
+    }
+
+
     private static PersistenceManager instance;
     private final Gson gson = new Gson();
     private final Object lock = new Object();
     private Connection conn;
     private File dbFile;
 
+    /** 临时存储层（内存 LRU + Redis 可选加速，覆盖印象/群印象/纠正查询） */
+    private final TemporalStore temporalStore = new TemporalStore(500, 300_000L);
+
+    // Skills CRUD delegation
+    private PersistenceSkills skillsDb;
+
     public static PersistenceManager getInstance() {
         return instance;
     }
+
+    /** 获取数据库连接（供 RouteCache 等内部组件使用） */
+    public Connection getConnection() { return conn; }
+
+    /** 获取同步锁（供 RouteCache 等内部组件使用） */
+    public Object getLock() { return lock; }
 
     // ==================== 初始化 ====================
 
@@ -87,6 +114,7 @@ public class PersistenceManager {
                 stmt.execute("PRAGMA busy_timeout=3000");
             }
 
+            skillsDb = new PersistenceSkills(conn, lock);
             createTables();
 
             if (isNew) {
@@ -191,11 +219,22 @@ public class PersistenceManager {
                     "  file_path TEXT NOT NULL DEFAULT ''," +
                     "  context TEXT NOT NULL DEFAULT ''," +
                     "  keywords TEXT NOT NULL DEFAULT ''," +
+                    "  remark TEXT NOT NULL DEFAULT ''," +
                     "  usage_count INTEGER NOT NULL DEFAULT 0," +
                     "  created_at INTEGER NOT NULL" +
                     ")"
                 );
                 stmt.execute("CREATE INDEX IF NOT EXISTS idx_sticker_created ON stickers(created_at)");
+
+                // 图片注释表（按图片 MD5 强绑定，AI 可自由修改，随图持久化）
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS image_remarks (" +
+                    "  image_md5 TEXT PRIMARY KEY," +
+                    "  remark TEXT NOT NULL DEFAULT ''," +
+                    "  source TEXT NOT NULL DEFAULT 'ocr'," +
+                    "  updated_at INTEGER NOT NULL" +
+                    ")"
+                );
 
                 // 定时任务表
                 stmt.execute(
@@ -204,6 +243,46 @@ public class PersistenceManager {
                     "  cron_expr TEXT NOT NULL DEFAULT ''," +
                     "  command TEXT NOT NULL DEFAULT ''," +
                     "  description TEXT NOT NULL DEFAULT ''," +
+                    "  enabled INTEGER NOT NULL DEFAULT 1," +
+                    "  last_run INTEGER NOT NULL DEFAULT 0," +
+                    "  created_at INTEGER NOT NULL" +
+                    ")");
+
+                // 系统闹钟表（AI Alarm：到点唤醒 AI 走 Agent 链路）
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS alarms (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  scope TEXT NOT NULL DEFAULT 'REMIND'," +
+                    "  schedule TEXT NOT NULL DEFAULT ''," +
+                    "  task TEXT NOT NULL DEFAULT ''," +
+                    "  snapshot TEXT," +
+                    "  notes TEXT," +
+                    "  channel TEXT NOT NULL DEFAULT 'console'," +
+                    "  sender_qq INTEGER NOT NULL DEFAULT 0," +
+                    "  is_group INTEGER NOT NULL DEFAULT 0," +
+                    "  group_id INTEGER NOT NULL DEFAULT 0," +
+                    "  is_master INTEGER NOT NULL DEFAULT 0," +
+                    "  repeat INTEGER NOT NULL DEFAULT 0," +
+                    "  enabled INTEGER NOT NULL DEFAULT 1," +
+                    "  last_run INTEGER NOT NULL DEFAULT 0," +
+                    "  created_at INTEGER NOT NULL" +
+                    ")");
+
+                // 系统闹钟表（AI Alarm：到点唤醒 AI 走 Agent 链路）
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS alarms (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  scope TEXT NOT NULL DEFAULT 'REMIND'," +
+                    "  schedule TEXT NOT NULL DEFAULT ''," +
+                    "  task TEXT NOT NULL DEFAULT ''," +
+                    "  snapshot TEXT," +
+                    "  notes TEXT," +
+                    "  channel TEXT NOT NULL DEFAULT 'console'," +
+                    "  sender_qq INTEGER NOT NULL DEFAULT 0," +
+                    "  is_group INTEGER NOT NULL DEFAULT 0," +
+                    "  group_id INTEGER NOT NULL DEFAULT 0," +
+                    "  is_master INTEGER NOT NULL DEFAULT 0," +
+                    "  repeat INTEGER NOT NULL DEFAULT 0," +
                     "  enabled INTEGER NOT NULL DEFAULT 1," +
                     "  last_run INTEGER NOT NULL DEFAULT 0," +
                     "  created_at INTEGER NOT NULL" +
@@ -256,7 +335,168 @@ public class PersistenceManager {
                     "END"
                 );
 
+                // 纠正记录表（AI犯错被纠正，支持同一主题多观点）
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS corrections (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  topic TEXT NOT NULL DEFAULT ''," +
+                    "  content TEXT NOT NULL DEFAULT ''," +
+                    "  viewpoint TEXT NOT NULL DEFAULT ''," +
+                    "  source TEXT NOT NULL DEFAULT 'user'," +
+                    "  qq INTEGER NOT NULL DEFAULT 0," +
+                    "  created_at INTEGER NOT NULL," +
+                    "  updated_at INTEGER NOT NULL" +
+                    ")"
+                );
+
+                // 技能表
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS skills (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  name TEXT NOT NULL DEFAULT ''," +
+                    "  category TEXT NOT NULL DEFAULT 'general'," +
+                    "  description TEXT NOT NULL DEFAULT ''," +
+                    "  content TEXT NOT NULL DEFAULT ''," +
+                    "  version INTEGER NOT NULL DEFAULT 1," +
+                    "  success_count INTEGER NOT NULL DEFAULT 0," +
+                    "  failure_count INTEGER NOT NULL DEFAULT 0," +
+                    "  last_used INTEGER NOT NULL DEFAULT 0," +
+                    "  parent_skill_id INTEGER NOT NULL DEFAULT 0," +
+                    "  status TEXT NOT NULL DEFAULT 'active'," +
+                    "  source TEXT NOT NULL DEFAULT 'extracted'," +
+                    "  scope TEXT NOT NULL DEFAULT 'task'," +
+                    "  content_hash TEXT NOT NULL DEFAULT ''," +
+                    "  created_at INTEGER NOT NULL," +
+                    "  updated_at INTEGER NOT NULL" +
+                    ")"
+                );
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_skill_status ON skills(status)");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_skill_category ON skills(category)");
+                // 人格印象表
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS impressions (" +
+                    "  qq INTEGER PRIMARY KEY," +
+                    "  nickname TEXT NOT NULL DEFAULT ''," +
+                    "  emotion_stability TEXT NOT NULL DEFAULT ''," +
+                    "  interests TEXT NOT NULL DEFAULT ''," +
+                    "  speaking_style TEXT NOT NULL DEFAULT ''," +
+                    "  honesty TEXT NOT NULL DEFAULT ''," +
+                    "  image_habit TEXT NOT NULL DEFAULT ''," +
+                    "  message_count INTEGER NOT NULL DEFAULT 0," +
+                    "  first_seen INTEGER NOT NULL," +
+                    "  last_seen INTEGER NOT NULL," +
+                    "  updated_at INTEGER NOT NULL" +
+                    ")"
+                );
+
+                // 群印象表
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS group_impressions (" +
+                    "  group_id INTEGER PRIMARY KEY," +
+                    "  group_name TEXT NOT NULL DEFAULT ''," +
+                    "  friendliness INTEGER NOT NULL DEFAULT 0," +
+                    "  atmosphere TEXT NOT NULL DEFAULT ''," +
+                    "  message_count INTEGER NOT NULL DEFAULT 0," +
+                    "  first_seen INTEGER NOT NULL," +
+                    "  last_seen INTEGER NOT NULL," +
+                    "  updated_at INTEGER NOT NULL" +
+                    ")"
+                );
+
+
+                // FTS5 skills full-text index
+                stmt.execute(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS skills_fts USING fts5(" +
+                    "  name, description, content," +
+                    "  content='skills'," +
+                    "  content_rowid='id'" +
+                    ")"
+                );
+
+                // 路由缓存表
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS route_cache (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  task_hash TEXT NOT NULL," +
+                    "  task_pattern TEXT NOT NULL DEFAULT ''," +
+                    "  tag_sequence TEXT NOT NULL DEFAULT ''," +
+                    "  success_count INTEGER NOT NULL DEFAULT 1," +
+                    "  total_rounds INTEGER NOT NULL DEFAULT 1," +
+                    "  avg_rounds REAL NOT NULL DEFAULT 1.0," +
+                    "  weight REAL NOT NULL DEFAULT 0.5," +
+                    "  last_used TEXT NOT NULL DEFAULT ''," +
+                    "  created_at TEXT NOT NULL DEFAULT (datetime('now'))" +
+                    ")"
+                );
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_route_hash ON route_cache(task_hash)");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_route_weight ON route_cache(weight)");
+
+                // Harness 执行轨迹表（可观测性：成功/失败/轮次/耗时/审查判定）
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS harness_traces (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  task_id TEXT NOT NULL," +
+                    "  mode TEXT NOT NULL DEFAULT 'console'," +
+                    "  task TEXT NOT NULL DEFAULT ''," +
+                    "  tool_calls INTEGER NOT NULL DEFAULT 0," +
+                    "  success INTEGER NOT NULL DEFAULT 0," +
+                    "  duration_ms INTEGER NOT NULL DEFAULT 0," +
+                    "  critic_verdict TEXT NOT NULL DEFAULT ''," +
+                    "  created_at INTEGER NOT NULL" +
+                    ")"
+                );
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_htrace_mode ON harness_traces(mode)");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_htrace_time ON harness_traces(created_at)");
+
+                // triggers for skills FTS
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS sft_ai AFTER INSERT ON skills BEGIN " +
+                    "  INSERT INTO skills_fts(rowid, name, description, content) " +
+                    "  VALUES (new.id, new.name, new.description, new.content); " +
+                    "END"
+                );
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS sft_ad AFTER DELETE ON skills BEGIN " +
+                    "  INSERT INTO skills_fts(skills_fts, rowid, name, description, content) " +
+                    "  VALUES ('delete', old.id, old.name, old.description, old.content); " +
+                    "END"
+                );
+                stmt.execute(
+                    "CREATE TRIGGER IF NOT EXISTS sft_au AFTER UPDATE ON skills BEGIN " +
+                    "  INSERT INTO skills_fts(skills_fts, rowid, name, description, content) " +
+                    "  VALUES ('delete', old.id, old.name, old.description, old.content); " +
+                    "  INSERT INTO skills_fts(rowid, name, description, content) " +
+                    "  VALUES (new.id, new.name, new.description, new.content); " +
+                    "END"
+                );
+
+                // === Schema 迁移：老库补列（幂等，避免用户手动重置数据库） ===
+                ensureColumn(stmt, "skills", "scope", "TEXT NOT NULL DEFAULT 'task'");
+                ensureColumn(stmt, "skills", "content_hash", "TEXT NOT NULL DEFAULT ''");
+                ensureColumn(stmt, "memories", "importance", "INTEGER NOT NULL DEFAULT 0");
+                ensureColumn(stmt, "memories", "category", "TEXT NOT NULL DEFAULT 'general'");
+                ensureColumn(stmt, "stickers", "keywords", "TEXT NOT NULL DEFAULT ''");
+                ensureColumn(stmt, "stickers", "file_path", "TEXT NOT NULL DEFAULT ''");
+                ensureColumn(stmt, "stickers", "remark", "TEXT NOT NULL DEFAULT ''");
+
             }
+        }
+    }
+
+    /**
+     * 老库 schema 迁移：若表缺少某列则 ALTER TABLE 补列。
+     * 幂等：列已存在时自动跳过，不重复添加。
+     */
+    private void ensureColumn(Statement stmt, String table, String column, String columnDdl) throws SQLException {
+        boolean exists = false;
+        try (ResultSet rs = stmt.executeQuery("PRAGMA table_info(" + table + ")")) {
+            while (rs.next()) {
+                if (column.equals(rs.getString("name"))) { exists = true; break; }
+            }
+        }
+        if (!exists) {
+            stmt.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + columnDdl);
+            AiAgentActivity.debugLog("[Persistence] schema migrate: " + table + " + " + column);
         }
     }
 
@@ -274,6 +514,64 @@ public class PersistenceManager {
                 conn = null;
             }
         }
+    }
+
+    // ==================== Harness Traces ====================
+
+    /**
+     * 持久化一条 Harness 执行轨迹。失败静默忽略（可观测性不应阻断业务）。
+     */
+    public void saveTrace(HarnessTrace trace) {
+        if (trace == null || conn == null) return;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO harness_traces (task_id, mode, task, tool_calls, success, duration_ms, critic_verdict, created_at) " +
+                    "VALUES (?,?,?,?,?,?,?,?)")) {
+                ps.setString(1, trace.taskId);
+                ps.setString(2, trace.mode);
+                ps.setString(3, HarnessTrace.truncateTask(trace.task, 500));
+                ps.setInt(4, trace.toolCalls);
+                ps.setInt(5, trace.success ? 1 : 0);
+                ps.setLong(6, trace.durationMs);
+                ps.setString(7, HarnessTrace.truncateTask(trace.criticVerdict, 500));
+                ps.setLong(8, trace.timestamp);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {
+                // 轨迹落库失败不影响业务
+            }
+        }
+    }
+
+    /**
+     * 按时间倒序列出最近 N 条 Harness 执行轨迹。
+     * @param limit 最大条数
+     */
+    public List<HarnessTrace> listTraces(int limit) {
+        List<HarnessTrace> traces = new ArrayList<>();
+        if (conn == null) return traces;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT task_id, mode, task, tool_calls, success, duration_ms, critic_verdict, created_at " +
+                    "FROM harness_traces ORDER BY id DESC LIMIT ?")) {
+                ps.setInt(1, Math.max(1, limit));
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        traces.add(new HarnessTrace(
+                                rs.getString("task_id"),
+                                rs.getString("mode"),
+                                rs.getString("task"),
+                                rs.getInt("tool_calls"),
+                                rs.getInt("success") != 0,
+                                rs.getLong("duration_ms"),
+                                rs.getString("critic_verdict"),
+                                rs.getLong("created_at")));
+                    }
+                }
+            } catch (SQLException ignored) {
+                // 读取失败返回空列表
+            }
+        }
+        return traces;
     }
 
     // ==================== Memories ====================
@@ -379,7 +677,7 @@ public class PersistenceManager {
         synchronized (lock) {
             List<MemoryEntry> results = new ArrayList<>();
             // 用 FTS5 匹配表达式
-            String ftsQuery = query.trim().replaceAll("\\s+", " OR ");
+            String ftsQuery = sanitizeFtsQuery(query);
             String sql =
                 "SELECT m.id, m.category, m.content, m.importance, m.created_at, m.updated_at " +
                 "FROM memories_fts f JOIN memories m ON f.rowid = m.id " +
@@ -429,10 +727,21 @@ public class PersistenceManager {
         return list;
     }
 
-    /** 构建记忆上下文字符串（供 System Prompt 注入） */
+    /** 构建记忆上下文字符串（供 System Prompt 注入）。
+     *  按 重要性×新鲜度 加权排序：FTS5 rank 得分 × (1 + importance/10) × 时间衰减因子 */
     public String buildMemoryContext(String query, int maxChars) {
-        List<MemoryEntry> related = searchMemories(query, FTS_MAX_RESULTS);
+        List<MemoryEntry> related = searchMemories(query, FTS_MAX_RESULTS * 2);
         if (related.isEmpty()) return null;
+
+        // 按重要性+新鲜度重新排序
+        long now = System.currentTimeMillis();
+        java.util.Collections.sort(related, new java.util.Comparator<MemoryEntry>() {
+            public int compare(MemoryEntry a, MemoryEntry b) {
+                double scoreA = getMemoryScore(a, now);
+                double scoreB = getMemoryScore(b, now);
+                return Double.compare(scoreB, scoreA); // 降序
+            }
+        });
 
         StringBuilder sb = new StringBuilder();
         sb.append("## Related Memories\n");
@@ -440,8 +749,89 @@ public class PersistenceManager {
 
         int chars = 0;
         int limit = maxChars > 0 ? maxChars : CTX_MAX_CHARS;
+        int count = 0;
         for (MemoryEntry m : related) {
-            String line = "- [" + m.getCategory() + "] " + m.getContent() + "\n";
+            if (count >= FTS_MAX_RESULTS) break; // 限制最多 FTS_MAX_RESULTS 条
+            double score = getMemoryScore(m, now);
+            // 过滤低重要性记忆（< 2 且超过 60 天）
+            long ageDays = (now - m.getTimestamp()) / 86_400_000L;
+            if (m.getImportance() < 2 && ageDays > 60) continue;
+            String line = "- [" + m.getCategory() + "] " + m.getContent();
+            if (m.getImportance() >= 8) line += " ⭐"; // 高重要性标记
+            line += "\n";
+            if (chars + line.length() > limit) break;
+            sb.append(line);
+            chars += line.length();
+            count++;
+        }
+        return sb.toString();
+    }
+
+    /** 计算记忆的综合得分：importance (0-10) × 时间衰减 (30天半衰期) */
+    private double getMemoryScore(MemoryEntry m, long now) {
+        double importanceScore = 1.0 + (m.getImportance() / 10.0); // 1.0 ~ 2.0
+        long ageMs = now - m.getTimestamp();
+        double ageDays = ageMs / 86_400_000.0;
+        // 30天半衰期：1天=0.977, 7天=0.85, 30天=0.5, 90天=0.125
+        double decay = Math.pow(0.5, ageDays / 30.0);
+        return importanceScore * decay;
+    }
+
+    // ==================== Notes Context (auto-injection for layered memory) ====================
+
+    /**
+     * Build auto-injected notes context from FTS5 search.
+     * Unlike {@link #searchNotes} which is user-triggered, this is automatically called
+     * before each AI invocation to inject relevant knowledge into the system prompt.
+     */
+    public String buildNotesContext(String query, int maxChars) {
+        java.util.List<String[]> related = searchNotes(query, 5);
+        if (related.isEmpty()) return null;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("## Knowledge Base Notes\n");
+        sb.append("Relevant notes from the persistent knowledge base:\n\n");
+
+        int chars = 0;
+        int limit = maxChars > 0 ? maxChars : 1500;
+        for (String[] r : related) {
+            String line = "- [#" + r[0] + "] " + r[1];
+            if (r[2] != null && !r[2].isEmpty()) {
+                line += ": " + r[2];
+            }
+            line += "\n";
+            if (chars + line.length() > limit) break;
+            sb.append(line);
+            chars += line.length();
+        }
+        return sb.toString();
+    }
+
+    /** Convenience: build notes context with default char limit */
+    public String buildNotesContext(String query) {
+        return buildNotesContext(query, 1500);
+    }
+
+    // ==================== Corrections Context (纠正记录自动注入) ====================
+
+    /**
+     * 构建纠正记录上下文 —— 自动检索与 query 相关的纠正记录并注入系统提示词，
+     * 让 AI 在回答前先参考过去被纠正的内容，避免重复犯错。
+     */
+    public String buildCorrectionsContext(String query, int maxChars) {
+        List<CorrectionEntry> related = searchCorrections(query, 5);
+        if (related.isEmpty()) return null;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("## Corrections (纠错记录)\n");
+        sb.append("之前被纠正过的相关记录，回答前先参考、避免重犯:\n\n");
+
+        int chars = 0;
+        int limit = maxChars > 0 ? maxChars : 1200;
+        for (CorrectionEntry c : related) {
+            String line = "- [" + c.getTopic() + "]";
+            if (c.getViewpoint() != null && !c.getViewpoint().isEmpty()) line += "(" + c.getViewpoint() + ")";
+            line += ": " + c.getContent() + "\n";
             if (chars + line.length() > limit) break;
             sb.append(line);
             chars += line.length();
@@ -752,28 +1142,354 @@ public class PersistenceManager {
     /** @return 数据库文件路径 */
     public File getDbFile() { return dbFile; }
 
-    // ==================== Stickers ====================
+
+    // ==================== Impressions ====================
+
+    /** Get impression for a QQ user */
+    public ImpressionEntry getImpression(long qq) {
+        ImpressionEntry cached = temporalStore.get("imp:" + qq, ImpressionEntry.class);
+        if (cached != null) return cached;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT qq, nickname, emotion_stability, interests, speaking_style,"
+                    + " honesty, image_habit, message_count, first_seen, last_seen, updated_at"
+                    + " FROM impressions WHERE qq=?")) {
+                ps.setLong(1, qq);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        ImpressionEntry imp = new ImpressionEntry(
+                            rs.getLong(1), rs.getString(2), rs.getString(3),
+                            rs.getString(4), rs.getString(5), rs.getString(6),
+                            rs.getString(7), rs.getInt(8), rs.getLong(9),
+                            rs.getLong(10), rs.getLong(11));
+                        temporalStore.put("imp:" + qq, imp);
+                        return imp;
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return null;
+    }
+
+    /** Get recent impressions (for cross-channel injection) */
+    public List<ImpressionEntry> getAllImpressions(int limit) {
+        List<ImpressionEntry> list = new ArrayList<>();
+        synchronized (lock) {
+            String sql = "SELECT qq, nickname, emotion_stability, interests, speaking_style,"
+                    + " honesty, image_habit, message_count, first_seen, last_seen, updated_at"
+                    + " FROM impressions WHERE message_count > 5 ORDER BY last_seen DESC LIMIT ?";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setInt(1, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        list.add(new ImpressionEntry(
+                            rs.getLong(1), rs.getString(2), rs.getString(3),
+                            rs.getString(4), rs.getString(5), rs.getString(6),
+                            rs.getString(7), rs.getInt(8), rs.getLong(9),
+                            rs.getLong(10), rs.getLong(11)));
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+
+    /** Insert or update impression */
+    public void upsertImpression(ImpressionEntry imp) {
+        if (imp == null) return;
+        temporalStore.invalidate("imp:" + imp.getQq());
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO impressions (qq, nickname, emotion_stability, interests,"
+                    + " speaking_style, honesty, image_habit, message_count, first_seen,"
+                    + " last_seen, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+                    + " ON CONFLICT(qq) DO UPDATE SET"
+                    + " nickname=excluded.nickname, emotion_stability=excluded.emotion_stability,"
+                    + " interests=excluded.interests, speaking_style=excluded.speaking_style,"
+                    + " honesty=excluded.honesty, image_habit=excluded.image_habit,"
+                    + " message_count=excluded.message_count, last_seen=excluded.last_seen,"
+                    + " updated_at=excluded.updated_at")) {
+                ps.setLong(1, imp.getQq());
+                ps.setString(2, imp.getNickname() != null ? imp.getNickname() : "");
+                ps.setString(3, imp.getEmotionStability());
+                ps.setString(4, imp.getInterests());
+                ps.setString(5, imp.getSpeakingStyle());
+                ps.setString(6, imp.getHonesty());
+                ps.setString(7, imp.getImageHabit());
+                ps.setInt(8, imp.getMessageCount());
+                ps.setLong(9, imp.getFirstSeen());
+                ps.setLong(10, imp.getLastSeen());
+                ps.setLong(11, imp.getUpdatedAt());
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[Persistence] upsertImpression FAILED: " + e.getMessage());
+            }
+        }
+    }
+
+    /** Record a message for impression tracking (lightweight, no upsert) */
+    public void recordImpressionMessage(long qq, String nickname) {
+        temporalStore.invalidate("imp:" + qq);
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO impressions (qq, nickname, message_count, first_seen, last_seen, updated_at)"
+                    + " VALUES (?,?,1,?,?,?)"
+                    + " ON CONFLICT(qq) DO UPDATE SET"
+                    + " nickname=CASE WHEN excluded.nickname!='' THEN excluded.nickname ELSE nickname END,"
+                    + " message_count=message_count+1, last_seen=excluded.last_seen")) {
+                long now = System.currentTimeMillis();
+                ps.setLong(1, qq);
+                ps.setString(2, nickname != null ? nickname : "");
+                ps.setLong(3, now);
+                ps.setLong(4, now);
+                ps.setLong(5, now);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    // ==================== Group Impressions ====================
+
+    /** Get group impression by group id */
+    public GroupImpression getGroupImpression(long groupId) {
+        GroupImpression cached = temporalStore.get("gimp:" + groupId, GroupImpression.class);
+        if (cached != null) return cached;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT group_id, group_name, friendliness, atmosphere, message_count, first_seen, last_seen, updated_at"
+                    + " FROM group_impressions WHERE group_id=?")) {
+                ps.setLong(1, groupId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        GroupImpression gi = new GroupImpression(
+                                rs.getLong(1), rs.getString(2), rs.getInt(3),
+                                rs.getString(4), rs.getInt(5), rs.getLong(6),
+                                rs.getLong(7), rs.getLong(8));
+                        temporalStore.put("gimp:" + groupId, gi);
+                        return gi;
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return null;
+    }
+
+    /** Insert or update group impression */
+    public void upsertGroupImpression(GroupImpression gi) {
+        if (gi == null) return;
+        temporalStore.invalidate("gimp:" + gi.getGroupId());
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO group_impressions (group_id, group_name, friendliness, atmosphere, message_count, first_seen, last_seen, updated_at)"
+                    + " VALUES (?,?,?,?,?,?,?,?)"
+                    + " ON CONFLICT(group_id) DO UPDATE SET"
+                    + " group_name=CASE WHEN excluded.group_name!='' THEN excluded.group_name ELSE group_name END,"
+                    + " friendliness=excluded.friendliness, atmosphere=excluded.atmosphere,"
+                    + " message_count=excluded.message_count, first_seen=group_impressions.first_seen,"
+                    + " last_seen=excluded.last_seen, updated_at=excluded.updated_at")) {
+                ps.setLong(1, gi.getGroupId());
+                ps.setString(2, gi.getGroupName());
+                ps.setInt(3, gi.getFriendliness());
+                ps.setString(4, gi.getAtmosphere());
+                ps.setInt(5, gi.getMessageCount());
+                ps.setLong(6, gi.getFirstSeen());
+                ps.setLong(7, gi.getLastSeen());
+                ps.setLong(8, gi.getUpdatedAt());
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[Persistence] upsertGroupImpression FAILED: " + e.getMessage());
+            }
+        }
+    }
+
+    /** 调整群友好度（情绪联动）：delta 正负增减，-100~100 区间 */
+    public void adjustGroupFriendliness(long groupId, int delta) {
+        temporalStore.invalidate("gimp:" + groupId);
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO group_impressions (group_id, group_name, friendliness, atmosphere, message_count, first_seen, last_seen, updated_at)"
+                    + " VALUES (?,?," + delta + ",'',0,?,?,?)"
+                    + " ON CONFLICT(group_id) DO UPDATE SET"
+                    + " friendliness=MAX(-100, MIN(100, group_impressions.friendliness + excluded.friendliness)),"
+                    + " updated_at=excluded.updated_at")) {
+                long now = System.currentTimeMillis();
+                ps.setLong(1, groupId);
+                ps.setString(2, "");
+                ps.setLong(3, now);
+                ps.setLong(4, now);
+                ps.setLong(5, now);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    /** 记录一条群消息（轻量，累计消息数） */
+    public void recordGroupImpressionMessage(long groupId, String groupName) {
+        temporalStore.invalidate("gimp:" + groupId);
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO group_impressions (group_id, group_name, friendliness, atmosphere, message_count, first_seen, last_seen, updated_at)"
+                    + " VALUES (?,?,0,'',1,?,?,?)"
+                    + " ON CONFLICT(group_id) DO UPDATE SET"
+                    + " group_name=CASE WHEN excluded.group_name!='' THEN excluded.group_name ELSE group_name END,"
+                    + " message_count=group_impressions.message_count+1, last_seen=excluded.last_seen")) {
+                long now = System.currentTimeMillis();
+                ps.setLong(1, groupId);
+                ps.setString(2, groupName != null ? groupName : "");
+                ps.setLong(3, now);
+                ps.setLong(4, now);
+                ps.setLong(5, now);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    // ==================== Corrections (纠正记录) ====================
+
+    /** 记录一条纠正（AI犯错被纠正），返回自增 id */
+    public int addCorrection(String topic, String content, String viewpoint, String source, long qq) {
+        temporalStore.invalidateByPrefix("corr_topic:");
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO corrections (topic, content, viewpoint, source, qq, created_at, updated_at)"
+                    + " VALUES (?,?,?,?,?,?,?)")) {
+                long now = System.currentTimeMillis();
+                ps.setString(1, topic != null ? topic : "");
+                ps.setString(2, content != null ? content : "");
+                ps.setString(3, viewpoint != null ? viewpoint : "");
+                ps.setString(4, source != null ? source : "user");
+                ps.setLong(5, qq);
+                ps.setLong(6, now);
+                ps.setLong(7, now);
+                ps.executeUpdate();
+                try (ResultSet rs = ps.getGeneratedKeys()) {
+                    if (rs.next()) return rs.getInt(1);
+                }
+            } catch (SQLException e) { return -1; }
+        }
+        return -1;
+    }
+
+    /** 按主题查询纠正记录（返回全部观点，实现「多观点查询」） */
+    public List<CorrectionEntry> getCorrectionsByTopic(String topic) {
+        if (topic == null || topic.trim().isEmpty()) return new ArrayList<>();
+        String key = "corr_topic:" + topic.trim();
+        List<CorrectionEntry> cached = temporalStore.get(key, new TypeToken<List<CorrectionEntry>>(){}.getType());
+        if (cached != null) return cached;
+        List<CorrectionEntry> list = new ArrayList<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id, topic, content, viewpoint, source, qq, created_at, updated_at"
+                    + " FROM corrections WHERE topic LIKE ? ORDER BY created_at DESC")) {
+                ps.setString(1, "%" + topic.trim() + "%");
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) list.add(mapCorrection(rs));
+                }
+            } catch (SQLException ignored) {}
+        }
+        temporalStore.put(key, list);
+        return list;
+    }
+
+    /** 模糊搜索纠正记录（匹配 topic 或 content） */
+    public List<CorrectionEntry> searchCorrections(String query, int limit) {
+        List<CorrectionEntry> list = new ArrayList<>();
+        if (query == null || query.trim().isEmpty()) return list;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id, topic, content, viewpoint, source, qq, created_at, updated_at"
+                    + " FROM corrections WHERE topic LIKE ? OR content LIKE ?"
+                    + " ORDER BY updated_at DESC LIMIT ?")) {
+                String like = "%" + query.trim().replace("'", "''") + "%";
+                ps.setString(1, like);
+                ps.setString(2, like);
+                ps.setInt(3, limit > 0 ? limit : 10);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) list.add(mapCorrection(rs));
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+
+    /** 获取最近的纠正记录 */
+    public List<CorrectionEntry> getAllCorrections(int limit) {
+        List<CorrectionEntry> list = new ArrayList<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id, topic, content, viewpoint, source, qq, created_at, updated_at"
+                    + " FROM corrections ORDER BY updated_at DESC LIMIT ?")) {
+                ps.setInt(1, limit > 0 ? limit : 50);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) list.add(mapCorrection(rs));
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+
+    /** 删除一条纠正记录 */
+    public boolean deleteCorrection(long id) {
+        temporalStore.invalidateByPrefix("corr_topic:");
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement("DELETE FROM corrections WHERE id=?")) {
+                ps.setLong(1, id);
+                return ps.executeUpdate() > 0;
+            } catch (SQLException e) { return false; }
+        }
+    }
+
+    private CorrectionEntry mapCorrection(ResultSet rs) throws SQLException {
+        return new CorrectionEntry(
+                rs.getLong(1), rs.getString(2), rs.getString(3),
+                rs.getString(4), rs.getString(5), rs.getLong(6),
+                rs.getLong(7), rs.getLong(8));
+    }
+
+    /** Get recent impressions for distillation (return qq+messageCount for users with >10 messages and stale >1h) */
+    public List<Long> getUsersForImpressionDistillation(int minMessages, long staleMs) {
+        List<Long> list = new ArrayList<>();
+        long cutoff = System.currentTimeMillis() - staleMs;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT qq FROM impressions WHERE message_count>=? AND updated_at<?")) {
+                ps.setInt(1, minMessages);
+                ps.setLong(2, cutoff);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) list.add(rs.getLong(1));
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+
+
+        // ==================== Stickers ====================
 
     /** 添加表情包条目 */
-    public StickerEntry addSticker(String imageUrl, String filePath, String context, String keywords) {
+    public StickerEntry addSticker(String imageUrl, String filePath, String context, String keywords, String remark) {
         if (imageUrl == null || imageUrl.trim().isEmpty()) return null;
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO stickers (image_url, file_path, context, keywords, usage_count, created_at) "
-                    + "VALUES (?,?,?,?,0,?)",
+                    "INSERT INTO stickers (image_url, file_path, context, keywords, remark, usage_count, created_at) "
+                    + "VALUES (?,?,?,?,?,0,?)",
                     Statement.RETURN_GENERATED_KEYS)) {
                 long now = System.currentTimeMillis();
                 ps.setString(1, imageUrl.trim());
-                ps.setString(2, filePath != null ? filePath : "");
+                String fp = (filePath != null && !filePath.isEmpty()) ? filePath : "";
+                ps.setString(2, fp);
                 ps.setString(3, context != null ? context : "");
                 String kw = (keywords != null && !keywords.trim().isEmpty())
                         ? keywords.trim() : StickerEntry.extractKeywords(context);
                 ps.setString(4, kw);
-                ps.setLong(5, now);
+                ps.setString(5, remark != null ? remark : "");
+                ps.setLong(6, now);
                 ps.executeUpdate();
                 try (ResultSet rs = ps.getGeneratedKeys()) {
                     if (rs.next()) {
-                        return new StickerEntry(rs.getInt(1), imageUrl.trim(), filePath, context, kw, now);
+                        StickerEntry e = new StickerEntry(rs.getInt(1), imageUrl.trim(), filePath, context, kw, now);
+                        e.setRemark(remark != null ? remark : "");
+                        return e;
                     }
                 }
             } catch (SQLException e) {
@@ -800,13 +1516,14 @@ public class PersistenceManager {
             List<StickerEntry> list = new ArrayList<>();
             try (Statement stmt = conn.createStatement();
                  ResultSet rs = stmt.executeQuery(
-                         "SELECT id, image_url, file_path, context, keywords, usage_count, created_at "
+                         "SELECT id, image_url, file_path, context, keywords, remark, usage_count, created_at "
                          + "FROM stickers ORDER BY created_at DESC")) {
                 while (rs.next()) {
                     StickerEntry se = new StickerEntry(
                             rs.getInt(1), rs.getString(2), rs.getString(3),
-                            rs.getString(4), rs.getString(5), rs.getLong(7));
-                    se.setUsageCount(rs.getInt(6));
+                            rs.getString(4), rs.getString(5), rs.getLong(8));
+                    se.setUsageCount(rs.getInt(7));
+                    se.setRemark(rs.getString(6));
                     list.add(se);
                 }
             } catch (SQLException ignored) {}
@@ -841,6 +1558,42 @@ public class PersistenceManager {
                 ps.setInt(1, id);
                 return ps.executeUpdate() > 0;
             } catch (SQLException e) { return false; }
+        }
+    }
+
+    // ==================== Image Remarks (图片注释) ====================
+
+    /** 获取图片注释（按 MD5 强绑定），未命中返回 null */
+    public String getImageRemark(String md5) {
+        if (md5 == null || md5.isEmpty()) return null;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT remark FROM image_remarks WHERE image_md5=?")) {
+                ps.setString(1, md5);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return rs.getString(1);
+                }
+            } catch (SQLException ignored) {}
+        }
+        return null;
+    }
+
+    /** 写入/更新图片注释（AI 修改或 OCR 生成），UPSERT 语义 */
+    public void setImageRemark(String md5, String remark, String source) {
+        if (md5 == null || md5.isEmpty() || remark == null) return;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO image_remarks (image_md5, remark, source, updated_at) VALUES (?,?,?,?) "
+                    + "ON CONFLICT(image_md5) DO UPDATE SET remark=excluded.remark, "
+                    + "source=excluded.source, updated_at=excluded.updated_at")) {
+                ps.setString(1, md5);
+                ps.setString(2, remark);
+                ps.setString(3, source != null ? source : "ai");
+                ps.setLong(4, System.currentTimeMillis());
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[Persistence] setImageRemark FAILED: " + e.getMessage());
+            }
         }
     }
 
@@ -931,6 +1684,118 @@ public class PersistenceManager {
         }
     }
 
+    // ==================== Alarms (系统闹钟 AI Alarm) ====================
+
+    /** 添加闹钟，返回自增 ID */
+    public int addAlarm(String scope, String schedule, String task, String snapshot,
+                        String notes, String channel, long senderQq, boolean isGroup,
+                        long groupId, boolean isMaster, boolean repeat) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO alarms (scope, schedule, task, snapshot, notes, channel, " +
+                    "sender_qq, is_group, group_id, is_master, repeat, enabled, last_run, created_at) " +
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,1,0,?)")) {
+                ps.setString(1, scope != null ? scope : "REMIND");
+                ps.setString(2, schedule != null ? schedule : "");
+                ps.setString(3, task != null ? task : "");
+                ps.setString(4, snapshot);
+                ps.setString(5, notes);
+                ps.setString(6, channel != null ? channel : "console");
+                ps.setLong(7, senderQq);
+                ps.setInt(8, isGroup ? 1 : 0);
+                ps.setLong(9, groupId);
+                ps.setInt(10, isMaster ? 1 : 0);
+                ps.setInt(11, repeat ? 1 : 0);
+                ps.setLong(12, System.currentTimeMillis());
+                ps.executeUpdate();
+                try (ResultSet rs = ps.getGeneratedKeys()) {
+                    if (rs.next()) return rs.getInt(1);
+                }
+            } catch (SQLException e) { return -1; }
+        }
+        return -1;
+    }
+
+    /** 列出所有闹钟 */
+    public List<AlarmEntry> listAlarms() {
+        List<AlarmEntry> list = new ArrayList<>();
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT * FROM alarms ORDER BY created_at")) {
+                while (rs.next()) {
+                    list.add(mapAlarm(rs));
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+
+    /** 获取单个闹钟 */
+    public AlarmEntry getAlarm(int id) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement("SELECT * FROM alarms WHERE id=?")) {
+                ps.setInt(1, id);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return mapAlarm(rs);
+                }
+            } catch (SQLException ignored) {}
+        }
+        return null;
+    }
+
+    /** 删除闹钟（同时删除其快照/备注） */
+    public boolean removeAlarm(int id) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement("DELETE FROM alarms WHERE id=?")) {
+                ps.setInt(1, id);
+                return ps.executeUpdate() > 0;
+            } catch (SQLException e) { return false; }
+        }
+    }
+
+    /** 追加备注到闹钟（notes 为 JSON 数组字符串） */
+    public boolean appendAlarmNote(int id, String newNotesJson) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement("UPDATE alarms SET notes=? WHERE id=?")) {
+                ps.setString(1, newNotesJson);
+                ps.setInt(2, id);
+                return ps.executeUpdate() > 0;
+            } catch (SQLException e) { return false; }
+        }
+    }
+
+    /** 设置闹钟启用/禁用 */
+    public boolean setAlarmEnabled(int id, boolean enabled) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement("UPDATE alarms SET enabled=? WHERE id=?")) {
+                ps.setInt(1, enabled ? 1 : 0);
+                ps.setInt(2, id);
+                return ps.executeUpdate() > 0;
+            } catch (SQLException e) { return false; }
+        }
+    }
+
+    /** 更新闹钟最后执行时间 */
+    public void updateAlarmLastRun(int id, long ts) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement("UPDATE alarms SET last_run=? WHERE id=?")) {
+                ps.setLong(1, ts);
+                ps.setInt(2, id);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    private AlarmEntry mapAlarm(ResultSet rs) throws SQLException {
+        return new AlarmEntry(
+                rs.getInt("id"), rs.getString("scope"), rs.getString("schedule"),
+                rs.getString("task"), rs.getString("snapshot"), rs.getString("notes"),
+                rs.getString("channel"), rs.getLong("sender_qq"),
+                rs.getInt("is_group") != 0, rs.getLong("group_id"),
+                rs.getInt("is_master") != 0, rs.getInt("repeat") != 0,
+                rs.getInt("enabled") != 0, rs.getLong("last_run"), rs.getLong("created_at"));
+    }
+
     // ==================== Notes (knowledge base) ====================
 
     /** add note, returns auto-inc id */
@@ -962,7 +1827,7 @@ public class PersistenceManager {
                              "FROM notes_fts f JOIN notes n ON f.rowid = n.id " +
                              "WHERE notes_fts MATCH ? ORDER BY rank LIMIT ?";
                 java.sql.PreparedStatement ps = conn.prepareStatement(sql);
-                ps.setString(1, query);
+                ps.setString(1, sanitizeFtsQuery(query));
                 ps.setInt(2, limit > 0 ? limit : 10);
                 java.sql.ResultSet rs = ps.executeQuery();
                 while (rs.next()) {
@@ -1042,6 +1907,72 @@ public class PersistenceManager {
             } catch (java.sql.SQLException e) { return false; }
         }
     }
+
+    // ==================== Skills (delegated to PersistenceSkills) ====================
+
+    public int addSkill(String name, String category, String description,
+                        String content, String source) {
+        return skillsDb.addSkill(name, category, description, content, source, "task");
+    }
+
+    public int addSkill(String name, String category, String description,
+                        String content, String source, String scope) {
+        return skillsDb.addSkill(name, category, description, content, source, scope);
+    }
+
+    public boolean updateSkill(int id, String name, String description,
+                               String content, int newVersion) {
+        return skillsDb.updateSkill(id, name, description, content, newVersion);
+    }
+
+    public boolean removeSkill(int id) {
+        return skillsDb.removeSkill(id);
+    }
+
+    public SkillEntry getSkill(int id) {
+        return skillsDb.getSkill(id);
+    }
+
+    public List<SkillEntry> listAllSkills() {
+        return skillsDb.listAllSkills();
+    }
+
+    public List<SkillEntry> searchSkills(String query, int limit) {
+        return skillsDb.searchSkills(query, limit, PersistenceManager::sanitizeFtsQuery);
+    }
+
+    public SkillEntry findSimilarSkill(String name, String description) {
+        return skillsDb.findSimilarSkill(name, description);
+    }
+
+    public void incrementSkillUsage(int id, boolean success) {
+        skillsDb.incrementSkillUsage(id, success);
+    }
+
+    public List<SkillEntry> getSkillsForEvolution(int minFailureCount, int minTotal) {
+        return skillsDb.getSkillsForEvolution(minFailureCount, minTotal);
+    }
+
+    public boolean deprecateSkill(int id) {
+        return skillsDb.deprecateSkill(id);
+    }
+
+    public boolean markSkillMerged(int id, int mergedIntoId) {
+        return skillsDb.markSkillMerged(id, mergedIntoId);
+    }
+
+    public List<SkillEntry> getSkillsByScope(String scope) {
+        return skillsDb.getSkillsByScope(scope);
+    }
+
+    public List<SkillEntry> getGeneralSkills() {
+        return skillsDb.getGeneralSkills();
+    }
+
+    public List<SkillEntry> getPersonaSkills() {
+        return skillsDb.getPersonaSkills();
+    }
+
 
     private static String trunc(String s, int maxLen) {
 

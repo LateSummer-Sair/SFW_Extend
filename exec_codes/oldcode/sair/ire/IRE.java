@@ -5,9 +5,13 @@ import java.io.FileReader;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.MalformedURLException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -16,6 +20,7 @@ import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
 
 import sair.FCM;
+import sair.LoaderManager;
 import sair.Main;
 import sair.Pathes;
 import sair.sacoms.SairLists;
@@ -49,6 +54,9 @@ public class IRE extends Activity {
 	private final SEMod semod = new SEMod();
 	private final JCPMod jcmod = new JCPMod();
 
+	/** å·²è‡ªåŠ¨æ‰«æè¿‡åŒçˆ¶ç›®å½•çš„ç›®å½•é›†åˆï¼Œé¿å…é€’å½’é‡å¤æ‰«æ */
+	private final LinkedHashSet<String> scannedSiblingDirs = new LinkedHashSet<String>();
+
 	@Override
 	public Object main(String funcName, String args) {
 		if (!isloaded)
@@ -59,7 +67,7 @@ public class IRE extends Activity {
 			try {
 				return evalfunc(args);
 			} catch (Exception e) {
-				SairCons.println(FCM.Error_Color, "º¯ÊıÎŞ·¨´¦Àí´Ë²ÎÊı£¬Çë¼ì²éº¯ÊıÊÇ·ñÖ§³Ö½ö×Ö·û´®µÄ²ÎÊı£¡");
+				SairCons.println(FCM.Error_Color, "å‡½æ•°æ— æ³•å¤„ç†æ­¤å‚æ•°ï¼Œè¯·æ£€æŸ¥å‡½æ•°æ˜¯å¦æ”¯æŒä»…å­—ç¬¦ä¸²çš„å‚æ•°ï¼");
 				return null;
 			}
 
@@ -114,6 +122,9 @@ public class IRE extends Activity {
 		case "unloadmod":
 			return unloadmod(args);
 
+		case "run":
+			return run(args);
+
 		}
 
 		return false;
@@ -128,10 +139,228 @@ public class IRE extends Activity {
 			try {
 				mod.unLoadJar();
 			} catch (Exception e) {
-				SairCons.println(FCM.Error_Color, "Ã²ËÆÎŞ·¨Ğ¶ÔØ[" + urler.getUrl() + "]Äã×Ô¼º²éÒ»ÏÂ¿´¿´");
+				SairCons.println(FCM.Error_Color, "è²Œä¼¼æ— æ³•å¸è½½[" + urler.getUrl() + "]ä½ è‡ªå·±æŸ¥ä¸€ä¸‹çœ‹çœ‹");
 				return mod;
 			}
 		return mod;
+	}
+
+	private Object run(String args) {
+		if (args == null || args.trim().isEmpty()) {
+			SairCons.println(FCM.Error_Color, "usage: ire/run [path] [args...]");
+			return false;
+		}
+
+		String[] parts = splitPathAndArgs(args);
+		String path = new Urler(parts[0]).getUrl();
+		String runArgs = parts[1];
+
+		File mainFile = new File(path);
+		if (!mainFile.exists()) {
+			SairCons.println(FCM.Error_Color, "file not found: " + path);
+			return false;
+		}
+		String mainPath = mainFile.getAbsolutePath();
+
+		scannedSiblingDirs.clear();
+
+		// 1. æ”¶é›†é˜¶æ®µï¼šé€’å½’æ”¶é›† ire æ–‡ä»¶ã€ir æ–‡ä»¶ä¸ jar è·¯å¾„
+		LinkedHashMap<String, String> irPaths = new LinkedHashMap<String, String>();
+		List<String> jarPaths = new ArrayList<String>();
+		LinkedHashSet<String> ireFiles = new LinkedHashSet<String>();
+		collectImports(mainPath, irPaths, jarPaths, ireFiles);
+
+		// 2. jar è¿è¡ŒæœŸåŠ è½½ï¼šåŠ å…¥å½“å‰ SairLoader é“¾
+		for (String jar : jarPaths) {
+			try {
+				LoaderManager.loadLibJar(jar);
+			} catch (Exception e) {
+				SairCons.println(FCM.Error_Color, "load jar failed: " + jar + " " + e.getMessage());
+			}
+		}
+
+		// 3. è½¬è¯‘é˜¶æ®µï¼šç»Ÿä¸€è½¬è¯‘æ‰€æœ‰ ire æ–‡ä»¶ï¼ˆå¸¦å®Œæ•´ ir è·¯å¾„æ˜ å°„ï¼‰
+		LinkedHashMap<String, String> sources = new LinkedHashMap<String, String>();
+		String mainClassName = null;
+		for (String irePath : ireFiles) {
+			String src = readFile(irePath);
+			if (src == null) {
+				SairCons.println(FCM.Error_Color, "read file failed: " + irePath);
+				return false;
+			}
+			IRETranslator tr = new IRETranslator(src, irPaths);
+			if (!tr.translate()) {
+				SairCons.println(FCM.Error_Color, "translate failed: " + irePath + " " + tr.getError());
+				return false;
+			}
+			String cls = tr.getFullClassName();
+			if (sources.containsKey(cls)) {
+				SairCons.println(FCM.Error_Color, "duplicate group name: " + cls + " (" + irePath + ")");
+				return false;
+			}
+			sources.put(cls, tr.getJavaSource());
+			if (irePath.equals(mainPath))
+				mainClassName = cls;
+		}
+
+		if (mainClassName == null) {
+			SairCons.println(FCM.Error_Color, "main group not found");
+			return false;
+		}
+
+		// 4. æ‰¹é‡ç¼–è¯‘ + 5. åå°„è°ƒç”¨ï¼ˆfinally æ¸…ç†æœ¬æ¬¡ç¼–è¯‘äº§ç”Ÿçš„å­—èŠ‚ç ç¼“å­˜ï¼‰
+		Set<String> compiledBefore = new HashSet<String>(UDFParse.compiledClassNames());
+		try {
+			String err = UDFParse.compileBatch(sources, jarPaths);
+			if (err != null) {
+				SairCons.println(FCM.Error_Color, "compile failed:\r\n" + err);
+				return false;
+			}
+
+			Class<?> clazz = UDFParse.loadClass(mainClassName);
+			Method main = clazz.getMethod("main", String.class);
+			return main.invoke(null, runArgs);
+		} catch (NoSuchMethodException e) {
+			SairCons.println(FCM.Error_Color, "main(String) method not found: " + e.getMessage());
+		} catch (Exception e) {
+			SairCons.println(FCM.Error_Color, "execute failed: " + e.getMessage());
+		} finally {
+			UDFParse.removeCompiled(compiledBefore);
+		}
+		return null;
+	}
+
+	/** é€’å½’æ”¶é›† import çš„ ire æ–‡ä»¶ã€ir æ–‡ä»¶ä¸ jar è·¯å¾„ï¼Œå»ºç«‹ ir é€»è¾‘åæ˜ å°„ */
+	private void collectImports(String irePath, LinkedHashMap<String, String> irPaths, List<String> jarPaths,
+			LinkedHashSet<String> ireFiles) {
+		irePath = new File(irePath).getAbsolutePath();
+		if (!ireFiles.add(irePath))
+			return;
+
+		String src = readFile(irePath);
+		if (src == null)
+			return;
+		IRETranslator tr = new IRETranslator(src);
+		if (!tr.extractImports())
+			return;
+
+		String baseDir = new File(irePath).getParent();
+
+		// åŒçˆ¶ç›®å½•ä¸‹æ— éœ€ importï¼šè‡ªåŠ¨æ‰«æå½“å‰æ–‡ä»¶æ‰€åœ¨ç›®å½•çš„ä¸€çº§ .ire/.ir
+		scanSiblings(baseDir, irPaths, jarPaths, ireFiles);
+
+		for (String jar : tr.getJarPaths()) {
+			String abs = resolvePath(baseDir, jar);
+			File f = new File(abs);
+			if (f.isDirectory()) {
+				File[] fs = f.listFiles();
+				if (fs != null)
+					for (File ff : fs)
+						if (ff.isFile() && ff.getName().toLowerCase().endsWith(".jar"))
+							jarPaths.add(ff.getAbsolutePath());
+			} else if (f.isFile()) {
+				jarPaths.add(f.getAbsolutePath());
+			}
+		}
+
+		for (String ir : tr.getIrImports()) {
+			String abs = resolvePath(baseDir, ir);
+			File f = new File(abs);
+			if (f.isDirectory()) {
+				scanIrDir(f, irPaths);
+			} else {
+				putIrPath(f, irPaths);
+			}
+		}
+
+		for (String imp : tr.getIreImports()) {
+			String abs = resolvePath(baseDir, imp);
+			File f = new File(abs);
+			if (f.isDirectory()) {
+				File[] fs = f.listFiles();
+				if (fs != null)
+					for (File ff : fs)
+						if (ff.isFile()) {
+							String n = ff.getName().toLowerCase();
+							if (n.endsWith(".ire"))
+								collectImports(ff.getAbsolutePath(), irPaths, jarPaths, ireFiles);
+							else if (n.endsWith(".ir"))
+								putIrPath(ff, irPaths);
+						}
+			} else if (f.isFile() && f.getName().toLowerCase().endsWith(".ire")) {
+				collectImports(f.getAbsolutePath(), irPaths, jarPaths, ireFiles);
+			}
+		}
+	}
+
+	private void scanIrDir(File dir, LinkedHashMap<String, String> irPaths) {
+		File[] fs = dir.listFiles();
+		if (fs == null)
+			return;
+		for (File f : fs)
+			if (f.isFile() && f.getName().toLowerCase().endsWith(".ir"))
+				putIrPath(f, irPaths);
+	}
+
+	/** æ‰«ææŸç›®å½•ä¸€çº§ä¸‹çš„ .ire/.irï¼ˆåŒçˆ¶ç›®å½•å… import è§„åˆ™ï¼‰ï¼Œæ¯ä¸ªç›®å½•åªæ‰«æä¸€æ¬¡ */
+	private void scanSiblings(String dir, LinkedHashMap<String, String> irPaths, List<String> jarPaths,
+			LinkedHashSet<String> ireFiles) {
+		if (dir == null || !scannedSiblingDirs.add(dir))
+			return;
+		File d = new File(dir);
+		File[] fs = d.listFiles();
+		if (fs == null)
+			return;
+		for (File f : fs) {
+			if (!f.isFile())
+				continue;
+			String n = f.getName().toLowerCase();
+			if (n.endsWith(".ire"))
+				collectImports(f.getAbsolutePath(), irPaths, jarPaths, ireFiles);
+			else if (n.endsWith(".ir"))
+				putIrPath(f, irPaths);
+		}
+	}
+
+	private void putIrPath(File f, LinkedHashMap<String, String> irPaths) {
+		if (!f.exists())
+			return;
+		String name = f.getName();
+		int dot = name.lastIndexOf('.');
+		if (dot > 0)
+			name = name.substring(0, dot);
+		irPaths.put(name, f.getAbsolutePath());
+	}
+
+	private String resolvePath(String baseDir, String p) {
+		File f = new File(p);
+		if (f.isAbsolute())
+			return f.getAbsolutePath();
+		return new File(baseDir, p).getAbsolutePath();
+	}
+
+	private String readFile(String path) {
+		try {
+			return new String(Files.readAllBytes(new File(path).toPath()), StandardCharsets.UTF_8);
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
+	private String[] splitPathAndArgs(String args) {
+		args = args.trim();
+		if (args.startsWith("\"")) {
+			int end = args.indexOf('"', 1);
+			if (end > 0) {
+				String path = args.substring(1, end);
+				String rest = args.substring(end + 1).trim();
+				return new String[] { path, rest };
+			}
+		}
+		int sp = args.indexOf(' ');
+		if (sp < 0)
+			return new String[] { args, "" };
+		return new String[] { args.substring(0, sp), args.substring(sp + 1).trim() };
 	}
 
 	private Object unloadacti(String args) {
@@ -144,7 +373,7 @@ public class IRE extends Activity {
 				try {
 					exec.unLoadJar();
 				} catch (Exception e) {
-					SairCons.println(FCM.Error_Color, "Ã²ËÆÎŞ·¨Ğ¶ÔØ[" + args + "]Äã×Ô¼º²éÒ»ÏÂ¿´¿´");
+					SairCons.println(FCM.Error_Color, "è²Œä¼¼æ— æ³•å¸è½½[" + args + "]ä½ è‡ªå·±æŸ¥ä¸€ä¸‹çœ‹çœ‹");
 					return exec;
 				}
 		}
@@ -156,11 +385,11 @@ public class IRE extends Activity {
 		for (File path : listFile) {
 			Boolean flag = jcmod.cpJavaFile(path.getAbsolutePath(), code);
 			if (flag == null)
-				SairCons.println(FCM.Error_Color, path.getAbsolutePath() + "\t²»´æÔÚ£¡");
+				SairCons.println(FCM.Error_Color, path.getAbsolutePath() + "\tä¸å­˜åœ¨ï¼");
 			else if (flag == true)
-				SairCons.println(path.getAbsolutePath() + "\t±àÒë³É¹¦£¡");
+				SairCons.println(path.getAbsolutePath() + "\tç¼–è¯‘æˆåŠŸï¼");
 			else if (flag == false)
-				SairCons.println(FCM.Error_Color, path.getAbsolutePath() + "\t±àÒëÊ§°Ü£¡¿ÉÄÜÄúÃ»ÓĞÌîĞ´±àÂë²ÎÊı£¿");
+				SairCons.println(FCM.Error_Color, path.getAbsolutePath() + "\tç¼–è¯‘å¤±è´¥ï¼å¯èƒ½æ‚¨æ²¡æœ‰å¡«å†™ç¼–ç å‚æ•°ï¼Ÿ");
 		}
 		return listFile;
 	}
@@ -179,7 +408,7 @@ public class IRE extends Activity {
 			return null;
 		Object obj = JCPMod.omap.get(args);
 		if (obj == null) {
-			SairCons.println(FCM.Error_Color, "±äÁ¿Ãû[" + args + "]²»´æÔÚ£¡");
+			SairCons.println(FCM.Error_Color, "å˜é‡å[" + args + "]ä¸å­˜åœ¨ï¼");
 			return true;
 		}
 
@@ -292,7 +521,7 @@ public class IRE extends Activity {
 		if (names.contains(args))
 			semod.JSE = semod.SEM.getEngineByName(args);
 		else
-			SairCons.println(FCM.Error_Color, "JVMÖ§³ÖµÄÁĞ±íÖĞÃ»ÓĞÕÒµ½ÓïÑÔÒıÇæ£¡");
+			SairCons.println(FCM.Error_Color, "JVMæ”¯æŒçš„åˆ—è¡¨ä¸­æ²¡æœ‰æ‰¾åˆ°è¯­è¨€å¼•æ“ï¼");
 		return true;
 	}
 
@@ -351,29 +580,57 @@ public class IRE extends Activity {
 		return new String[] { //
 				"IRE V1.5.3", //
 				"Coder : Sair", //
-				"(±ğÎÊÎÒÎªÊ²Ã´²»¼ÓÒ»¸öÈÈĞ¶ÔØbootLibµÄ¹¦ÄÜ£¬ÒòÎªÕâÕæµÄ²»°²È«£¬ÄãÒª¼Ó×Ô¼º¼Ó£¬·´ÕıÎÒ²»¼Ó)", //
-				"(»¹ÓĞ¾ÍÊÇ£¬±àÒëjavaÎÄ¼şµÄÄÜÁ¦ÓÉjava8µÄJDKÌá¹©£¬Èç¹ûÄãÊÇJRE£¬ÄÇÃ´³öÃÅ×ó¹Õ£¬²»ÒªÓÃÕâÍæÒâ¶ù±È½ÏºÃ)", "",
-				this.getName() + "/evalfunc [funcName] [funcARGS...] : Ö´ĞĞÒÑ¾­¼ÓÔØµÄº¯Êı£¬[funcName]Îªº¯ÊıÃû£¬[funcARGS...]Îªº¯ÊıµÄ²ÎÊı", //
-				"\t\t×¢Òâ£¡º¯Êı½ÓÊÕµÄ²ÎÊıÎª×Ö·û´®ÀàĞÍ£¬Èç¹ûĞèÒª£¬Çë×ÔĞĞÔÚ½Å±¾ÄÚ×ª»¯£¡", //
-				this.getName() + "/loadfile [scriptPath] : [scriptPath]Îª½Å±¾ËùÔÚµÄÂ·¾¶", //
-				this.getName() + "/evalline [script] : [script]Îªµ¥¾äÖ´ĞĞµÄ½Å±¾ÃüÁî", //
-				this.getName() + "/enginelist : ´òÓ¡µ±Ç°JVMËùÖ§³ÖµÄËùÓĞÒıÇæ", //
-				this.getName() + "/thisengine : ´òÓ¡ÏÖÔÚÕıÔÚÊ¹ÓÃµÄÒıÇæ", //
+				"========== IRE è„šæœ¬è¯­è¨€è¯­æ³• ==========", //
+				"ire/run [path] [args...] : æ‰§è¡Œ .ire è„šæœ¬ï¼Œ[args...] æ‹¼æ¥ä¸ºå•ä¸ªå­—ç¬¦ä¸²ä¼ å…¥ main(String args)", //
+				"", //
+				"ã€æ–‡ä»¶ç»“æ„ã€‘ä¸€ä¸ª .ire æ–‡ä»¶å¯¹åº”ä¸€ä¸ª groupï¼ˆè½¬è¯‘ä¸ºä¸€ä¸ª Java ç±»ï¼‰", //
+				"  group ç»„å {", //
+				"    fc main(String args) { ... }   // å…¥å£å‡½æ•°", //
+				"  }", //
+				"", //
+				"ã€åŸºç¡€ç±»å‹ã€‘Bool/Int/Double/String/Long/LLong/Char/var(Object)", //
+				"  åŸºç¡€ç±»å‹ç»Ÿä¸€è½¬è¯‘ä¸ºå°è£…ç±»å‹ï¼šIntâ†’Integerã€Longâ†’Longã€Doubleâ†’Doubleã€Boolâ†’Booleanã€Charâ†’Characterï¼ˆå¯ä½œæ³›å‹å®å‚ï¼‰", //
+				"  æ•°ç»„ç±»å‹æ”¯æŒï¼šInt[] arrã€String[][] matrix ç­‰", //
+				"", //
+				"ã€å‡½æ•° fcã€‘fc [è¿”å›ç±»å‹] å‡½æ•°å(å‚æ•°) { ... }", //
+				"  fc ç»Ÿä¸€ç¼–è¯‘ä¸º public staticï¼›æ—  return æ—¶ç»Ÿä¸€è¿”å› null", //
+				"", //
+				"ã€å­—æ®µã€‘group å†…å¯ç›´æ¥å£°æ˜ï¼šInt count = 0;", //
+				"", //
+				"ã€import å¯¼å…¥ã€‘", //
+				"  import { java:java.util.List;  ../MyLib.ire;  Sair\\MyLib2.ir;  Sair }", //
+				"  ï¼ˆåŒçˆ¶ç›®å½•ä¸‹çš„ .ire/.ir æ— éœ€ importï¼Œè‡ªåŠ¨å¯ç”¨ï¼‰", //
+				"", //
+				"ã€jar å¯¼å…¥ã€‘jar { è·¯å¾„æˆ–ç›®å½• }  // ç›®å½•ä»…æ‰«æä¸€çº§ä¸‹çš„å…¨éƒ¨ jar", //
+				"", //
+				"ã€è°ƒç”¨ã€‘ire è°ƒç”¨ï¼šMyLib.func1(args);  ir è°ƒç”¨ï¼šMyLib2.LabelName; æˆ– MyLib2;", //
+				"", //
+				"ã€æ§åˆ¶æµ/è¡¨è¾¾å¼ã€‘if/elseã€switch/caseã€forã€whileã€do-whileã€ä¸‰ç›®ã€æ•°å­¦/ä½ç§»è¿ç®—ã€(Int)x å¼ºè½¬ å…¨éƒ¨é€ä¼  Java", //
+				"", //
+				"ã€æ³›å‹/Javaç±»å‹ã€‘å£°æ˜æ”¯æŒ List<Int>ã€java.util.List<String>ã€Map<String,Integer> ç­‰", //
+				"(åˆ«é—®æˆ‘ä¸ºä»€ä¹ˆä¸åŠ ä¸€ä¸ªçƒ­å¸è½½bootLibçš„åŠŸèƒ½ï¼Œå› ä¸ºè¿™çœŸçš„ä¸å®‰å…¨ï¼Œä½ è¦åŠ è‡ªå·±åŠ ï¼Œåæ­£æˆ‘ä¸åŠ )", //
+				"(è¿˜æœ‰å°±æ˜¯ï¼Œç¼–è¯‘javaæ–‡ä»¶çš„èƒ½åŠ›ç”±java8çš„JDKæä¾›ï¼Œå¦‚æœä½ æ˜¯JREï¼Œé‚£ä¹ˆå‡ºé—¨å·¦æ‹ï¼Œä¸è¦ç”¨è¿™ç©æ„å„¿æ¯”è¾ƒå¥½)", "",
+				this.getName() + "/evalfunc [funcName] [funcARGS...] : æ‰§è¡Œå·²ç»åŠ è½½çš„å‡½æ•°ï¼Œ[funcName]ä¸ºå‡½æ•°åï¼Œ[funcARGS...]ä¸ºå‡½æ•°çš„å‚æ•°", //
+				"\t\tæ³¨æ„ï¼å‡½æ•°æ¥æ”¶çš„å‚æ•°ä¸ºå­—ç¬¦ä¸²ç±»å‹ï¼Œå¦‚æœéœ€è¦ï¼Œè¯·è‡ªè¡Œåœ¨è„šæœ¬å†…è½¬åŒ–ï¼", //
+				this.getName() + "/loadfile [scriptPath] : [scriptPath]ä¸ºè„šæœ¬æ‰€åœ¨çš„è·¯å¾„", //
+				this.getName() + "/evalline [script] : [script]ä¸ºå•å¥æ‰§è¡Œçš„è„šæœ¬å‘½ä»¤", //
+				this.getName() + "/enginelist : æ‰“å°å½“å‰JVMæ‰€æ”¯æŒçš„æ‰€æœ‰å¼•æ“", //
+				this.getName() + "/thisengine : æ‰“å°ç°åœ¨æ­£åœ¨ä½¿ç”¨çš„å¼•æ“", //
 				this.getName()
-						+ "/cpjavafile [code] [javaFilePath] : Ê¹ÓÃJVMµÄ±àÒëÆ÷±àÒëÎŞ°üÃûµÄjavaÎÄ¼ş£¬[code]ÎªÎÄ±¾±àÂë¸ñÊ½ [javaFilePath]ÎªjavaÎÄ¼şµÄÂ·¾¶", //
+						+ "/cpjavafile [code] [javaFilePath] : ä½¿ç”¨JVMçš„ç¼–è¯‘å™¨ç¼–è¯‘æ— åŒ…åçš„javaæ–‡ä»¶ï¼Œ[code]ä¸ºæ–‡æœ¬ç¼–ç æ ¼å¼ [javaFilePath]ä¸ºjavaæ–‡ä»¶çš„è·¯å¾„", //
 				this.getName()
-						+ "/newobject [name] [ClassName] : ĞÂ½¨¶ÔÏó£¬[ClassName]Îª¶ÔÏóÃû£¨ÎÄ¼şÃû²»°üÀ¨ÍØÕ¹Ãû£©£¬[name]Îª±äÁ¿Ãû£¨½öÖ§³ÖÎŞ²Î¹¹Ôìº¯Êı£©", //
-				this.getName() + "/invokmeth [oName] [mName] [null|args...] : Ö´ĞĞÃû³ÆÎª[oName]µÄ¶ÔÏóÖĞµÄ[mName]·½·¨", //
-				"\t\t×¢Òâ£¡[args]½ÓÊÕµÄ²ÎÊıÎª×Ö·û´®ÀàĞÍ£¬Èç¹ûĞèÒª£¬Çë×ÔĞĞÔÚ´úÂëÄÚ×ª»¯£¡Èç¹ûÎŞ²ÎÊı£¬Ôò¿ÉÒÔ´«Èë×Ö·û´®µÄnull", //
-				this.getName() + "/loadbootmod [jarFilePath] : °ÑjarÍØÕ¹Ä£×é¿âÒÔspiĞÎÊ½¼ÓÔØ", //
-				this.getName() + "/loadlibmod [jarFilePath] : °ÑjarÍØÕ¹Ä£×é¿âÒÔsair_extĞÎÊ½¼ÓÔØ", //
-				this.getName() + "/unloadacti [actiName] : Ç¿ÖÆÊ¹ÓÃucpÈÈĞ¶ÔØacti£¬Óë[actiName]Ïà¹ØµÄÆäËûactiÒ²»á±»Ò»Í¬Ğ¶ÔØ£¡", //
-				this.getName() + "/unloadmod [modPath] : Ç¿ÖÆÊ¹ÓÃucpÈÈĞ¶ÔØmod£¬[modPath]ĞèÒªÈ«Â·¾¶", //
-				this.getName() + "/loadact [jarFilePath] : °ÑjarÒÔsair_actĞÎÊ½¼ÓÔØ£¨ĞèÒªÓĞjarÄÚÓĞ·ûºÏ¹æ¸ñµÄMFÎÄ¼ş£©", //
-				this.getName() + "/objlist : ±éÀúÏÔÊ¾omapÖĞËùÓĞ¶ÔÏó", //
-				this.getName() + "/omlist [name] : ±éÀúÏÔÊ¾omapÖĞÖ¸¶¨¶ÔÏóµÄËùÓĞ¹«¿ª·½·¨", //
-				this.getName() + "/loadall [code] : ¼ÓÔØ±àÒë" + this.getDataDir() + "ÏÂÃæËùÓĞµÄjavaÎÄ¼ş", //
-				this.getName() + "/classlist : ±éÀúÏÔÊ¾ÒÑ¼ÓÔØµÄËùÓĞClass", //
+						+ "/newobject [name] [ClassName] : æ–°å»ºå¯¹è±¡ï¼Œ[ClassName]ä¸ºå¯¹è±¡åï¼ˆæ–‡ä»¶åä¸åŒ…æ‹¬æ‹“å±•åï¼‰ï¼Œ[name]ä¸ºå˜é‡åï¼ˆä»…æ”¯æŒæ— å‚æ„é€ å‡½æ•°ï¼‰", //
+				this.getName() + "/invokmeth [oName] [mName] [null|args...] : æ‰§è¡Œåç§°ä¸º[oName]çš„å¯¹è±¡ä¸­çš„[mName]æ–¹æ³•", //
+				"\t\tæ³¨æ„ï¼[args]æ¥æ”¶çš„å‚æ•°ä¸ºå­—ç¬¦ä¸²ç±»å‹ï¼Œå¦‚æœéœ€è¦ï¼Œè¯·è‡ªè¡Œåœ¨ä»£ç å†…è½¬åŒ–ï¼å¦‚æœæ— å‚æ•°ï¼Œåˆ™å¯ä»¥ä¼ å…¥å­—ç¬¦ä¸²çš„null", //
+				this.getName() + "/loadbootmod [jarFilePath] : æŠŠjaræ‹“å±•æ¨¡ç»„åº“ä»¥spiå½¢å¼åŠ è½½", //
+				this.getName() + "/loadlibmod [jarFilePath] : æŠŠjaræ‹“å±•æ¨¡ç»„åº“ä»¥sair_extå½¢å¼åŠ è½½", //
+				this.getName() + "/unloadacti [actiName] : å¼ºåˆ¶ä½¿ç”¨ucpçƒ­å¸è½½actiï¼Œä¸[actiName]ç›¸å…³çš„å…¶ä»–actiä¹Ÿä¼šè¢«ä¸€åŒå¸è½½ï¼", //
+				this.getName() + "/unloadmod [modPath] : å¼ºåˆ¶ä½¿ç”¨ucpçƒ­å¸è½½modï¼Œ[modPath]éœ€è¦å…¨è·¯å¾„", //
+				this.getName() + "/loadact [jarFilePath] : æŠŠjarä»¥sair_actå½¢å¼åŠ è½½ï¼ˆéœ€è¦æœ‰jarå†…æœ‰ç¬¦åˆè§„æ ¼çš„MFæ–‡ä»¶ï¼‰", //
+				this.getName() + "/objlist : éå†æ˜¾ç¤ºomapä¸­æ‰€æœ‰å¯¹è±¡", //
+				this.getName() + "/omlist [name] : éå†æ˜¾ç¤ºomapä¸­æŒ‡å®šå¯¹è±¡çš„æ‰€æœ‰å…¬å¼€æ–¹æ³•", //
+				this.getName() + "/loadall [code] : åŠ è½½ç¼–è¯‘" + this.getDataDir() + "ä¸‹é¢æ‰€æœ‰çš„javaæ–‡ä»¶", //
+				this.getName() + "/classlist : éå†æ˜¾ç¤ºå·²åŠ è½½çš„æ‰€æœ‰Class", //
 		};
 	}
 

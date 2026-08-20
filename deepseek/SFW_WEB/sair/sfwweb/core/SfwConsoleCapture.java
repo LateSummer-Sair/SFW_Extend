@@ -7,6 +7,8 @@ import java.awt.Color;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * SFW 控制台输出捕获器
@@ -27,6 +29,13 @@ public class SfwConsoleCapture {
     private boolean registered = false;
 
     private int maxLines = 5000;
+
+    /** 异步通知 SSE 订阅者，避免阻塞 SFW 主线程 */
+    private final ExecutorService notifyExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "SFW_WEB_SSE_Notify");
+        t.setDaemon(true);
+        return t;
+    });
 
     /** SSE 订阅者接口 */
     public interface SseSubscriber {
@@ -68,6 +77,8 @@ public class SfwConsoleCapture {
      */
     private void handleConsoleOutput(Integer index, Color c, String info) {
         if (info == null) return;
+        // 归一化换行符：\r\n → \n，独立 \r → \n（避免 \r 在 textContent 中覆盖内容）
+        info = info.replace("\r\n", "\n").replace("\r", "\n");
 
         String colorHex = colorToHex(c);
         ConsoleLine line = new ConsoleLine(info, colorHex);
@@ -79,11 +90,11 @@ public class SfwConsoleCapture {
             outputLines.remove(0);
         }
 
-        // 通知所有 SSE 订阅者
+        // 异步通知所有 SSE 订阅者，避免阻塞 SFW 主线程
         for (SseSubscriber sub : subscribers) {
-            try {
-                sub.onNewLine(line);
-            } catch (Exception ignored) {}
+            notifyExecutor.submit(() -> {
+                try { sub.onNewLine(line); } catch (Exception ignored) {}
+            });
         }
     }
 
@@ -157,6 +168,7 @@ public class SfwConsoleCapture {
     public void shutdown() {
         SairCons.removePrintRunnable(PR_ID);
         registered = false;
+        notifyExecutor.shutdown();
         subscribers.clear();
         outputLines.clear();
     }

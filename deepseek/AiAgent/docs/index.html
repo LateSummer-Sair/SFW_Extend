@@ -1,314 +1,118 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AiAgent — SFW AI 智能代理插件 | 技术文档</title>
-    <link rel="stylesheet" href="css/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AiAgent — SFW AI 智能代理插件 · 技术文档</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-    <!-- Particle Background -->
-    <canvas id="particles-canvas"></canvas>
+  <canvas id="bg-canvas"></canvas>
+  <div class="aurora"><span></span><span></span><span></span></div>
+  <div class="progress-bar"></div>
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航"><span></span><span></span><span></span></button>
 
-    <!-- Sidebar Navigation -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-logo">
-            <div class="icon">⚡</div>
-            <span class="logo-text">AiAgent</span>
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <header class="page-hero">
+      <div class="container">
+        <div class="crumb">Home / 概述</div>
+        <h1><span class="gradient-text">AiAgent</span> · 智能代理插件</h1>
+        <p class="lead">
+          SairFrameWork 框架的 AI 智能代理 — 原生 Function Calling 多轮循环、三层通道权限模型、
+          技能自进化、四层记忆系统、Harness 多智能体编排、QQ OneBot 机器人（统一记忆 + 群管理）、多模态图片识别。
+          对接 DeepSeek V4 Vision API，流式逐字输出，SQLite 全局持久化，统一多线程治理。
+        </p>
+        <div class="stat-grid">
+          <div class="stat-card reveal"><div class="tint tint-cyan"></div><div class="num" data-target="94">0</div><div class="label">Java 源文件</div></div>
+          <div class="stat-card reveal" data-delay="1"><div class="tint tint-purple"></div><div class="num" data-target="29345">0</div><div class="label">代码行数</div></div>
+          <div class="stat-card reveal" data-delay="2"><div class="tint tint-magenta"></div><div class="num" data-target="52">0</div><div class="label">用户命令</div></div>
+          <div class="stat-card reveal" data-delay="3"><div class="tint tint-amber"></div><div class="num" data-target="67">0</div><div class="label">FC 工具</div></div>
         </div>
-        <nav class="sidebar-nav">
-                <a href="index.html" class="active">概述</a>
-                <a href="architecture.html">架构</a>
-                <a href="patterns.html">设计模式</a>
-                <a href="classes.html">类结构</a>
-                <a href="commands.html">命令</a>
-                <a href="feedback.html">反馈</a>
-        </nav>
-        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航菜单">
-            <span></span><span></span><span></span>
-        </button>
-    </aside>
+      </div>
+    </header>
 
-    <!-- Hero Section -->
-    <section class="hero">
-        <div class="hero-content">
-            <div class="hero-badge">SFW Plugin · v2.6</div>
-            <h1>
-                <span class="gradient-text">AiAgent</span>
-            </h1>
-            <p class="hero-subtitle">
-                SairFrameWork AI 智能代理插件 — 对接 DeepSeek API（V4 Vision 多模态），流式逐字输出，QQ OneBot 机器人（统一记忆库），<br>
-                SQLite 全局持久化 + 记忆联通系统 + 情绪陪伴系统 + 动态代码注入 + 联网搜索 + 跨平台终端 + 会话日志，全面接管 SFW 框架。<br>
-                <strong>v2.5/2.6 更新：(1) execs 思考过程合并转发 — AI 执行 execs 时的多轮思考通过 NapCat 合并转发 API 折叠为 QQ 原生消息卡片，每轮思考为独立节点；(2) 表情包自动收集与发送 — QQ 聊天中自动收集图片到表情库，AI 回复时根据语境自动匹配发送表情包；(3) 6 项安全加固 — AES 密钥 SHA-256 派生、路径穿越防护、Nashorn 沙箱强化、HTTP 连接泄漏修复、情绪 TOCTOU 原子化、execq 并发引用计数；(4) CronScheduler 定时任务调度 — 基于 ScheduledExecutorService，支持 cron 表达式，持久化到 SQLite cron_jobs 表；(5) 知识库/笔记系统 — &lt;note&gt; 创建笔记 + &lt;searchnote&gt; FTS5 全文检索，持久化 aiagent.db；(6) 增强网页抓取 — &lt;web&gt; 支持 CSS 选择器提取 + 正则提取 + HTML 标签剥离；(7) 批量文件操作 — &lt;batchrename&gt; 批量重命名 + &lt;batchconvert&gt; 批量编码转换；(8) 自然语气说话规则 — AI 禁用波浪线和 emoji，回复简洁自然；(9) 模型智能路由 — model=auto 时 Chat/Execq 走 deepseek-v4-flash、Agent 走 deepseek-v4-pro，非 auto 则全通道统一；(10) AutoClear 自动清屏 — 守护线程每 3 分钟执行 /clear 防日志 OOM，ai/autoclearon|off 命令控制。</strong>
-            </p>
-            <div class="hero-stats">
-                <div class="hero-stat reveal">
-                    <div class="num" data-target="44">0</div>
-                    <div class="label">核心类</div>
-                </div>
-                <div class="hero-stat reveal">
-                    <div class="num" data-target="36">0</div>
-                    <div class="label">命令</div>
-                </div>
-                <div class="hero-stat reveal">
-                    <div class="num" data-target="11">0</div>
-                    <div class="label">设计模式</div>
-                </div>
-                <div class="hero-stat reveal">
-                    <div class="num" data-target="16500">0</div>
-                    <div class="label">行代码</div>
-                </div>
-            </div>
+    <div class="container">
+      <section class="section" id="overview">
+        <div class="section-head reveal">
+          <div class="section-tag">Overview</div>
+          <h2>核心能力</h2>
+          <p class="desc">从「对话」到「自主任务执行」再到「群管理」，一个插件全面接管 SFW 框架。</p>
         </div>
-    </section>
+        <ul class="feature-list">
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">原生 Function Calling 多轮循环</div><div class="f-desc">FunctionCallingBridge 驱动 tools/tool_calls 多轮循环（无轮次上限 + 连续失败/无进展自动终止），ToolDispatcher 统一注册与执行工具，模型自主决定聊天或调工具</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">三层通道权限模型</div><div class="f-desc">本地 execs（全量工具）→ QQ execq 普通消息（受限工具 + 仅 NapCat 技能）→ QQ execs: 关键字（全工具 + 全技能）。越权立即终止</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">技能自进化 + scope 四分类</div><div class="f-desc">SkillBank + SkillExtractor LLM 轨迹蒸馏 + RouteCache 路径权重缓存。scope 分 general/execq/task/persona，按通道按需注入</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">三方技能库（含代码段执行）</div><div class="f-desc">单文件 md 支持 java/js/nodejs/python 代码段，airun 入口签名动态注册为 tp_ 工具，直接 Function Calling 调用；agentskills.io 技能包渐进式披露</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">四层记忆系统</div><div class="f-desc">memories（持久记忆）/ notes（知识库）/ skills（技能）/ impressions（人格印象）四层架构，FTS5 全文检索 + 重要性加权 + 时间衰减</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">QQ OneBot v11 机器人</div><div class="f-desc">反向 WebSocket 接手群聊私聊，统一记忆库区分群聊/私聊，完整群管理（禁言/踢出/拉黑/设管/改群名/退群），跨群操作</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">多模态图片识别</div><div class="f-desc">DeepSeek V4 Vision 智能分析，二维码拦截（含码不存），图片注释 MD5 强绑定持久化，引用图片触发 OCR</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">人格印象系统</div><div class="f-desc">ImpressionExtractor 蒸馏每个 QQ 用户 5 维人格画像，回复时自动注入印象上下文实现个性化交互</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">动态代码注入与执行</div><div class="f-desc">Nashorn JS 即时执行 + JavaCompiler 编译注入，编译→加载→执行→丢弃。execq 通道 evaljs 受限</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">联网搜索 + 文件下载 + 天气</div><div class="f-desc">HTTP GET（SSRF 内网黑名单 + DNS Rebinding 检测），必应搜索、文件下载、实时天气（Redis 旁路缓存）</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">情绪陪伴 + 好感度六级权限</div><div class="f-desc">情绪状态机（被夸开心/被骂难过/连续失败撒娇暂停），好感度 0~1000 六级权限：100 加好友 / 200 改马甲 / 300 入新群 / 400 挚友关注 / 800 恋人 5% 监听 / 1000 提至 10%，捐赠按 1元=1分</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">好感度查询 / 调整 / 复位 / 排行</div><div class="f-desc">queryaffection 查单个/群成员/随机抽取，setaffection 主人调整任意用户（昵称/QQ/群），affectionrank 本群 Top10（全局仅主人），resetaffection 一键复位；群成员关系表 + 内存缓存双层结构，按群号高效排序</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">跨群记忆检索</div><div class="f-desc">群聊完整历史 FTS5 全文索引 + 中文 N-gram 兜底，群与群之间共享记忆（如「隔壁群谁喊妈妈」可跨群命中）</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">拟人化监听态</div><div class="f-desc">消息并发处理（execPool 3 线程），每个监听群独立进入 8~20 秒监听窗口，AI 判定相关性自动续期，同群 8 次边界暂停，挚友/恋人概率主动关注</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">好友申请 / 群邀请 AI 决策</div><div class="f-desc">好友申请与群邀请不再自动处理，进入待处理请求池，AI 通过 pendingrequests/approvefriend/acceptgroupinvite 等工具按好感度决策；捐赠由主人私聊告知，AI 用 recorddonation 工具记录</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">Cron 定时 + 自动清屏</div><div class="f-desc">标准 cron 表达式持久化定时任务，重启恢复；AutoClear 守护线程每 3 分钟防日志 OOM</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">系统闹钟（AI Alarm）</div><div class="f-desc">alarm 工具创建到点唤醒 AI 的闹钟：语义解析 once/daily/weekly 三种 schedule，上下文快照持久化，到点重建上下文走 Agent 链路执行任务（一次性触发即完成自动移除）；普通用户到点仅提醒、主人走受限链路、execs/本地走全权限</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">配置持久化 + AES 加密</div><div class="f-desc">API Key AES-GCM 加密存储（兼容旧 ECB 回退），DeepSeek 高级参数（reasoning/温度/频率惩罚）自动保存</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">模型智能路由</div><div class="f-desc">model=auto 时本地 execs 走 deepseek-v4-pro（深度推理）、QQ execq 走 deepseek-v4-flash（轻量快速）</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">Harness 多智能体编排</div><div class="f-desc">AgentOrchestrator 三种编排模式：流水线 pipeline / 扇出扇入 fanout / 专家池 expert，任务分解为子步骤并聚合结果（/orchestrate）</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">Harness 可观测性</div><div class="f-desc">HarnessTrace 执行轨迹 SQLite 持久化 + HarnessEval 评测报告（成功率/平均工具调用/耗时），FC 循环全程埋点（/harnesseval）</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">五级上下文压缩管线</div><div class="f-desc">ContextPipeline L1 token 预算 → L2 截断 → L3 LLM 摘要 → L4 重要性加权 → L5 FTS 检索，动态分配各层上下文预算</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">统一多线程治理</div><div class="f-desc">ThreadManager 统一命名线程池 + OneBot 连接池 + FC 多工具并发执行 + execPool 可配置背压 + 工具执行 120s 超时</div></div></li>
+        </ul>
+      </section>
 
-    <!-- Overview Section -->
-    <section id="overview">
-        <div class="container">
-            <div class="section-header reveal">
-                <div class="section-tag">Overview</div>
-                <h2>项目概述</h2>
-                <div class="section-divider"></div>
-                <p>AiAgent 是一个为 SFW (SairFrameWork) 框架打造的 AI 智能代理插件（v2.6），全面对接 DeepSeek API（V4 Vision 多模态），实现流式对话与自主任务执行。集成 QQ OneBot v11 机器人，支持群聊/私聊双通道，execq 独立通道（插件白名单门控），<b>统一记忆库架构</b>（所有对话历史统一管理，通过来源标记区分群聊/私聊，实现记忆联通）。具备好友/群邀请好感度决策、反滥用保护、群上下文感知、<code>&lt;stop&gt;</code> 紧急停止标签、群管理违规处罚（警告/禁言/踢出/拉黑）、<b>多模态图片识别</b>（DeepSeek V4 Vision API）、<b>execs 合并转发思考卡片</b>（QQ 原生折叠消息）、<b>表情包自动收集与语境匹配发送</b>、<b>折叠消息上下文感知</b>（自动展开QQ折叠消息至上下文）、<b>模型智能路由</b>（auto→flash/pro自动分派，日志输出路由信息）、<b>AutoClear 自动清屏</b>（守护线程每3分钟 /clear 防OOM）、<b>编码与UI全量修复</b>（SFW标题乱码/SysConsolePanel字体）、<b>PromptManager 集中式提示词管理</b>（三段提示词统一入口，config.properties 追加模式持久化）等高级功能。44 个 Java 源文件，约 16,500 行代码，SQLite 全局持久化，外部依赖：SFW.jar + sqlite-jdbc-3.42.0.0.jar + gson-2.8.6.jar。</p>
-            </div>
-
-            <ul class="feature-list">
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">QQ OneBot v11 机器人（统一记忆 + 群管理）</div>
-                        <div class="f-desc">反向 WebSocket 连接接手 QQ 私聊群聊。execq 独立通道（独立提示词/记忆/上下文），仅开放 cmd/web/readdir/setname/stop 标签，<b>&lt;cmd&gt; 插件白名单门控</b>。**统一记忆库架构**：所有对话存储在 unified_memory.db，通过 source_type/source_id 标记区分群聊/私聊。群聊中 AI 拥有完整群管理能力（警告/禁言/踢出/拉黑），通过 NapCatApi 调用 NapCat QQ 框架标准 API 执行违规处罚。@回复/引用/提到名字触发响应，支持主动查看群聊（每5分钟）</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">AI 接管 SFW</div>
-                        <div class="f-desc">遍历 Libraries.activities 收集所有插件 help，AI 自主分析并执行命令</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">流式逐字输出</div>
-                        <div class="f-desc">单例 FIFO 队列逐字输出 + 10ms 延迟，打字机效果 + 多颜色区分，新流自动排空旧队列</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">~900K Token 上下文</div>
-                        <div class="f-desc">对话历史滑动窗口，自动估算 token 并裁剪，保留至少 4 条消息。持久化到 aiagent.db (SQLite)</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">好友/群邀请好感度决策 + 反滥用</div>
-                        <div class="f-desc">7步优先级决策链智能处理群邀请：①主人无条件接受 ②好友申请通过后5分钟内拉群→拒绝+警告 ③好感度>600→接受 ④好感度≤200→拒绝 ⑤好感度200-600→忽略。好友申请验证：无消息→拒绝，有消息→接受。反滥用5分钟窗口防止恶意拉群</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">SQLite 统一持久化</div>
-                        <div class="f-desc">单文件 aiagent.db 替代 5 个 JSON，WAL 模式 + FTS5 全文搜索 + 自动迁移旧数据，支持记忆/日志/对话/情绪/上下文全量持久化</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">动态代码注入与执行</div>
-                        <div class="f-desc">Nashorn JavaScript 即时执行 + JavaCompiler 即时编译注入，编译→加载→执行→丢弃，全程一次性</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">联网搜索 + 文件下载</div>
-                        <div class="f-desc">HTTP GET 获取网页内容（SSRF 内网黑名单防护），支持搜索引擎/API调用/文件下载</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">跨平台系统终端</div>
-                        <div class="f-desc">ProcessBuilder 封装，Windows/Linux/macOS 自适应 cmd/sh 切换，UTF-8 输出，30s 超时</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">三模式记忆同步</div>
-                        <div class="f-desc">chat ↔ exec ↔ execs 双向上下文注入：Agent 结果注入 Chat + Chat 历史注入 Agent + Agent 层层递进</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">FTS5 全文记忆搜索</div>
-                        <div class="f-desc">SQLite FTS5 全文搜索引擎 + LIKE 回退，按相关性排序检索记忆，自动注入 Chat/Agent 上下文</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">情绪陪伴系统</div>
-                        <div class="f-desc">AI 具备情绪状态机：被夸开心、被骂难过、连续失败撒娇暂停、开心到爆触发彩蛋弹窗。v2.0 优化彩蛋频率（阈值80→95，触发后消耗情绪值），防止过度频繁</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">&lt;stop&gt; 紧急停止标签</div>
-                        <div class="f-desc">AI 可在QQ消息中发送 <code>&lt;stop&gt;</code> 标签让 Agent 立即停止执行。同时支持 QQ 消息直接检测（主人发送含 &lt;stop&gt; 的消息），以及 execq Agent 内部输出 <code>&lt;stop&gt;</code> 标签自停。三通道全覆盖：QQ直接检测 + execq AI输出 + 控制台TAG_PATTERN</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">高危操作确认门控</div>
-                        <div class="f-desc">ConfirmationGate 统一门控：动态注入、系统命令、文件读取等 8 类操作需 ai/yes ai/no 确认，60s 超时自动拒绝</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">AI 自我进化 + 提示词集中管理</div>
-                        <div class="f-desc">AI 可通过 &lt;editprompt&gt; 标签修改自身 system prompt，通过 PromptManager 统一追加到 config.properties 持久化。PromptManager 集中管理三段提示词（systemPrompt/execqPrompt/agentStaticPrompt），硬编码默认 + config 追加，重启不丢失</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">多模态图片识别（DeepSeek V4 Vision）</div>
-                        <div class="f-desc">QQ 机器人接收图片后通过 DeepSeek V4 Vision API 进行智能分析：腾讯内部图片域名（qpic.cn/gchat.qpic 等）自动下载并转为 base64 data URI 传参，外部图片直传 URL。AI 可结合聊天上下文理解图片内容并给出精准回复。ChatMessage 扩展 contentParts 字段兼容 Vision API content 数组格式</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">execs 思考过程合并转发（v2.5）</div>
-                        <div class="f-desc">QQ 触发 execs 任务后，AI 的多轮思考通过 NapCat <code>send_group_forward_msg</code> / <code>send_private_forward_msg</code> API 折叠为 QQ 原生合并转发消息卡片。每轮思考（[第N轮思考]）拆分为独立节点，主人可逐条展开查看推理过程。OneBotServer 通过 Gson 序列化复杂嵌套的 messages 参数，失败时自动回退纯文本发送</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">表情包自动收集与发送（v2.5）</div>
-                        <div class="f-desc">StickerManager 管理 SQLite 表情库（stickers 表），QQ 聊天中的图片消息自动收集到表情库，存储图片路径、上下文对话、关键词和时间戳。AI 回复时自动匹配语境关键词发送最相关的表情包。StickerEntry 模型记录 id/filePath/context/keywords/timestamp/imageUrl 字段</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">6 项安全加固（v2.5）</div>
-                        <div class="f-desc">① AES 密钥多因子派生（不再硬编码）② 路径穿越防护（download 标签校验）③ Nashorn JS ClassFilter 沙箱（禁止访问文件/反射/进程）④ HTTP 连接 try-finally 防泄漏 ⑤ EmotionManager 情绪 TOCTOU 原子化 ⑥ execq bypassConfirm 并发引用计数（enterBypass/exitBypass）</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">CronScheduler 定时任务调度（v2.6）</div>
-                        <div class="f-desc">基于 ScheduledExecutorService 的定时任务引擎，支持标准 cron 表达式（秒分时日月周）。任务持久化到 SQLite cron_jobs 表，支持 enable/disable/delete。AI 可通过 &lt;schedule&gt; 标签创建、查询、管理定时任务</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">知识库/笔记系统（v2.6）</div>
-                        <div class="f-desc">SQLite FTS5 全文搜索驱动。AI 可通过 &lt;note&gt; 标签创建笔记（标题+内容+分类），&lt;searchnote&gt; 标签按关键词全文检索。笔记持久化到 aiagent.db notes 表，支持跨会话查询</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">增强网页抓取（v2.6）</div>
-                        <div class="f-desc">&lt;web&gt; 标签升级：支持 CSS 选择器提取（extract=selector:div.content）、正则提取（extract=regex:pattern）、HTML 标签剥离（extract=text）。SSRF 内网黑名单防护 + DNS Rebinding 检测</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">批量文件操作（v2.6）</div>
-                        <div class="f-desc">&lt;batchrename&gt; 批量重命名：支持正则替换、前缀/后缀添加、序号补零。&lt;batchconvert&gt; 批量编码转换：支持 GBK→UTF-8、检测 BOM、递归子目录。均需确认门控</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">模型智能路由（v2.6）</div>
-                        <div class="f-desc">model=auto 时 Chat/Execq 通道自动走 deepseek-v4-flash（轻量快速），Agent 通道走 deepseek-v4-pro（深度推理）。设置非 auto 模型时全通道严格遵守配置值。每次路由自动输出日志提示当前使用的模型</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">AutoClear 自动清屏（v2.6）</div>
-                        <div class="f-desc">守护线程每 3 分钟自动执行 /clear 清屏，防止长时间运行日志累积导致 OOM。通过 ai/autoclearon 启用、ai/autoclearoff 停止，exit() 时自动关闭线程</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">增量持久化写入</div>
-                        <div class="f-desc">INSERT/UPDATE 逐条写入替代全量 Gson.toJson() 覆盖，事务保护 + busy_timeout=3000ms，高并发安全</div>
-                    </div>
-                </li>
-                <li class="reveal">
-                    <div class="check">✓</div>
-                    <div>
-                        <div class="f-title">配置持久化 + AES 加密</div>
-                        <div class="f-desc">API Key 使用 AES 加密存储到 config.properties，URL/Model/Prompt 自动持久化，旧值自动升级</div>
-                    </div>
-                </li>
-            </ul>
-
-            <!-- Quick Navigation Cards -->
-            <div class="card-grid" style="margin-top:48px;">
-                <a href="architecture.html" class="card reveal" style="text-decoration:none; color:inherit;">
-                    <div class="card-icon cyan">🏗</div>
-                    <h3>系统架构</h3>
-                    <p>分层架构图 · Chat/Agent 数据流 · 多模态图片识别数据流 · 流式输出原理 · 三模式上下文注入链</p>
-                </a>
-                <a href="patterns.html" class="card reveal" style="text-decoration:none; color:inherit;">
-                    <div class="card-icon purple">🎨</div>
-                    <h3>设计模式</h3>
-                    <p>11 种设计模式：Repository · 门面 · 单例 · 生产者消费者 · 策略(多模态+合并转发+模型路由) · ReAct · Cron调度 · 确认门控 · EDT路由 · 情绪状态机 · 反滥用责任链</p>
-                </a>
-                <a href="classes.html" class="card reveal" style="text-decoration:none; color:inherit;">
-                    <div class="card-icon green">📦</div>
-                    <h3>类结构详解</h3>
-                    <p>44 个核心类 · ~16,500 行 · 9 个包：core / model / util / ui / acts / onebot / onebot.model / onebot.util</p>
-                </a>
-                <a href="commands.html" class="card reveal" style="text-decoration:none; color:inherit;">
-                    <div class="card-icon amber">📋</div>
-                    <h3>命令参考 & 部署</h3>
-                    <p>36 个用户命令 + 20 种主线 XML 标签 + 21 种 OneBot execq 标签（11 工具+10 群管） · 模型智能路由 · AutoClear 自动清屏 · PromptManager 集中式提示词管理 · 多模态图片识别 · 合并转发 · 表情包 · 插件白名单 · 反滥用 · 编译打包部署三步骤</p>
-                </a>
-            </div>
+      <section class="section" id="nav">
+        <div class="section-head reveal">
+          <div class="section-tag">Documentation</div>
+          <h2>文档导航</h2>
+          <p class="desc">8 大篇章，覆盖架构、权限、技能、记忆、QQ 机器人、命令、类结构与设计模式。</p>
         </div>
-    </section>
+        <div class="card-grid reveal">
+          <a href="architecture.html" class="card tilt"><div class="card-icon ic-cyan">🏗</div><h3>系统架构</h3><p>分层架构 · 数据流 · Function Calling 循环 · 上下文注入链</p><span class="more">查看</span></a>
+          <a href="permissions.html" class="card tilt"><div class="card-icon ic-purple">🔐</div><h3>权限与通道</h3><p>三层权限模型 · 工具权限矩阵 · 越权拦截 · 确认门控</p><span class="more">查看</span></a>
+          <a href="skills.html" class="card tilt"><div class="card-icon ic-magenta">🧠</div><h3>技能系统</h3><p>内置技能库 · 三方技能 · 技能包 · 技能蒸馏 · 路径路由</p><span class="more">查看</span></a>
+          <a href="memory.html" class="card tilt"><div class="card-icon ic-amber">💾</div><h3>记忆系统</h3><p>六库存储 · 人格印象 · 纠正记录 · 记忆生命周期</p><span class="more">查看</span></a>
+          <a href="commands.html" class="card tilt"><div class="card-icon ic-green">📋</div><h3>命令参考</h3><p>52 个用户命令 · 67 个 FC 工具 · 部署三步</p><span class="more">查看</span></a>
+          <a href="classes.html" class="card tilt"><div class="card-icon ic-blue">📦</div><h3>类结构</h3><p>94 个 Java 类 · 10 个包 · 核心类职责</p><span class="more">查看</span></a>
+        </div>
+      </section>
 
-    <!-- Footer -->
+      <section class="section" id="quick">
+        <div class="section-head reveal">
+          <div class="section-tag">Quick Start</div>
+          <h2>快速开始</h2>
+        </div>
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">配置 API Key</span><span class="fn-sub">ai/setkey sk-xxx</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node core"><span class="fn-title">Agent 全能模式</span><span class="fn-sub">ai/execs 列出所有已加载的插件并分类</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node core"><span class="fn-title">配置 QQ 机器人</span><span class="fn-sub">onebotsetport / onebotsettoken / onebotsetselfid / onebotconnect</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node end"><span class="fn-title">开始使用</span><span class="fn-sub">本地 execs + QQ 群聊双通道</span></div>
+          </div>
+          <div class="flow-caption">部署完成后，在 SFW 控制台输入命令即可开始使用</div>
+        </div>
+      </section>
+    </div>
+
     <footer class="footer">
-        <div class="container">
-            <p>
-                <span class="brand">AiAgent</span> v2.6 ·
-                基于 <span style="color:var(--accent-purple);">SairFrameWork 0.5.3</span> ·
-                对接 <span style="color:var(--accent-cyan);">DeepSeek V4 Vision API</span>
-            </p>
-            <p style="margin-top:6px; font-size:0.78rem;">
-                QQ OneBot · NapCat群管理 · 合并转发 · 表情包 · 安全加固 · 好感度决策 · 反滥用 · &lt;stop&gt; · 群上下文 · 三模式同步 · 情绪系统 · 彩蛋弹窗 · SQLite · FTS5 · Cron定时 · 知识库 · 增强抓取 · 批量操作 · 模型路由 · 自动清屏 · 提示词优化 · 流式排空 · 动态注入 · 联网搜索 · 会话日志 · 多模态图片识别
-            </p>
-        </div>
+      <div class="container">
+        <p><span class="brand">AiAgent</span> v3.3 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
+        <p style="margin-top:6px">原生 Function Calling · 三层权限模型 · Harness 多智能体编排 · 可观测性 · 五级上下文压缩 · 统一多线程治理 · 技能 scope 四分类 · 三方技能代码段 · 技能包 · 四层记忆 · 人格印象 · 情绪陪伴 · 好感度六级权限 · 跨群记忆检索 · 拟人化监听态 · 好友申请/群邀请 AI 决策 · 多模态识别 · AES-GCM · SSRF 防护 · Redis 缓存 · Cron 定时 · 系统闹钟</p>
+      </div>
     </footer>
+  </main>
 
-    <!-- Back to Top -->
-    <div class="back-to-top" title="回到顶部">↑</div>
-
-    <!-- Scripts -->
-    <script src="js/main.js"></script>
+  <div class="back-to-top" title="回到顶部">↑</div>
+  <script src="js/main.js"></script>
 </body>
 </html>

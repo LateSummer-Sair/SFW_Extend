@@ -50,6 +50,21 @@ public class OneBotServer {
     /** API调用等待队列：echo → 响应Future */
     private final ConcurrentHashMap<String, CompletableFuture<String>> pendingApiCalls = new ConcurrentHashMap<>();
 
+    /** WebSocket 连接处理线程池：有界队列 + 拒绝策略，防止连接洪峰线程爆炸。 */
+    private final ExecutorService connPool = new ThreadPoolExecutor(
+            4, 8, 60L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<Runnable>(256),
+            new ThreadFactory() {
+                private final AtomicInteger seq = new AtomicInteger(1);
+                @Override
+                public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, "OneBot-Conn-" + seq.getAndIncrement());
+                    t.setDaemon(true);
+                    return t;
+                }
+            },
+            new ThreadPoolExecutor.CallerRunsPolicy());
+
     // === 配置项 ===
     private int port = DEFAULT_PORT;
     private String accessToken = "";
@@ -80,7 +95,7 @@ public class OneBotServer {
     /** 启动WebSocket服务器 */
     public synchronized boolean start() {
         if (running.get()) {
-            AiAgentActivity.debugLog("[OneBot] 服务器已在运行");
+            AiAgentActivity.qqLog("[OneBot] 服务器已在运行");
             return false;
         }
         try {
@@ -89,10 +104,10 @@ public class OneBotServer {
             acceptThread = new Thread(this::acceptLoop, "OneBot-Acceptor");
             acceptThread.setDaemon(true);
             acceptThread.start();
-            AiAgentActivity.debugLog("[OneBot] 服务器已启动，端口: " + port);
+            AiAgentActivity.qqLog("[OneBot] 服务器已启动，端口: " + port);
             return true;
         } catch (IOException e) {
-            AiAgentActivity.debugLog("[OneBot] 启动失败: " + e.getMessage());
+            AiAgentActivity.qqLog("[OneBot] 启动失败: " + e.getMessage());
             return false;
         }
     }
@@ -111,7 +126,9 @@ public class OneBotServer {
                 serverSocket.close();
             }
         } catch (IOException ignored) {}
-        AiAgentActivity.debugLog("[OneBot] 服务器已停止");
+        // 关闭连接处理线程池（已提交连接会继续处理完，拒绝新提交）
+        connPool.shutdown();
+        AiAgentActivity.qqLog("[OneBot] 服务器已停止");
     }
 
     public boolean isRunning() { return running.get(); }
@@ -126,10 +143,10 @@ public class OneBotServer {
                 WebSocketConnection conn = new WebSocketConnection(socket);
                 connections.add(conn);
                 wsClientCount.incrementAndGet();
-                new Thread(conn::handle, "OneBot-Conn-" + wsClientCount.get()).start();
+                connPool.submit(conn::handle);
             } catch (IOException e) {
                 if (running.get()) {
-                    AiAgentActivity.debugLog("[OneBot] 接受连接错误: " + e.getMessage());
+                    AiAgentActivity.qqLog("[OneBot] 接受连接错误: " + e.getMessage());
                 }
             }
         }
@@ -174,7 +191,7 @@ public class OneBotServer {
         CompletableFuture<String> future = new CompletableFuture<>();
         pendingApiCalls.put(echo, future);
         
-        AiAgentActivity.debugLog("[OneBot] 发送API: " + (payload.length() > 200 ? payload.substring(0, 200) + "..." : payload));
+        AiAgentActivity.qqLog("[OneBot] 发送API: " + (payload.length() > 200 ? payload.substring(0, 200) + "..." : payload));
         // 广播到所有连接
         for (WebSocketConnection c : connections) {
             if (c.isOpen()) {
@@ -189,11 +206,11 @@ public class OneBotServer {
             return response;
         } catch (TimeoutException e) {
             pendingApiCalls.remove(echo);
-            AiAgentActivity.debugLog("[OneBot] API调用超时: " + action);
+            AiAgentActivity.qqLog("[OneBot] API调用超时: " + action);
             return null;
         } catch (Exception e) {
             pendingApiCalls.remove(echo);
-            AiAgentActivity.debugLog("[OneBot] API调用异常: " + e.getMessage());
+            AiAgentActivity.qqLog("[OneBot] API调用异常: " + e.getMessage());
             return null;
         }
     }
@@ -260,17 +277,17 @@ public class OneBotServer {
                     return;
                 }
 
-                AiAgentActivity.debugLog("[OneBot] 客户端已连接: " + remoteAddr);
+                AiAgentActivity.qqLog("[OneBot] 客户端已连接: " + remoteAddr);
 
                 // 2. 读取帧循环
                 readFrames();
 
             } catch (IOException e) {
-                AiAgentActivity.debugLog("[OneBot] 连接错误: " + e.getMessage());
+                AiAgentActivity.qqLog("[OneBot] 连接错误: " + e.getMessage());
             } finally {
                 close();
                 connections.remove(this);
-                AiAgentActivity.debugLog("[OneBot] 客户端已断开: " + remoteAddr);
+                AiAgentActivity.qqLog("[OneBot] 客户端已断开: " + remoteAddr);
             }
         }
 
@@ -310,7 +327,7 @@ public class OneBotServer {
             }
 
             if (secKey == null) {
-                AiAgentActivity.debugLog("[OneBot] 缺少 Sec-WebSocket-Key");
+                AiAgentActivity.qqLog("[OneBot] 缺少 Sec-WebSocket-Key");
                 return false;
             }
 
@@ -318,7 +335,7 @@ public class OneBotServer {
             if (accessToken != null && !accessToken.isEmpty()) {
                 String expectedAuth = "Bearer " + accessToken;
                 if (authHeader == null || !expectedAuth.equals(authHeader)) {
-                    AiAgentActivity.debugLog("[OneBot] 认证失败: " + remoteAddr);
+                    AiAgentActivity.qqLog("[OneBot] 认证失败: " + remoteAddr);
                     String response = "HTTP/1.1 401 Unauthorized\r\n\r\n";
                     out.write(response.getBytes(StandardCharsets.UTF_8));
                     out.flush();
@@ -393,7 +410,7 @@ public class OneBotServer {
 
                 // 读取payload
                 if (payloadLen > MAX_FRAME_SIZE || payloadLen > Integer.MAX_VALUE) {
-                    AiAgentActivity.debugLog("[OneBot] 帧过大: " + payloadLen);
+                    AiAgentActivity.qqLog("[OneBot] 帧过大: " + payloadLen);
                     break;
                 }
 
@@ -439,7 +456,7 @@ public class OneBotServer {
                         }
                         break;
                     default:
-                        AiAgentActivity.debugLog("[OneBot] 未知操作码: " + opcode);
+                        AiAgentActivity.qqLog("[OneBot] 未知操作码: " + opcode);
                         break;
                 }
             }
@@ -475,12 +492,12 @@ public class OneBotServer {
                 return;
             }
             
-            AiAgentActivity.debugLog("[OneBot] 收到: " + (text.length() > 200 ? text.substring(0, 200) + "..." : text));
+            AiAgentActivity.qqLog("[OneBot] 收到: " + (text.length() > 200 ? text.substring(0, 200) + "..." : text));
             if (messageHandler != null) {
                 try {
                     messageHandler.handleRawMessage(text, this::sendText);
                 } catch (Exception e) {
-                    AiAgentActivity.debugLog("[OneBot] 消息处理错误: " + e.toString());
+                    AiAgentActivity.qqLog("[OneBot] 消息处理错误: " + e.toString());
                 }
             }
         }
@@ -502,25 +519,110 @@ public class OneBotServer {
                             
                     // 检查是否戳的是机器人自己
                     if (targetId == currentSelfId && messageHandler != null) {
-                        AiAgentActivity.debugLog("[OneBot] 检测到戳一戳: user=" + userId + ", group=" + groupId);
+                        AiAgentActivity.qqLog("[OneBot] 检测到戳一戳: user=" + userId + ", group=" + groupId);
                                 
-                        // 构造一个虚拟的@消息，触发AI响应
-                        String fakeMessage = "{\"message_type\":\"" + (groupId > 0 ? "group" : "private") + "\"," +
-                            "\"user_id\":" + userId + "," +
-                            (groupId > 0 ? "\"group_id\":" + groupId + "," : "") +
-                            "\"message\":[{\"type\":\"at\",\"data\":{\"qq\":" + currentSelfId + "}},{\"type\":\"text\",\"data\":{\"text\":\"戳了捅我\"}}]," +
-                            "\"message_id\":0," +
-                            "\"raw_message\":\"[CQ:poke,qq=" + userId + "]\"}";
-                                
-                        messageHandler.handleRawMessage(fakeMessage, this::sendText);
+                        // 即时回复：AI分析上下文动态生成
+                        String pokeReply = getPokeReply(userId, groupId, messageHandler);
+                        if (pokeReply != null && !pokeReply.isEmpty()) {
+                            if (groupId > 0) {
+                                OneBotServer.this.sendGroupMsg(groupId, pokeReply);
+                            } else {
+                                OneBotServer.this.sendPrivateMsg(userId, pokeReply);
+                            }
+                            AiAgentActivity.qqLog("[OneBot] 戳一戳回复: " + pokeReply);
+                        }
                     }
                 }
             } catch (Exception e) {
-                AiAgentActivity.debugLog("[OneBot] notice事件处理错误: " + e.toString());
+                AiAgentActivity.qqLog("[OneBot] notice事件处理错误: " + e.toString());
             }
         }
 
-        /** 处理request事件（群邀请、好友请求等） */
+        /** AI驱动的戳一戳回复：分析上下文动态生成 */
+    private String getPokeReply(long userId, long groupId, sair.aiagent.onebot.QQMessageHandler handler) {
+        sair.aiagent.onebot.EmotionStateManager em = handler.getEmotionManager();
+        int affection = (em != null) ? em.getAffection(userId) : 0;
+        if (em != null) {
+            if (em.isBetrayer(userId)) return null;
+            if (em.isInRomance() && em.getRomancePartnerId() == userId) return "啊~你又戳我！\uD83D\uDC95";
+        }
+
+        // Build recent conversation context
+        sair.aiagent.onebot.UnifiedQQMemoryManager mem = handler.getUnifiedMemory();
+        String context = buildPokeContext(userId, groupId, mem, handler);
+
+        // Check if bot's name appears in context
+        String selfName = handler.getSelfName();
+        boolean nameInContext = selfName != null && !selfName.isEmpty()
+                && context != null && context.contains(selfName);
+
+        if (nameInContext) {
+            // Name found: ask AI to naturally continue the conversation
+            String aiReply = aiGeneratePokeReply(context, selfName, handler);
+            if (aiReply != null && !aiReply.isEmpty()) return aiReply;
+        }
+
+        // No name in context or AI failed: varied confusion responses
+        String[] confused = {"何意味？", "啊？", "嘟嘟？", "啊呀？", "唉？"};
+        if (affection >= 500) {
+            String[] warm = {"哎呀，别戳了啦~", "咔，戳我干嘛～", "戳戳怪哦！"};
+            return warm[new java.util.Random().nextInt(warm.length)];
+        }
+        return confused[new java.util.Random().nextInt(confused.length)];
+    }
+
+    /** Build recent conversation context from unified memory */
+    private String buildPokeContext(long userId, long groupId,
+            sair.aiagent.onebot.UnifiedQQMemoryManager mem,
+            sair.aiagent.onebot.QQMessageHandler handler) {
+        if (mem == null) return "";
+        StringBuilder sb = new StringBuilder();
+        java.util.List<String[]> msgs;
+        if (groupId > 0) {
+            msgs = mem.getGroupConversations(groupId, 10);
+        } else {
+            msgs = mem.getPrivateConversations(userId, 10);
+        }
+        if (msgs == null || msgs.isEmpty()) return "";
+        for (String[] m : msgs) {
+            String name = (m.length > 5 && m[5] != null && !m[5].isEmpty()) ? m[5]
+                    : (m.length > 4 && m[4] != null ? m[4] : "unknown");
+            String content = m.length > 1 ? m[1] : "";
+            if (content.length() > 200) content = content.substring(0, 200) + "...";
+            sb.append(name).append(": ").append(content).append("\n");
+        }
+        return sb.toString();
+    }
+
+    /** Use AI to generate a context-aware poke reply */
+    private String aiGeneratePokeReply(String context, String selfName,
+            sair.aiagent.onebot.QQMessageHandler handler) {
+        try {
+            sair.aiagent.core.DeepSeekClient client = handler.getDeepSeekClient();
+            if (client == null) return null;
+            String prompt = "Someone just poked you in a chat. Reply naturally.\n\n"
+                    + "Your name is: " + selfName + "\n"
+                    + "Recent chat context:\n" + context + "\n\n"
+                    + "Rules:\n"
+                    + "- If your name appears in context, continue the conversation naturally\n"
+                    + "- Express mild confusion but be friendly\n"
+                    + "- Keep reply VERY short (under 20 chars if possible)\n"
+                    + "- Output ONLY the reply text, nothing else";
+            java.util.List<sair.aiagent.model.ChatMessage> msgs = new java.util.ArrayList<>();
+            msgs.add(new sair.aiagent.model.ChatMessage("user", prompt));
+            String reply = client.chatSync(msgs, "deepseek-v4-flash");
+            if (reply != null) {
+                reply = reply.trim().replaceAll("^[\"']+|[\"']+$", "");
+                if (reply.length() > 80) reply = reply.substring(0, 80);
+                if (!reply.isEmpty()) return reply;
+            }
+        } catch (Exception e) {
+            AiAgentActivity.qqLog("[OneBot] AI poke reply failed: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /** 处理request事件（群邀请、好友请求等） */
         private void handleRequestEvent(String text) {
             try {
                 String requestType = JsonUtil.extractString(text, "request_type");
@@ -533,7 +635,7 @@ public class OneBotServer {
                     String flag = JsonUtil.extractString(text, "flag");
                     
                     if (messageHandler != null && flag != null && userId > 0) {
-                        AiAgentActivity.debugLog("[OneBot] 收到好友申请: userId=" + userId);
+                        AiAgentActivity.qqLog("[OneBot] 收到好友申请: userId=" + userId);
                         messageHandler.handleFriendRequest(userId, comment, flag);
                     }
                 }
@@ -545,12 +647,12 @@ public class OneBotServer {
                     String flag = JsonUtil.extractString(text, "flag");
                     
                     if (messageHandler != null && flag != null && userId > 0) {
-                        AiAgentActivity.debugLog("[OneBot] 收到群邀请: userId=" + userId + ", groupId=" + groupId);
+                        AiAgentActivity.qqLog("[OneBot] 收到群邀请: userId=" + userId + ", groupId=" + groupId);
                         messageHandler.handleGroupInviteRequest(userId, groupId, flag);
                     }
                 }
             } catch (Exception e) {
-                AiAgentActivity.debugLog("[OneBot] request事件处理错误: " + e.toString());
+                AiAgentActivity.qqLog("[OneBot] request事件处理错误: " + e.toString());
             }
         }
 
@@ -561,7 +663,7 @@ public class OneBotServer {
                 byte[] data = text.getBytes(StandardCharsets.UTF_8);
                 sendFrame(0x01, data);
             } catch (IOException e) {
-                AiAgentActivity.debugLog("[OneBot] 发送错误: " + e.getMessage());
+                AiAgentActivity.qqLog("[OneBot] 发送错误: " + e.getMessage());
                 close();
             }
         }

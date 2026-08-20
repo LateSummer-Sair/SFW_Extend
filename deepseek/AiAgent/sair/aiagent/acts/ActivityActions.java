@@ -55,12 +55,19 @@ public class ActivityActions {
     public Object route(String funcName, String args) {
         AiAgentActivity.debugLog("路由: " + funcName);
         switch (funcName) {
-            case "chat":       return handleChat(args);
-            case "exec":       return handleExec(args);
+            case "chat":       return handleExecs(args);
+            case "exec":       return handleExecs(args);
             case "execs":      return handleExecs(args);
+            case "execfc":     return handleExecs(args);
+            case "orchestrate": return handleOrchestrate(args);
+            case "harnesseval": return handleHarnessEval();
+            case "criticon":   return handleCriticOn();
+            case "criticoff":  return handleCriticOff();
             case "setkey":     return handleSetKey(args);
             case "seturl":     return handleSetUrl(args);
             case "setmodel":   return handleSetModel(args);
+            case "setocrkey":  return handleSetOcrKey(args);
+            case "setthirdpartycode": return handleSetThirdPartyCode(args);
             case "setprompt":  return handleSetPrompt(args);
             case "showprompt": return handleShowPrompt();
             case "memories":   return handleMemories();
@@ -82,18 +89,32 @@ public class ActivityActions {
             case "onebotsetselfid":    return oneBotCmd.handleOneBotSetSelfId(args);
             case "onebotsetprompt":   return oneBotCmd.handleOneBotSetPrompt(args);
             case "onebotshowprompt":  return oneBotCmd.handleOneBotShowPrompt();
-            case "onebotwhitelist":      return oneBotCmd.handleOneBotWhitelist();
-            case "onebotwhitelistadd":   return oneBotCmd.handleOneBotWhitelistAdd(args);
-            case "onebotwhitelistremove": return oneBotCmd.handleOneBotWhitelistRemove(args);
             // === 主动查看配置 ===
             case "onebotenableproactive": return oneBotCmd.handleOneBotEnableProactive();
             case "onebotdisableproactive": return oneBotCmd.handleOneBotDisableProactive();
             case "onebotaddgroup":       return oneBotCmd.handleOneBotAddGroup(args);
             case "onebotremovegroup":    return oneBotCmd.handleOneBotRemoveGroup(args);
             case "onebotlistgroups":     return oneBotCmd.handleOneBotListGroups();
+            // === 拟人化监听队列开关 ===
+            case "onebotenablelisten":   return oneBotCmd.handleOneBotEnableListen();
+            case "onebotdisablelisten":  return oneBotCmd.handleOneBotDisableListen();
+            case "resetaffection":       return oneBotCmd.handleResetAffection();
+            case "resetdonations":      return oneBotCmd.handleResetDonations();
             // === 自动清屏 ===
             case "autoclearon":  return handleAutoClearOn();
             case "autoclearoff": return handleAutoClearOff();
+            case "qqlogon":   return handleQqLogOn();
+            case "qqlogoff":  return handleQqLogOff();
+            // === Skills ===
+            case "skills":         return handleSkills();
+            case "skillsearch":    return handleSkillSearch(args);
+            case "skilldelete":    return handleSkillDelete(args);
+            case "skillextract":   return handleSkillExtract();
+            case "skillevolve":    return handleSkillEvolve();
+            case "skillinfo":      return handleSkillInfo(args);
+            case "skillexport":    return handleSkillExport(args);
+            case "skillexportall": return handleSkillExportAll();
+            case "clearstickers":  return handleClearStickers();
             default:           return false;
         }
     }
@@ -105,6 +126,44 @@ public class ActivityActions {
         act.getConfig().setApiKey(args);
         act.getConfig().save();
         println(C_INFO, "API密钥已设置: " + act.getConfig().getMaskedKey());
+        return true;
+    }
+
+    /** 设置在线 OCR 的 Access Key（EasyOCR 等），设置后启用图片文字识别能力。 */
+    public Object handleSetOcrKey(String args) {
+        if (isEmpty(args)) return err("用法: ai/setocrkey [OCR Access Key]");
+        act.getConfig().setOcrAccessKey(args);
+        act.getConfig().save();
+        sair.aiagent.ocr.OcrManager.getInstance().setAccessKey(args);
+        println(C_INFO, "OCR Access Key 已设置，OCR 能力已启用（引擎: "
+                + sair.aiagent.ocr.OcrManager.getInstance().getEngineName() + "）");
+        return true;
+    }
+
+    /**
+     * 放权开关：三方技能代码段是否在所有通道（含 execq/QQ）可用。
+     * 默认 on=放权（用户导入的三方技能视为刚需，安全由用户自行审查）；off=仅 execs/本地可用。
+     */
+    public Object handleSetThirdPartyCode(String args) {
+        if (isEmpty(args)) {
+            boolean cur = act.getConfig().isThirdPartyCodeExecq();
+            println(C_INFO, "三方技能代码段执行权限（execq/QQ 通道）："
+                    + (cur ? "开（放权，所有通道可用）" : "关（仅 execs/本地可用）"));
+            println(C_INFO, "用法: ai/setthirdpartycode on|off");
+            return true;
+        }
+        String v = args.trim().toLowerCase();
+        if ("on".equals(v) || "true".equals(v) || "1".equals(v)) {
+            act.getConfig().setThirdPartyCodeExecq(true);
+            act.getConfig().save();
+            println(C_INFO, "已放权：三方技能代码段在所有通道（含 execq/QQ）可用。");
+        } else if ("off".equals(v) || "false".equals(v) || "0".equals(v)) {
+            act.getConfig().setThirdPartyCodeExecq(false);
+            act.getConfig().save();
+            println(C_INFO, "已收紧：三方技能代码段仅在 execs/本地通道可用，execq/QQ 通道不可用。");
+        } else {
+            return err("用法: ai/setthirdpartycode on|off");
+        }
         return true;
     }
 
@@ -199,6 +258,18 @@ public class ActivityActions {
         return true;
     }
 
+    public Object handleClearStickers() {
+        sair.aiagent.core.StickerManager sm = act.getAgent().getStickerManager();
+        if (sm == null) {
+            println(C_ERR, "表情包管理器未初始化。");
+            return false;
+        }
+        int before = sm.count();
+        sm.clearAll();
+        println(C_INFO, "表情包图片库已清空（删除 " + before + " 张）。");
+        return true;
+    }
+
     // ==================== 确认命令 ====================
 
     public Object handleYes() {
@@ -225,131 +296,30 @@ public class ActivityActions {
         return true;
     }
 
-    // ==================== Chat 模式 ====================
+    // ==================== Chat 模式（已合并到 execs） ====================
 
     public Object handleChat(String args) {
-        AiAgentActivity.debugLog("handleChat 进入: " + args);
-        if (isEmpty(args)) return err("用法: ai/chat [问题]");
-        if (!checkKey()) { AiAgentActivity.debugLog("handleChat: 未设置API密钥"); return false; }
-
-        final String userMsg = args.trim();
-        AiAgentActivity.debugLog("handleChat: 用户消息=" + userMsg);
-
-        // === 情绪：检测用户消息中的情绪 ===
-        act.getEmotionManager().detectEmotion(userMsg);
-
-        // === 情绪：检查Agent是否暂停，若是则处理互动 ===
-        if (act.getEmotionManager().isPaused()) {
-            String result = act.getEmotionManager().handleUserInteraction(userMsg);
-            if ("comforted".equals(result)) {
-                println(new Color(180, 255, 180), "💚 AI感受到你的安慰，心情平静下来了~");
-            } else if ("guided".equals(result)) {
-                println(new Color(180, 220, 255), "📝 指导已记录，AI继续工作中...");
-            }
-            return true;
-        }
-
-        println(C_INFO, "\n[你] " + userMsg);
-
-        act.stopActivePrinter();
-
-        final String memoryContext = act.getMemory().buildContext(userMsg);
-        if (memoryContext != null) {
-            println(C_MEM, "[记忆] 找到相关记忆，已注入上下文。");
-        }
-
-        final StreamPrinter printer = StreamPrinter.getInstance();
-        printer.start();
-
-        print(C_AI, "[AI] ");
-        AiAgentActivity.debugLog("handleChat: 启动后台线程");
-
-        act.setActiveThread(new Thread(new Runnable() {
-            public void run() {
-                AiAgentActivity.debugLog("ChatThread: 开始");
-                final String[] capturedResponse = new String[1];  // 用于上下文持久化
-                try {
-                    act.getHistory().add(new ChatMessage("user", userMsg));
-                    String sysPrompt = act.getConfig().getSystemPrompt();
-
-                    // 注入 Agent 最近的执行结果（Agent ↔ Chat 同步）
-                    String agentSummary = act.getAgent().getLastSummary();
-                    if (agentSummary == null) {
-                        // 跨会话回退：从 context.json 加载 AI 上次的思维摘要
-                        agentSummary = act.getMemory().loadContext();
-                    }
-                    if (agentSummary != null) {
-                        sysPrompt += "\n\n## Recent Agent Execution\n"
-                                   + "The following is what you (the assistant/agent) did recently on this system.\n"
-                                   + "Use this context to answer user questions about prior agent actions:\n"
-                                   + agentSummary + "\n";
-                    }
-
-                    // === 注入会话日志（跨会话持久化记忆） ===
-                    String journalCtx = act.getJournal().buildRecentContext();
-                    if (journalCtx != null) {
-                        sysPrompt += "\n" + journalCtx;
-                    }
-
-                    List<ChatMessage> messages = act.getHistory().buildFullContext(sysPrompt);
-                    if (memoryContext != null) {
-                        ChatMessage sysMsg = messages.get(0);
-                        String enhanced = sysMsg.getContent() + "\n\n" + memoryContext;
-                        messages.set(0, new ChatMessage("system", enhanced));
-                    }
-
-                    AiAgentActivity.debugLog("ChatThread: 调用chatStream...");
-                    String execqModel = sair.aiagent.core.AiConfig.getInstance().getExecqModel();
-                    String fullResponse = act.getClient().chatStream(messages, execqModel);
-                    AiAgentActivity.debugLog("ChatThread: chatStream返回, 长度=" + fullResponse.length());
-                    capturedResponse[0] = fullResponse;
-                    act.getHistory().add(new ChatMessage("assistant", fullResponse));
-                    // === 日志：记录用户消息 + AI 回复 ===
-                    act.getJournal().addEntry("user", "chat", userMsg, null);
-                    act.getJournal().addEntry("assistant", "chat", fullResponse, null);
-                } catch (Exception e) {
-                    AiAgentActivity.debugLog("ChatThread: 错误: " + e.toString());
-                    println(C_ERR, "\n[错误] 对话失败: " + e.toString());
-                    if (e.getMessage() != null) {
-                        println(C_ERR, "        " + e.getMessage());
-                    }
-                } finally {
-                    printer.finish();
-                    printer.await(5000);
-                    println("");
-                    if (act.getActiveThread() == Thread.currentThread()) act.setActiveThread(null);
-                    // === 上下文持久化：保存 Chat 摘要到 dataDir/context.json ===
-                    if (capturedResponse[0] != null) {
-                        String clean = capturedResponse[0].replaceAll("<[^>]+>", "").trim();
-                        if (clean.length() > 1500) clean = clean.substring(0, 1500) + "...";
-                        act.getMemory().saveContext(clean);
-                    }
-                    AiAgentActivity.debugLog("ChatThread: 结束");
-                }
-            }
-        }, "AiAgent-Chat"));
-        act.getActiveThread().setDaemon(true);
-        act.getActiveThread().start();
-
-        AiAgentActivity.debugLog("handleChat: 完成");
-        return true;
+        return handleExecs(args);
     }
 
-    // ==================== Agent 模式 ====================
+    // ==================== Agent 模式（已合并到 execs） ====================
 
     public Object handleExec(String args) {
-        AiAgentActivity.debugLog("handleExec 进入: " + args);
-        if (isEmpty(args)) return err("用法: ai/exec [任务描述]");
-        if (!checkKey()) { AiAgentActivity.debugLog("handleExec: 未设置API密钥"); return false; }
+        return handleExecs(args);
+    }
 
-        final String execTask = args.trim();
+    /** execs 模式 —— 唯一入口：免确认 + 原生 Function Calling（全能模式，模型自动决定聊天还是调工具）。 */
+    public Object handleExecs(String args) {
+        AiAgentActivity.debugLog("handleExecs 进入: " + args);
+        if (isEmpty(args)) return err("用法: ai/execs [任务描述]");
+        if (!checkKey()) { AiAgentActivity.debugLog("handleExecs: 未设置API密钥"); return false; }
+
+        final String fcTask = args.trim();
 
         // === 情绪：检测用户消息中的情绪 ===
-        act.getEmotionManager().detectEmotion(execTask);
-
-        // === 情绪：检查Agent是否暂停，若是则处理互动 ===
+        act.getEmotionManager().detectEmotion(fcTask);
         if (act.getEmotionManager().isPaused()) {
-            String result = act.getEmotionManager().handleUserInteraction(execTask);
+            String result = act.getEmotionManager().handleUserInteraction(fcTask);
             if ("comforted".equals(result)) {
                 println(new Color(180, 255, 180), "💚 AI感受到你的安慰，心情平静下来了~");
             } else if ("guided".equals(result)) {
@@ -360,59 +330,133 @@ public class ActivityActions {
 
         act.stopActivePrinter();
 
-        final String memoryContext = act.getMemory().buildContext(execTask);
+        // === 注入上下文 ===
+        final String memoryContext = act.getMemory().buildContext(fcTask);
         if (memoryContext != null) {
             println(C_MEM, "[记忆] 找到相关记忆，已注入上下文。");
         }
-
         act.getAgent().setMemoryContext(memoryContext);
-        act.getAgent().setMemoryManager(act.getMemory());
 
-        // 注入 Chat 对话历史到 Agent 上下文（Chat ↔ Agent 同步）
+        sair.aiagent.core.SkillBank fcBank = sair.aiagent.core.SkillBank.getInstance();
+        if (fcBank != null && fcBank.getPersistenceManager() != null) {
+            act.getAgent().setNotesContext(fcBank.getPersistenceManager().buildNotesContext(fcTask));
+            act.getAgent().setCorrectionsContext(fcBank.getPersistenceManager().buildCorrectionsContext(fcTask, 1200));
+        }
+        act.getAgent().setMemoryManager(act.getMemory());
         act.getAgent().setChatHistoryContext(buildChatContextForAgent());
-        // === 注入 journal 引用（Agent 需要它来记录操作并可读取历史） ===
         act.getAgent().setJournal(act.getJournal());
-        // === 注入 EmotionManager 引用 ===
         act.getAgent().setEmotionManager(act.getEmotionManager());
 
-        final String task = execTask;
-
-        AiAgentActivity.debugLog("handleExec: 启动后台线程");
+        final String task = fcTask;
         final JournalManager journal = act.getJournal();
 
+        println(C_INFO, "[execs] 使用原生 Function Calling 执行（免确认全能模式）...");
+
+        AiAgentActivity.debugLog("handleExecs: 启动后台线程");
         act.setActiveThread(new Thread(new Runnable() {
             public void run() {
-                AiAgentActivity.debugLog("ExecThread: 开始");
+                AiAgentActivity.debugLog("ExecsThread: 开始");
                 try {
-                    act.getAgent().execute(task);
-                    AiAgentActivity.debugLog("ExecThread: agent.execute() 完成");
-                    // === 日志：记录 Agent 任务 + 执行摘要 ===
-                    String agentSummary = act.getAgent().getLastSummary();
-                    journal.addEntry("agent", "exec", task, agentSummary);
-                } catch (Exception e) {
-                    AiAgentActivity.debugLog("ExecThread: 错误: " + e.toString());
-                    println(C_ERR, "[错误] Agent执行失败: " + e.toString());
-                    if (e.getMessage() != null) {
-                        println(C_ERR, "        " + e.getMessage());
+                    String result = act.getAgent().executeFcLocal(task);
+                    AiAgentActivity.debugLog("ExecsThread: executeFcLocal() 完成");
+                    if (result != null && !result.isEmpty()) {
+                        StreamPrinter printer = StreamPrinter.getInstance();
+                        printer.start();
+                        printer.setColor(C_AI);
+                        printer.offer(result);
+                        printer.flushAndStop();
                     }
+                    journal.addEntry("agent", "execs", task, result);
+                } catch (Exception e) {
+                    AiAgentActivity.debugLog("ExecsThread: 错误: " + e.toString());
+                    println(C_ERR, "[错误] Function Calling 执行失败: " + e.toString());
                 } finally {
-                    StreamPrinter.getInstance().flushAndStop();
+                    act.getGate().setBypassConfirm(false);
                     if (act.getActiveThread() == Thread.currentThread()) act.setActiveThread(null);
-                    AiAgentActivity.debugLog("ExecThread: 结束");
+                    AiAgentActivity.debugLog("ExecsThread: 结束");
                 }
             }
-        }, "AiAgent-Exec"));
+        }, "AiAgent-Execs"));
         act.getActiveThread().setDaemon(true);
         act.getActiveThread().start();
 
         return true;
     }
 
-    /** execs 模式 —— 与 exec 相同，但跳过所有高危操作确认。 */
-    public Object handleExecs(String args) {
-        act.getGate().setBypassConfirm(true);
-        println(C_INFO, "[execs] 安全模式关闭 — 所有高危操作将自动执行，不再提示确认。");
-        return handleExec(args);
+    /** orchestrate 模式 —— 多智能体编排（pipeline / fanout / expert，opt-in）。 */
+    public Object handleOrchestrate(String args) {
+        AiAgentActivity.debugLog("handleOrchestrate 进入: " + args);
+        if (isEmpty(args)) return err("用法: ai/orchestrate [pipeline|fanout|expert] [任务描述]");
+        if (!checkKey()) { AiAgentActivity.debugLog("handleOrchestrate: 未设置API密钥"); return false; }
+
+        String trimmed = args.trim();
+        String mode = "pipeline";
+        String task = trimmed;
+        String lower = trimmed.toLowerCase();
+        if (lower.startsWith("pipeline ")) { mode = "pipeline"; task = trimmed.substring("pipeline".length()).trim(); }
+        else if (lower.startsWith("fanout ")) { mode = "fanout"; task = trimmed.substring("fanout".length()).trim(); }
+        else if (lower.startsWith("expert ")) { mode = "expert"; task = trimmed.substring("expert".length()).trim(); }
+        if (task.isEmpty()) return err("用法: ai/orchestrate [pipeline|fanout|expert] [任务描述]");
+
+        final String fMode = mode;
+        final String fTask = task;
+        println(C_INFO, "[orchestrate] 多智能体编排（模式=" + fMode + "）执行中...");
+
+        act.setActiveThread(new Thread(() -> {
+            try {
+                String result = act.getAgent().executeOrchestrated(fTask, fMode, new sair.aiagent.core.ToolContext("console"), null);
+                if (result != null && !result.isEmpty()) {
+                    StreamPrinter printer = StreamPrinter.getInstance();
+                    printer.start();
+                    printer.setColor(C_AI);
+                    printer.offer(result);
+                    printer.flushAndStop();
+                }
+                act.getJournal().addEntry("agent", "orchestrate", fTask, result);
+            } catch (Exception e) {
+                AiAgentActivity.debugLog("OrchestrateThread: 错误: " + e.toString());
+                println(C_ERR, "[错误] 编排执行失败: " + e.toString());
+            } finally {
+                act.getGate().setBypassConfirm(false);
+                if (act.getActiveThread() == Thread.currentThread()) act.setActiveThread(null);
+            }
+        }, "AiAgent-Orchestrate"));
+        act.getActiveThread().setDaemon(true);
+        act.getActiveThread().start();
+        return true;
+    }
+
+    /** harnesseval —— 输出最近 Harness 执行轨迹评测报告（可观测性）。 */
+    public Object handleHarnessEval() {
+        try {
+            sair.aiagent.core.PersistenceManager pm = sair.aiagent.core.PersistenceManager.getInstance();
+            if (pm == null) {
+                println(C_ERR, "[HarnessEval] 持久化层未初始化");
+                return true;
+            }
+            sair.aiagent.core.HarnessEval eval = new sair.aiagent.core.HarnessEval(pm);
+            String report = eval.evaluate(50);
+            println(C_INFO, report);
+        } catch (Exception e) {
+            println(C_ERR, "[HarnessEval] 评测失败: " + e.toString());
+        }
+        return true;
+    }
+
+    /** criticon —— 开启 Harness 验证闭环（opt-in），每次最终回复增加一次独立审查。 */
+    public Object handleCriticOn() {
+        sair.aiagent.core.HarnessConfig.getInstance().setCriticEnabled(true);
+        act.getAgent().setCriticEnabled(true);
+        println(C_INFO, "[Critic] Harness 验证闭环已开启（每次最终回复增加一次独立审查）");
+        return true;
+    }
+
+    /** criticoff —— 关闭 Harness 验证闭环（默认状态，老功能零干扰）。 */
+    public Object handleCriticOff() {
+        sair.aiagent.core.HarnessConfig.getInstance().setCriticEnabled(false);
+        act.getAgent().setCriticEnabled(false);
+        println(C_INFO, "[Critic] Harness 验证闭环已关闭");
+        return true;
     }
 
     // ==================== 心情查询 ====================
@@ -451,6 +495,20 @@ public class ActivityActions {
         return true;
     }
 
+    // ==================== QQ日志开关 ====================
+
+    public Object handleQqLogOn() {
+        AiAgentActivity.setQqLogEnabled(true);
+        println(C_INFO, "[QqLog] QQ消息控制台输出已开启");
+        return true;
+    }
+
+    public Object handleQqLogOff() {
+        AiAgentActivity.setQqLogEnabled(false);
+        println(C_INFO, "[QqLog] QQ消息控制台输出已关闭");
+        return true;
+    }
+
     // ==================== 上下文同步 ====================
 
     /**
@@ -479,6 +537,126 @@ public class ActivityActions {
             }
         }
         return sb.toString();
+    }
+
+    // ==================== Skills 命令 ====================
+
+    public Object handleSkills() {
+        sair.aiagent.core.SkillBank bank = sair.aiagent.core.SkillBank.getInstance();
+        String list = bank.formatSkillList();
+        println(C_INFO, list);
+        return true;
+    }
+
+    public Object handleSkillSearch(String args) {
+        if (isEmpty(args)) return err("用法: ai/skillsearch [关键词]");
+        sair.aiagent.core.SkillBank bank = sair.aiagent.core.SkillBank.getInstance();
+        java.util.List<sair.aiagent.model.SkillEntry> results = bank.search(args.trim(), 10);
+        if (results.isEmpty()) {
+            println(C_INFO, "未找到匹配的技能。");
+            return true;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("搜索结果 (").append(results.size()).append(" 条):\n");
+        for (sair.aiagent.model.SkillEntry s : results) {
+            sb.append("[").append(s.getId()).append("] ").append(s.getName())
+              .append(" v").append(s.getVersion())
+              .append(" [").append(s.getCategory()).append("] ")
+              .append(s.successRate()).append("% 成功率\n");
+            sb.append("  ").append(s.getDescription()).append("\n");
+        }
+        println(C_INFO, sb.toString().trim());
+        return true;
+    }
+
+    public Object handleSkillInfo(String args) {
+        if (isEmpty(args)) return err("用法: ai/skillinfo [ID]");
+        try {
+            int id = Integer.parseInt(args.trim());
+            sair.aiagent.core.SkillBank bank = sair.aiagent.core.SkillBank.getInstance();
+            sair.aiagent.model.SkillEntry skill = bank.getSkill(id);
+            if (skill == null) {
+                println(C_INFO, "技能 #" + id + " 不存在。");
+                return true;
+            }
+            println(C_INFO, bank.formatSkillDetail(skill));
+        } catch (NumberFormatException e) {
+            return err("请输入有效的技能ID");
+        }
+        return true;
+    }
+
+    public Object handleSkillDelete(String args) {
+        if (isEmpty(args)) return err("用法: ai/skilldelete [ID]");
+        try {
+            int id = Integer.parseInt(args.trim());
+            sair.aiagent.core.SkillBank bank = sair.aiagent.core.SkillBank.getInstance();
+            if (bank.delete(id)) {
+                println(C_INFO, "技能 #" + id + " 已删除。");
+            } else {
+                println(C_ERR, "删除失败，技能 #" + id + " 不存在。");
+            }
+        } catch (NumberFormatException e) {
+            return err("请输入有效的技能ID");
+        }
+        return true;
+    }
+
+    public Object handleSkillExtract() {
+        sair.aiagent.core.SkillBank bank = sair.aiagent.core.SkillBank.getInstance();
+        sair.aiagent.core.PersistenceManager pm = sair.aiagent.core.PersistenceManager.getInstance();
+        if (pm == null) {
+            println(C_ERR, "持久化管理器未初始化。");
+            return false;
+        }
+        sair.aiagent.core.SkillExtractor extractor = act.getAgent().getSkillExtractor();
+        if (extractor == null) {
+            // Create on demand
+            extractor = new sair.aiagent.core.SkillExtractor(act.getClient(), bank);
+        }
+        println(C_INFO, "正在从最近操作日志提取技能...");
+        int added = extractor.extractFromJournal(pm, 30);
+        if (added > 0) {
+            println(C_INFO, "✓ 提取了 " + added + " 个新技能。使用 ai/skills 查看。");
+        } else {
+            println(C_INFO, "未发现可提取的新技能。");
+        }
+        return true;
+    }
+
+    public Object handleSkillEvolve() {
+        sair.aiagent.core.SkillBank bank = sair.aiagent.core.SkillBank.getInstance();
+        println(C_INFO, "正在分析失败模式并进化技能...");
+        int evolved = bank.evolve();
+        if (evolved > 0) {
+            println(C_INFO, "✓ 进化了 " + evolved + " 个技能。使用 ai/skills 查看更新。");
+        } else {
+            println(C_INFO, "没有需要进化的技能（所有技能失败率都低于阈值）。");
+        }
+        return true;
+    }
+
+    public Object handleSkillExport(String args) {
+        sair.aiagent.core.SkillBank bank = sair.aiagent.core.SkillBank.getInstance();
+        if (isEmpty(args)) return err("用法: ai/skillexport [ID]");
+        try {
+            int id = Integer.parseInt(args.trim());
+            String md = bank.exportSkill(id);
+            if (md == null) {
+                println(C_INFO, "技能 #" + id + " 不存在。");
+            } else {
+                println(C_INFO, md);
+            }
+        } catch (NumberFormatException e) {
+            return err("请输入有效的技能ID");
+        }
+        return true;
+    }
+
+    public Object handleSkillExportAll() {
+        sair.aiagent.core.SkillBank bank = sair.aiagent.core.SkillBank.getInstance();
+        println(C_INFO, bank.exportAllSkills());
+        return true;
     }
 
     // ==================== EDT-safe 输出（委托 EdtUtils） ====================

@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IRE 脚本语言 · 技术文档</title>
+<style>
+:root{
+  --bg:#0a0e1a; --bg2:#101629; --card:#141b33; --card2:#1a2340;
+  --line:#243055; --txt:#d7e0f5; --muted:#8b98c0;
+  --pink:#ff4d8d; --cyan:#22d3ee; --violet:#8b5cf6; --amber:#fbbf24; --green:#34d399;
+  --grad:linear-gradient(135deg,#ff4d8d 0%,#8b5cf6 50%,#22d3ee 100%);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  background:radial-gradient(1200px 800px at 80% -10%,#1c2a55 0%,transparent 60%),
+             radial-gradient(1000px 700px at -10% 30%,#2a1440 0%,transparent 55%),var(--bg);
+  color:var(--txt); line-height:1.75; overflow-x:hidden;
+}
+/* 顶部进度条 */
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--grad);z-index:99;box-shadow:0 0 12px var(--pink)}
+/* 粒子背景 */
+#particles{position:fixed;inset:0;pointer-events:none;z-index:0}
+.p{position:absolute;border-radius:50%;background:rgba(139,92,246,.5);animation:float linear infinite}
+@keyframes float{0%{transform:translateY(0) scale(1);opacity:0}10%{opacity:.7}90%{opacity:.4}100%{transform:translateY(-110vh) scale(.3);opacity:0}}
+/* 侧边导航 */
+.sidebar{
+  position:fixed;left:0;top:0;bottom:0;width:270px;z-index:20;
+  background:linear-gradient(180deg,rgba(16,22,41,.95),rgba(10,14,26,.95));
+  backdrop-filter:blur(14px);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;transition:transform .35s ease;
+}
+.sidebar .logo{padding:26px 22px 18px;border-bottom:1px solid var(--line)}
+.sidebar .logo h1{font-size:22px;letter-spacing:1px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sidebar .logo p{font-size:12px;color:var(--muted);margin-top:4px}
+.nav{flex:1;overflow-y:auto;padding:14px 12px}
+.nav::-webkit-scrollbar{width:5px}
+.nav::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+.nav a{
+  display:block;color:var(--muted);text-decoration:none;padding:9px 14px;margin:3px 0;
+  border-radius:10px;font-size:14px;position:relative;transition:.25s;border:1px solid transparent;
+}
+.nav a:hover{color:var(--txt);background:rgba(139,92,246,.12);border-color:var(--line);transform:translateX(4px)}
+.nav a.active{color:#fff;background:linear-gradient(90deg,rgba(255,77,141,.22),rgba(139,92,246,.18));border-color:rgba(139,92,246,.5);box-shadow:0 0 16px rgba(139,92,246,.25)}
+.nav a .num{display:inline-block;min-width:20px;margin-right:8px;font-size:11px;color:var(--cyan);font-family:monospace}
+/* 汉堡按钮 */
+#burger{position:fixed;top:16px;left:16px;z-index:30;display:none;width:42px;height:42px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--txt);font-size:20px;cursor:pointer}
+/* 主区 */
+.main{margin-left:270px;position:relative;z-index:5}
+.hero{
+  min-height:62vh;display:flex;flex-direction:column;justify-content:center;align-items:center;
+  text-align:center;padding:90px 30px 50px;position:relative;
+}
+.hero .badge{display:inline-block;padding:6px 18px;border-radius:999px;border:1px solid var(--line);color:var(--cyan);font-size:13px;margin-bottom:20px;letter-spacing:2px;animation:fadeUp .8s ease both}
+.hero h2{font-size:56px;font-weight:800;letter-spacing:2px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;animation:fadeUp .8s .1s ease both}
+.hero .sub{color:var(--muted);margin-top:16px;max-width:640px;font-size:16px;animation:fadeUp .8s .2s ease both}
+#typewriter{font-family:monospace;font-size:20px;color:var(--green);margin-top:30px;min-height:30px;text-shadow:0 0 10px rgba(52,211,153,.6)}
+#typewriter .caret{display:inline-block;width:2px;height:20px;background:var(--green);vertical-align:-3px;animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:0}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+/* 内容区 */
+.content{max-width:960px;margin:0 auto;padding:20px 40px 120px}
+section{margin-bottom:70px;scroll-margin-top:30px}
+section .anchor{display:block;position:relative;top:-90px;visibility:hidden}
+h3.sec{
+  font-size:28px;margin-bottom:22px;padding-left:16px;position:relative;letter-spacing:1px;
+}
+h3.sec::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);width:5px;height:28px;border-radius:3px;background:var(--grad);box-shadow:0 0 12px var(--pink)}
+h4{font-size:19px;margin:28px 0 12px;color:#fff}
+h4 .dot{color:var(--pink);margin-right:8px}
+p{color:var(--txt);margin:10px 0;font-size:15px}
+.muted{color:var(--muted)}
+.card{
+  background:linear-gradient(160deg,var(--card),var(--card2));border:1px solid var(--line);
+  border-radius:16px;padding:22px 26px;margin:18px 0;position:relative;overflow:hidden;
+  transition:transform .3s,box-shadow .3s,border-color .3s;
+}
+.card:hover{transform:translateY(-4px);border-color:rgba(139,92,246,.6);box-shadow:0 14px 40px rgba(0,0,0,.4),0 0 24px rgba(139,92,246,.15)}
+.card::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.05),transparent);transform:skewX(-20deg);transition:left .6s}
+.card:hover::after{left:120%}
+/* 代码块 */
+.code-wrap{position:relative;margin:16px 0;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#0b1020;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.code-wrap .bar{display:flex;align-items:center;gap:6px;padding:10px 14px;background:#10162b;border-bottom:1px solid var(--line)}
+.code-wrap .bar .dot{width:11px;height:11px;border-radius:50%}
+.code-wrap .bar .dot.r{background:#ff5f57}.code-wrap .bar .dot.y{background:#febc2e}.code-wrap .bar .dot.g{background:#28c840}
+.code-wrap .bar .lang{margin-left:auto;font-size:12px;color:var(--muted);font-family:monospace}
+.code-wrap pre{margin:0;padding:18px;overflow-x:auto;font-family:"JetBrains Mono","Cascadia Code",Consolas,monospace;font-size:13.5px;line-height:1.7}
+.code-wrap pre code{color:#cdd6f4}
+.copy{position:absolute;right:12px;top:42px;padding:4px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--muted);font-size:12px;cursor:pointer;transition:.25s}
+.copy:hover{color:#fff;border-color:var(--cyan);box-shadow:0 0 10px rgba(34,211,238,.4)}
+/* 语法高亮 */
+.k{color:#ff79c6;font-weight:600}.t{color:#8be9fd}.s{color:#f1fa8c}.c{color:#6272a4;font-style:italic}.n{color:#bd93f9}.m{color:#ffb86c}
+/* 表格 */
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px;overflow:hidden;border-radius:12px}
+th,td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line)}
+th{background:var(--card2);color:var(--cyan);font-weight:600}
+tr:hover td{background:rgba(139,92,246,.07)}
+td code{background:rgba(139,92,246,.18);padding:2px 7px;border-radius:6px;font-size:13px;color:var(--cyan)}
+/* 滚动渐入 */
+.reveal{opacity:0;transform:translateY(30px);transition:opacity .7s ease,transform .7s ease}
+.reveal.visible{opacity:1;transform:none}
+/* 回到顶部 */
+#top{position:fixed;right:26px;bottom:26px;width:46px;height:46px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--txt);font-size:20px;cursor:pointer;z-index:25;opacity:0;pointer-events:none;transition:.3s}
+#top.show{opacity:1;pointer-events:auto}
+#top:hover{border-color:var(--pink);box-shadow:0 0 14px rgba(255,77,141,.5)}
+/* 响应式 */
+@media(max-width:920px){
+  .sidebar{transform:translateX(-100%)}
+  .sidebar.open{transform:none}
+  .main{margin-left:0}
+  #burger{display:block}
+  .hero h2{font-size:38px}
+}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div id="particles"></div>
+
+<button id="burger" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+
+<aside class="sidebar">
+  <div class="logo">
+    <h1>IRE 语言</h1>
+    <p>Java 魔改 · 脚本技术文档</p>
+  </div>
+  <nav class="nav" id="nav">
+    <a href="#intro"><span class="num">01</span>简介</a>
+    <a href="#quickstart"><span class="num">02</span>快速开始</a>
+    <a href="#group"><span class="num">03</span>文件与 group</a>
+    <a href="#types"><span class="num">04</span>基础类型</a>
+    <a href="#vars"><span class="num">05</span>变量与字段</a>
+    <a href="#fc"><span class="num">06</span>函数 fc</a>
+    <a href="#import"><span class="num">07</span>import 导入</a>
+    <a href="#jar"><span class="num">08</span>jar 导入</a>
+    <a href="#call"><span class="num">09</span>调用 ire / ir</a>
+    <a href="#flow"><span class="num">10</span>控制流</a>
+    <a href="#expr"><span class="num">11</span>表达式与运算</a>
+    <a href="#cast"><span class="num">12</span>类型转换</a>
+    <a href="#array"><span class="num">13</span>数组</a>
+    <a href="#generic"><span class="num">14</span>泛型与 Java 类型</a>
+    <a href="#interop"><span class="num">15</span>Java 互操作</a>
+    <a href="#demo"><span class="num">16</span>完整示例</a>
+  </nav>
+</aside>
+
+<main class="main">
+  <header class="hero">
+    <div class="badge">IRE · Script Language</div>
+    <h2>IRE 脚本语言</h2>
+    <p class="sub">一门对 Java 魔改的脚本语言。表达式与语法直接透传 Java 运行时，无需手动编译，转译后由系统自动动态编译执行。兼容 ir 文件，拥有完整的类型系统与控制流能力。</p>
+    <div id="typewriter"><span class="caret"></span></div>
+  </header>
+
+  <div class="content">
+
+    <section id="intro"><span class="anchor"></span>
+      <h3 class="sec">01 · 简介</h3>
+      <div class="card reveal">
+        <p>IRE 是对 SFW 框架的扩充，为 <code>ir</code> 这种纯配置脚本补上了真正的语言能力。它的设计核心是「<b style="color:var(--pink)">转译为 Java 源码 → 动态编译 → 当前运行时反射执行</b>」。</p>
+        <p class="muted">优先级、注释、转义、异常处理全部沿用 Java 规则。你在 IRE 里写的表达式，最终就是合法的 Java 表达式。</p>
+        <table>
+          <tr><th>能力</th><th>说明</th></tr>
+          <tr><td>文件扩展名</td><td><code>.ire</code></td></tr>
+          <tr><td>执行命令</td><td><code>ire/run [path] [args...]</code></td></tr>
+          <tr><td>入口函数</td><td><code>fc main(String args)</code></td></tr>
+          <tr><td>兼容性</td><td>可直接 import 并调用 <code>.ir</code> 文件</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section id="quickstart"><span class="anchor"></span>
+      <h3 class="sec">02 · 快速开始</h3>
+      <div class="card reveal">
+        <p>新建文件 <code>Hello.ire</code>，写一个入口函数：</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">Hello.ire</span></div><button class="copy">复制</button><pre><code>group Hello {
+    fc main(String args) {
+        SairCons.println(FCM.split_Color, "Hello, IRE!");
+        return 0;
+    }
+}</code></pre></div>
+        <p>在 SFW 中执行：</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">shell</span></div><button class="copy">复制</button><pre><code>ire/run C:\path\to\Hello.ire a b c</code></pre></div>
+        <p class="muted">入口参数 <code>a b c</code> 会被拼接成单个字符串 <code>"a b c"</code> 传给 <code>main(String args)</code>。</p>
+      </div>
+    </section>
+
+    <section id="group"><span class="anchor"></span>
+      <h3 class="sec">03 · 文件与 group</h3>
+      <div class="card reveal">
+        <p>一个 <code>.ire</code> 文件<b>只能有一个 <code>group</code></b>，它会被转译成一个 Java 类（包名固定为 <code>sair.ire.script</code>），类名即 group 名。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">MyIre.ire</span></div><button class="copy">复制</button><pre><code>import {
+    java:sair.sys.SairCons;
+    java:sair.FCM;
+}
+
+group MyIre {
+    Int counter = 0;
+
+    fc main(String args) {
+        SairCons.println(FCM.split_Color, args);
+    }
+}</code></pre></div>
+        <p class="muted">group 内只允许出现 <code>fc</code> 函数和字段声明。</p>
+      </div>
+    </section>
+
+    <section id="types"><span class="anchor"></span>
+      <h3 class="sec">04 · 基础类型</h3>
+      <div class="card reveal">
+        <table>
+          <tr><th>IRE 类型</th><th>转译为 Java</th><th>说明</th></tr>
+          <tr><td><code>Bool</code></td><td><code>Boolean</code></td><td>布尔</td></tr>
+          <tr><td><code>Int</code></td><td><code>Integer</code></td><td>整数</td></tr>
+          <tr><td><code>Long</code></td><td><code>Long</code></td><td>长整型</td></tr>
+          <tr><td><code>Double</code></td><td><code>Double</code></td><td>双精度浮点</td></tr>
+          <tr><td><code>Char</code></td><td><code>Character</code></td><td>字符</td></tr>
+          <tr><td><code>String</code></td><td><code>String</code></td><td>字符串</td></tr>
+          <tr><td><code>LLong</code></td><td><code>java.math.BigInteger</code></td><td>超长整型</td></tr>
+          <tr><td><code>var</code></td><td><code>Object</code></td><td>可接收一切类型</td></tr>
+        </table>
+        <p class="muted">声明处统一使用 IRE 类型名，转译时自动替换为对应 Java 类型；基础类型一律转译为封装类型，可直接作泛型实参（如 <code>List&lt;Int&gt;</code> → <code>List&lt;Integer&gt;</code>）。</p>
+      </div>
+    </section>
+
+    <section id="vars"><span class="anchor"></span>
+      <h3 class="sec">05 · 变量与字段</h3>
+      <div class="card reveal">
+        <h4><span class="dot">◆</span>局部变量</h4>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>String name = "Sair";
+Int age = 18;
+Double pi = 3.14159;
+var anything = "可以接收任何类型";</code></pre></div>
+        <h4><span class="dot">◆</span>字段</h4>
+        <p>group 内直接声明，转译为 <code>public static</code> 字段。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>group Store {
+    Int total = 0;
+    String title = "未命名";
+
+    fc main(String args) {
+        total = 100;
+        title = "新标题";
+    }
+}</code></pre></div>
+      </div>
+    </section>
+
+    <section id="fc"><span class="anchor"></span>
+      <h3 class="sec">06 · 函数 fc</h3>
+      <div class="card reveal">
+        <p>所有函数用 <code>fc</code> 修饰，统一编译为 <code>public static</code> 方法。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>// 无显式返回类型：默认返回 Object，无 return 时返回 null
+fc sayHello(String str) {
+    SairCons.println(FCM.split_Color, str);
+}
+
+// 显式返回类型：Int
+fc add(Int a, Int b) {
+    return a + b;
+}
+
+// 无 return 时统一返回 null
+fc Int zero() {
+}</code></pre></div>
+        <p class="muted">无 return 时统一返回 <code>null</code>（基础类型已转译为封装类型，不再返回 0/0L/0.0/false/空字符）。</p>
+      </div>
+    </section>
+
+    <section id="import"><span class="anchor"></span>
+      <h3 class="sec">07 · import 导入</h3>
+      <div class="card reveal">
+        <p><code>import { }</code> 支持三种导入：<b>Java 类</b>、<b>.ire 文件</b>、<b>.ir 文件</b>，以及<b>目录一级扫描</b>。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>import {
+    // Java 类导入
+    java:com.sair.test.*;
+    java:com.sair.test.p.Tools;
+
+    // 绝对路径
+    C:\Sair\MyLib.ire
+    C:\Sair\MyLib2.ir
+
+    // 相对路径
+    Sair\MyLib.ire
+    ..\..\MyLib2.ir
+
+    // 目录：扫描一级目录下全部（不含子文件夹）
+    ..\..\..
+}</code></pre></div>
+        <p>路径规则：绝对路径、相对路径、<code>..</code> 表示上一级目录。</p>
+        <div class="card">
+          <p style="color:var(--amber)">★ 同父目录下无需 import</p>
+          <p class="muted">与当前文件在同一目录下的 <code>.ire</code> 和 <code>.ir</code> 文件会自动扫描可用，无需显式 import。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="jar"><span class="anchor"></span>
+      <h3 class="sec">08 · jar 导入</h3>
+      <div class="card reveal">
+        <p><code>jar { }</code> 用于导入第三方 jar，用法与路径规则和 import 一致。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>jar {
+    C:\Sair\libs\gson.jar
+    ..\libs\jsoup.jar
+
+    // 目录：扫描一级目录下全部 jar
+    ..\deps
+}</code></pre></div>
+        <p class="muted">默认已动态导入 SFW.jar、bootlib 与 modlib 中的全部 jar，可直接使用其中任意静态 public 方法。</p>
+      </div>
+    </section>
+
+    <section id="call"><span class="anchor"></span>
+      <h3 class="sec">09 · 调用 ire / ir</h3>
+      <div class="card reveal">
+        <h4><span class="dot">◆</span>调用 ire 代码</h4>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>String args = "hello";
+MyLib.func1(args);          // 调用其他 group 的静态函数</code></pre></div>
+        <h4><span class="dot">◆</span>调用 ir 代码</h4>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>MyLib2.LabelName_1;   // 跳转执行 ir 中的指定标签块
+MyLib2.LabelName_2;
+MyLib2;               // 无标签时按 ir 默认主流程顺序执行</code></pre></div>
+        <p class="muted">ir 调用均为无参数、无返回值调用。</p>
+      </div>
+    </section>
+
+    <section id="flow"><span class="anchor"></span>
+      <h3 class="sec">10 · 控制流</h3>
+      <div class="card reveal">
+        <h4><span class="dot">◆</span>if / else</h4>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>if (x &gt; 10) {
+    return "大";
+} else if (x &gt; 5) {
+    return "中";
+} else {
+    return "小";
+}</code></pre></div>
+        <h4><span class="dot">◆</span>switch / case</h4>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>switch (n) {
+    case 1:
+        SairCons.println(FCM.split_Color, "one");
+        break;
+    case 2:
+        SairCons.println(FCM.split_Color, "two");
+        break;
+    default:
+        SairCons.println(FCM.split_Color, "other");
+}</code></pre></div>
+        <h4><span class="dot">◆</span>for / while / do-while</h4>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>for (Int i = 0; i &lt; 10; i = i + 1) {
+    SairCons.println(FCM.split_Color, i);
+}
+
+while (x &gt; 0) {
+    x = x - 1;
+}
+
+do {
+    x = x + 1;
+} while (x &lt; 10);</code></pre></div>
+        <h4><span class="dot">◆</span>try / catch / finally</h4>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>try {
+    risky();
+} catch (Exception e) {
+    SairCons.println(FCM.split_Color, e.getMessage());
+} finally {
+    cleanup();
+}</code></pre></div>
+      </div>
+    </section>
+
+    <section id="expr"><span class="anchor"></span>
+      <h3 class="sec">11 · 表达式与运算</h3>
+      <div class="card reveal">
+        <p>表达式整体透传 Java，支持完整运算能力。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>Int a = (1 + 2) * 3;          // 数学运算
+Int b = a % 4;                // 取模
+Int c = a &lt;&lt; 2;               // 位移
+Int d = a &amp; 0xFF;             // 位运算
+Bool ok = a &gt; 5 &amp;&amp; b &lt; 3;    // 逻辑
+String s = ok ? "yes" : "no"; // 三目
+a += 1; a++;                  // 自增与赋值</code></pre></div>
+      </div>
+    </section>
+
+    <section id="cast"><span class="anchor"></span>
+      <h3 class="sec">12 · 类型转换</h3>
+      <div class="card reveal">
+        <p>使用 IRE 类型名做强转，转译时自动替换为 Java 类型。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>Double x = 3.14;
+Int y = (Int) x;             // → (Integer) x
+
+var obj = "hello";
+String s = (String) obj;     // → (String) obj</code></pre></div>
+      </div>
+    </section>
+
+    <section id="array"><span class="anchor"></span>
+      <h3 class="sec">13 · 数组</h3>
+      <div class="card reveal">
+        <p>数组类型支持字段、局部变量、参数与返回类型，也支持多维。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>group Arr {
+    Int[] nums = new Int[3];
+    String[][] matrix;
+
+    fc Int[] makeArr(Int n) {
+        Int[] a = new Int[n];
+        for (Int i = 0; i &lt; n; i = i + 1) {
+            a[i] = i * 2;
+        }
+        return a;
+    }
+
+    fc main(String args) {
+        Int[] r = makeArr(3);
+        return r[2];
+    }
+}</code></pre></div>
+        <p class="muted">数组类型的函数无 return 时默认返回 <code>null</code>。</p>
+      </div>
+    </section>
+
+    <section id="generic"><span class="anchor"></span>
+      <h3 class="sec">14 · 泛型与 Java 类型</h3>
+      <div class="card reveal">
+        <p>声明位置支持任意 Java 类名、限定名与泛型参数（含嵌套）。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>import {
+    java:java.util.List;
+    java:java.util.Map;
+    java:java.util.ArrayList;
+    java:java.util.HashMap;
+}
+
+group Store {
+    java.util.List&lt;String&gt; items;
+    Map&lt;String, List&lt;Integer&gt;&gt; map;
+
+    fc java.util.List&lt;String&gt; getList() {
+        return new ArrayList&lt;String&gt;();
+    }
+
+    fc main(String args) {
+        List&lt;String&gt; l = new ArrayList&lt;String&gt;();
+        l.add("x");
+        Map&lt;String, Integer&gt; m = new HashMap&lt;String, Integer&gt;();
+        return l.size();
+    }
+}</code></pre></div>
+        <p class="muted">基础类型已统一转译为封装类型，可直接用 <code>Int</code> 作泛型实参：<code>List&lt;Int&gt;</code> → <code>List&lt;Integer&gt;</code>、<code>Map&lt;String, Int&gt;</code> → <code>Map&lt;String, Integer&gt;</code>。</p>
+      </div>
+    </section>
+
+    <section id="interop"><span class="anchor"></span>
+      <h3 class="sec">15 · Java 互操作</h3>
+      <div class="card reveal">
+        <p>可直接调用任意 Java 静态 public 方法、创建对象、使用 Java 类库。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>import {
+    java:java.util.ArrayList;
+    java:java.util.List;
+}
+
+group Demo {
+    fc main(String args) {
+        // 静态方法
+        String s = String.valueOf(123);
+
+        // 创建对象
+        List&lt;String&gt; list = new ArrayList&lt;String&gt;();
+        list.add("a");
+        list.add("b");
+
+        // 直接使用 SFW 组件
+        SairCons.println(FCM.split_Color, list.size());
+    }
+}</code></pre></div>
+      </div>
+    </section>
+
+    <section id="demo"><span class="anchor"></span>
+      <h3 class="sec">16 · 完整示例</h3>
+      <div class="card reveal">
+        <p>综合示例：两个文件，<code>MyIre2.ire</code> 在 <code>MyIre.ire</code> 的上级目录。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">MyIre2.ire</span></div><button class="copy">复制</button><pre><code>import {
+    java:sair.sys.SairCons;
+    java:sair.FCM;
+}
+
+group MyIre2 {
+    fc sayHello(String str) {
+        SairCons.println(FCM.split_Color, str);
+    }
+
+    fc Int doubleIt(Int x) {
+        return x * 2;
+    }
+}</code></pre></div>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">MyIre.ire</span></div><button class="copy">复制</button><pre><code>import {
+    ../MyIre2.ire
+}
+
+group MyIre {
+    fc main(String args) {
+        MyIre2.sayHello("hello world!!!");
+        Int result = MyIre2.doubleIt(21);
+        return result;   // 42
+    }
+}</code></pre></div>
+        <p class="muted">执行 <code>ire/run C:\path\MyIre.ire</code>，最终在 SFW 中打印 <code>hello world!!!</code>。</p>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<button id="top" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+
+<script>
+// 粒子
+(function(){
+  const c = document.getElementById('particles');
+  for(let i=0;i<26;i++){
+    const d=document.createElement('div');
+    d.className='p';
+    const s=Math.random()*5+2;
+    d.style.width=s+'px';d.style.height=s+'px';
+    d.style.left=Math.random()*100+'vw';
+    d.style.top=Math.random()*100+'vh';
+    d.style.animationDuration=(Math.random()*12+8)+'s';
+    d.style.animationDelay=(-Math.random()*12)+'s';
+    const hue=[291,339,190][i%3];
+    d.style.background=`hsla(${hue},80%,60%,.5)`;
+    c.appendChild(d);
+  }
+})();
+
+// 打字机
+(function(){
+  const el=document.getElementById('typewriter');
+  const texts=['fc main(String args) { ... }','ire → Java → 动态编译','直接透传 Java 运行时'];
+  let ti=0,ci=0,del=false;
+  function tick(){
+    const t=texts[ti];
+    if(!del){
+      ci++; if(ci>t.length){del=true;setTimeout(tick,1400);return;}
+    }else{
+      ci--; if(ci===0){del=false;ti=(ti+1)%texts.length;}
+    }
+    el.innerHTML=t.slice(0,ci)+'<span class="caret"></span>';
+    setTimeout(tick, del?28:72);
+  }
+  tick();
+})();
+
+// 进度条 + 回到顶部 + 导航高亮 + 滚动渐入
+const navLinks=[...document.querySelectorAll('.nav a')];
+const sections=[...document.querySelectorAll('section')];
+const progress=document.getElementById('progress');
+const topBtn=document.getElementById('top');
+const observer=new IntersectionObserver(es=>{
+  es.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('visible'); });
+},{threshold:.08});
+document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
+
+function onScroll(){
+  const h=document.documentElement;
+  const sc=h.scrollTop||document.body.scrollTop;
+  const max=h.scrollHeight-h.clientHeight;
+  progress.style.width=(max?sc/max*100:0)+'%';
+  topBtn.classList.toggle('show',sc>500);
+  let cur=sections[0].id;
+  sections.forEach(s=>{ if(sc>=s.offsetTop-120) cur=s.id; });
+  navLinks.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+cur));
+}
+window.addEventListener('scroll',onScroll,{passive:true});
+onScroll();
+
+// 代码高亮
+function highlight(code){
+  return code
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|\b(0x[0-9a-fA-F]+|\d+(?:\.\d+)?[LfFdD]?)\b|\b(group|fc|if|else|for|while|do|switch|case|default|break|continue|return|try|catch|finally|throw|import|jar|new|this|super|true|false|null)\b|\b(Bool|Int|Double|String|Long|LLong|Char|var)\b/g,
+    function(m,c,s,n,k,t){
+      if(c)return '<span class="c">'+c+'</span>';
+      if(s)return '<span class="s">'+s+'</span>';
+      if(n)return '<span class="n">'+n+'</span>';
+      if(k)return '<span class="k">'+k+'</span>';
+      if(t)return '<span class="t">'+t+'</span>';
+      return m;
+    });
+}
+document.querySelectorAll('.code-wrap pre code').forEach(b=>{
+  b.innerHTML=highlight(b.textContent);
+});
+// 复制按钮
+document.querySelectorAll('.copy').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const code=btn.parentElement.querySelector('code').textContent;
+    navigator.clipboard.writeText(code).then(()=>{
+      btn.textContent='已复制';
+      setTimeout(()=>btn.textContent='复制',1200);
+    });
+  });
+});
+</script>
+</body>
+</html>
