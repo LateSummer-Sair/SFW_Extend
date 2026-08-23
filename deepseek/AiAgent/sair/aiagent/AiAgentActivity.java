@@ -34,7 +34,6 @@ import sair.aiagent.core.ToolContext;
 import sair.aiagent.model.AlarmEntry;
 import sair.aiagent.onebot.OneBotServer;
 import sair.aiagent.onebot.QQMessageHandler;
-import sair.aiagent.onebot.ImageRecognizer;
 import sair.aiagent.onebot.NapCatApi;
 import sair.sys.SairCons;
 import sair.sys.gui.ConsFrame;
@@ -42,7 +41,7 @@ import sair.user.Activity;
 import sair.user.PrintRunnable;
 
 /**
- * AiAgent V3.3 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
+ * AiAgent V3.4 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
  *
  * <h3>架构</h3>
  * 路由与命令实现分离 —— {@code main()} 仅做初始化 + 委托 {@link ActivityActions#route}，
@@ -147,9 +146,6 @@ public class AiAgentActivity extends Activity {
             stickerManager.setPersistenceManager(persistenceManager);
             stickerManager.setDataDir(dataDir);
             agent.setStickerManager(stickerManager);
-
-            // 图片注释持久化：注入 PM，使 AI 修改的注释随图（MD5）长期存储
-            ImageRecognizer.setPersistenceManager(persistenceManager);
 
             // 从 SQLite 加载（首次运行时自动迁移旧 JSON）
             if (isNew) {
@@ -334,15 +330,6 @@ public class AiAgentActivity extends Activity {
                 debugLog("已加载上次会话上下文");
             }
 
-            // === OCR 模块初始化（在线 OCR，默认 EasyOCR）===
-            sair.aiagent.ocr.OcrManager ocrMgr = sair.aiagent.ocr.OcrManager.getInstance();
-            ocrMgr.setAccessKey(config.getOcrAccessKey());
-            if (!config.hasOcrAccessKey()) {
-                debugLog("[OCR] 未设置 Access Key，OCR 能力已禁用（可通过 ai/setocrkey 启用）");
-            } else {
-                debugLog("[OCR] 已启用（引擎: " + ocrMgr.getEngineName() + "）");
-            }
-
             initialized = true;
         }
         return actions.route(funcName, args);
@@ -353,13 +340,12 @@ public class AiAgentActivity extends Activity {
         String n = getName();
         return new String[] {
             Pathes.printSplit,
-            "AiAgent V3.3 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出 · OneBot QQ",
+            "AiAgent V3.4 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出 · OneBot QQ",
             "DeepSeek API, 流式打字机效果, Agent自主操作, 持久化记忆, JS/Java动态注入",
             "配置:",
             "\t" + n + "/setkey [密钥]        设置API密钥",
             "\t" + n + "/seturl [地址]        设置API地址 (默认: " + AiConfig.DEFAULT_API_URL + ")",
             "\t" + n + "/setmodel [模型]      设置模型 (默认: " + AiConfig.DEFAULT_MODEL + ")",
-            "\t" + n + "/setocrkey [密钥]     设置OCR Access Key (在线OCR识别)",
             "\t" + n + "/setthirdpartycode on|off  三方技能代码段权限（默认on放权，所有通道可用；off则仅execs/本地）",
             "\t" + n + "/setprompt [提示词]   设置系统提示词",
             "\t" + n + "/showprompt           显示当前提示词",

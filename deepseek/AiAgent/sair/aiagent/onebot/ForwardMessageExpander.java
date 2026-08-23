@@ -158,6 +158,28 @@ public final class ForwardMessageExpander {
     }
 
     /**
+     * 从 get_msg API 响应中提取引用消息发送者信息。
+     * @return String[]{昵称/群名片, QQ号字符串}，解析失败返回 null
+     */
+    public static String[] extractQuotedSender(String apiResponse) {
+        if (apiResponse == null || apiResponse.isEmpty()) return null;
+        try {
+            String dataObj = JsonUtil.extractObject(apiResponse, "data");
+            if (dataObj == null) return null;
+            String senderObj = JsonUtil.extractObject(dataObj, "sender");
+            if (senderObj == null) return null;
+            long senderQQ = JsonUtil.extractLong(senderObj, "user_id");
+            String nick = JsonUtil.extractString(senderObj, "nickname");
+            if (nick == null || nick.isEmpty()) nick = "未知";
+            String card = JsonUtil.extractString(senderObj, "card");
+            if (card != null && !card.isEmpty()) nick = card;
+            return new String[]{ nick, String.valueOf(senderQQ) };
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * 从 get_msg API 响应中提取引用消息里图片的 URL 列表（用于 OCR 识别）。
      * @return 图片 URL 列表（无图片时返回 null 或空列表）
      */

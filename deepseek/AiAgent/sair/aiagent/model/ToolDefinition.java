@@ -24,6 +24,9 @@ public class ToolDefinition implements Serializable {
     private final Map<String, Object> properties = new LinkedHashMap<>();
     private final List<String> required = new ArrayList<>();
 
+    /** strict 模式（Beta）：模型严格遵循 JSON Schema 输出（需 /beta base_url + additionalProperties:false） */
+    private boolean strict = false;
+
     public ToolDefinition(String name, String description) {
         this.name = name;
         this.description = (description != null) ? description : "";
@@ -75,17 +78,53 @@ public class ToolDefinition implements Serializable {
     public String getDescription() { return description; }
 
     /**
+     * 设置 strict 模式（Beta）。开启后工具定义将附带 {@code strict: true} 与
+     * {@code additionalProperties: false}，optional 属性以 {@code anyOf:[原类型, {type:"null"}]} 表示可选。
+     */
+    public ToolDefinition setStrict(boolean strict) { this.strict = strict; return this; }
+
+    /** @return 是否启用 strict 模式 */
+    public boolean isStrict() { return strict; }
+
+    /**
      * 将工具定义转换为 API 请求所需的 JSON 对象（Map 形式，供 Gson 序列化）。
      * @return {"type":"function","function":{...}} 结构
      */
+    @SuppressWarnings("unchecked")
     public Map<String, Object> toRequestObject() {
         Map<String, Object> function = new LinkedHashMap<>();
         function.put("name", name);
         function.put("description", description);
+        if (strict) {
+            function.put("strict", true);
+        }
 
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("type", "object");
-        params.put("properties", new LinkedHashMap<>(properties));
+        if (strict) {
+            params.put("additionalProperties", false);
+        }
+
+        // strict 模式下 optional 属性（未 required）需以 anyOf:[原类型, {type:"null"}] 表示可选，
+        // 否则服务端 JSON Schema 校验会因「存在未 required 的属性」而报错。
+        Map<String, Object> props = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : properties.entrySet()) {
+            Object v = e.getValue();
+            if (strict && (v instanceof Map) && !required.contains(e.getKey())) {
+                Map<String, Object> propMap = new LinkedHashMap<>((Map<String, Object>) v);
+                List<Object> anyOf = new ArrayList<>();
+                anyOf.add(propMap);
+                Map<String, Object> nullType = new LinkedHashMap<>();
+                nullType.put("type", "null");
+                anyOf.add(nullType);
+                Map<String, Object> wrapped = new LinkedHashMap<>();
+                wrapped.put("anyOf", anyOf);
+                props.put(e.getKey(), wrapped);
+            } else {
+                props.put(e.getKey(), v);
+            }
+        }
+        params.put("properties", props);
         if (!required.isEmpty()) {
             params.put("required", new ArrayList<>(required));
         }

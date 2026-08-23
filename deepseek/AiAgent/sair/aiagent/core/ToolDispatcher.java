@@ -53,6 +53,19 @@ public class ToolDispatcher {
 
     // ==================== 工具注册 ====================
 
+    /**
+     * strict 模式（Beta）下，统一为所有工具应用 strict 约束
+     * （{@code additionalProperties:false} + 严格 JSON Schema，optional 属性转 anyOf null）。
+     * <p>仅在 {@link AiConfig#isStrictMode()} 开启时生效。</p>
+     */
+    private static void applyStrictIfEnabled(List<ToolDefinition> tools) {
+        if (AiConfig.getInstance().isStrictMode()) {
+            for (ToolDefinition t : tools) {
+                if (t != null) t.setStrict(true);
+            }
+        }
+    }
+
     /** 本地通道（console/execs）全量工具注册。 */
     public static List<ToolDefinition> buildAllTools() {
         List<ToolDefinition> tools = new ArrayList<>();
@@ -156,9 +169,18 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("alarm", "系统闹钟（到点唤醒AI执行任务）。命令格式：add schedule|task（schedule=once:yyyy-MM-dd HH:mm / daily:HH:mm / weekly:D,HH:mm，D=1周一~7周日） | list | remove id | cancel id | append id|备注内容")
                 .addString("content", "完整子命令字符串"));
 
+        tools.add(new ToolDefinition("searchglobal", "全局记忆检索：跨群/跨用户检索 Bot 的对话历史、群聊记录和长期记忆（用于回答「某用户/某群之前聊了什么」）。涉及隐私的内容由你判断是否透露，隐私则跳过不说")
+                .addString("query", "检索关键词（话题/人名/群名等）"));
+
+        tools.add(new ToolDefinition("markmessage", "给消息打 Mark 备注（AI 自用内部标记，用户看不到）。action=set 标记某条消息的处理结果（message 可留空=当前消息，mark 必填）；action=get 查询某条消息是否已处理（message 必填）；action=list 列出最近带备注的消息")
+                .addString("action", "set/get/list")
+                .addOptionalString("message", "要标记或查询的消息内容（set 留空=当前消息；get 必填）")
+                .addOptionalString("mark", "备注内容（set 时必填，如「已记录XXX捐赠10元」）"));
+
         // 三方技能（含代码段）动态注册为 Function Calling 工具（tp_ 前缀），execs/本地始终可用
         addThirdPartyToolTools(tools);
 
+        applyStrictIfEnabled(tools);
         return tools;
     }
 
@@ -350,6 +372,14 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("alarm", "系统闹钟（到点唤醒AI执行任务，普通用户为提醒，主人为 AI 任务）。命令格式：add schedule|task（schedule=once:yyyy-MM-dd HH:mm / daily:HH:mm / weekly:D,HH:mm） | list | remove id | cancel id | append id|备注内容")
                 .addString("content", "完整子命令字符串"));
 
+        tools.add(new ToolDefinition("searchglobal", "全局记忆检索：跨群/跨用户检索 Bot 的对话历史、群聊记录和长期记忆（用于回答「某用户/某群之前聊了什么」）。涉及隐私的内容由你判断是否透露，隐私则跳过不说")
+                .addString("query", "检索关键词（话题/人名/群名等）"));
+
+        tools.add(new ToolDefinition("markmessage", "给消息打 Mark 备注（AI 自用内部标记，用户看不到）。action=set 标记某条消息的处理结果（message 可留空=当前消息，mark 必填）；action=get 查询某条消息是否已处理（message 必填）；action=list 列出最近带备注的消息")
+                .addString("action", "set/get/list")
+                .addOptionalString("message", "要标记或查询的消息内容（set 留空=当前消息；get 必填）")
+                .addOptionalString("mark", "备注内容（set 时必填，如「已记录XXX捐赠10元」）"));
+
         // 三方技能代码段执行能力（callskill + tp_ 动态工具）：默认放权给用户，用户可通过配置关闭
         if (AiConfig.getInstance().isThirdPartyCodeExecq()) {
             tools.add(new ToolDefinition("callskill", "调用三方技能（data/skills/*.md）内嵌代码段的 airun 入口函数。args 为 JSON（字符串用引号包裹、对象用 {}）")
@@ -358,6 +388,7 @@ public class ToolDispatcher {
             addThirdPartyToolTools(tools);
         }
 
+        applyStrictIfEnabled(tools);
         return tools;
     }
 
@@ -548,6 +579,8 @@ public class ToolDispatcher {
             case "setaffection":       return executeSetAffection(argumentsJson, ctx);
             case "affectionrank":      return executeAffectionRank(argumentsJson, ctx);
             case "alarm":             return executeAlarm(argumentsJson, ctx);
+            case "searchglobal":      return executeSearchGlobal(argumentsJson, ctx);
+            case "markmessage":       return executeMarkMessage(argumentsJson, ctx);
             default:
                 if (toolName != null && toolName.startsWith("tp_")) {
                     return executeThirdPartyTool(toolName.substring(3), argumentsJson);
@@ -583,6 +616,123 @@ public class ToolDispatcher {
     private static String executeTime() {
         return "当前时间: " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss EEEE")
                 .format(new java.util.Date());
+    }
+
+    /** 全局记忆检索（searchglobal 工具）：综合群聊历史、对话历史、AI 长期记忆三源检索。 */
+    private String executeSearchGlobal(String argumentsJson, ToolContext ctx) {
+        String query = arg(argumentsJson, "query");
+        if (query == null || query.trim().isEmpty()) {
+            return "[searchglobal] 请提供 query（检索关键词）";
+        }
+        sair.aiagent.onebot.UnifiedQQMemoryManager mem = ctx != null ? ctx.unifiedMemory : null;
+        if (mem == null) {
+            return "[searchglobal] 统一记忆库不可用（仅 QQ 通道支持全局记忆检索）";
+        }
+        String q = query.trim();
+        StringBuilder sb = new StringBuilder("[searchglobal] 全局记忆检索结果（query: ").append(q).append("）");
+        int hitCount = 0;
+
+        // 1. 群聊历史（跨群，含所有群消息）
+        java.util.List<String> groupHits = mem.searchGroupChatHistory(q, 5);
+        if (groupHits != null && !groupHits.isEmpty()) {
+            sb.append("\n【群聊记录】");
+            for (String h : groupHits) { sb.append("\n- ").append(h); hitCount++; }
+        }
+
+        // 2. 对话历史（私聊 + 群聊，跨用户）
+        java.util.List<String> convHits = mem.searchConversations(q, 5);
+        if (convHits != null && !convHits.isEmpty()) {
+            sb.append("\n【对话历史】");
+            for (String h : convHits) { sb.append("\n- ").append(h); hitCount++; }
+        }
+
+        // 3. AI 长期记忆
+        java.util.List<String> memHits = mem.searchMemories(q, 3);
+        if (memHits != null && !memHits.isEmpty()) {
+            sb.append("\n【长期记忆】");
+            for (String h : memHits) { sb.append("\n- ").append(h); hitCount++; }
+        }
+
+        if (hitCount == 0) {
+            return "[searchglobal] 未找到与「" + q + "」相关的记录";
+        }
+        return sb.toString();
+    }
+
+    /** 消息 Mark 备注（markmessage 工具）：AI 自用，标记已处理消息，避免重复处理。 */
+    private String executeMarkMessage(String argumentsJson, ToolContext ctx) {
+        String action = arg(argumentsJson, "action");
+        String message = arg(argumentsJson, "message");
+        String mark = arg(argumentsJson, "mark");
+        sair.aiagent.onebot.UnifiedQQMemoryManager mem = ctx != null ? ctx.unifiedMemory : null;
+        if (mem == null) {
+            return "[markmessage] 统一记忆库不可用（仅 QQ 通道支持消息备注）";
+        }
+        String srcType = "private";
+        long srcId = 0;
+        long senderQQ = 0;
+        if (ctx != null && ctx.qqMsg != null) {
+            senderQQ = ctx.qqMsg.getUserId();
+            if (ctx.qqMsg.isGroupMessage()) {
+                srcType = "group";
+                srcId = ctx.qqMsg.getGroupId();
+            } else {
+                srcId = ctx.qqMsg.getUserId();
+            }
+        }
+        if (action == null) action = "";
+        action = action.trim();
+
+        if ("list".equals(action)) {
+            if ("group".equals(srcType)) {
+                java.util.List<String[]> list = mem.getRecentGroupChatHistoryWithMark(srcId, 30);
+                StringBuilder sb = new StringBuilder("[markmessage] 最近带 Mark 备注的消息:\n");
+                int c = 0;
+                for (String[] m : list) {
+                    if (m != null && m.length > 3 && m[3] != null && !m[3].isEmpty()) {
+                        String content = m[2] != null ? m[2] : "";
+                        if (content.length() > 60) content = content.substring(0, 60) + "...";
+                        sb.append("- \"").append(content).append("\" → ").append(m[3]).append("\n");
+                        c++;
+                    }
+                }
+                return c > 0 ? sb.toString() : "[markmessage] 最近没有带 Mark 备注的消息";
+            }
+            return "[markmessage] list 仅群聊场景支持";
+        }
+
+        if ("get".equals(action)) {
+            if (message == null || message.trim().isEmpty()) {
+                return "[markmessage] get 需要 message 参数（要查询的消息内容）";
+            }
+            String existing = "group".equals(srcType)
+                    ? mem.getGroupMessageMark(srcId, senderQQ, message.trim())
+                    : mem.getConversationMark(srcType, srcId, message.trim());
+            return existing != null && !existing.isEmpty()
+                    ? "[markmessage] 该消息已有备注: " + existing
+                    : "[markmessage] 该消息暂无备注（说明尚未处理或无需处理）";
+        }
+
+        if ("set".equals(action)) {
+            if (mark == null || mark.trim().isEmpty()) {
+                return "[markmessage] set 需要 mark 参数（备注内容）";
+            }
+            String target = (message != null && !message.trim().isEmpty())
+                    ? message.trim()
+                    : (ctx != null && ctx.qqMsg != null ? ctx.qqMsg.getPlainText() : null);
+            if (target == null || target.trim().isEmpty()) {
+                return "[markmessage] 无法确定要标记的消息（请提供 message 参数）";
+            }
+            if ("group".equals(srcType)) {
+                mem.setGroupMessageMark(srcId, senderQQ, target, mark.trim());
+            } else {
+                mem.setConversationMark(srcType, srcId, target, mark.trim());
+            }
+            String brief = target.length() > 40 ? target.substring(0, 40) + "..." : target;
+            return "[markmessage] 已标记消息 \"" + brief + "\" → " + mark.trim();
+        }
+
+        return "[markmessage] 用法: action=set（打备注，mark 必填）/ get（查备注，message 必填）/ list（列出最近带备注消息）";
     }
 
     /** 查询技能/工具的完整说明书（skillinfo 工具）。 */

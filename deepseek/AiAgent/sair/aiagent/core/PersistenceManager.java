@@ -1798,15 +1798,42 @@ public class PersistenceManager {
 
     // ==================== Notes (knowledge base) ====================
 
-    /** add note, returns auto-inc id */
+    /** add note (带去重：title 精确匹配时二选一选优，避免重复知识), returns auto-inc id */
     public int addNote(String title, String content, String tags) {
         synchronized (lock) {
+            String normTitle = title != null ? title.trim() : "";
+            String normContent = content != null ? content.trim() : "";
+            // 去重：title 精确匹配，已存在则二选一选优（新内容明显更完整则更新旧笔记，否则保留旧笔记）
+            if (!normTitle.isEmpty()) {
+                try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                        "SELECT id, content FROM notes WHERE title = ? ORDER BY updated_at DESC LIMIT 1")) {
+                    ps.setString(1, normTitle);
+                    try (java.sql.ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            int oldId = rs.getInt(1);
+                            String oldContent = rs.getString(2);
+                            String oldC = oldContent != null ? oldContent.trim() : "";
+                            // 新内容明显更完整（比旧内容长 50% 且至少多 50 字）才更新，否则保留旧笔记
+                            if (normContent.length() > oldC.length() * 3 / 2 && normContent.length() > oldC.length() + 50) {
+                                updateNote(oldId, normTitle, normContent, tags);
+                                AiAgentActivity.debugLog("[Note] 去重选优：更新已有笔记 #" + oldId + "（新内容更完整）");
+                            } else {
+                                AiAgentActivity.debugLog("[Note] 去重跳过：已有笔记 #" + oldId + " 内容相近，保留旧笔记");
+                            }
+                            return oldId;
+                        }
+                    }
+                } catch (java.sql.SQLException e) {
+                    // 去重查询失败则走正常插入
+                }
+            }
+            // 正常插入
             try (java.sql.PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO notes (title, content, tags, created_at, updated_at) VALUES (?,?,?,?,?)")) {
                 long now = System.currentTimeMillis();
-                ps.setString(1, title != null ? title : "");
-                ps.setString(2, content != null ? content : "");
-                ps.setString(3, tags != null ? tags : "");
+                ps.setString(1, normTitle);
+                ps.setString(2, normContent);
+                ps.setString(3, tags != null ? tags.trim() : "");
                 ps.setLong(4, now);
                 ps.setLong(5, now);
                 ps.executeUpdate();

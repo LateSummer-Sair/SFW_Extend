@@ -22,6 +22,12 @@ public class FunctionCallingBridge {
     /** 验证闭环：审查者评估不通过时允许重新生成的最大次数（防死循环）。 */
     public static final int MAX_CRITIC_RETRIES = 2;
 
+    /** 工具调用总次数硬上限：防止 AI 陷入「工具全部成功但一直探索/翻找」的无限循环，永不输出最终回复。 */
+    public static final int MAX_TOTAL_TOOL_CALLS = 60;
+
+    /** 接近硬上限时，注入一次「尽快总结收尾」提示的触发阈值。 */
+    public static final int WARN_TOOL_CALLS = 45;
+
     private final DeepSeekClient client;
 
     /** 审查者子 Agent（可空；非空时对最终回复做验证闭环）。 */
@@ -70,14 +76,38 @@ public class FunctionCallingBridge {
             userContent.append(dynamicContext).append("\n\n");
         }
         userContent.append(task);
-        messages.add(new ChatMessage("user", userContent.toString()));
+
+        // === 多模态图片支持（DeepSeek Vision，替代已移除的在线 OCR）===
+        // QQ 通道消息含图片时，先由 vision 模型纯识别图片得到文字描述，再把描述作为上下文
+        // 交给常规模型 + 工具继续 Function Calling（如 web 搜索实时资料），避免「看图即脑补结论」的割裂。
+        List<String> visionImages = collectVisionImages(ctx);
+        String effectiveModel = (model != null) ? model : "";
+        List<ToolDefinition> effectiveTools = tools;
+        if (!visionImages.isEmpty()) {
+            String imageUnderstanding = recognizeImages(userContent.toString(), visionImages, ctx);
+            StringBuilder combined = new StringBuilder();
+            // 图片归属提醒（引用他人图片时，明确告知 AI 图片的原发送者，避免归因到当前对话者）
+            String ownerHint = buildImageOwnerHint(ctx);
+            if (ownerHint != null && !ownerHint.isEmpty()) {
+                combined.append(ownerHint).append("\n\n");
+            }
+            if (imageUnderstanding != null && !imageUnderstanding.isEmpty()) {
+                combined.append("[图片内容识别结果]\n").append(imageUnderstanding).append("\n\n");
+            }
+            combined.append(userContent.toString());
+            messages.add(new ChatMessage("user", combined.toString()));
+            // 保持常规模型 + 工具，继续走 Function Calling 循环
+        } else {
+            messages.add(new ChatMessage("user", userContent.toString()));
+        }
 
         int consecutiveFailures = 0;   // 连续失败次数（任何成功即归零）
         int criticRetries = 0;         // 审查者阻断后重新生成次数
         int totalToolCalls = 0;        // 工具调用总次数（尝试次数）
         String lastFailure = null;     // 最后一次失败信息
         boolean fallbackHinted = false;          // 是否已注入动态注入兜底提示
-        boolean hasEval = hasTool(tools, "eval");       // 通道是否有 eval（动态注入：Java 编译执行，终极兜底）
+        boolean wrapUpHinted = false;            // 是否已注入「尽快总结收尾」提示
+        boolean hasEval = hasTool(effectiveTools, "eval");       // 通道是否有 eval（动态注入：Java 编译执行，终极兜底）
         long traceStart = System.currentTimeMillis();   // Harness 可观测性：开始时间
         boolean traceSuccess = true;                    // Harness 可观测性：是否成功
         String traceVerdict = "";                       // Harness 可观测性：审查最终判定
@@ -93,7 +123,7 @@ public class FunctionCallingBridge {
                     fallbackHinted = true;
                     messages.add(new ChatMessage("user", buildFallbackPrompt()));
                 }
-                DeepSeekClient.ToolCallResult r = client.chatSyncWithTools(messages, tools, "auto", model);
+                DeepSeekClient.ToolCallResult r = client.chatSyncWithTools(messages, effectiveTools, "auto", effectiveModel);
                 if (!r.hasToolCalls()) {
                     String content = (r.content != null && !r.content.trim().isEmpty())
                             ? r.content : "(AI 未返回文本)";
@@ -103,15 +133,27 @@ public class FunctionCallingBridge {
                         traceVerdict = verdict;
                         if (verdict.startsWith("BLOCK")) {
                             criticRetries++;
-                            messages.add(new ChatMessage("assistant", content));
+                            // 携带 tools 参数的请求后续轮次必须回传 reasoning_content，否则思考模式下 API 返回 400
+                            messages.add(new ChatMessage("assistant", content, r.reasoningContent));
                             messages.add(new ChatMessage("user", buildCriticCorrection(verdict)));
                             continue;
                         }
                     }
                     return content;
                 }
-                messages.add(ChatMessage.createAssistantWithToolCalls(r.content, r.toolCalls));
+                // 携带 tools 参数的请求后续轮次必须完整回传 reasoning_content，否则思考模式下 API 返回 400
+                messages.add(ChatMessage.createAssistantWithToolCalls(r.content, r.reasoningContent, r.toolCalls));
                 totalToolCalls += r.toolCalls.size();
+                // 接近硬上限：注入一次收尾提示，引导 AI 基于已有信息尽快输出最终结果
+                if (!wrapUpHinted && totalToolCalls >= WARN_TOOL_CALLS) {
+                    wrapUpHinted = true;
+                    messages.add(new ChatMessage("user", buildWrapUpPrompt(totalToolCalls)));
+                }
+                // 硬上限：强制终止，返回已执行进度说明，避免永久不回复
+                if (totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
+                    traceSuccess = false;
+                    return buildToolCallLimitMessage(totalToolCalls);
+                }
                 List<String> toolResults = executeToolCalls(r.toolCalls, ctx, dispatcher);
                 for (int ti = 0; ti < r.toolCalls.size(); ti++) {
                     ToolCall tc = r.toolCalls.get(ti);
@@ -158,6 +200,92 @@ public class FunctionCallingBridge {
         } catch (Exception ignored) {
             // 轨迹落库失败不影响业务
         }
+    }
+
+    /**
+     * 收集 QQ 通道消息中的图片 URL，并转换为 Vision API 可用格式（base64 data URI / 可访问 URL）。
+     * <p>合并「当前消息图片」与「引用消息图片」，由 {@code ImageDownloader.resolveImageForVision}
+     * 统一处理腾讯内网图片的 base64 转换与 NapCat get_image 兜底。</p>
+     *
+     * @param ctx 工具执行上下文（可为 null，非 QQ 通道时返回空列表）
+     * @return Vision API 可用图片 URL 列表（可能为空）
+     */
+    private static List<String> collectVisionImages(ToolContext ctx) {
+        List<String> result = new ArrayList<>();
+        if (ctx == null || ctx.qqMsg == null) return result;
+
+        sair.aiagent.onebot.model.QQMessage qq = ctx.qqMsg;
+        List<String> rawUrls = new ArrayList<>();
+        if (qq.hasImage()) {
+            rawUrls.addAll(qq.getImageUrls());
+        }
+        rawUrls.addAll(qq.getQuotedImageUrls());
+
+        sair.aiagent.onebot.NapCatApi napcat = ctx.napcatApi;
+        for (String url : rawUrls) {
+            if (url == null || url.isEmpty()) continue;
+            String resolved = sair.aiagent.onebot.ImageDownloader.resolveImageForVision(url, napcat);
+            if (resolved != null && !resolved.isEmpty()) {
+                result.add(resolved);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 构建图片归属提醒：当引用了他人的图片时，明确告知 AI 图片的原发送者，
+     * 防止 AI 把图片的拍摄者/内容归因到当前对话者（如把「主人」当成图片发送者）。
+     *
+     * @param ctx 工具执行上下文
+     * @return 归属提醒文本，无归属信息时返回 null
+     */
+    private String buildImageOwnerHint(ToolContext ctx) {
+        if (ctx == null || ctx.qqMsg == null) return null;
+        String sender = ctx.qqMsg.getQuotedSenderName();
+        long senderQQ = ctx.qqMsg.getQuotedSenderQQ();
+        long currentUser = ctx.qqMsg.getUserId();
+        if (sender == null || sender.isEmpty() || senderQQ <= 0 || senderQQ == currentUser) {
+            return null;
+        }
+        return "⚠️ 图片归属提醒：本次消息涉及的图片，原发送者是【" + sender + "(QQ:" + senderQQ
+                + ")】，不是当前与你对话的这个人。当前对话者只是引用了这张图片来询问内容，"
+                + "请不要把图片的拍摄者、拍摄地点或内容归因到当前对话者身上。";
+    }
+
+    /**
+     * 用 vision 模型纯识别图片内容，返回客观文字描述（不启用 Function Calling）。
+     * <p>识别失败或结果为空时返回 null，调用方跳过图片理解继续正常流程。</p>
+     *
+     * @param text        原始用户文本（含动态上下文与任务，作为识别背景）
+     * @param visionImages Vision API 可用图片 URL 列表（非空）
+     * @return 图片文字描述，失败时返回 null
+     */
+    private String recognizeImages(String text, List<String> visionImages, ToolContext ctx) {
+        try {
+            String prompt = "请仔细识别这张图片，完整转写图中所有文字内容，并描述图片结构、关键信息"
+                    + "（如邮件标题、发件人、收件人、正文、日期、关键数据等）。"
+                    + "只做客观识别与转写，不要分析、不要下结论。";
+            // 图片归属说明：引用别人的图片时，明确告知 AI 这张图是谁发的
+            if (ctx != null && ctx.qqMsg != null) {
+                String sender = ctx.qqMsg.getQuotedSenderName();
+                long senderQQ = ctx.qqMsg.getQuotedSenderQQ();
+                long currentUser = ctx.qqMsg.getUserId();
+                if (sender != null && !sender.isEmpty() && senderQQ > 0 && senderQQ != currentUser) {
+                    prompt = "注意：这张（些）图片是被引用的消息里的，它是【" + sender + "(QQ:" + senderQQ
+                            + ")】发的，不是当前与你对话的人发的。\n\n" + prompt;
+                }
+            }
+            prompt += "\n\n用户消息背景：\n" + (text != null ? text : "");
+            List<ChatMessage> visionMsgs = new ArrayList<>();
+            visionMsgs.add(ChatMessage.createMultimodal(prompt, visionImages));
+            String result = client.chatSync(visionMsgs, AiConfig.getInstance().getVisionModel());
+            if (result != null && !result.trim().isEmpty()) {
+                return result.trim();
+            }
+        } catch (Exception e) {
+            sair.aiagent.AiAgentActivity.qqLog("[FC] 图片识别失败: " + e.toString());
+        }
+        return null;
     }
 
     /**
@@ -270,6 +398,18 @@ public class FunctionCallingBridge {
         // 「错误/异常」较宽泛，仅当出现在结果开头 30 字符内才判为失败，避免误伤文件内容
         String head = r.length() > 30 ? r.substring(0, 30) : r;
         return head.contains("错误") || head.contains("异常");
+    }
+
+    /** 构造「工具调用达到硬上限」终止时的告知信息。 */
+    private static String buildToolCallLimitMessage(int totalToolCalls) {
+        return "⚠ 本次任务已连续执行 " + totalToolCalls + " 次工具调用，达到安全上限，为避免无限循环已自动停止。\n"
+             + "已获取的部分结果可能尚未整理完成。如需继续，请补充更明确的目标，或拆分为更小的子任务后重试。";
+    }
+
+    /** 构造「接近硬上限」的收尾引导提示。 */
+    private static String buildWrapUpPrompt(int usedToolCalls) {
+        return "⚠ 注意：当前任务已执行 " + usedToolCalls + " 次工具调用，接近安全上限 " + MAX_TOTAL_TOOL_CALLS + "。\n"
+             + "请不要再调用新工具，立即基于已获取的信息总结并输出最终结果。";
     }
 
     /** 构造连续失败终止时的告知信息。 */

@@ -21,8 +21,8 @@
         <div class="crumb"><a href="index.html">Home</a> / 命令参考</div>
         <h1>命令<span class="gradient-text">参考</span></h1>
         <p class="lead">
-          所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 52 个用户命令 + 67 个 FC 工具。
-          v3.3 新增 Harness 多智能体编排（/orchestrate）+ 可观测性评测（/harnesseval）。
+          所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 51 个用户命令 + 68 个 FC 工具。
+          v3.4 新增 Mark 备注防重机制（markmessage）+ Harness 多智能体编排（/orchestrate）+ 可观测性评测（/harnesseval）。
         </p>
       </div>
     </header>
@@ -42,7 +42,6 @@
               <tr><td class="cmd-name">ai/setkey</td><td>[API Key]</td><td><span class="badge b-purple">配置</span></td><td>设置 DeepSeek API 密钥，AES-GCM 加密存储（兼容旧 ECB），持久化到 config.properties</td></tr>
               <tr><td class="cmd-name">ai/seturl</td><td>[URL]</td><td><span class="badge b-purple">配置</span></td><td>设置 API 地址，默认 https://api.deepseek.com</td></tr>
               <tr><td class="cmd-name">ai/setmodel</td><td>[模型名]</td><td><span class="badge b-purple">配置</span></td><td>设置模型，默认 auto。auto 下本地 execs 走 deepseek-v4-pro、QQ execq 走 deepseek-v4-flash（智能路由）</td></tr>
-              <tr><td class="cmd-name">ai/setocrkey</td><td>[OCR Key]</td><td><span class="badge b-purple">配置</span></td><td>设置在线 OCR（EasyOCR）Access Key，启用图片文字识别</td></tr>
               <tr><td class="cmd-name">ai/setthirdpartycode</td><td>on|off</td><td><span class="badge b-purple">配置</span></td><td>三方技能代码段权限：on=放权（含 QQ）；off=仅 execs/本地</td></tr>
               <tr><td class="cmd-name">ai/setprompt</td><td>[提示词]</td><td><span class="badge b-purple">配置</span></td><td>设置系统提示词（持久化），AI 也可通过 editprompt 工具修改</td></tr>
               <tr><td class="cmd-name">ai/showprompt</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看当前系统提示词全文</td></tr>
@@ -96,6 +95,7 @@
               <tr><td class="cmd-name">ai/onebotremovegroup</td><td>[群号1 群号2 ...]</td><td><span class="badge b-green">功能</span></td><td>移除监听的群（空格分隔多个）</td></tr>
               <tr><td class="cmd-name">ai/onebotlistgroups</td><td>—</td><td><span class="badge b-green">功能</span></td><td>列出监听的群及主动查看状态</td></tr>
               <tr><td class="cmd-name">ai/resetaffection</td><td>—</td><td><span class="badge b-green">功能</span></td><td>置空所有人的好感度（清空内存缓存 + 数据库）</td></tr>
+              <tr><td class="cmd-name">ai/resetdonations</td><td>—</td><td><span class="badge b-green">功能</span></td><td>清空全部捐赠记录（数据库层面彻底重置）</td></tr>
             </tbody>
           </table>
         </div>
@@ -132,15 +132,15 @@
         </div>
 
         <div class="card-grid cols-2 reveal">
-          <div class="card"><div class="card-icon ic-cyan">📦</div><h3>本地全量工具（31 个）</h3>
+          <div class="card"><div class="card-icon ic-cyan">📦</div><h3>本地全量工具（32 个）</h3>
             <p style="margin-bottom:6px"><b>系统/文件</b>：<code>cmd</code> <code>readfile</code> <code>readdir</code> <code>sys</code> <code>evaljs</code> <code>eval</code> <code>download</code> <code>batchrename</code> <code>batchconvert</code></p>
             <p style="margin-bottom:6px"><b>网络/信息</b>：<code>web</code> <code>search</code> <code>weather</code> <code>time</code> <code>balance</code></p>
-            <p style="margin-bottom:6px"><b>记忆/知识</b>：<code>remember</code> <code>correct</code> <code>note</code> <code>searchnote</code> <code>schedule</code> <code>alarm</code> <code>skillextract</code> <code>skillinfo</code></p>
+            <p style="margin-bottom:6px"><b>记忆/知识</b>：<code>remember</code> <code>correct</code> <code>note</code> <code>searchnote</code> <code>schedule</code> <code>alarm</code> <code>skillextract</code> <code>skillinfo</code> <code>searchglobal</code></p>
             <p style="margin-bottom:6px"><b>媒体/文件</b>：<code>sendimage</code> <code>sendrecord</code> <code>sendfile</code> <code>setimageremark</code></p>
             <p><b>三方/其他</b>：<code>thirdskill</code> <code>callskill</code> <code>tp_*</code> <code>superise</code> <code>editprompt</code> <code>stop</code></p>
           </div>
-          <div class="card" id="tools-execq"><div class="card-icon ic-magenta">🔒</div><h3>execq 受限工具（55 个）</h3>
-            <p style="margin-bottom:6px"><b>基础/信息（13）</b>：<code>cmd</code>（仅help）<code>eval</code>（仅搜索抓取）<code>web</code> <code>search</code> <code>readdir</code> <code>readfile</code> <code>weather</code> <code>time</code> <code>remember</code> <code>correct</code> <code>note</code> <code>searchnote</code> <code>balance</code></p>
+          <div class="card" id="tools-execq"><div class="card-icon ic-magenta">🔒</div><h3>execq 受限工具（56 个）</h3>
+            <p style="margin-bottom:6px"><b>基础/信息（14）</b>：<code>cmd</code>（仅help）<code>eval</code>（仅搜索抓取）<code>web</code> <code>search</code> <code>readdir</code> <code>readfile</code> <code>weather</code> <code>time</code> <code>remember</code> <code>correct</code> <code>note</code> <code>searchnote</code> <code>balance</code> <code>searchglobal</code></p>
             <p style="margin-bottom:6px"><b>表情包（4）</b>：<code>sendsticker</code> <code>collectsticker</code> <code>clearsticker</code> <code>setimageremark</code></p>
             <p style="margin-bottom:6px"><b>群管（12，仅主人）</b>：<code>ban</code> <code>kick</code> <code>muteall</code> <code>setadmin</code> <code>setcard</code> <code>setgroupname</code> <code>setname</code> <code>setsignature</code> <code>leavegroup</code> <code>block</code> <code>unblock</code> <code>delfriend</code></p>
             <p style="margin-bottom:6px"><b>媒体/互动（9）</b>：<code>poke</code> <code>sendlike</code> <code>sendfileto</code> <code>sendimage</code> <code>sendrecord</code> <code>sendfile</code> <code>relay</code> <code>forwardmsg</code> <code>skillinfo</code></p>
@@ -151,7 +151,7 @@
           </div>
         </div>
 
-        <div class="callout reveal" id="tools-execs"><div class="co-icon">🛡️</div><div><b>execs 全权限工具（67 个）</b> = 本地全量 31 个 + QQ 专属工具去重合并。QQ 主人发送 <code>execs:</code> 前缀消息后，AI 进入全工具 + 全技能模式。</div></div>
+        <div class="callout reveal" id="tools-execs"><div class="co-icon">🛡️</div><div><b>execs 全权限工具（68 个）</b> = 本地全量 32 个 + QQ 专属工具去重合并。QQ 主人发送 <code>execs:</code> 前缀消息后，AI 进入全工具 + 全技能模式。</div></div>
       </section>
 
       <section class="section" id="deploy">
@@ -162,7 +162,7 @@
         </div>
         <div class="card-grid reveal">
           <div class="card"><div class="card-icon ic-cyan">1</div><h3>编译</h3>
-            <p>使用 SFW 内置 JDK (8x64) 编译全部 94 个源文件。classpath 需包含 SFW.jar、gson、zxing、jsoup。</p>
+            <p>使用 SFW 内置 JDK (8x64) 编译全部 91 个源文件。classpath 需包含 SFW.jar、gson、zxing、jsoup。</p>
             <pre style="margin-top:12px"><code>javac -encoding UTF-8 -cp "SFW.jar;gson.jar;zxing-core.jar;zxing-javase.jar;jsoup.jar" -d out sair/aiagent/**/*.java</code></pre>
           </div>
           <div class="card"><div class="card-icon ic-purple">2</div><h3>打包</h3>
@@ -180,7 +180,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.3 · 52 命令 · 67 FC 工具 · 部署三步骤</p>
+        <p><span class="brand">AiAgent</span> v3.4 · 51 命令 · 68 FC 工具 · 部署三步骤</p>
       </div>
     </footer>
   </main>

@@ -208,9 +208,9 @@ public class DeepSeekClient {
 
     // ==================== HTTP通信 ====================
 
-    /** 构建完整API URL */
+    /** 构建完整API URL（strict 模式下自动切 /beta） */
     private String buildApiUrl() {
-        String url = config.getApiUrl();
+        String url = config.getEffectiveApiUrl();
         if (!url.endsWith("/")) url += "/";
         return url + "v1/chat/completions";
     }
@@ -367,37 +367,46 @@ public class DeepSeekClient {
         if (maxTok <= 0) maxTok = DEFAULT_MAX_TOKENS;
         root.addProperty("max_tokens", maxTok);
 
-        // --- reasoning_effort (thinking mode) ---
+        // --- thinking mode (思考模式开关) ---
+        // DeepSeek thinking 默认 enabled、effort 默认 high。为让「空/none=关闭思考模式」语义成立，
+        // 显式下发 thinking 开关。思考模式下 temperature/top_p/frequency_penalty/presence_penalty
+        // 不生效（下发也会被忽略），故仅在关闭思考时下发这些采样参数，避免误导。
         String re = cfg.getReasoningEffort();
-        if (re != null && !re.isEmpty() && !"none".equalsIgnoreCase(re)) {
+        boolean thinkingEnabled = (re != null && !re.isEmpty() && !"none".equalsIgnoreCase(re));
+        JsonObject thinking = new JsonObject();
+        thinking.addProperty("type", thinkingEnabled ? "enabled" : "disabled");
+        root.add("thinking", thinking);
+        if (thinkingEnabled) {
             root.addProperty("reasoning_effort", re);
         }
 
-        // --- temperature ---
-        double temp = cfg.getTemperature();
-        if (temp < 0 && hasMultimodalContent(messages)) {
-            temp = 0.1; // Vision API recommended temp
-        }
-        if (temp >= 0 && temp <= 2.0) {
-            root.addProperty("temperature", temp);
-        }
+        if (!thinkingEnabled) {
+            // --- temperature ---
+            double temp = cfg.getTemperature();
+            if (temp < 0 && hasMultimodalContent(messages)) {
+                temp = 0.1; // Vision API recommended temp
+            }
+            if (temp >= 0 && temp <= 2.0) {
+                root.addProperty("temperature", temp);
+            }
 
-        // --- top_p ---
-        double tp = cfg.getTopP();
-        if (tp > 0 && tp <= 1.0) {
-            root.addProperty("top_p", tp);
-        }
+            // --- top_p ---
+            double tp = cfg.getTopP();
+            if (tp > 0 && tp <= 1.0) {
+                root.addProperty("top_p", tp);
+            }
 
-        // --- frequency_penalty ---
-        double fp = cfg.getFrequencyPenalty();
-        if (fp >= -2.0 && fp <= 2.0) {
-            root.addProperty("frequency_penalty", fp);
-        }
+            // --- frequency_penalty ---
+            double fp = cfg.getFrequencyPenalty();
+            if (fp >= -2.0 && fp <= 2.0) {
+                root.addProperty("frequency_penalty", fp);
+            }
 
-        // --- presence_penalty ---
-        double pp = cfg.getPresencePenalty();
-        if (pp >= -2.0 && pp <= 2.0) {
-            root.addProperty("presence_penalty", pp);
+            // --- presence_penalty ---
+            double pp = cfg.getPresencePenalty();
+            if (pp >= -2.0 && pp <= 2.0) {
+                root.addProperty("presence_penalty", pp);
+            }
         }
 
         // --- stop sequences ---

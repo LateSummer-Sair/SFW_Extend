@@ -82,7 +82,7 @@
 
     const logo = document.createElement("div");
     logo.className = "sidebar-logo";
-    logo.innerHTML = '<div class="icon">⚡</div><span class="logo-text">AiAgent<span class="ver">v3.1</span></span>';
+    logo.innerHTML = '<div class="icon">⚡</div><span class="logo-text">AiAgent<span class="ver">v3.4</span></span>';
     sidebar.appendChild(logo);
 
     const nav = document.createElement("nav");

@@ -35,12 +35,12 @@
           <h2>设计模式清单</h2>
         </div>
         <div class="card-grid cols-2 reveal">
-          <div class="card"><div class="card-icon ic-cyan">1️⃣</div><h3>单例模式 Singleton</h3><p>AiConfig / PromptManager / SkillBank / StreamPrinter / OcrManager / RedisClient / FileServer 全局唯一实例。</p></div>
-          <div class="card"><div class="card-icon ic-purple">2️⃣</div><h3>门面模式 Facade</h3><p>PersistenceManager 统一管理 8+ 张表，OcrManager 门面封装 OcrEngine，MemoryManager 封装记忆 CRUD。</p></div>
+          <div class="card"><div class="card-icon ic-cyan">1️⃣</div><h3>单例模式 Singleton</h3><p>AiConfig / PromptManager / SkillBank / StreamPrinter / RedisClient / FileServer 全局唯一实例。</p></div>
+          <div class="card"><div class="card-icon ic-purple">2️⃣</div><h3>门面模式 Facade</h3><p>PersistenceManager 统一管理 8+ 张表，MemoryManager 封装记忆 CRUD。</p></div>
           <div class="card"><div class="card-icon ic-magenta">3️⃣</div><h3>策略模式 Strategy</h3><p>DeepSeekClient chatStream/chatSync/chatSyncWithTools 三种策略 + model=auto 智能路由（pro/flash）。</p></div>
           <div class="card"><div class="card-icon ic-amber">4️⃣</div><h3>观察者模式 Observer</h3><p>WatchService 文件监听：ThirdPartySkillStore / AgentSkillStore 监听技能目录变化自动重载。</p></div>
           <div class="card"><div class="card-icon ic-green">5️⃣</div><h3>工厂模式 Factory</h3><p>ToolDispatcher buildAllTools/buildExecqTools/buildExecsTools 三套工具工厂 + tp_ 动态工具注册。</p></div>
-          <div class="card"><div class="card-icon ic-blue">6️⃣</div><h3>命令模式 Command</h3><p>ActivityActions.route() 路由 52 个命令到 handle* 方法，命令与执行解耦。</p></div>
+          <div class="card"><div class="card-icon ic-blue">6️⃣</div><h3>命令模式 Command</h3><p>ActivityActions.route() 路由 51 个命令到 handle* 方法，命令与执行解耦。</p></div>
           <div class="card"><div class="card-icon ic-cyan">7️⃣</div><h3>模板方法模式 Template Method</h3><p>AgentExecutor executeFcLocal/executeFcExecq/executeFcExecs 共享 buildSystemPrompt + FC 循环模板。</p></div>
           <div class="card"><div class="card-icon ic-purple">8️⃣</div><h3>桥接模式 Bridge</h3><p>QQAgentBridge / FunctionCallingBridge 桥接 QQ 通道与 Agent 引擎。</p></div>
           <div class="card"><div class="card-icon ic-magenta">9️⃣</div><h3>门控模式 Gate</h3><p>ConfirmationGate CountDownLatch 同步阻塞 + 60s 超时 + 引用计数 bypass。</p></div>
@@ -132,7 +132,7 @@
           <div class="flow">
             <div class="flow-node start"><span class="fn-title">命令输入</span><span class="fn-sub">funcName + args</span></div>
             <div class="flow-edge"></div>
-            <div class="flow-node core"><span class="fn-title">ActivityActions.route()</span><span class="fn-sub">switch 路由 52 个命令</span></div>
+            <div class="flow-node core"><span class="fn-title">ActivityActions.route()</span><span class="fn-sub">switch 路由 51 个命令</span></div>
             <div class="flow-edge"></div>
             <div class="flow-node data"><span class="fn-title">handleExecs</span><span class="fn-sub">统一 FC 入口</span></div>
             <div class="flow-edge"></div>
@@ -148,7 +148,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.3 · 16 种设计模式 · 策略降级 · 情绪状态机 · 多智能体编排 · 线程池</p>
+        <p><span class="brand">AiAgent</span> v3.4 · 16 种设计模式 · 策略降级 · 情绪状态机 · 多智能体编排 · 线程池</p>
       </div>
     </footer>
   </main>

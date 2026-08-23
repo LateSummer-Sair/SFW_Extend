@@ -71,6 +71,34 @@ public class NapCatApi {
         params.put("message", message);
         return server.sendApiCall("send_msg", params);
     }
+
+    /**
+     * 获取语音转文字结果（fetch_ptt_text）。
+     * <p>由程序自动调用（非 AI 触发），将收到的语音消息转为文本后注入上下文，避免消耗 AI token。</p>
+     *
+     * @param messageId 语音消息ID
+     * @return 转文字文本；失败或为空返回 null
+     */
+    public String fetchPttText(long messageId) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("message_id", messageId);
+        String resp = server.sendApiCall("fetch_ptt_text", params);
+        if (resp == null || resp.isEmpty()) return null;
+        try {
+            JsonObject obj = JsonParser.parseString(resp).getAsJsonObject();
+            if (obj.has("data") && !obj.get("data").isJsonNull()) {
+                JsonObject data = obj.getAsJsonObject("data");
+                if (data.has("text") && !data.get("text").isJsonNull()) {
+                    String text = data.get("text").getAsString();
+                    return (text != null && !text.trim().isEmpty()) ? text.trim() : null;
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            AiAgentActivity.qqLog("[NapCat] fetch_ptt_text 解析失败: " + e.toString());
+            return null;
+        }
+    }
     
     // ==================== 群管理API ====================
     
@@ -1451,17 +1479,6 @@ public class NapCatApi {
         Map<String, Object> params = new HashMap<>();
         params.put("user_id", userId);
         return server.sendApiCall("nc_get_user_status", params);
-    }
-
-    /**
-     * 获取语音转文字结果。
-     * @param messageId 消息ID
-     * @return API响应JSON
-     */
-    public String fetchPttText(long messageId) {
-        Map<String, Object> params = new HashMap<>();
-        params.put("message_id", messageId);
-        return server.sendApiCall("fetch_ptt_text", params);
     }
 
     /**

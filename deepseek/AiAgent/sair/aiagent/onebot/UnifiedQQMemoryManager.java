@@ -86,7 +86,8 @@ public class UnifiedQQMemoryManager {
                     "  source_id INTEGER NOT NULL," +  // 群号或QQ号
                     "  sender_id INTEGER," +  // 发送者QQ号（群聊时有意义）
                     "  sender_name TEXT," +  // 发送者昵称
-                    "  created_at INTEGER NOT NULL" +
+                    "  created_at INTEGER NOT NULL," +
+                    "  mark TEXT" +  // AI 自用 Mark 备注（标记已处理/处理结果）
                     ")"
                 );
                 
@@ -140,7 +141,8 @@ public class UnifiedQQMemoryManager {
                     "  nickname TEXT," +
                     "  content TEXT NOT NULL," +
                     "  group_id INTEGER NOT NULL," +
-                    "  created_at INTEGER NOT NULL" +
+                    "  created_at INTEGER NOT NULL," +
+                    "  mark TEXT" +  // AI 自用 Mark 备注（标记已处理/处理结果）
                     ")"
                 );
                 
@@ -197,7 +199,20 @@ public class UnifiedQQMemoryManager {
                     "  updated_at INTEGER NOT NULL" +
                     ")"
                 );
+
+                // 幂等迁移：老库补 mark 列（列已存在时 ALTER TABLE 会报错，静默忽略）
+                ensureColumn("conversations", "mark TEXT");
+                ensureColumn("group_chat_history", "mark TEXT");
             }
+        }
+    }
+
+    /** 幂等加列：列已存在时 ALTER TABLE 报错，静默忽略。 */
+    private void ensureColumn(String table, String columnDef) {
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute("ALTER TABLE " + table + " ADD COLUMN " + columnDef);
+        } catch (SQLException ignored) {
+            // 列已存在
         }
     }
 
@@ -300,7 +315,7 @@ public class UnifiedQQMemoryManager {
                     sql += " AND source_id = ?";
                     params.add(sourceId);
                 }
-                sql += " ORDER BY created_at ASC LIMIT ?";
+                sql += " ORDER BY created_at DESC LIMIT ?";
                 params.add(limit);
                 
                 try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -344,6 +359,47 @@ public class UnifiedQQMemoryManager {
     /** 获取与特定用户的私聊历史 */
     public List<String[]> getPrivateConversations(long userId, int limit) {
         return getRecentConversations(limit, "private", userId);
+    }
+
+    /** 给对话历史中该来源最近一条相同内容的 user 消息打 Mark 备注（AI 自用，标记已处理）。 */
+    public void setConversationMark(String sourceType, long sourceId, String content, String mark) {
+        if (content == null || content.trim().isEmpty() || mark == null || mark.trim().isEmpty()) return;
+        synchronized (lock) {
+            long targetId = -1;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id FROM conversations WHERE role = 'user' AND source_type = ? AND source_id = ? AND content = ? ORDER BY created_at DESC LIMIT 1")) {
+                ps.setString(1, sourceType);
+                ps.setLong(2, sourceId);
+                ps.setString(3, content.trim());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) targetId = rs.getLong(1);
+                }
+            } catch (SQLException ignored) {}
+            if (targetId <= 0) return;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE conversations SET mark = ? WHERE id = ?")) {
+                ps.setString(1, mark.trim());
+                ps.setLong(2, targetId);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    /** 查询对话历史中该来源最近一条相同内容 user 消息的 Mark 备注（无则返回 null）。 */
+    public String getConversationMark(String sourceType, long sourceId, String content) {
+        if (content == null || content.trim().isEmpty()) return null;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT mark FROM conversations WHERE role = 'user' AND source_type = ? AND source_id = ? AND content = ? AND mark IS NOT NULL ORDER BY created_at DESC LIMIT 1")) {
+                ps.setString(1, sourceType);
+                ps.setLong(2, sourceId);
+                ps.setString(3, content.trim());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return rs.getString(1);
+                }
+            } catch (SQLException ignored) {}
+        }
+        return null;
     }
 
     // ==================== AI独立记忆 ====================
@@ -463,6 +519,38 @@ public class UnifiedQQMemoryManager {
                     } catch (SQLException ignored) {}
                 }
             }
+            list.addAll(matched);
+        }
+        return list;
+    }
+
+    /** 按关键词检索 conversations 表（跨用户/群/私聊对话历史），返回 "[群X]/[私聊X] 昵称: 内容" 格式化结果 */
+    public List<String> searchConversations(String query, int maxResults) {
+        List<String> list = new ArrayList<>();
+        if (query == null || query.trim().isEmpty()) return list;
+        String q = query.trim();
+        synchronized (lock) {
+            LinkedHashSet<String> matched = new LinkedHashSet<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT role, content, source_type, source_id, sender_name FROM conversations " +
+                    "WHERE content LIKE ? ORDER BY created_at DESC LIMIT ?")) {
+                ps.setString(1, "%" + q + "%");
+                ps.setInt(2, maxResults);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String role = rs.getString(1);
+                        String content = rs.getString(2);
+                        String sourceType = rs.getString(3);
+                        long sourceId = rs.getLong(4);
+                        String senderName = rs.getString(5);
+                        if (content == null) content = "";
+                        if (content.length() > 160) content = content.substring(0, 160) + "...";
+                        String label = "group".equals(sourceType) ? "[群" + sourceId + "]" : "[私聊" + sourceId + "]";
+                        String who = "assistant".equals(role) ? "Bot" : (senderName != null && !senderName.isEmpty() ? senderName : "用户");
+                        matched.add(label + " " + who + ": " + content);
+                    }
+                }
+            } catch (SQLException ignored) {}
             list.addAll(matched);
         }
         return list;
@@ -588,6 +676,93 @@ public class UnifiedQQMemoryManager {
                     // 反转为时间升序
                     for (int i = tempList.size() - 1; i >= 0; i--) {
                         list.add(tempList.get(i));
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+
+    /** 获取特定群的最近N条消息（含 Mark 备注，返回 [user_id, nickname, content, mark]，mark 可能为 null），时间升序。 */
+    public List<String[]> getRecentGroupChatHistoryWithMark(long groupId, int limit) {
+        List<String[]> list = new ArrayList<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT user_id, nickname, content, mark FROM group_chat_history WHERE group_id = ? ORDER BY created_at DESC LIMIT ?")) {
+                ps.setLong(1, groupId);
+                ps.setInt(2, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    List<String[]> tempList = new ArrayList<>();
+                    while (rs.next()) {
+                        tempList.add(new String[] {
+                            String.valueOf(rs.getLong(1)),
+                            rs.getString(2),
+                            rs.getString(3),
+                            rs.getString(4)
+                        });
+                    }
+                    for (int i = tempList.size() - 1; i >= 0; i--) {
+                        list.add(tempList.get(i));
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+    
+    /** 给群聊历史中「该群该用户最近一条相同内容」的消息打 Mark 备注（AI 自用，标记已处理）。 */
+    public void setGroupMessageMark(long groupId, long userId, String content, String mark) {
+        if (content == null || content.trim().isEmpty() || mark == null || mark.trim().isEmpty()) return;
+        synchronized (lock) {
+            long targetId = -1;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id FROM group_chat_history WHERE group_id = ? AND user_id = ? AND content = ? ORDER BY created_at DESC LIMIT 1")) {
+                ps.setLong(1, groupId);
+                ps.setLong(2, userId);
+                ps.setString(3, content.trim());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) targetId = rs.getLong(1);
+                }
+            } catch (SQLException ignored) {}
+            if (targetId <= 0) return;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE group_chat_history SET mark = ? WHERE id = ?")) {
+                ps.setString(1, mark.trim());
+                ps.setLong(2, targetId);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+    
+    /** 查询群聊历史中该用户最近一条相同内容消息的 Mark 备注（无则返回 null）。 */
+    public String getGroupMessageMark(long groupId, long userId, String content) {
+        if (content == null || content.trim().isEmpty()) return null;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT mark FROM group_chat_history WHERE group_id = ? AND user_id = ? AND content = ? AND mark IS NOT NULL ORDER BY created_at DESC LIMIT 1")) {
+                ps.setLong(1, groupId);
+                ps.setLong(2, userId);
+                ps.setString(3, content.trim());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return rs.getString(1);
+                }
+            } catch (SQLException ignored) {}
+        }
+        return null;
+    }
+    
+    /** 获取全局最近的群聊历史（跨群，按时间倒序，排除指定群），用于跨群续聊上下文 */
+    public List<String> getRecentGroupChatHistoryGlobal(int limit, long excludeGroupId) {
+        List<String> list = new ArrayList<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT nickname, group_id, content FROM group_chat_history " +
+                    "WHERE group_id != ? ORDER BY created_at DESC LIMIT ?")) {
+                ps.setLong(1, excludeGroupId);
+                ps.setInt(2, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        list.add(formatHistoryHit(rs));
                     }
                 }
             } catch (SQLException ignored) {}

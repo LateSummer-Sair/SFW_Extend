@@ -525,7 +525,8 @@ public class OneBotServer {
                         String pokeReply = getPokeReply(userId, groupId, messageHandler);
                         if (pokeReply != null && !pokeReply.isEmpty()) {
                             if (groupId > 0) {
-                                OneBotServer.this.sendGroupMsg(groupId, pokeReply);
+                                // 群聊中明确@戳自己的那个人
+                                OneBotServer.this.sendGroupMsg(groupId, "[CQ:at,qq=" + userId + "] " + pokeReply);
                             } else {
                                 OneBotServer.this.sendPrivateMsg(userId, pokeReply);
                             }
@@ -547,28 +548,65 @@ public class OneBotServer {
             if (em.isInRomance() && em.getRomancePartnerId() == userId) return "啊~你又戳我！\uD83D\uDC95";
         }
 
-        // Build recent conversation context
+        // 最近对话上下文
         sair.aiagent.onebot.UnifiedQQMemoryManager mem = handler.getUnifiedMemory();
         String context = buildPokeContext(userId, groupId, mem, handler);
-
-        // Check if bot's name appears in context
         String selfName = handler.getSelfName();
-        boolean nameInContext = selfName != null && !selfName.isEmpty()
-                && context != null && context.contains(selfName);
 
-        if (nameInContext) {
-            // Name found: ask AI to naturally continue the conversation
-            String aiReply = aiGeneratePokeReply(context, selfName, handler);
+        // 优先：有该用户最近的非空消息 → AI 结合上下文自然回应（不要只回「空消息」）
+        String recentUserMsg = findUserRecentMessage(userId, groupId, mem);
+        if (recentUserMsg != null && !recentUserMsg.isEmpty()) {
+            String aiReply = aiGeneratePokeReply(selfName, context, recentUserMsg, handler);
             if (aiReply != null && !aiReply.isEmpty()) return aiReply;
         }
 
-        // No name in context or AI failed: varied confusion responses
+        // 其次：名字出现在上下文中 → AI 自然续聊
+        boolean nameInContext = selfName != null && !selfName.isEmpty()
+                && context != null && context.contains(selfName);
+        if (nameInContext) {
+            String aiReply = aiGeneratePokeReply(selfName, context, null, handler);
+            if (aiReply != null && !aiReply.isEmpty()) return aiReply;
+        }
+
+        // 兜底：随机困惑/温暖回复
         String[] confused = {"何意味？", "啊？", "嘟嘟？", "啊呀？", "唉？"};
         if (affection >= 500) {
             String[] warm = {"哎呀，别戳了啦~", "咔，戳我干嘛～", "戳戳怪哦！"};
             return warm[new java.util.Random().nextInt(warm.length)];
         }
         return confused[new java.util.Random().nextInt(confused.length)];
+    }
+
+    /** 查找该用户最近一条非空消息（群聊查群历史，私聊查会话记录），找不到返回 null。 */
+    private String findUserRecentMessage(long userId, long groupId,
+            sair.aiagent.onebot.UnifiedQQMemoryManager mem) {
+        if (mem == null) return null;
+        try {
+            if (groupId > 0) {
+                java.util.List<String[]> history = mem.getRecentGroupChatHistory(groupId, 30);
+                if (history != null) {
+                    String uid = String.valueOf(userId);
+                    for (int i = history.size() - 1; i >= 0; i--) {
+                        String[] m = history.get(i);
+                        if (m != null && m.length > 2 && uid.equals(m[0])) {
+                            String c = m[2];
+                            if (c != null && !c.trim().isEmpty()) return c.trim();
+                        }
+                    }
+                }
+            } else {
+                java.util.List<String[]> conv = mem.getPrivateConversations(userId, 30);
+                if (conv != null) {
+                    for (String[] m : conv) {
+                        if (m != null && m.length > 1 && "user".equals(m[0])) {
+                            String c = m[1];
+                            if (c != null && !c.trim().isEmpty()) return c.trim();
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
     /** Build recent conversation context from unified memory */
@@ -595,22 +633,26 @@ public class OneBotServer {
     }
 
     /** Use AI to generate a context-aware poke reply */
-    private String aiGeneratePokeReply(String context, String selfName,
+    private String aiGeneratePokeReply(String selfName, String context, String recentUserMsg,
             sair.aiagent.onebot.QQMessageHandler handler) {
         try {
             sair.aiagent.core.DeepSeekClient client = handler.getDeepSeekClient();
             if (client == null) return null;
             String prompt = "Someone just poked you in a chat. Reply naturally.\n\n"
                     + "Your name is: " + selfName + "\n"
-                    + "Recent chat context:\n" + context + "\n\n"
-                    + "Rules:\n"
-                    + "- If your name appears in context, continue the conversation naturally\n"
-                    + "- Express mild confusion but be friendly\n"
-                    + "- Keep reply VERY short (under 20 chars if possible)\n"
+                    + "Recent chat context:\n" + context + "\n";
+            if (recentUserMsg != null && !recentUserMsg.isEmpty()) {
+                prompt += "\nThe person who poked you recently said: \"" + recentUserMsg + "\"\n"
+                        + "Respond to what they said instead of just acting confused.\n";
+            }
+            prompt += "\nRules:\n"
+                    + "- If there is a recent message from this person, respond to it naturally\n"
+                    + "- Do NOT say things like \"empty message\" or \"no content\"\n"
+                    + "- Keep reply short and friendly (under 30 chars if possible)\n"
                     + "- Output ONLY the reply text, nothing else";
             java.util.List<sair.aiagent.model.ChatMessage> msgs = new java.util.ArrayList<>();
             msgs.add(new sair.aiagent.model.ChatMessage("user", prompt));
-            String reply = client.chatSync(msgs, "deepseek-v4-flash");
+            String reply = client.chatSync(msgs, sair.aiagent.core.AiConfig.getInstance().getExecqModel());
             if (reply != null) {
                 reply = reply.trim().replaceAll("^[\"']+|[\"']+$", "");
                 if (reply.length() > 80) reply = reply.substring(0, 80);

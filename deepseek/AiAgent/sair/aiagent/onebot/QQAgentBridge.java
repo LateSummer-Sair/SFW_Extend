@@ -17,8 +17,8 @@ class QQAgentBridge {
     /** execq 随机配表情包的概率（0.0~1.0），命中时才从库存随机挑一个追加 */
     private static final double STICKER_RANDOM_PROBABILITY = 0.4;
 
-    /** 单条 QQ 消息最大长度（超过则切割后逐条发送，条数不设上限）。 */
-    private static final int MAX_MSG_LEN = 100;
+    /** 单条 QQ 消息最大长度（极端兜底上限，正常由 AI 用 <split> 语义分段，程序仅在超长时兜底切割）。 */
+    private static final int MAX_MSG_LEN = 1000;
 
     private final AgentExecutor agentExecutor;
     private final UnifiedQQMemoryManager unifiedMemory;
@@ -165,18 +165,77 @@ class QQAgentBridge {
         sb.append(msg.isGroupMessage() ? " 群聊: " : " 私聊: ");
         sb.append(msg.getPlainText());
         if (msg.hasImage() && !msg.getImageUrls().isEmpty()) {
+            // 图片已通过多模态（DeepSeek Vision）直接传给 AI，此处仅提示数量，不再注入内网 URL 文本
             sb.append("\n📷 此消息包含 ").append(msg.getImageUrls().size()).append(" 张图片");
-            for (int i = 0; i < msg.getImageUrls().size(); i++) {
-                sb.append("\n  图片URL: ").append(msg.getImageUrls().get(i));
-            }
         }
         if (msg.hasForward() && msg.getForwardContent() != null && !msg.getForwardContent().isEmpty()) {
             sb.append("\n" + "📨" + " 转发/折叠消息内容:\n").append(msg.getForwardContent());
         }
         if (msg.getQuotedMessageContent() != null && !msg.getQuotedMessageContent().isEmpty()) {
-            sb.append("\n💬 被引用的消息: ").append(msg.getQuotedMessageContent());
+            String quotedSenderLabel = (msg.getQuotedSenderName() != null && !msg.getQuotedSenderName().isEmpty())
+                    ? msg.getQuotedSenderName() + "(QQ:" + msg.getQuotedSenderQQ() + ")"
+                    : "对方";
+            sb.append("\n💬 被引用的消息（由 ").append(quotedSenderLabel).append(" 发出）: ").append(msg.getQuotedMessageContent());
         }
         return sb.toString();
+    }
+
+    /** 纯@（无附带文字）时的任务描述：结合上下文自然回应，不回复「空消息」。 */
+    private String buildBareMentionTask(QQMessage msg) {
+        String name = msg.getDisplayName();
+        String[] recent = findRecentUserMessageWithMark(msg);
+        if (recent != null && recent[0] != null && !recent[0].isEmpty()) {
+            String content = recent[0];
+            String mark = recent[1];
+            if (mark != null && !mark.isEmpty()) {
+                return name + " 单独 @ 了你（没有附带文字）。\n"
+                        + "他/她最近说的是：\"" + content + "\"\n"
+                        + "这条消息你【之前已经处理过了】，处理结果是：\"" + mark + "\"\n"
+                        + "请基于「已处理」这个事实自然地回应他/她（例如告诉他刚才已经帮他办过了），【绝对不要重复执行原消息里的任务】。";
+            }
+            return name + " 单独 @ 了你（没有附带文字）。\n"
+                    + "请结合他/她最近说的话自然地回应，不要提「空消息」「没内容」之类的话。\n"
+                    + "他/她最近说的是：\"" + content + "\"";
+        }
+        return name + " 单独 @ 了你（没有附带文字）。\n"
+                + "请自然地回应他/她（例如打招呼、询问有什么事），不要提「空消息」。";
+    }
+
+    /** 查找该用户最近一条非空消息及其 Mark 备注（返回 [内容, 备注]，备注可能为 null），找不到返回 null。 */
+    private String[] findRecentUserMessageWithMark(QQMessage msg) {
+        if (unifiedMemory == null) return null;
+        try {
+            if (msg.isGroupMessage()) {
+                java.util.List<String[]> history = unifiedMemory.getRecentGroupChatHistoryWithMark(msg.getGroupId(), 30);
+                if (history != null) {
+                    String uid = String.valueOf(msg.getUserId());
+                    for (int i = history.size() - 1; i >= 0; i--) {
+                        String[] m = history.get(i);
+                        if (m != null && m.length > 2 && uid.equals(m[0])) {
+                            String content = m[2];
+                            if (content != null && !content.trim().isEmpty()) {
+                                String mark = (m.length > 3) ? m[3] : null;
+                                return new String[]{ content.trim(), mark };
+                            }
+                        }
+                    }
+                }
+            } else {
+                java.util.List<String[]> conv = unifiedMemory.getPrivateConversations(msg.getUserId(), 30);
+                if (conv != null) {
+                    for (String[] m : conv) {
+                        if (m != null && m.length > 1 && "user".equals(m[0])) {
+                            String content = m[1];
+                            if (content != null && !content.trim().isEmpty()) {
+                                String mark = unifiedMemory.getConversationMark("private", msg.getUserId(), content.trim());
+                                return new String[]{ content.trim(), mark };
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
     // ==================== 消息分割 ====================
@@ -189,31 +248,71 @@ class QQAgentBridge {
             messages.add(t);
             return messages;
         }
+        // 1. 先切分成「语义单元」：``` 代码块作为不可分割的原子单元，其余按空行段落切分
+        List<String> units = splitSemanticUnits(t);
+        // 2. 按 MAX_MSG_LEN 合并语义单元，尽量不在单元内部切割
         StringBuilder current = new StringBuilder();
-        for (String para : t.split("\\n\\n")) {
-            String p = para.trim();
-            if (p.isEmpty()) continue;
-            if (p.length() > MAX_MSG_LEN) {
-                // 段落超长：先 flush 当前缓冲，再把段落切成多条
+        for (String unit : units) {
+            if (unit.length() > MAX_MSG_LEN) {
+                // 单元本身超长（如超长代码块/段落）：先 flush 当前缓冲，再单独切分
                 if (current.length() > 0) {
                     messages.add(current.toString().trim());
                     current.setLength(0);
                 }
-                for (String piece : splitLongParagraph(p)) {
+                for (String piece : splitLongParagraph(unit)) {
                     messages.add(piece);
                 }
                 continue;
             }
-            int mergedLen = current.length() + (current.length() > 0 ? 2 : 0) + p.length();
+            int mergedLen = current.length() + (current.length() > 0 ? 2 : 0) + unit.length();
             if (mergedLen > MAX_MSG_LEN && current.length() > 0) {
                 messages.add(current.toString().trim());
                 current.setLength(0);
             }
             if (current.length() > 0) current.append("\n\n");
-            current.append(p);
+            current.append(unit);
         }
         if (current.length() > 0) messages.add(current.toString().trim());
         return messages;
+    }
+
+    /** 将文本切分为语义单元：优先保护 ``` 代码块（含围栏整体），代码块之外按空行段落切分。 */
+    private List<String> splitSemanticUnits(String t) {
+        List<String> units = new ArrayList<>();
+        StringBuilder plain = new StringBuilder();
+        int i = 0;
+        int n = t.length();
+        while (i < n) {
+            int fence = t.indexOf("```", i);
+            if (fence < 0) {
+                plain.append(t.substring(i));
+                break;
+            }
+            int close = t.indexOf("```", fence + 3);
+            if (close < 0) {
+                plain.append(t.substring(i));
+                break;
+            }
+            // 代码块前的内容先按空行段落切分
+            plain.append(t.substring(i, fence));
+            appendParagraphs(units, plain.toString());
+            plain.setLength(0);
+            // 代码块整体作为独立原子单元（含三反引号围栏）
+            String block = t.substring(fence, close + 3).trim();
+            if (!block.isEmpty()) units.add(block);
+            i = close + 3;
+        }
+        if (plain.length() > 0) {
+            appendParagraphs(units, plain.toString());
+        }
+        return units;
+    }
+
+    private void appendParagraphs(List<String> units, String text) {
+        for (String para : text.split("\\n\\n")) {
+            String p = para.trim();
+            if (!p.isEmpty()) units.add(p);
+        }
     }
 
     /** 把超长段落切成 ≤MAX_MSG_LEN 的片段，优先在换行/句末标点处切。 */
@@ -266,38 +365,25 @@ class QQAgentBridge {
         }
 
         try {
+            // 语音消息：若异步转文字尚未完成，直接告知用户，无需等待（异步转文字完成后会自动注入聊天记录）
+            if (msg.hasRecord() && (msg.getVoiceText() == null || msg.getVoiceText().isEmpty())) {
+                sendReply(msg, "收到语音消息，但语音转文字尚未完成，请稍后重试。转文字完成后会自动记录。");
+                return;
+            }
             String task = buildTaskDescription(msg);
 
-            // 本地图片识别（二维码 + OCR）：为节省在线 OCR 成本，仅对「引用消息图片」做识别（OCR 回归引用才使用）。
-            // 直接发送的图片不再自动识别，AI 可根据任务描述中的图片 URL 引导用户「引用该图片」后识别。
-            java.util.List<String> allImages = new java.util.ArrayList<>();
-            allImages.addAll(msg.getQuotedImageUrls());
-            boolean hasAnyImage = !msg.getQuotedImageUrls().isEmpty();
-            if (hasAnyImage) {
-                StringBuilder recog = new StringBuilder();
-                recog.append("\n\n【图片本地识别备注】\n以下为每张图片的二维码与文字识别结果（先识别二维码，再识别文字），请以此备注为理解图片的唯一依据，直接根据备注内容回答；备注中标记「无」表示该项未识别到：");
-                int idx = 0;
-                for (String imgUrl : allImages) {
-                    idx++;
-                    try {
-                        byte[] imgBytes = ImageDownloader.downloadImage(imgUrl);
-                        String remark = ImageRecognizer.buildRemark(imgBytes);
-                        recog.append("\n图片").append(idx).append(": ").append(remark);
-                        // 附带 MD5，供 AI 用 setimageremark 工具精确修改该图注释（与图片强绑定）
-                        if (imgBytes != null && imgBytes.length > 0) {
-                            recog.append(" 【MD5:").append(ImageRecognizer.md5(imgBytes)).append("】");
-                        }
-                    } catch (Exception e) {
-                        recog.append("\n图片").append(idx).append(": 二维码: 无 | OCR文字: 无（识别失败）");
-                        AiAgentActivity.qqLog("[QQMsg] 图片识别失败: " + e.toString());
-                    }
-                }
-                task = task + recog.toString();
+            // 纯@（无附带文字）：分析上下文，不要回复「空消息」
+            boolean bareMention = msg.isAtBot() && (plainText == null || plainText.trim().isEmpty());
+            if (bareMention) {
+                task = buildBareMentionTask(msg);
             }
 
             long senderQQ = msg.getUserId();
             boolean isMaster = sair.aiagent.core.AiConfig.getInstance().isMasterQQ(senderQQ);
-            boolean useExecs = isMaster && plainText != null && plainText.startsWith("execs:");
+            // 语音消息：触发词在语音转文字内容中（voiceText）也应生效，兼容 execs: 前缀
+            String voiceText = msg.getVoiceText();
+            boolean voiceExecs = voiceText != null && voiceText.trim().startsWith("execs:");
+            boolean useExecs = isMaster && ((plainText != null && plainText.startsWith("execs:")) || voiceExecs);
             AiAgentActivity.qqLog("[QQMsg] 发送者QQ: " + senderQQ + ", 是否主人: " + isMaster + ", 使用execs: " + useExecs);
 
             // 构造 QQ 工具执行上下文
@@ -317,7 +403,12 @@ class QQAgentBridge {
             if (useExecs) {
                 AiAgentActivity.qqLog("[QQMsg] 主人execs消息，执行完整execs链路（Function Calling 全工具）");
                 sendReply(msg, "[execs] 权限提升：全权限 + 全技能...\n正在启动execs链路...");
-                String actualTask = plainText.substring(6).trim();
+                String actualTask;
+                if (voiceExecs) {
+                    actualTask = voiceText.trim().substring(6).trim();
+                } else {
+                    actualTask = plainText.substring(6).trim();
+                }
                 // execs 全权限：将 execq 提示词中的受限描述替换为全权限说明，避免 AI 误以为仍受 execq 限制
                 String execsSystem = stableSystem != null ? stableSystem
                         .replace("execq 通道的 eval（动态注入）仅限多对象拆分搜索场景破例可用，evaljs（动态执行）始终禁用；其他场景无代码兜底",
@@ -369,6 +460,10 @@ class QQAgentBridge {
                         }
                     }
 
+                    // 群聊纯@回复加@前缀，明确指向@自己的那个人
+                    if (bareMention && msg.isGroupMessage() && !messages.isEmpty()) {
+                        messages.set(0, "[CQ:at,qq=" + msg.getUserId() + "] " + messages.get(0));
+                    }
                     sendMultipleReplies(msg, messages);
                 } else {
                     // 兜底：AI 只输出了标签没有纯文本，发送确认提示

@@ -156,13 +156,11 @@ class QQPromptBuilder {
         if (hasDirectImage || hasQuotedImage) {
             if (hasDirectImage) {
                 sb.append("📷 此消息包含 ").append(msg.getImageUrls().size()).append(" 张图片。\n");
-                sb.append("为节省 OCR 成本，直接发送的图片不会自动识别；如需理解图片内容，请引导用户「引用该图片」后重发，引用后系统会自动识别并附上备注。\n");
             }
             if (hasQuotedImage) {
-                sb.append("📷 此消息引用了 ").append(msg.getQuotedImageUrls().size()).append(" 张图片，其二维码与文字识别结果已作为「图片本地识别备注」附在任务描述中。\n");
-                sb.append("请以这些备注为理解图片的唯一依据：备注中「二维码」和「OCR文字」都标记为「无」时，才说明未识别到内容；直接依据备注回答，不要说自己没有看图能力，也不要臆测备注之外的信息。\n");
-                sb.append("图片备注与图片 MD5 强绑定（备注后附【MD5:xxx】）；若用户指正了图片内容，可用 setimageremark 工具更新该图注释（注释随图持久化）。\n");
+                sb.append("📷 此消息引用了 ").append(msg.getQuotedImageUrls().size()).append(" 张图片。\n");
             }
+            sb.append("这些图片已通过多模态（DeepSeek Vision）直接传给视觉模型，请直接依据图片内容理解回答，不要说自己看不到图片。\n");
             sb.append("如果需要发送图片，使用 <sendimage>描述</sendimage> 标签。\n\n");
         }
 
@@ -178,8 +176,11 @@ class QQPromptBuilder {
         }
 
         if (msg.getQuotedMessageContent() != null && !msg.getQuotedMessageContent().isEmpty()) {
-            sb.append("💬 用户回复了以下消息:\n").append(msg.getQuotedMessageContent()).append("\n");
-            sb.append("请结合被引用的消息理解上下文，做出针对性回复。\n\n");
+            String quotedSenderLabel = (msg.getQuotedSenderName() != null && !msg.getQuotedSenderName().isEmpty())
+                    ? msg.getQuotedSenderName() + "(QQ:" + msg.getQuotedSenderQQ() + ")"
+                    : "对方";
+            sb.append("💬 用户引用了 ").append(quotedSenderLabel).append(" 的消息:\n").append(msg.getQuotedMessageContent()).append("\n");
+            sb.append("注意：这段被引用的消息是 ").append(quotedSenderLabel).append(" 发出的，不是当前与你对话的用户发的。请结合上下文做出针对性回复。\n\n");
         }
 
         if (msg.isGroupMessage() && unifiedMemory != null) {
@@ -293,9 +294,9 @@ class QQPromptBuilder {
 
     private void appendGroupChatHistory(StringBuilder sb, QQMessage msg, long masterQQ,
                                          Set<Long> ownerSet, Set<Long> adminSet) {
-        List<String[]> groupHistory = unifiedMemory.getRecentGroupChatHistory(msg.getGroupId(), 50);
+        List<String[]> groupHistory = unifiedMemory.getRecentGroupChatHistoryWithMark(msg.getGroupId(), 50);
         if (!groupHistory.isEmpty()) {
-            sb.append("## 临时群上下文(近50条,⭐主人👑群主🔧管理,其余=群昵称)\n");
+            sb.append("## 临时群上下文(近50条,⭐主人👑群主🔧管理,其余=群昵称;带〖已处理〗标记的说明你处理过该消息,不要重复执行)\n");
             for (String[] h : groupHistory) {
                 long hUid = Long.parseLong(h[0]);
                 String hName = h[1]; String content = h[2];
@@ -305,7 +306,20 @@ class QQPromptBuilder {
                 if (ownerSet.contains(hUid)) prefix.append("👑");
                 else if (adminSet.contains(hUid)) prefix.append("🔧");
                 if (prefix.length() > 0) prefix.append(" ");
-                sb.append(prefix).append(hName).append(": ").append(content).append("\n");
+                sb.append(prefix).append(hName).append(": ").append(content);
+                if (h.length > 3 && h[3] != null && !h[3].isEmpty()) {
+                    sb.append(" 〖已处理:").append(h[3]).append("〗");
+                }
+                sb.append("\n");
+            }
+            sb.append("\n");
+        }
+        // 跨群续聊：注入最近其他群聊的话题（时间维度兜底，解决"继续上一个群的话题"这类无关键词元引用）
+        List<String> globalGroupChat = unifiedMemory.getRecentGroupChatHistoryGlobal(12, msg.getGroupId());
+        if (!globalGroupChat.isEmpty()) {
+            sb.append("## 最近其他群聊话题(跨群续聊)\n");
+            for (String h : globalGroupChat) {
+                sb.append("- ").append(h).append("\n");
             }
             sb.append("\n");
         }

@@ -127,11 +127,27 @@ public class ChatMessage implements Serializable {
 
     /**
      * 工厂方法：创建 assistant 消息，携带工具调用（Function Calling 多轮回传）。
+     * <p>等价于 {@link #createAssistantWithToolCalls(String, String, List)}，思考链内容为空。</p>
+     *
      * @param content   可选文本内容（可为 null）
      * @param toolCalls 工具调用列表
      */
     public static ChatMessage createAssistantWithToolCalls(String content, List<ToolCall> toolCalls) {
-        return new ChatMessage("assistant", content, "", toolCalls, null, null);
+        return createAssistantWithToolCalls(content, "", toolCalls);
+    }
+
+    /**
+     * 工厂方法：创建 assistant 消息，携带工具调用 + 思考链内容（Function Calling 多轮回传）。
+     * <p>DeepSeek 思考模式下，携带 tools 参数的请求在后续所有轮次中必须完整回传
+     * reasoning_content（即使该轮模型未实际进行工具调用），否则 API 返回 400。</p>
+     *
+     * @param content          可选文本内容（工具调用轮次可能为空字符串）
+     * @param reasoningContent 该轮 assistant 的思考链内容（可为空）
+     * @param toolCalls        工具调用列表
+     */
+    public static ChatMessage createAssistantWithToolCalls(String content, String reasoningContent,
+                                                           List<ToolCall> toolCalls) {
+        return new ChatMessage("assistant", content, reasoningContent, toolCalls, null, null);
     }
 
     /**

@@ -54,8 +54,16 @@ public class QQMessage {
     private String forwardContent;
     /** 引用消息的原始内容(通过get_msg API获取) */
     private String quotedMessageContent;
+    /** 被引用消息的发送者昵称/群名片(通过get_msg API获取) */
+    private String quotedSenderName;
+    /** 被引用消息的发送者QQ号 */
+    private long quotedSenderQQ;
     /** 折叠消息的转发ID(用于get_forward_msg API获取内容) */
     private String forwardId;
+    /** 是否包含语音消息段 */
+    private boolean hasRecord;
+    /** 语音转文字结果（程序自动通过 fetch_ptt_text 获取，非 AI 调用） */
+    private String voiceText;
 
     // === 内部类 ===
 
@@ -181,9 +189,24 @@ public class QQMessage {
     
     public String getQuotedMessageContent() { return quotedMessageContent; }
     public void setQuotedMessageContent(String v) { this.quotedMessageContent = v; }
+
+    /** 被引用消息的发送者昵称/群名片 */
+    public String getQuotedSenderName() { return quotedSenderName; }
+    public void setQuotedSenderName(String v) { this.quotedSenderName = v; }
+    /** 被引用消息的发送者QQ号 */
+    public long getQuotedSenderQQ() { return quotedSenderQQ; }
+    public void setQuotedSenderQQ(long v) { this.quotedSenderQQ = v; }
     
     public String getForwardId() { return forwardId; }
     public void setForwardId(String v) { this.forwardId = v; }
+
+    /** 是否包含语音消息段 */
+    public boolean hasRecord() { return hasRecord; }
+    public void setHasRecord(boolean v) { this.hasRecord = v; }
+
+    /** 获取语音转文字结果（程序自动转换） */
+    public String getVoiceText() { return voiceText; }
+    public void setVoiceText(String v) { this.voiceText = v; }
 
     /** 是否为群消息 */
     public boolean isGroupMessage() {
@@ -203,10 +226,15 @@ public class QQMessage {
         return String.valueOf(userId);
     }
 
-    /** 提取纯文本内容（去除CQ码，含图片/折叠占位） */
+    /** 提取纯文本内容（去除CQ码，含图片/折叠/语音转文字占位） */
     public String getPlainText() {
         if (rawMessage == null) return "";
         StringBuilder sb = new StringBuilder(rawMessage.replaceAll("\\[CQ:[^\\]]+\\]", "").trim());
+        // 语音转文字：作为消息正文注入，并备注来源（仅在已转文字成功后追加，避免未转时污染）
+        if (hasRecord && voiceText != null && !voiceText.isEmpty()) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append("[语音转文字] ").append(voiceText);
+        }
         // 图片信息
         if (hasImage && !imageUrls.isEmpty()) {
             sb.append("\n[包含图片: ").append(imageUrls.size()).append("张]");
@@ -221,10 +249,15 @@ public class QQMessage {
         return sb.toString().trim();
     }
     
-    /** 提取纯文本内容（仅文本，不含图片/折叠信息） */
+    /** 提取纯文本内容（仅文本，不含图片/折叠信息，含语音转文字） */
     public String getPlainTextOnly() {
         if (rawMessage == null) return "";
-        return rawMessage.replaceAll("\\[CQ:[^\\]]+\\]", "").trim();
+        StringBuilder sb = new StringBuilder(rawMessage.replaceAll("\\[CQ:[^\\]]+\\]", "").trim());
+        if (hasRecord && voiceText != null && !voiceText.isEmpty()) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append("[语音转文字] ").append(voiceText);
+        }
+        return sb.toString().trim();
     }
 
     @Override

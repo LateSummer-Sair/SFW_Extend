@@ -66,7 +66,6 @@ public class ActivityActions {
             case "setkey":     return handleSetKey(args);
             case "seturl":     return handleSetUrl(args);
             case "setmodel":   return handleSetModel(args);
-            case "setocrkey":  return handleSetOcrKey(args);
             case "setthirdpartycode": return handleSetThirdPartyCode(args);
             case "setprompt":  return handleSetPrompt(args);
             case "showprompt": return handleShowPrompt();
@@ -129,15 +128,9 @@ public class ActivityActions {
         return true;
     }
 
-    /** 设置在线 OCR 的 Access Key（EasyOCR 等），设置后启用图片文字识别能力。 */
+    /** 设置在线 OCR 的 Access Key（已移除 OCR 能力，此方法保留仅为兼容旧路由） */
     public Object handleSetOcrKey(String args) {
-        if (isEmpty(args)) return err("用法: ai/setocrkey [OCR Access Key]");
-        act.getConfig().setOcrAccessKey(args);
-        act.getConfig().save();
-        sair.aiagent.ocr.OcrManager.getInstance().setAccessKey(args);
-        println(C_INFO, "OCR Access Key 已设置，OCR 能力已启用（引擎: "
-                + sair.aiagent.ocr.OcrManager.getInstance().getEngineName() + "）");
-        return true;
+        return err("OCR 能力已移除，图片理解已改由 DeepSeek Vision 多模态模型负责，无需设置 OCR Key。");
     }
 
     /**

@@ -79,6 +79,16 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
         return t;
     });
 
+    /** 语音转文字线程池（多线程异步，全程自动监听每条消息，发现语音立即唤起线程转文字，不阻塞消息处理主流程） */
+    private final ExecutorService voiceTranscribePool = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "OneBot-VoiceTranscribe");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /** 语音转文字缓存：语音消息 messageId → 转文字文本（供引用语音直接定位，避免重复转换） */
+    private final Map<Long, String> voiceTextCache = new ConcurrentHashMap<>();
+
     /** 是否启用主动查看功能 */
     private volatile boolean proactiveCheckEnabled = false;
 
@@ -708,6 +718,10 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
         StringBuilder forwardText = new StringBuilder();
         
         for (QQMessage.MessageSegment seg : msg.getSegments()) {
+            if ("record".equals(seg.type)) {
+                msg.setHasRecord(true);
+                AiAgentActivity.qqLog("[QQMsg] 检测到语音消息: file=" + seg.file + ", url=" + seg.url);
+            }
             if (seg.isFile()) {
                 // 主人发送的文件自动下载到 fileDownloadPath
                 AiAgentActivity.qqLog("[QQMsg] 检测到文件消息: name=" + seg.fileName + ", url=" + seg.url);
@@ -808,6 +822,13 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
             // 检查selfId是否设置（群聊@检测需要）
             if (msg.isGroupMessage() && selfId == 0) {
                 AiAgentActivity.qqLog("[QQMsg] 警告: selfId未设置，群聊@检测将失效！请执行 ai/onebotsetselfid <QQ号>");
+            }
+
+            // === 语音消息：异步转文字（全程自动监听，发现语音立即唤起新线程转换，不阻塞消息处理） ===
+            if (msg.hasRecord() && napcatApi != null) {
+                final QQMessage voiceMsg = msg;
+                voiceTranscribePool.submit(() -> transcribeVoiceAsync(voiceMsg));
+                AiAgentActivity.qqLog("[QQMsg] 语音消息已提交异步转文字: messageId=" + msg.getMessageId());
             }
 
 
@@ -1021,6 +1042,35 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
     }
 
     /**
+     * 语音消息异步转文字：调用 NapCat fetch_ptt_text，转文字成功后注入聊天记录并备注。
+     * <p>由 voiceTranscribePool 独立线程执行，全程自动监听语音消息，不阻塞 AI 响应主流程。</p>
+     */
+    private void transcribeVoiceAsync(QQMessage msg) {
+        try {
+            String text = napcatApi.fetchPttText(msg.getMessageId());
+            if (text != null && !text.isEmpty()) {
+                msg.setVoiceText(text);
+                // 写入缓存，供引用语音直接定位（不重复转换）
+                voiceTextCache.put(msg.getMessageId(), text);
+                // 注入聊天记录并备注（替换原语音消息，Bot 后续读取聊天记录即可发现已转换的语音内容）
+                String content = "[语音转文字] " + text;
+                if (msg.isGroupMessage()) {
+                    unifiedMemory.addConversation("user", content, "group",
+                        msg.getGroupId(), msg.getUserId(), msg.getDisplayName());
+                } else {
+                    unifiedMemory.addConversation("user", content, "private",
+                        msg.getUserId(), msg.getUserId(), msg.getDisplayName());
+                }
+                AiAgentActivity.qqLog("[QQMsg] 语音异步转文字完成并注入聊天记录: " + text);
+            } else {
+                AiAgentActivity.qqLog("[QQMsg] 语音转文字失败或无内容: messageId=" + msg.getMessageId());
+            }
+        } catch (Exception e) {
+            AiAgentActivity.qqLog("[QQMsg] 语音异步转文字异常: " + e.toString());
+        }
+    }
+
+    /**
      * 处理单个触发任务（由 execPool 并发线程调用）。
      * <p>群管理员检查 → 引用/折叠消息 → 历史图片回看 → 表情包收集 →
      * 构建提示词 → 转发检查 → 执行 AI。</p>
@@ -1050,6 +1100,12 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 try {
                     String quotedJson = napcatApi.getMessage(quotedMsgId);
                     if (quotedJson != null && !quotedJson.isEmpty()) {
+                        String[] quotedSender = ForwardMessageExpander.extractQuotedSender(quotedJson);
+                        if (quotedSender != null && quotedSender.length == 2) {
+                            msg.setQuotedSenderName(quotedSender[0]);
+                            try { msg.setQuotedSenderQQ(Long.parseLong(quotedSender[1])); } catch (NumberFormatException ignored) {}
+                            AiAgentActivity.qqLog("[QQMsg] 引用消息发送者: " + quotedSender[0] + "(QQ:" + quotedSender[1] + ")");
+                        }
                         String quotedText = ForwardMessageExpander.extractQuotedMessageFull(quotedJson);
                         if (quotedText != null && !quotedText.isEmpty()) {
                             msg.setQuotedMessageContent(quotedText);
@@ -1088,6 +1144,26 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                                 msg.setQuotedMessageContent(raw);
                                 AiAgentActivity.qqLog("[QQMsg] 引用消息降级raw_message: " +
                                     (raw.length() > 100 ? raw.substring(0, 100) + "..." : raw));
+                            }
+                        }
+
+                        // === 被引用消息是语音消息：直接定位预处理好的转文字结果（不再重复转换） ===
+                        String quotedRaw = extractString(quotedJson, "raw_message");
+                        boolean isQuotedVoice = (quotedRaw != null && quotedRaw.contains("[CQ:record"))
+                                || quotedJson.contains("\"type\":\"record\"");
+                        if (isQuotedVoice) {
+                            String voiceText = voiceTextCache.get((long) quotedMsgId);
+                            if (voiceText != null && !voiceText.isEmpty()) {
+                                String exist = msg.getQuotedMessageContent();
+                                String voiceRemark = "[语音转文字] " + voiceText;
+                                if (exist != null && !exist.isEmpty()) {
+                                    msg.setQuotedMessageContent(exist + "\n\n" + voiceRemark);
+                                } else {
+                                    msg.setQuotedMessageContent(voiceRemark);
+                                }
+                                AiAgentActivity.qqLog("[QQMsg] 引用语音定位到预处理转文字: " + voiceText);
+                            } else {
+                                AiAgentActivity.qqLog("[QQMsg] 引用语音转文字尚未完成，等待异步预处理: messageId=" + quotedMsgId);
                             }
                         }
                     }

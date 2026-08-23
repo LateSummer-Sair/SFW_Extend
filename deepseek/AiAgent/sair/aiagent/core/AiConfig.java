@@ -89,6 +89,8 @@ public class AiConfig {
     private String deepSeekUserId = "";     // 用于缓存隔离/内容安全
     private double frequencyPenalty = -1;    // -1=不设置, -2.0~2.0
     private double presencePenalty = -1;     // -1=不设置, -2.0~2.0
+    /** Function Calling strict 模式（Beta）：切 /beta base_url + 严格 JSON Schema（additionalProperties:false） */
+    private boolean strictMode = false;
 
     /** 主动查看功能是否启用 */
     private boolean proactiveCheckEnabled = false;
@@ -107,9 +109,6 @@ public class AiConfig {
 
     /** 文件下载目录（接收主人发送的文件存储位置） */
     private String fileDownloadPath = "";
-
-    /** OCR Access Key（EasyOCR 等在线 OCR 服务），空=禁用 OCR */
-    private String ocrAccessKey = "";
 
     /** 配置文件路径（init后设置） */
     private File configFile;
@@ -188,8 +187,6 @@ public class AiConfig {
             botName = p.getProperty("botName", "");
             // 文件下载目录
             fileDownloadPath = p.getProperty("fileDownloadPath", "");
-            // OCR Access Key（加密存储）
-            ocrAccessKey = decrypt(p.getProperty("ocrAccessKey", ""));
             // DeepSeek 高级参数
             reasoningEffort = p.getProperty("reasoningEffort", "");
             try { temperature = Double.parseDouble(p.getProperty("temperature", "-1")); } catch (NumberFormatException ignored) {}
@@ -200,6 +197,7 @@ public class AiConfig {
             deepSeekUserId = p.getProperty("deepSeekUserId", "");
             try { frequencyPenalty = Double.parseDouble(p.getProperty("frequencyPenalty", "-1")); } catch (NumberFormatException ignored) {}
             try { presencePenalty = Double.parseDouble(p.getProperty("presencePenalty", "-1")); } catch (NumberFormatException ignored) {}
+            strictMode = "true".equalsIgnoreCase(p.getProperty("strictMode", "false"));
         } catch (Exception ignored) {
             // 读取失败则使用默认值
         }
@@ -248,7 +246,6 @@ public class AiConfig {
             // AI机器人名字
             p.setProperty("botName", botName);
             p.setProperty("fileDownloadPath", fileDownloadPath);
-            p.setProperty("ocrAccessKey", encrypt(ocrAccessKey));
             // DeepSeek 高级参数
             p.setProperty("reasoningEffort", reasoningEffort);
             p.setProperty("temperature", String.valueOf(temperature));
@@ -259,6 +256,7 @@ public class AiConfig {
             p.setProperty("deepSeekUserId", deepSeekUserId);
             p.setProperty("frequencyPenalty", String.valueOf(frequencyPenalty));
             p.setProperty("presencePenalty", String.valueOf(presencePenalty));
+            p.setProperty("strictMode", String.valueOf(strictMode));
             try (FileOutputStream fos = new FileOutputStream(configFile)) {
                 p.store(new OutputStreamWriter(fos, StandardCharsets.UTF_8),
                         "AiAgent Configuration");
@@ -276,6 +274,23 @@ public class AiConfig {
 
     public String getApiKey()          { return apiKey; }
     public String getApiUrl()          { return apiUrl; }
+
+    /**
+     * 获取实际请求用的 base_url。
+     * <p>strict 模式（Beta）需切换到 {@code https://api.deepseek.com/beta}，
+     * 否则服务端会对 strict JSON Schema 校验失败。</p>
+     */
+    public String getEffectiveApiUrl() {
+        if (strictMode) {
+            String base = apiUrl;
+            if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+            if (!base.endsWith("/beta")) {
+                return base + "/beta";
+            }
+            return base;
+        }
+        return apiUrl;
+    }
     public String getModel()           { return model; }
 
     /** 获取系统提示词（从 PromptManager） */
@@ -339,23 +354,14 @@ public class AiConfig {
     /** 设置文件下载目录 */
     public void setFileDownloadPath(String path) { this.fileDownloadPath = (path != null) ? path.trim() : ""; }
 
-    // === OCR 配置 ===
-
-    /** 获取 OCR Access Key（在线 OCR 服务）。 */
-    public String getOcrAccessKey() { return ocrAccessKey; }
-
-    /** 设置 OCR Access Key。 */
-    public void setOcrAccessKey(String key) { this.ocrAccessKey = (key != null) ? key.trim() : ""; }
-
-    /** 是否已设置 OCR Access Key（即 OCR 能力是否可用）。 */
-    public boolean hasOcrAccessKey() { return ocrAccessKey != null && !ocrAccessKey.isEmpty(); }
-    
     // ==================== 模型智能路由 (v2.4) ====================
     
     /** 默认 execq/chat 模型（轻量快速） */
     private static final String DEFAULT_EXECQ_MODEL = "deepseek-v4-flash";
     /** 默认 agent 模型（深度推理） */
     private static final String DEFAULT_AGENT_MODEL = "deepseek-v4-pro";
+    /** 默认 vision 模型（多模态图像理解，替代已移除的在线 OCR） */
+    private static final String DEFAULT_VISION_MODEL = "deepseek-v4-flash-vision-exp";
     /** auto 模式标记 */
     private static final String AUTO_MODEL = "auto";
     
@@ -396,6 +402,14 @@ public class AiConfig {
         }
         logModelRoute("Agent", model);
         return model;
+    }
+
+    /**
+     * 获取 Vision（多模态图像理解）模型名。
+     * <p>当消息携带图片时，切换到该模型，通过多模态能力直接看图理解（替代已移除的在线 OCR）。</p>
+     */
+    public String getVisionModel() {
+        return DEFAULT_VISION_MODEL;
     }
 
     /** 模型路由日志（仅在 model=auto 时输出提示） */
@@ -518,6 +532,10 @@ public class AiConfig {
     public void setFrequencyPenalty(double v) { this.frequencyPenalty = Math.max(-2.0, Math.min(2.0, v)); }
     public double getPresencePenalty() { return presencePenalty; }
     public void setPresencePenalty(double v) { this.presencePenalty = Math.max(-2.0, Math.min(2.0, v)); }
+
+    /** Function Calling strict 模式（Beta）开关 */
+    public boolean isStrictMode() { return strictMode; }
+    public void setStrictMode(boolean v) { this.strictMode = v; }
 
     // ==================== 工具方法 ====================
 
