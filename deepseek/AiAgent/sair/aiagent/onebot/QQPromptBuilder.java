@@ -37,7 +37,6 @@ class QQPromptBuilder {
         StringBuilder sb = new StringBuilder(8192);
 
         Set<Long> masterQQSet = AiConfig.getInstance().getMasterQQs();
-        long masterQQ = masterQQSet.isEmpty() ? 0L : masterQQSet.iterator().next();
         Set<Long> adminSet = new HashSet<>();
         Set<Long> ownerSet = new HashSet<>();
         Map<Long, String> roleCache = new LinkedHashMap<>();
@@ -52,6 +51,7 @@ class QQPromptBuilder {
         }
 
         sb.append("## 当前上下文\n");
+        boolean isSpeakerMaster = AiConfig.getInstance().isMasterQQ(msg.getUserId());
         if (msg.isGroupMessage()) {
             String groupName = unifiedMemory.getGroupName(msg.getGroupId());
             if (groupName == null && napcatApi != null) {
@@ -72,14 +72,22 @@ class QQPromptBuilder {
             sb.append(" | 说话者: ").append(msg.getDisplayName());
             sb.append("(QQ:").append(msg.getUserId()).append(")");
             sb.append(" | 身份: ").append(roleLabel);
+            if (isSpeakerMaster) {
+                sb.append(" | ⭐此人是你的主人，可以称呼'主人'");
+            } else {
+                sb.append(" | 此人不是你的主人，请用昵称/名字称呼，禁止喊'主人'");
+            }
         } else {
             sb.append("私聊 | QQ:").append(msg.getUserId());
             sb.append(" | ").append(msg.getDisplayName());
+            if (isSpeakerMaster) {
+                sb.append(" | ⭐此人是你的主人，可以称呼'主人'");
+            } else {
+                sb.append(" | 此人不是你的主人，请用昵称/名字称呼，禁止喊'主人'");
+            }
         }
         String botName = AiConfig.getInstance().getBotName();
         if (botName != null && !botName.isEmpty()) sb.append(" | 你的名字:").append(botName);
-        boolean isSpeakerMaster = AiConfig.getInstance().isMasterQQ(msg.getUserId());
-        if (isSpeakerMaster) sb.append(" | ⭐此人是主人");
         sb.append("\n");
 
         if (msg.isGroupMessage() && !msg.getMentionedUsers().isEmpty()) {
@@ -89,7 +97,7 @@ class QQPromptBuilder {
                 if (mc > 0) sb.append(", ");
                 String tagName = resolveUserName(mu, msg.getGroupId(), unifiedMemory);
                 sb.append(tagName).append("(QQ:").append(mu).append(")");
-                if (mu == masterQQ) sb.append("⭐");
+                if (masterQQSet.contains(mu)) sb.append("⭐");
                 if (ownerSet.contains(mu)) sb.append("👑");
                 else if (adminSet.contains(mu)) sb.append("🔧");
                 mc++;
@@ -160,26 +168,32 @@ class QQPromptBuilder {
             if (hasQuotedImage) {
                 sb.append("📷 此消息引用了 ").append(msg.getQuotedImageUrls().size()).append(" 张图片。\n");
             }
-            sb.append("这些图片已通过多模态（DeepSeek Vision）直接传给视觉模型，请直接依据图片内容理解回答，不要说自己看不到图片。\n");
+            sb.append("图片内容识别结果由系统按需注入（引用图片或用户明确要求「看图」时才会调用视觉模型识别）。\n");
+            sb.append("若上下文未出现 [图片内容识别结果]，说明本次未识别图片，请勿凭空编造图片内容，仅结合图片备注与上下文回复。\n");
             sb.append("如果需要发送图片，使用 <sendimage>描述</sendimage> 标签。\n\n");
         }
 
         if (msg.hasForward()) {
-            if (msg.getForwardContent() != null && !msg.getForwardContent().isEmpty()) {
-                sb.append("📨 此消息包含转发/折叠消息，以下是其中的内容:\n");
-                sb.append(msg.getForwardContent()).append("\n");
-                sb.append("请认真分析折叠消息中的每一条内容并做出回复。\n\n");
-            } else {
-                sb.append("📨 此消息包含转发/折叠消息，但详细内容暂未获取到。\n");
-                sb.append("请告知用户你暂时无法查看折叠消息的具体内容。\n\n");
-            }
+            sb.append("📨 此消息包含转发/折叠消息，其内容概述由系统单独生成后注入（见 [折叠消息摘要]）。\n");
+            sb.append("若上下文未出现 [折叠消息摘要]，说明本次未能获取折叠内容，请告知用户暂时无法查看折叠消息的具体内容。\n\n");
         }
 
         if (msg.getQuotedMessageContent() != null && !msg.getQuotedMessageContent().isEmpty()) {
             String quotedSenderLabel = (msg.getQuotedSenderName() != null && !msg.getQuotedSenderName().isEmpty())
                     ? msg.getQuotedSenderName() + "(QQ:" + msg.getQuotedSenderQQ() + ")"
                     : "对方";
-            sb.append("💬 用户引用了 ").append(quotedSenderLabel).append(" 的消息:\n").append(msg.getQuotedMessageContent()).append("\n");
+            String quotedContent = msg.getQuotedMessageContent();
+            int foldIdx = quotedContent.indexOf("[折叠消息展开内容]");
+            if (foldIdx >= 0) {
+                String head = quotedContent.substring(0, foldIdx).trim();
+                if (!head.isEmpty()) {
+                    sb.append("💬 用户引用了 ").append(quotedSenderLabel).append(" 的消息(其转发内容已单独生成概述):\n").append(head).append("\n");
+                } else {
+                    sb.append("💬 用户引用了 ").append(quotedSenderLabel).append(" 的折叠消息，具体内容概述见 [折叠消息摘要]。\n");
+                }
+            } else {
+                sb.append("💬 用户引用了 ").append(quotedSenderLabel).append(" 的消息:\n").append(quotedContent).append("\n");
+            }
             sb.append("注意：这段被引用的消息是 ").append(quotedSenderLabel).append(" 发出的，不是当前与你对话的用户发的。请结合上下文做出针对性回复。\n\n");
         }
 
@@ -191,7 +205,7 @@ class QQPromptBuilder {
                 for (Map.Entry<String, Long> e : nickMap.entrySet()) {
                     if (nc >= 20) break;
                     sb.append(e.getKey()).append("→").append(e.getValue());
-                    if (e.getValue() == masterQQ) sb.append("⭐");
+                    if (masterQQSet.contains(e.getValue())) sb.append("⭐");
                     if (ownerSet.contains(e.getValue())) sb.append("👑");
                     else if (adminSet.contains(e.getValue())) sb.append("🔧");
                     sb.append(" "); nc++;
@@ -206,7 +220,7 @@ class QQPromptBuilder {
                 for (String[] a : admins) {
                     long aid = Long.parseLong(a[0]);
                     String label = a[1] + "(QQ:" + a[0] + ")";
-                    if (aid == masterQQ) label += "⭐";
+                    if (masterQQSet.contains(aid)) label += "⭐";
                     if ("owner".equals(a[2])) {
                         if (ownerLine.length() > 0) ownerLine.append(", ");
                         ownerLine.append(label);
@@ -229,7 +243,7 @@ class QQPromptBuilder {
                 for (Map.Entry<String, Long> e : personalMap.entrySet()) {
                     if (pc >= 15) break;
                     sb.append(e.getKey()).append("→").append(e.getValue());
-                    if (e.getValue() == masterQQ) sb.append("⭐");
+                    if (masterQQSet.contains(e.getValue())) sb.append("⭐");
                     if (ownerSet.contains(e.getValue())) sb.append("👑");
                     else if (adminSet.contains(e.getValue())) sb.append("🔧");
                     sb.append(" "); pc++;
@@ -239,7 +253,7 @@ class QQPromptBuilder {
         }
 
         if (msg.isGroupMessage()) {
-            appendGroupChatHistory(sb, msg, masterQQ, ownerSet, adminSet);
+            appendGroupChatHistory(sb, msg, masterQQSet, ownerSet, adminSet);
         } else {
             appendPrivateChatHistory(sb, msg);
         }
@@ -292,17 +306,17 @@ class QQPromptBuilder {
         return buildStableSystemPrompt() + "\n\n" + buildDynamicContext(msg, punishmentRecords);
     }
 
-    private void appendGroupChatHistory(StringBuilder sb, QQMessage msg, long masterQQ,
+    private void appendGroupChatHistory(StringBuilder sb, QQMessage msg, Set<Long> masterQQSet,
                                          Set<Long> ownerSet, Set<Long> adminSet) {
-        List<String[]> groupHistory = unifiedMemory.getRecentGroupChatHistoryWithMark(msg.getGroupId(), 50);
+        List<String[]> groupHistory = unifiedMemory.getRecentGroupChatHistoryWithMark(msg.getGroupId(), 25);
         if (!groupHistory.isEmpty()) {
-            sb.append("## 临时群上下文(近50条,⭐主人👑群主🔧管理,其余=群昵称;带〖已处理〗标记的说明你处理过该消息,不要重复执行)\n");
+            sb.append("## 临时群上下文(近25条,⭐主人👑群主🔧管理,其余=群昵称;带〖已处理〗标记的说明你处理过该消息,不要重复执行)\n");
             for (String[] h : groupHistory) {
                 long hUid = Long.parseLong(h[0]);
                 String hName = h[1]; String content = h[2];
                 if (content.length() > 200) content = content.substring(0, 200) + "...";
                 StringBuilder prefix = new StringBuilder();
-                if (hUid == masterQQ) prefix.append("⭐");
+                if (masterQQSet.contains(hUid)) prefix.append("⭐");
                 if (ownerSet.contains(hUid)) prefix.append("👑");
                 else if (adminSet.contains(hUid)) prefix.append("🔧");
                 if (prefix.length() > 0) prefix.append(" ");
@@ -334,7 +348,7 @@ class QQPromptBuilder {
             }
             sb.append("\n");
         }
-        appendGlobalConversations(sb, msg, 30, 15, masterQQ, ownerSet, adminSet);
+        appendGlobalConversations(sb, msg, 30, 15, masterQQSet, ownerSet, adminSet);
     }
 
     private void appendPrivateChatHistory(StringBuilder sb, QQMessage msg) {
@@ -349,11 +363,11 @@ class QQPromptBuilder {
             }
             sb.append("\n");
         }
-        appendGlobalConversations(sb, msg, 20, 10, 0L, Collections.emptySet(), Collections.emptySet());
+        appendGlobalConversations(sb, msg, 20, 10, Collections.emptySet(), Collections.emptySet(), Collections.emptySet());
     }
 
     private void appendGlobalConversations(StringBuilder sb, QQMessage msg, int fetch, int show,
-                                            long masterQQ, Set<Long> ownerSet, Set<Long> adminSet) {
+                                            Set<Long> masterQQSet, Set<Long> ownerSet, Set<Long> adminSet) {
         List<String[]> globalConvs = unifiedMemory.getGlobalRecentConversations(fetch);
         if (globalConvs.isEmpty()) return;
         sb.append("## 全局最近活跃\n");
@@ -368,7 +382,7 @@ class QQPromptBuilder {
             if (senderIdStr != null) {
                 try {
                     long sid = Long.parseLong(senderIdStr);
-                    if (sid == masterQQ) prefix.append("⭐");
+                    if (masterQQSet.contains(sid)) prefix.append("⭐");
                     if (ownerSet.contains(sid)) prefix.append("👑");
                     else if (adminSet.contains(sid)) prefix.append("🔧");
                 } catch (NumberFormatException ignored) {}

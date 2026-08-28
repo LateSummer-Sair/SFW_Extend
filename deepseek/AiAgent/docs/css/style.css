@@ -359,7 +359,7 @@ body {
   width: auto; height: auto; background: none; display: flex; align-items: center; gap: 10px;
   padding: 4px 0; align-self: center;
 }
-.flow-edge.label::before, .flow-edge.label::after { content: ""; width: 34px; height: 2px; background: linear-gradient(90deg, transparent, var(--cyan), transparent); }
+.flow-edge.label::before, .flow-edge.label::after { content: ""; width: 34px; height: 2px; background: linear-gradient(90deg, transparent, var(--cyan), transparent); position: static; border: none; }
 .flow-edge.label .el { font-size: 0.72rem; color: var(--muted); }
 
 /* 分支 */

@@ -74,7 +74,8 @@ public class ActivityActions {
             case "forgetall":  return handleForgetAll();
             case "yes":        return handleYes();
             case "no":         return handleNo();
-            case "info":       return handleInfo();
+            case "config":     return handleConfig();
+            case "setconfig":  return handleSetConfig(args);
             case "reset":      return handleReset();
             case "stop":       return handleStop();
             case "mood":       return handleMood();
@@ -114,6 +115,8 @@ public class ActivityActions {
             case "skillexport":    return handleSkillExport(args);
             case "skillexportall": return handleSkillExportAll();
             case "clearstickers":  return handleClearStickers();
+            case "exportdata":     return handleExportData(args);
+            case "importdata":     return handleImportData(args);
             default:           return false;
         }
     }
@@ -190,12 +193,18 @@ public class ActivityActions {
         return true;
     }
 
-    public Object handleInfo() {
+    public Object handleConfig() {
+        sair.aiagent.core.AiConfig cfg = act.getConfig();
         println(C_INFO, "== AiAgent 配置 ==");
-        println(C_INFO, "API地址 : " + act.getConfig().getApiUrl());
-        println(C_INFO, "API密钥 : " + act.getConfig().getMaskedKey());
-        println(C_INFO, "模型    : " + act.getConfig().getModel());
-        println(C_INFO, "提示词  : " + act.getConfig().getSystemPrompt().length() + " 字符");
+        println(C_INFO, "API地址 : " + cfg.getApiUrl());
+        println(C_INFO, "API密钥 : " + cfg.getMaskedKey());
+        println(C_INFO, "模型    : " + cfg.getModel());
+        println(C_INFO, "思考模式: " + describeReasoningEffort(cfg.getReasoningEffort()));
+        println(C_INFO, "温度    : " + (cfg.getTemperature() < 0 ? "(默认)" : String.valueOf(cfg.getTemperature())));
+        println(C_INFO, "top_p   : " + (cfg.getTopP() < 0 ? "(默认)" : String.valueOf(cfg.getTopP())));
+        println(C_INFO, "最大输出: " + (cfg.getMaxOutputTokens() <= 0 ? "(默认)" : String.valueOf(cfg.getMaxOutputTokens())));
+        println(C_INFO, "strict  : " + (cfg.isStrictMode() ? "开" : "关"));
+        println(C_INFO, "提示词  : " + cfg.getSystemPrompt().length() + " 字符");
         println(C_INFO, "对话    : " + act.getHistory().size() + " 条/~"
                 + act.getHistory().estimateTotalTokens() + " tokens");
         println(C_INFO, "记忆    : " + act.getMemory().size() + " 条");
@@ -203,6 +212,87 @@ public class ActivityActions {
                 + " | Shell: " + SysConsoleExecutor.getShellType());
         println(C_INFO, "数据目录: " + act.getDataDir());
         return true;
+    }
+
+    /**
+     * 统一配置开关：ai/setconfig &lt;key&gt; &lt;value&gt;，长期存储的 config.properties
+     * 均可由命令控制，无需手动编辑文件。
+     */
+    public Object handleSetConfig(String args) {
+        if (isEmpty(args)) {
+            println(C_INFO, "== 可配置项（用法: ai/setconfig <key> <value>）==");
+            println(C_INFO, "reasoning   思考模式（深度思考）：low/high/max=开启且控制思考深度，none=关闭");
+            println(C_INFO, "temperature 温度（输出随机性）：-1=不设置，0~2.0 越高越发散有创意、越低越严谨确定");
+            println(C_INFO, "topp        核采样（候选词范围）：-1=不设置，0~1.0 与 temperature 二选一微调");
+            println(C_INFO, "maxtokens   单次回复最大长度上限：0=默认，正整数=上限 token 数");
+            println(C_INFO, "freq        频率惩罚（抑制重复用词）：-1=不设置，-2.0~2.0 越高越少车轱辘话");
+            println(C_INFO, "pres        存在惩罚（鼓励新话题/新词）：-1=不设置，-2.0~2.0 越高越倾向引入新内容");
+            println(C_INFO, "strict      Function Calling 严格模式：on=切 /beta+严格JSON Schema(工具调用更可靠)，off=关闭");
+            println(C_INFO, "userid      DeepSeek user_id（缓存隔离/内容安全标识）");
+            println(C_INFO, "botname     Bot 消息触发词（多个用 ; 分隔，群聊中提到任一触发词触发回复）");
+            return true;
+        }
+        String[] parts = args.trim().split("\\s+", 2);
+        if (parts.length < 2) return err("用法: ai/setconfig <key> <value>（key 列表见 ai/setconfig）");
+        String key = parts[0].trim().toLowerCase();
+        String val = parts[1].trim();
+        sair.aiagent.core.AiConfig cfg = act.getConfig();
+        try {
+            switch (key) {
+                case "reasoning": case "reasoningeffort":
+                    if ("none".equalsIgnoreCase(val) || "off".equalsIgnoreCase(val) || "close".equalsIgnoreCase(val)) {
+                        cfg.setReasoningEffort("");
+                    } else {
+                        cfg.setReasoningEffort(val);
+                    }
+                    println(C_INFO, "思考模式 -> " + describeReasoningEffort(cfg.getReasoningEffort()));
+                    break;
+                case "temperature": case "temp":
+                    cfg.setTemperature(Double.parseDouble(val));
+                    println(C_INFO, "temperature -> " + cfg.getTemperature());
+                    break;
+                case "topp": case "top_p":
+                    cfg.setTopP(Double.parseDouble(val));
+                    println(C_INFO, "top_p -> " + cfg.getTopP());
+                    break;
+                case "maxtokens": case "maxoutputtokens":
+                    cfg.setMaxOutputTokens(Integer.parseInt(val));
+                    println(C_INFO, "maxOutputTokens -> " + cfg.getMaxOutputTokens());
+                    break;
+                case "freq": case "frequencypenalty":
+                    cfg.setFrequencyPenalty(Double.parseDouble(val));
+                    println(C_INFO, "frequencyPenalty -> " + cfg.getFrequencyPenalty());
+                    break;
+                case "pres": case "presencepenalty":
+                    cfg.setPresencePenalty(Double.parseDouble(val));
+                    println(C_INFO, "presencePenalty -> " + cfg.getPresencePenalty());
+                    break;
+                case "strict": case "strictmode":
+                    boolean on = "on".equalsIgnoreCase(val) || "true".equalsIgnoreCase(val) || "1".equals(val);
+                    cfg.setStrictMode(on);
+                    println(C_INFO, "strictMode -> " + (on ? "开（切 /beta + 严格Schema）" : "关"));
+                    break;
+                case "userid": case "deepseekuserid":
+                    cfg.setDeepSeekUserId(val);
+                    println(C_INFO, "deepSeekUserId -> " + cfg.getDeepSeekUserId());
+                    break;
+                case "botname": case "trigger": case "triggerword":
+                    cfg.setBotName(val);
+                    println(C_INFO, "触发词 -> " + String.join("; ", cfg.getTriggerWords()));
+                    break;
+                default:
+                    return err("未知配置项: " + key + "（输入 ai/setconfig 查看可配置项）");
+            }
+            cfg.save();
+            return true;
+        } catch (NumberFormatException e) {
+            return err("值必须是数字: " + val);
+        }
+    }
+
+    private String describeReasoningEffort(String re) {
+        if (re == null || re.isEmpty() || "none".equalsIgnoreCase(re)) return "关闭";
+        return re;
     }
 
     public Object handleReset() {
@@ -261,6 +351,88 @@ public class ActivityActions {
         sm.clearAll();
         println(C_INFO, "表情包图片库已清空（删除 " + before + " 张）。");
         return true;
+    }
+
+    // ==================== 数据导入导出 ====================
+
+    /** 导出指定库到 JSON 文件（SFW 命令，仅主人手动触发）。 */
+    public Object handleExportData(String args) {
+        sair.aiagent.core.PersistenceManager pm = sair.aiagent.core.PersistenceManager.getInstance();
+        if (pm == null) return err("持久化层未初始化。");
+        String[] parts = (args == null ? "" : args.trim()).split("\\s+", 2);
+        String lib = (parts.length > 0 && !parts[0].isEmpty()) ? parts[0].trim().toLowerCase() : "";
+        String path = parts.length > 1 ? parts[1].trim() : "";
+        if (lib.isEmpty()) return err("用法: ai/exportdata <lib> [path]  （lib=memory/note/impression/sticker；path 缺省存数据目录）");
+
+        String json;
+        String defaultName;
+        switch (lib) {
+            case "memory":     json = pm.exportMemoriesJson(); defaultName = "backup_memory.json"; break;
+            case "note":       json = pm.exportNotesJson();    defaultName = "backup_note.json"; break;
+            case "impression": json = pm.exportImpressionsJson(); defaultName = "backup_impression.json"; break;
+            case "sticker":    json = pm.exportStickersJson(); defaultName = "backup_sticker.json"; break;
+            default: return err("未知库名：" + lib + "（可选 memory/note/impression/sticker）");
+        }
+
+        File target;
+        if (!path.isEmpty()) {
+            target = new File(path);
+        } else {
+            File db = pm.getDbFile();
+            String dir = (db != null && db.getParentFile() != null) ? db.getParent() : ".";
+            target = new File(dir, defaultName);
+        }
+        boolean ok = pm.exportJsonToFile(json, target);
+        if (ok) {
+            println(C_INFO, "已导出 " + lib + " → " + target.getAbsolutePath() + "（" + json.length() + " 字符）");
+        } else {
+            println(C_ERR, "导出失败：" + target.getAbsolutePath());
+        }
+        return true;
+    }
+
+    /** 从 JSON 文件导入指定库（清空覆盖，仅主人手动触发）。 */
+    public Object handleImportData(String args) {
+        sair.aiagent.core.PersistenceManager pm = sair.aiagent.core.PersistenceManager.getInstance();
+        if (pm == null) return err("持久化层未初始化。");
+        String[] parts = (args == null ? "" : args.trim()).split("\\s+", 2);
+        if (parts.length < 2 || parts[0].trim().isEmpty() || parts[1].trim().isEmpty()) {
+            return err("用法: ai/importdata <lib> <path>  （lib=memory/note/impression/sticker；导入会清空覆盖原库）");
+        }
+        String lib = parts[0].trim().toLowerCase();
+        String path = parts[1].trim();
+
+        File file = new File(path);
+        String json = pm.readJsonFromFile(file);
+        if (json == null) return err("读取文件失败：" + file.getAbsolutePath());
+
+        switch (lib) {
+            case "memory": {
+                int n = pm.importMemoriesJson(json);
+                if (n < 0) return err("记忆 JSON 解析失败");
+                println(C_INFO, "已导入记忆 " + n + " 条（原库已清空覆盖）。");
+                return true;
+            }
+            case "note": {
+                int n = pm.importNotesJson(json);
+                if (n < 0) return err("笔记 JSON 解析失败");
+                println(C_INFO, "已导入笔记 " + n + " 条（原库已清空覆盖）。");
+                return true;
+            }
+            case "impression": {
+                int[] r = pm.importImpressionsJson(json);
+                if (r[0] < 0) return err("印象 JSON 解析失败");
+                println(C_INFO, "已导入人物印象 " + r[0] + " 条、群印象 " + r[1] + " 条（原库已清空覆盖）。");
+                return true;
+            }
+            case "sticker": {
+                int n = pm.importStickersJson(json);
+                if (n < 0) return err("表情库 JSON 解析失败");
+                println(C_INFO, "已导入表情包 " + n + " 条（原库已清空覆盖）。");
+                return true;
+            }
+            default: return err("未知库名：" + lib + "（可选 memory/note/impression/sticker）");
+        }
     }
 
     // ==================== 确认命令 ====================

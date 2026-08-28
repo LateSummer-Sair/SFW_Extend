@@ -571,6 +571,8 @@ public class IRETranslator {
 	private void parseTopLevel() {
 		emitLine("package " + SCRIPT_PACKAGE + ";");
 		emitLine("");
+		// 自动导入 IREHelper，供 ir 调用（MyLib2; / MyLib2.Label;）生成使用
+		emitLine("import sair.ire.IREHelper;");
 		for (String imp : javaImports)
 			emitLine("import " + imp + ";");
 		if (!javaImports.isEmpty())

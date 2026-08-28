@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>更新日志 — AiAgent 技术文档</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <canvas id="bg-canvas"></canvas>
+  <div class="aurora"><span></span><span></span><span></span></div>
+  <div class="progress-bar"></div>
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航"><span></span><span></span><span></span></button>
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <header class="page-hero">
+      <div class="container">
+        <div class="crumb"><a href="index.html">Home</a> / 更新日志</div>
+        <h1>更新<span class="gradient-text">日志</span></h1>
+        <p class="lead">
+          AiAgent 从 V1.0 本地聊天助手，一路演进到 V3.7 全功能智能代理 ——
+          Function Calling 多轮循环、四层记忆、技能自进化、Harness 多智能体编排、QQ OneBot 机器人、多模态识图。
+        </p>
+      </div>
+    </header>
+
+    <div class="container">
+
+      <section class="section" id="v3">
+        <div class="section-head reveal">
+          <div class="section-tag">V3.x</div>
+          <h2>V3.0 系列 · 智能化与编排</h2>
+          <p class="desc">识图模型上线、技能自进化、Harness 编排、多智能体通信、日志治理。</p>
+        </div>
+        <ul class="feature-list">
+          <li class="feature-item reveal"><div class="check">V3.7</div><div><div class="f-title">日志输出治理 + 全通道调用追踪</div><div class="f-desc">日志不再写文件，统一输出到 SFW 控制台；execs/execq/QQexecs 全通道记录 Agent 探索了什么、调用了什么工具、任务抛给了哪个 Agent</div></div></li>
+          <li class="feature-item reveal"><div class="check">V3.6</div><div><div class="f-title">触发词多词化 + 多智能体通信</div><div class="f-desc">消息触发词支持多个（; 分隔，settrigger 工具动态修改）；AgentBus 多智能体通信（call_agent/ask_agent）；折叠消息解析修复；按需识图 + 段落摘要</div></div></li>
+          <li class="feature-item reveal"><div class="check">V3.5</div><div><div class="f-title">多模态识图增强 + 群印象 + 好感度排行</div><div class="f-desc">引用图片 file(md5) 兜底、图片 3M + File API；群印象系统；好感度排行（本群 Top10 / 全局仅主人）；AgentSkillStore 技能包重构（zip 自动解压）</div></div></li>
+          <li class="feature-item reveal"><div class="check">V3.4</div><div><div class="f-title">消息 Mark 防重 + 系统闹钟 + 多主人</div><div class="f-desc">markmessage 消息处理防重机制；系统闹钟 AI Alarm（语义解析 once/daily/weekly）；多主人支持；数据导出导入（exportdata/importdata）</div></div></li>
+          <li class="feature-item reveal"><div class="check">V3.3</div><div><div class="f-title">Harness 多智能体编排 + 可观测性</div><div class="f-desc">AgentOrchestrator 三种编排模式（pipeline/fanout/expert）；HarnessTrace 轨迹 SQLite 持久化 + HarnessEval 评测；五级上下文压缩管线；统一多线程治理</div></div></li>
+          <li class="feature-item reveal"><div class="check">V3.2</div><div><div class="f-title">技能自进化 + 路径路由</div><div class="f-desc">SkillExtractor LLM 轨迹蒸馏 + RouteCache 路径权重缓存；技能 scope 四分类（general/execq/task/persona）</div></div></li>
+          <li class="feature-item reveal"><div class="check">V3.1</div><div><div class="f-title">表情包系统 + 人格印象系统</div><div class="f-desc">StickerManager 表情包自动收集/发送；ImpressionExtractor 蒸馏五维人格画像，回复时自动注入印象上下文实现个性化交互</div></div></li>
+          <li class="feature-item reveal"><div class="check">V3.0</div><div><div class="f-title">识图上线 · 移除 OCR</div><div class="f-desc">全面改用 DeepSeek 识图模型（多模态 Vision），彻底移除在线 OCR 依赖</div></div></li>
+        </ul>
+      </section>
+
+      <section class="section" id="v2">
+        <div class="section-head reveal">
+          <div class="section-tag">V2.x</div>
+          <h2>V2.0 系列 · Agent 与技能化</h2>
+          <p class="desc">Function Calling、通道简化、技能概念、跨群记忆、情绪印象强化。</p>
+        </div>
+        <ul class="feature-list">
+          <li class="feature-item reveal"><div class="check">V2.9</div><div><div class="f-title">技能库概念重构</div><div class="f-desc">改为单 md 与多文件技能两种模式</div></div></li>
+          <li class="feature-item reveal"><div class="check">V2.8</div><div><div class="f-title">强化情绪系统、印象系统</div><div class="f-desc">情绪状态机与人格印象双向联动，负面情绪降低印象、正面提升</div></div></li>
+          <li class="feature-item reveal"><div class="check">V2.7</div><div><div class="f-title">跨群、跨会话支持</div><div class="f-desc">群聊完整历史全文索引，跨群共享记忆、不失忆</div></div></li>
+          <li class="feature-item reveal"><div class="check">V2.6</div><div><div class="f-title">OCR 频次限制 + 逻辑优化</div><div class="f-desc">限制 OCR 识别频次，优化识别逻辑</div></div></li>
+          <li class="feature-item reveal"><div class="check">V2.5</div><div><div class="f-title">SFW 命令 + 自动清屏</div><div class="f-desc">增加 SFW 命令，可开关 QQ 日志输出，增加自动清屏</div></div></li>
+          <li class="feature-item reveal"><div class="check">V2.4</div><div><div class="f-title">引入技能概念</div><div class="f-desc">支持三方技能导入，Agent 按需加载技能知识</div></div></li>
+          <li class="feature-item reveal"><div class="check">V2.3</div><div><div class="f-title">优化响应速度</div><div class="f-desc">减少无用的链路，降低端到端延迟</div></div></li>
+          <li class="feature-item reveal"><div class="check">V2.2</div><div><div class="f-title">简化通道</div><div class="f-desc">QQ —— QQexecs/execq，本地 —— execs</div></div></li>
+          <li class="feature-item reveal"><div class="check">V2.1</div><div><div class="f-title">强化上下文能力</div><div class="f-desc">引入 Function Calling / Tools Calling</div></div></li>
+          <li class="feature-item reveal"><div class="check">V2.0</div><div><div class="f-title">强化 Agent 执行循环</div><div class="f-desc">加入 OCR 识别</div></div></li>
+        </ul>
+      </section>
+
+      <section class="section" id="v1">
+        <div class="section-head reveal">
+          <div class="section-tag">V1.x</div>
+          <h2>V1.0 系列 · 从聊天到 QQ</h2>
+          <p class="desc">本地聊天、命令行调用、情绪系统、记忆库、QQ-Napcat 接入。</p>
+        </div>
+        <ul class="feature-list">
+          <li class="feature-item reveal"><div class="check">V1.9</div><div><div class="f-title">笔记功能</div><div class="f-desc">增加本地 AI 与 QQ AI 的笔记功能</div></div></li>
+          <li class="feature-item reveal"><div class="check">V1.8</div><div><div class="f-title">QQ-Napcat 强化</div><div class="f-desc">强化主人识别，增加记忆库功能</div></div></li>
+          <li class="feature-item reveal"><div class="check">V1.7</div><div><div class="f-title">QQ-Napcat 支持</div><div class="f-desc">加入 QQ-Napcat 支持，可以接入到 QQ 聊天</div></div></li>
+          <li class="feature-item reveal"><div class="check">V1.6</div><div><div class="f-title">Windows 乱码修复</div><div class="f-desc">修复 Windows 上的乱码</div></div></li>
+          <li class="feature-item reveal"><div class="check">V1.5</div><div><div class="f-title">强化命令行调用</div><div class="f-desc">跨平台支持</div></div></li>
+          <li class="feature-item reveal"><div class="check">V1.4</div><div><div class="f-title">exec 门控强化</div><div class="f-desc">exec 门控的强化，BUG 修复</div></div></li>
+          <li class="feature-item reveal"><div class="check">V1.3</div><div><div class="f-title">通道权限门控</div><div class="f-desc">exec 通道需要权限门控，execs 通道默认允许，chat 聊天通道</div></div></li>
+          <li class="feature-item reveal"><div class="check">V1.2</div><div><div class="f-title">聊天记录缓存</div><div class="f-desc">增加聊天记录缓存数据库能力</div></div></li>
+          <li class="feature-item reveal"><div class="check">V1.1</div><div><div class="f-title">情绪系统</div><div class="f-desc">增加情绪系统</div></div></li>
+          <li class="feature-item reveal"><div class="check">V1.0</div><div><div class="f-title">本地 deepseek-AiAgent</div><div class="f-desc">聊天对话功能上线，支持调用本地命令行</div></div></li>
+        </ul>
+      </section>
+
+    </div>
+
+    <footer class="footer">
+      <div class="container">
+        <p><span class="brand">AiAgent</span> v3.7 · V1.0 → V3.7 版本演进 · 功能里程碑</p>
+      </div>
+    </footer>
+  </main>
+
+  <div class="back-to-top" title="回到顶部">↑</div>
+  <script src="js/main.js"></script>
+</body>
+</html>

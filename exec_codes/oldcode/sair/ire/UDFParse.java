@@ -132,9 +132,18 @@ public class UDFParse {
 				javaFileObjectMap.remove(k);
 	}
 
-	/** 构建编译期 classpath：当前 SFW 类加载链 + 额外 jar */
+	/** 构建编译期 classpath：当前 SFW 类加载链 + act 加载器 + 额外 jar */
 	private static String buildClasspath(Collection<String> extraJars) {
 		HashSet<String> set = new HashSet<String>();
+		// 加入所有 act 加载器（ExecLoaders）中的 jar，确保 IRE 插件自身（含 IREHelper）在编译 classpath 中。
+		// 注意：SairBaseLoader.findClass 使用不带 CodeSource 的 defineClass，类的 getCodeSource() 为 null，
+		// 因此不能靠 CodeSource 定位插件位置，必须直接遍历 act 加载器。
+		for (SairLoader actLoader : LoaderManager.ExecLoaders.values()) {
+			if (actLoader == null)
+				continue;
+			for (File file : actLoader.getAllJarFile())
+				set.add(file.getAbsolutePath() + File.pathSeparator);
+		}
 		for (ClassLoader classloader : urlClassLoaders) {
 			if (classloader instanceof SairLoader) {
 				Collection<File> con = ((SairLoader) classloader).getAllJarFile();
@@ -250,11 +259,22 @@ public class UDFParse {
 
 		private Class<?> toLoad(String name) {
 			Class<?> clazz = null;
+			// 先尝试 act 加载器（IRE 插件自身通过 ExectionLoader 加载），确保 IREHelper 等插件类可被脚本类解析
+			for (SairLoader actLoader : LoaderManager.ExecLoaders.values()) {
+				if (actLoader == null)
+					continue;
+				try {
+					clazz = actLoader.loadClass(name);
+				} catch (ClassNotFoundException e) {
+				}
+				if (clazz != null)
+					return clazz;
+			}
+			// 再尝试原有加载链
 			for (ClassLoader classloader : urlClassLoaders) {
 				try {
 					clazz = classloader.loadClass(name);
 				} catch (ClassNotFoundException e) {
-
 				}
 				if (clazz != null)
 					return clazz;

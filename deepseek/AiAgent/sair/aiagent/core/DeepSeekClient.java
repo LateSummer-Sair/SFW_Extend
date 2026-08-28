@@ -321,6 +321,12 @@ public class DeepSeekClient {
                             img.addProperty("url", (String) imgObj.get("url"));
                             p.add("image_url", img);
                         }
+                    } else if ("file".equals(type)) {
+                        // File API 内容块：{type:"file", file_id:"file-api-xxx"}
+                        Object fid = part.get("file_id");
+                        if (fid != null) {
+                            p.addProperty("file_id", fid.toString());
+                        }
                     }
                     contentArr.add(p);
                 }
@@ -373,6 +379,11 @@ public class DeepSeekClient {
         // 不生效（下发也会被忽略），故仅在关闭思考时下发这些采样参数，避免误导。
         String re = cfg.getReasoningEffort();
         boolean thinkingEnabled = (re != null && !re.isEmpty() && !"none".equalsIgnoreCase(re));
+        // 视觉多模态（图片识别/审查）无需深度思考：强制关闭 thinking，避免视觉模型响应极慢导致卡死
+        // （深度思考会为图片生成大量 reasoning tokens，使 vision 调用耗时从秒级膨胀到分钟级）
+        if (hasMultimodalContent(messages)) {
+            thinkingEnabled = false;
+        }
         JsonObject thinking = new JsonObject();
         thinking.addProperty("type", thinkingEnabled ? "enabled" : "disabled");
         root.add("thinking", thinking);

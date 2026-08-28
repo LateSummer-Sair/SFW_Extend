@@ -183,14 +183,22 @@ public class ChatMessage implements Serializable {
         if (imageUrls != null) {
             for (String url : imageUrls) {
                 if (url != null && !url.isEmpty()) {
-                    Map<String, Object> imageUrlObj = new LinkedHashMap<>();
-                    imageUrlObj.put("url", url);
+                    if (url.startsWith("file:")) {
+                        // File API 上传结果：{type:"file", file_id:"file-api-xxx"}
+                        Map<String, Object> filePart = new LinkedHashMap<>();
+                        filePart.put("type", "file");
+                        filePart.put("file_id", url.substring("file:".length()));
+                        parts.add(filePart);
+                    } else {
+                        Map<String, Object> imageUrlObj = new LinkedHashMap<>();
+                        imageUrlObj.put("url", url);
 
-                    Map<String, Object> imagePart = new LinkedHashMap<>();
-                    imagePart.put("type", "image_url");
-                    imagePart.put("image_url", imageUrlObj);
+                        Map<String, Object> imagePart = new LinkedHashMap<>();
+                        imagePart.put("type", "image_url");
+                        imagePart.put("image_url", imageUrlObj);
 
-                    parts.add(imagePart);
+                        parts.add(imagePart);
+                    }
                 }
             }
         }

@@ -1,12 +1,6 @@
 package sair.aiagent;
 
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.OutputStreamWriter;
-import java.io.PrintWriter;
-import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 
 
 import sair.FCM;
@@ -41,7 +35,7 @@ import sair.user.Activity;
 import sair.user.PrintRunnable;
 
 /**
- * AiAgent V3.4 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
+ * AiAgent V3.7 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
  *
  * <h3>架构</h3>
  * 路由与命令实现分离 —— {@code main()} 仅做初始化 + 委托 {@link ActivityActions#route}，
@@ -145,6 +139,8 @@ public class AiAgentActivity extends Activity {
             emotionManager.setPersistenceManager(persistenceManager);
             stickerManager.setPersistenceManager(persistenceManager);
             stickerManager.setDataDir(dataDir);
+            stickerManager.setDeepSeekClient(client);
+            stickerManager.startAutoCleanup();
             agent.setStickerManager(stickerManager);
 
             // 从 SQLite 加载（首次运行时自动迁移旧 JSON）
@@ -340,7 +336,7 @@ public class AiAgentActivity extends Activity {
         String n = getName();
         return new String[] {
             Pathes.printSplit,
-            "AiAgent V3.4 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出 · OneBot QQ",
+            "AiAgent V3.7 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出 · OneBot QQ",
             "DeepSeek API, 流式打字机效果, Agent自主操作, 持久化记忆, JS/Java动态注入",
             "配置:",
             "\t" + n + "/setkey [密钥]        设置API密钥",
@@ -349,7 +345,8 @@ public class AiAgentActivity extends Activity {
             "\t" + n + "/setthirdpartycode on|off  三方技能代码段权限（默认on放权，所有通道可用；off则仅execs/本地）",
             "\t" + n + "/setprompt [提示词]   设置系统提示词",
             "\t" + n + "/showprompt           显示当前提示词",
-            "\t" + n + "/info                 显示配置信息",
+            "\t" + n + "/config              显示配置信息",
+            "\t" + n + "/setconfig <key> <value>  设置配置项（思考模式/温度/top_p等，输入 setconfig 看用法）",
             "对话:",
             "\t" + n + "/execs [任务]         Agent模式 (原生Function Calling，免确认全能)",
             "\t" + n + "/orchestrate [pipeline|fanout|expert] [任务]  多智能体编排（流水线/扇出扇入/专家池，opt-in）",
@@ -362,6 +359,9 @@ public class AiAgentActivity extends Activity {
             "\t" + n + "/memories             列出所有记忆",
             "\t" + n + "/forget [ID]          按ID删除记忆",
             "\t" + n + "/forgetall            清空所有记忆",
+            "数据备份:",
+            "\t" + n + "/exportdata <lib> [path]  导出库为JSON（lib=memory/note/impression/sticker；path缺省存数据目录）",
+            "\t" + n + "/importdata <lib> <path>  从JSON导入库（清空覆盖原库）",
             "反射确认:",
             "\t" + n + "/yes                  确认高危操作 (反射/系统命令/动态注入)",
             "\t" + n + "/no                   拒绝高危操作",
@@ -473,13 +473,6 @@ public class AiAgentActivity extends Activity {
             persistenceManager.close();
             persistenceManager = null;
         }
-        // 关闭调试日志写入器
-        synchronized (debugLock) {
-            if (debugWriter != null) {
-                debugWriter.close();
-                debugWriter = null;
-            }
-        }
     }
 
     // ==================== 自动清屏守护线程 ====================
@@ -530,6 +523,7 @@ public class AiAgentActivity extends Activity {
             oneBotMessageHandler.setDataDir(dataDir);          // 必须在setServer之前调用！
             oneBotMessageHandler.setServer(oneBotServer);
             oneBotMessageHandler.setAgentExecutor(agent);
+            stickerManager.setNapcatApi(oneBotMessageHandler.getNapcatApi());
             oneBotMessageHandler.setSelfId(config.getOnebotSelfId());
 
             oneBotServer.setMessageHandler(oneBotMessageHandler);
@@ -597,26 +591,14 @@ public class AiAgentActivity extends Activity {
 
         // ==================== Debug 日志 ====================
 
-    private static PrintWriter debugWriter;
-    private static final Object debugLock = new Object();
-
     /** QQ消息控制台输出开关 — 默认开启，通过 ai/qqlogoff 关闭 */
     private static volatile boolean qqLogEnabled = true;
 
-    /** Debug log to file - cross-platform */
+    /** Debug log 仅输出到 SFW 控制台（不写文件） */
     public static void debugLog(String msg) {
-        synchronized (debugLock) {
-            try {
-                SairCons.println("[AiAgent] " + msg);
-                if (debugWriter == null) {
-                    debugWriter = new PrintWriter(new OutputStreamWriter(
-                            new FileOutputStream(
-                                System.getProperty("user.home") + File.separator + "aiagent_debug.log", true),
-                            StandardCharsets.UTF_8), true);
-                }
-                debugWriter.println(new SimpleDateFormat("HH:mm:ss.SSS").format(new Date()) + " " + msg);
-            } catch (Exception ignored) {}
-        }
+        try {
+            SairCons.println("[AiAgent] " + msg);
+        } catch (Exception ignored) {}
     }
 
     /** QQ消息专用日志：受 qqLogEnabled 开关控制 */

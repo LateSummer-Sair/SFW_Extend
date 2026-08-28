@@ -22,7 +22,7 @@
         <h1>系统<span class="gradient-text">架构</span></h1>
         <p class="lead">
           AiAgent 采用「路由与命令实现分离 + Function Calling 统一执行」的分层架构。
-          从命令入口 → 上下文注入 → 多轮工具调用 → 结果流式输出，形成完整闭环。
+          从命令入口 → 上下文注入 → 多轮工具调用 → 多智能体协作 → 结果流式输出，形成完整闭环。
         </p>
       </div>
     </header>
@@ -33,13 +33,13 @@
         <div class="section-head reveal">
           <div class="section-tag">Layers</div>
           <h2>分层架构</h2>
-          <p class="desc">9 个包 · 91 个类，按职责划分为 4 层。</p>
+          <p class="desc">9 个包 · 92 个 Java 源文件，按职责划分为 4 层。</p>
         </div>
         <div class="flow-box reveal">
           <div class="flow">
             <div class="flow-node core"><span class="fn-title">入口层</span><span class="fn-sub">AiAgentActivity（SFW Activity）+ ActivityActions + OneBotCommandActions</span></div>
             <div class="flow-edge"></div>
-            <div class="flow-node data"><span class="fn-title">执行层</span><span class="fn-sub">AgentExecutor + AgentOrchestrator + FunctionCallingBridge + ToolDispatcher + AgentActionHandler + ThreadManager</span></div>
+            <div class="flow-node data"><span class="fn-title">执行层</span><span class="fn-sub">AgentExecutor + AgentBus + AgentOrchestrator + FunctionCallingBridge + ToolDispatcher + AgentActionHandler + ThreadManager</span></div>
             <div class="flow-edge"></div>
             <div class="flow-node core"><span class="fn-title">能力层</span><span class="fn-sub">SkillBank / DeepSeekClient / DynamicCodeEngine / PersistenceManager / MemoryManager</span></div>
             <div class="flow-edge"></div>
@@ -103,6 +103,57 @@
         </div>
       </section>
 
+      <section class="section" id="multi-agent">
+        <div class="section-head reveal">
+          <div class="section-tag">Multi-Agent</div>
+          <h2>多智能体协作</h2>
+          <p class="desc">两层协作机制：AgentBus 递归通信（运行时互唤）+ AgentOrchestrator 任务编排（显式分解）。</p>
+        </div>
+
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">AgentBus 注册表</span><span class="fn-sub">main / vision / passage 三个 Agent</span></div>
+            <div class="flow-edge label"><span class="el">call_agent / ask_agent 工具</span></div>
+            <div class="flow-node core"><span class="fn-title">main 主模型</span><span class="fn-sub">主管全局上下文与资源调度</span></div>
+            <div class="flow-edge label"><span class="el">唤起 vision</span></div>
+            <div class="flow-node data"><span class="fn-title">vision 视觉模型</span><span class="fn-sub">分析图像，用 vision 工具</span></div>
+            <div class="flow-edge label"><span class="el">唤起 passage</span></div>
+            <div class="flow-node core"><span class="fn-title">passage 段落模型</span><span class="fn-sub">概括折叠消息，可反向 ask_agent main</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node end"><span class="fn-title">递归返回结果</span><span class="fn-sub">MAX_DEPTH=6 防死循环</span></div>
+          </div>
+          <div class="flow-caption">AgentBus：把「唤起另一个 Agent」做成 Function Calling 工具</div>
+        </div>
+
+        <div class="callout reveal">
+          <div class="co-icon">💡</div>
+          <div>三个协作 Agent 各有专属工具集：main 用全量/execq 工具，vision 用 vision/web/search/searchglobal，passage 用 searchglobal/searchnote/vision。每个子 Agent 的工具集都会额外注入 call_agent / ask_agent，使它能反向唤起其他 Agent，形成双向递归协作。</div>
+        </div>
+
+        <div class="flow-box reveal">
+          <div class="flow">
+            <div class="flow-node start"><span class="fn-title">ai/orchestrate [模式] [任务]</span><span class="fn-sub">显式多智能体编排入口</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node decision"><span class="fn-title">选择编排模式</span><span class="fn-sub">pipeline / fanout / expert</span></div>
+            <div class="flow-branch">
+              <div>
+                <div class="flow-branch-label">PIPELINE 流水线</div>
+                <div class="flow-node core"><span class="fn-title">任务分解为有序子步骤</span><span class="fn-sub">规划器拆分，按顺序串行执行</span></div>
+              </div>
+              <div>
+                <div class="flow-branch-label">FANOUT 扇出扇入</div>
+                <div class="flow-node core"><span class="fn-title">拆独立子任务并行执行</span><span class="fn-sub">各自完成后聚合结果</span></div>
+              </div>
+            </div>
+            <div class="flow-edge"></div>
+            <div class="flow-node data"><span class="fn-title">EXPERT_POOL 专家池</span><span class="fn-sub">路由器按任务类型选 coder/researcher/writer/general</span></div>
+            <div class="flow-edge"></div>
+            <div class="flow-node end"><span class="fn-title">聚合最终结果</span><span class="fn-sub">所有子步骤结果汇总返回</span></div>
+          </div>
+          <div class="flow-caption">AgentOrchestrator：任务分解 + 多 Agent 协作编排</div>
+        </div>
+      </section>
+
       <section class="section" id="context">
         <div class="section-head reveal">
           <div class="section-tag">Context</div>
@@ -155,21 +206,19 @@
         <div class="section-head reveal">
           <div class="section-tag">Structure</div>
           <h2>目录结构</h2>
-          <p class="desc">9 个包，91 个 Java 源文件，共 29,657 行代码。</p>
+          <p class="desc">9 个包，92 个 Java 源文件，共 31,602 行代码。</p>
         </div>
         <div class="table-wrap reveal">
           <table>
             <thead><tr><th>包</th><th>文件数</th><th>行数</th><th>职责</th></tr></thead>
             <tbody>
-              <tr><td class="cmd-name">sair.aiagent</td><td>1</td><td>577</td><td>插件入口 AiAgentActivity</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.core</td><td>45</td><td>15,027</td><td>核心引擎：Agent / FC / 工具 / 持久化 / 技能 / Harness</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.model</td><td>12</td><td>1,393</td><td>数据模型 POJO</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.acts</td><td>2</td><td>857</td><td>命令委托层</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.onebot</td><td>20</td><td>9,967</td><td>QQ OneBot 机器人模块</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.util</td><td>7</td><td>1,140</td><td>工具：网页抓取 / 天气 / 图片渲染 / 文件</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.ui</td><td>2</td><td>274</td><td>彩蛋窗口 / 系统控制台面板</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.onebot.model</td><td>1</td><td>242</td><td>QQMessage 消息模型</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.onebot.util</td><td>1</td><td>180</td><td>JsonUtil JSON 解析</td></tr>
+              <tr><td class="cmd-name">sair.aiagent</td><td>1</td><td>624</td><td>插件入口 AiAgentActivity</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.core</td><td>46</td><td>16,170</td><td>核心引擎：Agent / FC / 工具 / 持久化 / 技能 / Harness / 多智能体</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.model</td><td>12</td><td>1,250</td><td>数据模型 POJO</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.acts</td><td>2</td><td>1,147</td><td>命令委托层</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.onebot</td><td>22</td><td>11,038</td><td>QQ OneBot 机器人模块（含 model/util 子目录）</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.util</td><td>7</td><td>1,100</td><td>工具：网页抓取 / 天气 / 图片渲染 / 文件</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.ui</td><td>2</td><td>273</td><td>彩蛋窗口 / 系统控制台面板</td></tr>
             </tbody>
           </table>
         </div>
@@ -179,8 +228,8 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.4 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
-        <p style="margin-top:6px">分层架构 · Function Calling 循环 · 上下文注入链 · 拟人化监听态 · OneBot QQ 模块 · 目录结构</p>
+        <p><span class="brand">AiAgent</span> v3.7 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
+        <p style="margin-top:6px">分层架构 · Function Calling 循环 · 多智能体协作 · 上下文注入链 · 拟人化监听态 · OneBot QQ 模块 · 目录结构</p>
       </div>
     </footer>
   </main>

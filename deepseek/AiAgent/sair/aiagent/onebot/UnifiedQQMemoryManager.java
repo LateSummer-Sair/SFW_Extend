@@ -361,6 +361,26 @@ public class UnifiedQQMemoryManager {
         return getRecentConversations(limit, "private", userId);
     }
 
+    /** 获取某用户在群聊中的最近发言（用于印象蒸馏，返回 [nickname, content]，时间升序）。 */
+    public List<String[]> getUserGroupMessages(long userId, int limit) {
+        List<String[]> list = new ArrayList<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT nickname, content FROM group_chat_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?")) {
+                ps.setLong(1, userId);
+                ps.setInt(2, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    List<String[]> temp = new ArrayList<>();
+                    while (rs.next()) {
+                        temp.add(new String[] { rs.getString(1), rs.getString(2) });
+                    }
+                    for (int i = temp.size() - 1; i >= 0; i--) list.add(temp.get(i));
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+
     /** 给对话历史中该来源最近一条相同内容的 user 消息打 Mark 备注（AI 自用，标记已处理）。 */
     public void setConversationMark(String sourceType, long sourceId, String content, String mark) {
         if (content == null || content.trim().isEmpty() || mark == null || mark.trim().isEmpty()) return;

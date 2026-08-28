@@ -80,7 +80,7 @@ public class AiConfig {
     private String redisPassword = "";
 
     // === DeepSeek API 高级参数 ===
-    private String reasoningEffort = "";  // 空=不启用思考模式, high/max=启用
+    private String reasoningEffort = "high";  // 默认启用深度思考, low/high/max=启用, none/空=关闭
     private double temperature = -1;        // -1=不设置, 0~2.0
     private double topP = -1;               // -1=不设置
     private String stopSequences = "";      // 逗号分隔的停止词
@@ -104,7 +104,7 @@ public class AiConfig {
     /** 监听的群号列表（逗号分隔） */
     private final Set<Long> monitoredGroups = new LinkedHashSet<>();
 
-    /** AI机器人名字（用于检测群聊中提到名字时触发回复） */
+    /** 消息触发词列表（多个用 ; 分隔，用于群聊中提到任一触发词时触发回复；第一个作为主名字展示） */
     private String botName = "";
 
     /** 文件下载目录（接收主人发送的文件存储位置） */
@@ -188,7 +188,7 @@ public class AiConfig {
             // 文件下载目录
             fileDownloadPath = p.getProperty("fileDownloadPath", "");
             // DeepSeek 高级参数
-            reasoningEffort = p.getProperty("reasoningEffort", "");
+            reasoningEffort = p.getProperty("reasoningEffort", "high");
             try { temperature = Double.parseDouble(p.getProperty("temperature", "-1")); } catch (NumberFormatException ignored) {}
             try { topP = Double.parseDouble(p.getProperty("topP", "-1")); } catch (NumberFormatException ignored) {}
             stopSequences = p.getProperty("stopSequences", "");
@@ -406,7 +406,8 @@ public class AiConfig {
 
     /**
      * 获取 Vision（多模态图像理解）模型名。
-     * <p>当消息携带图片时，切换到该模型，通过多模态能力直接看图理解（替代已移除的在线 OCR）。</p>
+     * <p>按需识图：仅当用户「引用图片」或明确「看图指令」时才调用该模型分析图像内容。
+     * 识别结果由 {@code FunctionCallingBridge} 以 [图片内容识别结果] 注入主模型上下文。</p>
      */
     public String getVisionModel() {
         return DEFAULT_VISION_MODEL;
@@ -493,10 +494,51 @@ public class AiConfig {
     public boolean addMonitoredGroup(long groupId) { return monitoredGroups.add(groupId); }
     public boolean removeMonitoredGroup(long groupId) { return monitoredGroups.remove(groupId); }
 
-    // === AI机器人名字 ===
+    // === AI机器人名字 / 消息触发词 ===
 
-    public String getBotName() { return botName != null ? botName.trim() : ""; }
-    public void setBotName(String name) { this.botName = (name != null) ? name.trim() : ""; }
+    /** 获取主名字（第一个触发词），用于展示（转发卡片/提示词等）；无则返回空串 */
+    public String getBotName() {
+        List<String> words = getTriggerWords();
+        return words.isEmpty() ? "" : words.get(0);
+    }
+
+    /** 获取原始触发词存储串（多个用 ; 分隔，用于配置展示） */
+    public String getBotNameRaw() {
+        return botName != null ? botName.trim() : "";
+    }
+
+    /** 获取所有触发词（按 ; 拆分，去空白去空项） */
+    public List<String> getTriggerWords() {
+        List<String> words = new ArrayList<>();
+        if (botName == null || botName.trim().isEmpty()) return words;
+        for (String w : botName.split(";")) {
+            String t = w.trim();
+            if (!t.isEmpty()) words.add(t);
+        }
+        return words;
+    }
+
+    /** 判断文本是否命中任一触发词（用于群聊中@之外的触发检测） */
+    public boolean matchesTrigger(String text) {
+        if (text == null || text.isEmpty()) return false;
+        List<String> words = getTriggerWords();
+        if (words.isEmpty()) return false;
+        for (String w : words) {
+            if (text.contains(w)) return true;
+        }
+        return false;
+    }
+
+    /** 设置触发词（多个用 ; 分隔，自动去空白、去空项、去重后重新拼接存储） */
+    public void setBotName(String name) {
+        if (name == null) { this.botName = ""; return; }
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        for (String w : name.split(";")) {
+            String t = w.trim();
+            if (!t.isEmpty()) seen.add(t);
+        }
+        this.botName = String.join(";", seen);
+    }
 
     // === DeepSeek API 高级参数 Getters/Setters ===
 

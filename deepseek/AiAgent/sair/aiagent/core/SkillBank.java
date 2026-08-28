@@ -415,22 +415,22 @@ public class SkillBank {
         return agentSkillStore != null && agentSkillStore.get(name) != null;
     }
 
-    /** 将三方技能格式化为紧凑索引行（取前3行作为摘要）。 */
+    /** 将三方技能格式化为紧凑索引行（优先用 description 一句话描述，为空才取 content 前3行）。 */
     private static String compactThirdPartyLine(ThirdPartySkill tp) {
-        String content = tp.getContent();
-        String desc;
-        if (content != null && !content.isEmpty()) {
-            String[] lines = content.split("\\n");
-            StringBuilder summary = new StringBuilder();
-            for (int i = 0; i < Math.min(3, lines.length); i++) {
-                String line = lines[i].trim();
-                if (line.isEmpty()) continue;
-                if (summary.length() > 0) summary.append(" ");
-                summary.append(line);
+        String desc = tp.getDescription();
+        if (desc == null || desc.trim().isEmpty()) {
+            String content = tp.getContent();
+            if (content != null && !content.isEmpty()) {
+                String[] lines = content.split("\\n");
+                StringBuilder summary = new StringBuilder();
+                for (int i = 0; i < Math.min(3, lines.length); i++) {
+                    String line = lines[i].trim();
+                    if (line.isEmpty()) continue;
+                    if (summary.length() > 0) summary.append(" ");
+                    summary.append(line);
+                }
+                desc = summary.toString();
             }
-            desc = summary.toString();
-        } else {
-            desc = tp.getDescription();
         }
         if (desc == null) desc = "";
         if (desc.length() > 120) desc = desc.substring(0, 117) + "...";
@@ -465,20 +465,26 @@ public class SkillBank {
         return true;  // execs 或其它：全部可见
     }
 
-    /** 将一条技能格式化为紧凑索引行（取前3行作为摘要） */
+    /** 将一条技能格式化为紧凑索引行（优先用 description 一句话描述，为空才取 content 前3行） */
     private String compactLine(SkillEntry s) {
-        String content = s.getContent();
-        if (content == null) return null;
-        // 取前3行作为简短摘要
-        String[] lines = content.split("\\n");
-        StringBuilder summary = new StringBuilder();
-        for (int i = 0; i < Math.min(3, lines.length); i++) {
-            String line = lines[i].trim();
-            if (line.isEmpty()) continue;
-            if (summary.length() > 0) summary.append(" ");
-            summary.append(line);
+        String desc = s.getDescription();
+        if (desc == null || desc.trim().isEmpty()) {
+            // 回退：description 为空时取 content 前3行作为摘要
+            String content = s.getContent();
+            if (content == null) return null;
+            String[] lines = content.split("\\n");
+            StringBuilder summary = new StringBuilder();
+            for (int i = 0; i < Math.min(3, lines.length); i++) {
+                String line = lines[i].trim();
+                if (line.isEmpty()) continue;
+                if (summary.length() > 0) summary.append(" ");
+                summary.append(line);
+            }
+            desc = summary.toString();
+        } else {
+            desc = desc.trim();
         }
-        String desc = summary.toString();
+        if (desc.isEmpty()) return null;
         if (desc.length() > 120) desc = desc.substring(0, 117) + "...";
         return "- " + s.getName() + ": " + desc + "\n";
     }

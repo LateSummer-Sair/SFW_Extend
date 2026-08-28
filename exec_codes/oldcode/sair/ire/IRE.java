@@ -6,7 +6,15 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.MalformedURLException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardWatchEventKinds;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -56,6 +64,26 @@ public class IRE extends Activity {
 
 	/** 已自动扫描过同父目录的目录集合，避免递归重复扫描 */
 	private final LinkedHashSet<String> scannedSiblingDirs = new LinkedHashSet<String>();
+
+	/** 热更新监控：规范化路径 -> 监控条目 */
+	private final LinkedHashMap<String, MonitoredEntry> monitored = new LinkedHashMap<String, MonitoredEntry>();
+	private final HashSet<String> watchedDirs = new HashSet<String>();
+	private WatchService watcher;
+	private Thread watchThread;
+
+	/** 热更新监控条目 */
+	private static class MonitoredEntry {
+		final String path;
+		String hash;
+		boolean changed;
+		long loadedAt;
+		long changedAt;
+
+		MonitoredEntry(String path) {
+			this.path = path;
+			this.loadedAt = System.currentTimeMillis();
+		}
+	}
 
 	@Override
 	public Object main(String funcName, String args) {
@@ -125,6 +153,9 @@ public class IRE extends Activity {
 		case "run":
 			return run(args);
 
+		case "monlist":
+			return monlist();
+
 		}
 
 		return false;
@@ -169,6 +200,11 @@ public class IRE extends Activity {
 		List<String> jarPaths = new ArrayList<String>();
 		LinkedHashSet<String> ireFiles = new LinkedHashSet<String>();
 		collectImports(mainPath, irPaths, jarPaths, ireFiles);
+
+		// 注册热更新监控（主文件 + 所有 import 的 ire 文件）
+		ensureWatchService();
+		for (String irePath : ireFiles)
+			registerMonitor(irePath);
 
 		// 2. jar 运行期加载：加入当前 SairLoader 链
 		for (String jar : jarPaths) {
@@ -224,10 +260,136 @@ public class IRE extends Activity {
 			SairCons.println(FCM.Error_Color, "main(String) method not found: " + e.getMessage());
 		} catch (Exception e) {
 			SairCons.println(FCM.Error_Color, "execute failed: " + e.getMessage());
+			// 反射调用异常：打印真正的 cause 与堆栈，便于定位
+			Throwable cause = e.getCause();
+			if (cause != null) {
+				SairCons.println(FCM.Error_Color, "cause: " + cause.toString());
+				for (StackTraceElement st : cause.getStackTrace())
+					SairCons.println(FCM.Error_Color, "  at " + st.toString());
+			} else {
+				for (StackTraceElement st : e.getStackTrace())
+					SairCons.println(FCM.Error_Color, "  at " + st.toString());
+			}
 		} finally {
 			UDFParse.removeCompiled(compiledBefore);
 		}
 		return null;
+	}
+
+	/** 列出被热更新监控的 ire 文件及其状态 */
+	private Object monlist() {
+		ensureWatchService();
+		SairCons.println(FCM.split_Color, Pathes.printSplit);
+		SairCons.println(FCM.EXECTION_help_Color, "Monitored ire files (" + monitored.size() + ")");
+		for (MonitoredEntry e : monitored.values()) {
+			String status = e.changed ? "[CHANGED]" : "[OK]";
+			SairCons.println(FCM.EXECTION_help_Color, status + " " + e.path);
+		}
+		if (monitored.isEmpty())
+			SairCons.println(FCM.EXECTION_help_Color, "(空)");
+		return monitored.keySet();
+	}
+
+	/** 启动 WatchService 后台监控线程（懒启动） */
+	private void ensureWatchService() {
+		if (watcher != null)
+			return;
+		try {
+			watcher = FileSystems.getDefault().newWatchService();
+			watchThread = new Thread(this::watchLoop, "IRE-Watch");
+			watchThread.setDaemon(true);
+			watchThread.start();
+		} catch (Exception e) {
+			watcher = null;
+		}
+	}
+
+	/** 把 ire 文件加入热更新监控 */
+	private void registerMonitor(String path) {
+		path = new File(path).getAbsolutePath();
+		if (monitored.containsKey(path))
+			return;
+		MonitoredEntry entry = new MonitoredEntry(path);
+		entry.hash = fileHash(path);
+		monitored.put(path, entry);
+		registerWatchDir(new File(path).getParentFile());
+	}
+
+	/** 注册文件所在目录到 WatchService（去重） */
+	private void registerWatchDir(File dir) {
+		if (watcher == null || dir == null || !dir.isDirectory())
+			return;
+		if (!watchedDirs.add(dir.getAbsolutePath()))
+			return;
+		try {
+			Paths.get(dir.getAbsolutePath()).register(watcher, StandardWatchEventKinds.ENTRY_MODIFY,
+					StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_DELETE);
+		} catch (Exception ignore) {
+		}
+	}
+
+	/** WatchService 后台循环：事件防抖 + 临时文件过滤 + 哈希比对 */
+	private void watchLoop() {
+		while (true) {
+			WatchKey key;
+			try {
+				key = watcher.take();
+			} catch (Exception e) {
+				return;
+			}
+			// 事件防抖：合并短时间内的连续事件
+			try {
+				Thread.sleep(300);
+			} catch (InterruptedException e) {
+				return;
+			}
+			for (WatchEvent<?> event : key.pollEvents()) {
+				WatchEvent.Kind<?> kind = event.kind();
+				if (kind == StandardWatchEventKinds.OVERFLOW)
+					continue;
+				Object ctx = event.context();
+				if (!(ctx instanceof Path))
+					continue;
+				Path abs = ((Path) key.watchable()).resolve((Path) ctx);
+				String path = abs.toFile().getAbsolutePath();
+				// 临时文件过滤
+				String name = abs.toFile().getName();
+				if (name.startsWith("~") || name.endsWith(".tmp") || name.endsWith(".swp"))
+					continue;
+				MonitoredEntry entry = monitored.get(path);
+				if (entry == null)
+					continue;
+				checkChanged(entry);
+			}
+			key.reset();
+		}
+	}
+
+	/** 哈希比对：只有内容真正变化才标记（二次去噪） */
+	private void checkChanged(MonitoredEntry entry) {
+		if (entry.changed)
+			return;
+		String newHash = fileHash(entry.path);
+		if (newHash == null || newHash.equals(entry.hash))
+			return;
+		entry.hash = newHash;
+		entry.changed = true;
+		entry.changedAt = System.currentTimeMillis();
+		SairCons.println(FCM.Error_Color, "ire: 文件已变更 [" + entry.path + "]");
+	}
+
+	/** 计算文件 MD5（读取失败返回 null） */
+	private String fileHash(String path) {
+		try {
+			MessageDigest md = MessageDigest.getInstance("MD5");
+			byte[] digest = md.digest(Files.readAllBytes(Paths.get(path)));
+			StringBuilder sb = new StringBuilder();
+			for (byte b : digest)
+				sb.append(String.format("%02x", b));
+			return sb.toString();
+		} catch (Exception e) {
+			return null;
+		}
 	}
 
 	/** 递归收集 import 的 ire 文件、ir 文件与 jar 路径，建立 ir 逻辑名映射 */
@@ -631,6 +793,7 @@ public class IRE extends Activity {
 				this.getName() + "/omlist [name] : 遍历显示omap中指定对象的所有公开方法", //
 				this.getName() + "/loadall [code] : 加载编译" + this.getDataDir() + "下面所有的java文件", //
 				this.getName() + "/classlist : 遍历显示已加载的所有Class", //
+				this.getName() + "/monlist : 列出被热更新监控的 ire 文件及其状态", //
 		};
 	}
 

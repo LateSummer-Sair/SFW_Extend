@@ -567,8 +567,12 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
             } else if ("forward".equals(seg.type)) {
                 String dataObj = extractObject(item, "data");
                 if (dataObj != null) {
-                    // 尝试提取content（部分实现如NapCat直接内嵌内容）
-                    seg.content = extractString(dataObj, "content");
+                    // content 是 JSON 数组（NapCat 内嵌消息节点列表），优先用 extractArray；
+                    // 部分实现可能是字符串，降级 extractString 兼容。
+                    seg.content = extractArray(dataObj, "content");
+                    if (seg.content == null || seg.content.isEmpty()) {
+                        seg.content = extractString(dataObj, "content");
+                    }
                     // 提取forward_id（标准OneBot v11）
                     String fwdId = extractString(dataObj, "id");
                     if (fwdId != null && !fwdId.isEmpty()) {
@@ -746,14 +750,18 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
             }
             if (seg.isForward()) {
                 hasForward = true;
+                boolean extractedFromContent = false;
                 if (seg.content != null && !seg.content.isEmpty()) {
                     // content直接可用（部分实现如NapCat内嵌）
                     String extracted = ForwardMessageExpander.extractForwardText(seg.content);
                     if (extracted != null && !extracted.isEmpty()) {
                         if (forwardText.length() > 0) forwardText.append("\n");
                         forwardText.append(extracted);
+                        extractedFromContent = true;
                     }
-                } else if (seg.forwardId != null && !seg.forwardId.isEmpty()) {
+                }
+                // content 解析失败时，fallback 到 forward_id 走 get_forward_msg（避免内容丢失）
+                if (!extractedFromContent && seg.forwardId != null && !seg.forwardId.isEmpty()) {
                     // 标准OneBot v11：只有forward_id，需异步API获取
                     msg.setForwardId(seg.forwardId);
                     AiAgentActivity.qqLog("[QQMsg] 检测到折叠消息，forward_id=" + seg.forwardId + "，将异步获取内容");
@@ -890,12 +898,9 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 // 2. 如果消息触发了AI响应，也记录到个人对话历史（长期存储）
                 boolean shouldRespond = msg.isAtBot(); // 仅响应@自己的消息
                 if (!shouldRespond) {
-                    String botName = sair.aiagent.core.AiConfig.getInstance().getBotName();
-                    if (botName != null && !botName.isEmpty()) {
-                        String plainText = msg.getPlainText();
-                        if (plainText != null && plainText.contains(botName)) {
-                            shouldRespond = true;
-                        }
+                    String plainText = msg.getPlainText();
+                    if (sair.aiagent.core.AiConfig.getInstance().matchesTrigger(plainText)) {
+                        shouldRespond = true;
                     }
                 }
                 
@@ -926,15 +931,12 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
             if (msg.isGroupMessage()) {
                 boolean shouldRespond = msg.isAtBot(); // 仅响应@自己的消息
                 
-                // 检查是否提到了AI的名字
+                // 检查是否命中任一触发词（多个触发词用 ; 分隔）
                 if (!shouldRespond) {
-                    String botName = sair.aiagent.core.AiConfig.getInstance().getBotName();
-                    if (botName != null && !botName.isEmpty()) {
-                        String plainText = msg.getPlainText();
-                        if (plainText != null && plainText.contains(botName)) {
-                            shouldRespond = true;
-                            AiAgentActivity.qqLog("[QQMsg] 检测到提到名字: " + botName);
-                        }
+                    String plainText = msg.getPlainText();
+                    if (sair.aiagent.core.AiConfig.getInstance().matchesTrigger(plainText)) {
+                        shouldRespond = true;
+                        AiAgentActivity.qqLog("[QQMsg] 检测到触发词: " + plainText);
                     }
                 }
                 
@@ -1095,7 +1097,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
 
             // === 获取引用消息内容 ===
             if (msg.isReply() && msg.getReplyMessageId() > 0 && napcatApi != null) {
-                int quotedMsgId = (int) msg.getReplyMessageId();
+                long quotedMsgId = msg.getReplyMessageId();
                 AiAgentActivity.qqLog("[QQMsg] 获取引用消息: messageId=" + quotedMsgId);
                 try {
                     String quotedJson = napcatApi.getMessage(quotedMsgId);
@@ -1119,24 +1121,47 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                             }
                             AiAgentActivity.qqLog("[QQMsg] 引用消息包含图片: " + quotedImgUrls.size() + "张");
                         }
-                        String quotedFwdId = ForwardMessageExpander.extractForwardIdFromMsgJson(quotedJson);
-                        if (quotedFwdId != null && !quotedFwdId.isEmpty()) {
-                            AiAgentActivity.qqLog("[QQMsg] 引用消息是折叠消息: forwardId=" + quotedFwdId);
-                            try {
-                                String fwdJson = napcatApi.getForwardMsg(quotedFwdId);
-                                if (fwdJson != null && !fwdJson.isEmpty()) {
-                                    String fwdC = ForwardMessageExpander.extractForwardMsgContent(fwdJson);
-                                    if (fwdC != null && !fwdC.isEmpty()) {
-                                        if (fwdC.length() > 5000) fwdC = fwdC.substring(0, 5000) + "...";
-                                        String exist = msg.getQuotedMessageContent();
-                                        msg.setQuotedMessageContent((exist != null ? exist + "\n\n" : "")
-                                            + "[折叠消息展开内容]\n" + fwdC);
-                                        AiAgentActivity.qqLog("[QQMsg] 引用折叠消息展开成功，长度: " + fwdC.length());
-                                    }
-                                }
-                            } catch (Exception ef) {
-                                AiAgentActivity.qqLog("[QQMsg] 引用折叠消息展开失败: " + ef.toString());
+                        // 提取引用图片的 file（md5）字段，供 NapCat get_image 兜底下载（HTTP 直连内网图失败时）
+                        java.util.List<String> quotedImgFiles = ForwardMessageExpander.extractQuotedImageFiles(quotedJson);
+                        if (quotedImgFiles != null && !quotedImgFiles.isEmpty()) {
+                            for (String imgFile : quotedImgFiles) {
+                                msg.addQuotedImageFile(imgFile);
                             }
+                            AiAgentActivity.qqLog("[QQMsg] 引用消息图片 file(md5) 已提取: " + quotedImgFiles.size() + "个");
+                        }
+                        // 优先提取内嵌的 forward content（NapCat get_msg 直接内嵌转发内容，data.id 对获取内容无用）
+                        String fwdContent = ForwardMessageExpander.extractForwardContentFromMsgJson(quotedJson);
+                        AiAgentActivity.debugLog("[QQMsg] 引用折叠消息检测: 内嵌content=" + (fwdContent != null ? "长度" + fwdContent.length() : "null")
+                                + ", 会话类型=" + (msg.isGroupMessage() ? "群聊" : "私聊"));
+                        String fwdC = null;
+                        if (fwdContent != null && !fwdContent.isEmpty()) {
+                            fwdC = ForwardMessageExpander.extractForwardText(fwdContent);
+                            AiAgentActivity.debugLog("[QQMsg] 内嵌content解析: " + (fwdC == null ? "null" : "长度" + fwdC.length()));
+                        }
+                        if (fwdC == null || fwdC.isEmpty()) {
+                            // 回退：用 forward_id 调 get_forward_msg
+                            String quotedFwdId = ForwardMessageExpander.extractForwardIdFromMsgJson(quotedJson);
+                            AiAgentActivity.debugLog("[QQMsg] 回退 get_forward_msg: forwardId=" + quotedFwdId);
+                            if (quotedFwdId != null && !quotedFwdId.isEmpty()) {
+                                AiAgentActivity.qqLog("[QQMsg] 引用消息是折叠消息: forwardId=" + quotedFwdId);
+                                try {
+                                    String fwdJson = napcatApi.getForwardMsg(quotedFwdId);
+                                    AiAgentActivity.debugLog("[QQMsg] get_forward_msg 返回: " + (fwdJson == null ? "null" : (fwdJson.isEmpty() ? "空" : "长度" + fwdJson.length())));
+                                    if (fwdJson != null && !fwdJson.isEmpty()) {
+                                        fwdC = ForwardMessageExpander.extractForwardMsgContent(fwdJson);
+                                        AiAgentActivity.debugLog("[QQMsg] extractForwardMsgContent 返回: " + (fwdC == null ? "null" : "长度" + fwdC.length()));
+                                    }
+                                } catch (Exception ef) {
+                                    AiAgentActivity.qqLog("[QQMsg] 引用折叠消息展开失败: " + ef.toString());
+                                }
+                            }
+                        }
+                        if (fwdC != null && !fwdC.isEmpty()) {
+                            if (fwdC.length() > 5000) fwdC = fwdC.substring(0, 5000) + "...";
+                            String exist = msg.getQuotedMessageContent();
+                            msg.setQuotedMessageContent((exist != null ? exist + "\n\n" : "")
+                                + "[折叠消息展开内容]\n" + fwdC);
+                            AiAgentActivity.qqLog("[QQMsg] 引用折叠消息展开成功，长度: " + fwdC.length());
                         }
                         if (msg.getQuotedMessageContent() == null || msg.getQuotedMessageContent().isEmpty()) {
                             String raw = extractString(quotedJson, "raw_message");
@@ -1182,7 +1207,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                         historyJson = napcatApi.getFriendMsgHistory(msg.getUserId(), 0, 10);
                     }
                     if (historyJson != null && !historyJson.isEmpty()) {
-                        java.util.List<String> historyImgUrls = ForwardMessageExpander.extractHistoryImageUrls(historyJson, msg.getUserId());
+                        java.util.List<String> historyImgUrls = ForwardMessageExpander.extractHistoryImageUrls(historyJson, msg.getUserId(), selfId);
                         if (historyImgUrls != null && !historyImgUrls.isEmpty()) {
                             for (String imgUrl : historyImgUrls) {
                                 msg.addImageUrl(imgUrl);
@@ -1195,14 +1220,41 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 }
             }
 
-            // === 自动收集表情包图片（仅群聊，sub_type=1/3/7 的 image 段 + mface/sticker 段） ===
-            if (msg.isGroupMessage() && msg.hasStickerImages() && agentExecutor != null && agentExecutor.getStickerManager() != null) {
+            // === 自动收集图片为表情包（所有图片 + 引用图片，仅好感度≥200的图主触发，2分钟冷却在 StickerManager 内控制） ===
+            if (msg.isGroupMessage() && agentExecutor != null && agentExecutor.getStickerManager() != null) {
                 String ctx = msg.getPlainText();
-                for (String imgUrl : msg.getStickerUrls()) {
-                    try {
-                        agentExecutor.collectStickerFromQQ(imgUrl, ctx);
-                    } catch (Exception ex) {
-                        AiAgentActivity.qqLog("[QQMsg] Sticker collect fail: " + ex.toString());
+                java.util.Set<String> seen = new java.util.HashSet<>();
+
+                // 当前消息图片：好感度判断当前发送者
+                if (emotionManager != null && emotionManager.getAffection(msg.getUserId()) >= 200) {
+                    for (String imgUrl : msg.getImageUrls()) {
+                        if (imgUrl == null || imgUrl.isEmpty() || !seen.add(imgUrl)) continue;
+                        try {
+                            agentExecutor.collectStickerFromQQ(imgUrl, ctx);
+                        } catch (Exception ex) {
+                            AiAgentActivity.qqLog("[QQMsg] Sticker collect fail: " + ex.toString());
+                        }
+                    }
+                    for (String imgUrl : msg.getStickerUrls()) {
+                        if (imgUrl == null || imgUrl.isEmpty() || !seen.add(imgUrl)) continue;
+                        try {
+                            agentExecutor.collectStickerFromQQ(imgUrl, ctx);
+                        } catch (Exception ex) {
+                            AiAgentActivity.qqLog("[QQMsg] Sticker collect fail: " + ex.toString());
+                        }
+                    }
+                }
+
+                // 引用消息图片：好感度判断被引用消息的原发送者（图主）
+                long quotedOwnerQQ = msg.getQuotedSenderQQ() > 0 ? msg.getQuotedSenderQQ() : msg.getUserId();
+                if (emotionManager != null && emotionManager.getAffection(quotedOwnerQQ) >= 200) {
+                    for (String imgUrl : msg.getQuotedImageUrls()) {
+                        if (imgUrl == null || imgUrl.isEmpty() || !seen.add(imgUrl)) continue;
+                        try {
+                            agentExecutor.collectStickerFromQQ(imgUrl, ctx);
+                        } catch (Exception ex) {
+                            AiAgentActivity.qqLog("[QQMsg] Sticker collect fail: " + ex.toString());
+                        }
                     }
                 }
             }
@@ -1234,6 +1286,10 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
             java.io.StringWriter sw = new java.io.StringWriter();
             e.printStackTrace(new java.io.PrintWriter(sw));
             AiAgentActivity.qqLog("[QQMsg] 堆栈跟踪:\n" + sw.toString());
+            // 兜底回复：任何异常都不应导致 Bot 静默不回复
+            try {
+                sendReply(msg, "处理失败: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+            } catch (Exception ignored) {}
         } finally {
             processingMessages.remove(msgId);
         }

@@ -15,6 +15,7 @@
       { type: "link", href: "architecture.html", label: "架构总览" },
       { type: "link", href: "architecture.html#dataflow", label: "数据流全景" },
       { type: "link", href: "architecture.html#fc-loop", label: "Function Calling 循环" },
+      { type: "link", href: "architecture.html#multi-agent", label: "多智能体协作" },
       { type: "link", href: "architecture.html#context", label: "上下文注入链" },
       { type: "link", href: "architecture.html#structure", label: "目录结构" },
     ]},
@@ -23,7 +24,7 @@
       { type: "link", href: "permissions.html", label: "三层权限模型" },
       { type: "link", href: "permissions.html#matrix", label: "工具权限矩阵" },
       { type: "link", href: "permissions.html#gate", label: "越权拦截流程" },
-      { type: "link", href: "permissions.html#confirm", label: "高危操作确认门控" },
+      { type: "link", href: "permissions.html#code-safety", label: "高危代码拦截" },
     ]},
 
     { type: "group", icon: "🧠", label: "技能系统", children: [
@@ -72,6 +73,8 @@
     ]},
 
     { type: "link", href: "patterns.html", icon: "🎨", label: "设计模式" },
+
+    { type: "link", href: "changelog.html", icon: "📜", label: "更新日志" },
   ];
 
   /* ============ 渲染多级导航 ============ */
@@ -82,7 +85,7 @@
 
     const logo = document.createElement("div");
     logo.className = "sidebar-logo";
-    logo.innerHTML = '<div class="icon">⚡</div><span class="logo-text">AiAgent<span class="ver">v3.4</span></span>';
+    logo.innerHTML = '<div class="icon">⚡</div><span class="logo-text">AiAgent<span class="ver">v3.7</span></span>';
     sidebar.appendChild(logo);
 
     const nav = document.createElement("nav");

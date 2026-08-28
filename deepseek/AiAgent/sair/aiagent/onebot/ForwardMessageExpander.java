@@ -209,14 +209,51 @@ public final class ForwardMessageExpander {
     }
 
     /**
+     * 从 get_msg API 响应中提取引用消息里图片的 file 字段（md5 值）列表。
+     * <p>NapCat get_image API 需要图片的 file 字段（md5 值）而非 URL，
+     * 因此本方法用于内网图 HTTP 直连下载失败时的 NapCat 兜底下载。</p>
+     * <p>顺序与 {@link #extractQuotedImageUrls} 返回的 URL 一一对应；
+     * file 为空时降级取 file_id，再为空则占位空串保持对齐。</p>
+     * @return file(md5) 列表（无图片时返回 null 或空列表）
+     */
+    public static List<String> extractQuotedImageFiles(String apiResponse) {
+        if (apiResponse == null || apiResponse.isEmpty()) return null;
+        try {
+            String dataObj = JsonUtil.extractObject(apiResponse, "data");
+            if (dataObj == null) return null;
+            String msgArr = JsonUtil.extractArray(dataObj, "message");
+            if (msgArr == null || msgArr.isEmpty()) return null;
+            List<String> files = new java.util.ArrayList<>();
+            List<String> segs = JsonUtil.splitJsonArray(msgArr);
+            for (String seg : segs) {
+                String type = JsonUtil.extractString(seg, "type");
+                if ("image".equals(type)) {
+                    String data = JsonUtil.extractObject(seg, "data");
+                    if (data == null) continue;
+                    String file = JsonUtil.extractString(data, "file");
+                    if (file == null || file.isEmpty()) {
+                        file = JsonUtil.extractString(data, "file_id");
+                    }
+                    files.add(file != null ? file : "");
+                }
+            }
+            return files;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * 从 get_group_msg_history / get_friend_msg_history 响应中提取图片 URL。
      * 优先返回「发送者 == fromUserId」的最近一条含图消息的图片 URL；
      * 若找不到该发送者的图片，则回退返回最近一条任意发送者的含图消息图片 URL。
+     * 始终跳过机器人自己（selfId）发出的图片，避免重复存图与重复视觉分析。
      * @param apiResponse 历史消息 API 响应 JSON
      * @param fromUserId 期望的发送者QQ（<=0 表示不限定发送者）
+     * @param selfId 机器人自身QQ（>0 时跳过 bot 自己发的图）
      * @return 图片 URL 列表（无图片返回空列表）
      */
-    public static List<String> extractHistoryImageUrls(String apiResponse, long fromUserId) {
+    public static List<String> extractHistoryImageUrls(String apiResponse, long fromUserId, long selfId) {
         if (apiResponse == null || apiResponse.isEmpty()) return new java.util.ArrayList<>();
         List<String> fallback = new java.util.ArrayList<>();
         try {
@@ -229,6 +266,9 @@ public final class ForwardMessageExpander {
                 long senderUid = 0;
                 String senderObj = JsonUtil.extractObject(msgItem, "sender");
                 if (senderObj != null) senderUid = JsonUtil.extractLong(senderObj, "user_id");
+
+                // 跳过机器人自己发的图（避免重复存图 + 重复视觉分析）
+                if (selfId > 0 && senderUid == selfId) continue;
 
                 String messageArr = JsonUtil.extractArray(msgItem, "message");
                 if (messageArr == null || messageArr.isEmpty()) continue;
@@ -280,6 +320,34 @@ public final class ForwardMessageExpander {
         return null;
     }
 
+    /**
+     * 从 get_msg API 响应中提取 forward 段的 data.content（内嵌转发内容）。
+     * <p>NapCat 的 get_msg 返回 forward 段时，data.content 直接内嵌了转发消息列表，
+     * data.id 字段对获取内容无用；因此优先用本方法拿内嵌内容，失败再回退 get_forward_msg。</p>
+     * @return forward content 的 JSON 数组字符串，无内嵌 content 时返回 null
+     */
+    public static String extractForwardContentFromMsgJson(String apiResponse) {
+        if (apiResponse == null || apiResponse.isEmpty()) return null;
+        try {
+            String dataObj = JsonUtil.extractObject(apiResponse, "data");
+            if (dataObj == null) return null;
+            String msgArr = JsonUtil.extractArray(dataObj, "message");
+            if (msgArr == null || msgArr.isEmpty()) return null;
+            List<String> segs = JsonUtil.splitJsonArray(msgArr);
+            for (String seg : segs) {
+                String type = JsonUtil.extractString(seg, "type");
+                if ("forward".equals(type)) {
+                    String data = JsonUtil.extractObject(seg, "data");
+                    if (data != null) {
+                        String content = JsonUtil.extractArray(data, "content");
+                        if (content != null && !content.isEmpty()) return content;
+                    }
+                }
+            }
+        } catch (Exception e) { }
+        return null;
+    }
+
     /** 从forward content JSON中提取文本 */
     public static String extractForwardText(String forwardContent) {
         if (forwardContent == null || forwardContent.isEmpty()) return null;
@@ -309,7 +377,22 @@ public final class ForwardMessageExpander {
                     }
                 } else {
                     String type = JsonUtil.extractString(item, "type");
-                    if ("text".equals(type)) {
+                    if ("node".equals(type)) {
+                        // NapCat 合并转发节点：data.content 才是真正的消息段列表，递归解析。
+                        String dataObj = JsonUtil.extractObject(item, "data");
+                        if (dataObj != null) {
+                            String nodeContent = JsonUtil.extractArray(dataObj, "content");
+                            if (nodeContent != null && !nodeContent.isEmpty()) {
+                                String nested = extractForwardText(nodeContent);
+                                if (nested != null && !nested.isEmpty()) {
+                                    if (result.length() > 0) result.append(" | ");
+                                    String name = JsonUtil.extractString(dataObj, "name");
+                                    if (name != null && !name.isEmpty()) result.append(name).append(": ");
+                                    result.append(nested);
+                                }
+                            }
+                        }
+                    } else if ("text".equals(type)) {
                         String dataObj = JsonUtil.extractObject(item, "data");
                         if (dataObj != null) {
                             String text = JsonUtil.extractString(dataObj, "text");

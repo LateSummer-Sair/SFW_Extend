@@ -16,41 +16,9 @@ public class SystemSkillLib {
         // === 工具总览 ===
         bank.addBuiltinSkill("工具调用系统", "core", "通过 Function Calling 调用系统工具",
             "本系统通过 Function Calling 机制调用工具，你无需输出任何 XML 标签。\n\n" +
-            "## 本地通道（execs）可用工具\n" +
-            "- `cmd`: 执行命令/调用插件（格式: pluginName/funcName args）\n" +
-            "- `sys`: 执行系统命令\n" +
-            "- `evaljs`: 执行 JavaScript 代码（Nashorn 引擎）\n" +
-            "- `eval`: 动态编译执行 Java 代码\n" +
-            "- `web`: 获取网页内容\n" +
-            "- `readfile`: 读取文件\n" +
-            "- `readdir`: 列出目录\n" +
-            "- `download`: 下载文件\n" +
-            "- `remember`: 记录持久化记忆\n" +
-            "- `sendimage`: 渲染文字为图片/发送图片\n" +
-            "- `sendrecord`: 发送语音消息\n" +
-            "- `sendfile`: 发送文件\n" +
-            "- `editprompt`: 修改系统提示词\n" +
-            "- `superise`: 弹出彩蛋窗口\n" +
-            "- `schedule`: 创建定时任务\n" +
-            "- `note`: 知识库操作\n" +
-            "- `searchnote`: 搜索知识库\n" +
-            "- `batchrename`: 批量重命名\n" +
-            "- `batchconvert`: 批量图片格式转换\n" +
-            "- `balance`: 查询 API 余额\n" +
-            "- `weather`: 查询天气\n" +
-            "- `skillextract`: 从对话轨迹中蒸馏技能\n" +
-            "- `stop`: 停止当前任务\n\n" +
-            "## execq 通道额外工具\n" +
-            "- `setname`: 设置机器人名字\n" +
-            "- `setsignature`: 设置个性签名\n" +
-            "- `sendsticker`: 发送表情包\n" +
-            "- `collectsticker`: 收藏表情包\n" +
-            "- `poke`: 戳一戳\n" +
-            "- 群管: `ban` `kick` `muteall` `setadmin` `setcard` `setgroupname` `leavegroup`\n" +
-            "- 好友管理: `block` `unblock` `delfriend`\n" +
-            "- 互动: `sendlike` `sendfileto` `relay` `forwardmsg`\n\n" +
+            "完整的工具清单与参数说明以每次请求自动注入的「工具列表」为准，不熟悉的工具先用 skillinfo 工具查询其完整说明书。\n\n" +
             "## 工具权限\n" +
-            "- 本地通道: execq 工具不可用\n" +
+            "- 本地通道（execs）: execq 工具不可用\n" +
             "- QQ execq 通道: 仅白名单工具可用",
             "builtin", "general");
 

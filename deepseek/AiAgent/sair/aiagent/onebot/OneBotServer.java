@@ -231,7 +231,8 @@ public class OneBotServer {
         Map<String, Object> params = new HashMap<>();
         params.put("user_id", userId);
         params.put("message", message);
-        sendApiCall("send_private_msg", params);
+        String resp = sendApiCall("send_private_msg", params);
+        logSendFailure("send_private_msg", userId, resp);
     }
 
     /** 发送群聊消息 */
@@ -239,7 +240,47 @@ public class OneBotServer {
         Map<String, Object> params = new HashMap<>();
         params.put("group_id", groupId);
         params.put("message", message);
-        sendApiCall("send_group_msg", params);
+        String resp = sendApiCall("send_group_msg", params);
+        logSendFailure("send_group_msg", groupId, resp);
+    }
+
+    /**
+     * 检查消息发送结果：失败（含被禁言/风控/消息过长等）时输出 SFW 控制台日志。
+     * <p>成功（status=ok 或 retcode=0）静默返回；超时/异常已在 sendApiCall 记录，这里跳过。</p>
+     * <p>用 debugLog 输出，不受 /qqlogoff 开关影响，确保发送失败始终可见。</p>
+     */
+    private void logSendFailure(String action, long targetId, String resp) {
+        if (resp == null || resp.isEmpty()) return;
+        try {
+            String status = JsonUtil.extractString(resp, "status");
+            long retcode = JsonUtil.extractLong(resp, "retcode");
+            boolean failed = "failed".equalsIgnoreCase(status) || retcode != 0;
+            if (!failed) return;
+            String msg = JsonUtil.extractString(resp, "message");
+            String wording = JsonUtil.extractString(resp, "wording");
+            StringBuilder sb = new StringBuilder();
+            sb.append("[OneBot] 消息发送失败: ").append(action).append(", targetId=").append(targetId);
+            if (retcode != 0) sb.append(", retcode=").append(retcode);
+            if (msg != null && !msg.isEmpty()) sb.append(", message=").append(msg);
+            if (wording != null && !wording.isEmpty()) sb.append(", wording=").append(wording);
+            String lower = resp.toLowerCase();
+            boolean suspectMute = lower.contains("禁言") || lower.contains("mute")
+                    || lower.contains("ban") || lower.contains("block");
+            // QQNT 内核返回的 result 错误码（sendMsg 场景 result=120 通常是被禁言或触发风控导致发送被拒）
+            long ntResult = 0;
+            java.util.regex.Matcher rm = java.util.regex.Pattern.compile("\"result\"\\s*:\\s*(\\d+)").matcher(resp);
+            if (rm.find()) {
+                try { ntResult = Long.parseLong(rm.group(1)); } catch (NumberFormatException ignored) {}
+            }
+            if (ntResult == 120) suspectMute = true;
+            if (suspectMute) {
+                sb.append(" ⚠️ 疑似被禁言/风控");
+                if (ntResult != 0) sb.append(" (QQNT result=").append(ntResult).append(")");
+            }
+            AiAgentActivity.debugLog(sb.toString());
+        } catch (Exception ignored) {
+            // 解析失败不阻塞发送
+        }
     }
 
     // ==================== WebSocket连接内部类 ====================
@@ -556,7 +597,7 @@ public class OneBotServer {
         // 优先：有该用户最近的非空消息 → AI 结合上下文自然回应（不要只回「空消息」）
         String recentUserMsg = findUserRecentMessage(userId, groupId, mem);
         if (recentUserMsg != null && !recentUserMsg.isEmpty()) {
-            String aiReply = aiGeneratePokeReply(selfName, context, recentUserMsg, handler);
+            String aiReply = aiGeneratePokeReply(selfName, context, recentUserMsg, userId, groupId, handler);
             if (aiReply != null && !aiReply.isEmpty()) return aiReply;
         }
 
@@ -564,7 +605,7 @@ public class OneBotServer {
         boolean nameInContext = selfName != null && !selfName.isEmpty()
                 && context != null && context.contains(selfName);
         if (nameInContext) {
-            String aiReply = aiGeneratePokeReply(selfName, context, null, handler);
+            String aiReply = aiGeneratePokeReply(selfName, context, null, userId, groupId, handler);
             if (aiReply != null && !aiReply.isEmpty()) return aiReply;
         }
 
@@ -634,12 +675,15 @@ public class OneBotServer {
 
     /** Use AI to generate a context-aware poke reply */
     private String aiGeneratePokeReply(String selfName, String context, String recentUserMsg,
-            sair.aiagent.onebot.QQMessageHandler handler) {
+            long pokerUserId, long groupId, sair.aiagent.onebot.QQMessageHandler handler) {
         try {
             sair.aiagent.core.DeepSeekClient client = handler.getDeepSeekClient();
             if (client == null) return null;
+            String pokerName = resolvePokerName(pokerUserId, groupId, handler);
+            String pokerRole = resolvePokerRole(pokerUserId, groupId, handler);
             String prompt = "Someone just poked you in a chat. Reply naturally.\n\n"
                     + "Your name is: " + selfName + "\n"
+                    + "The person who poked you: " + pokerName + " (QQ:" + pokerUserId + ") [身份: " + pokerRole + "]\n"
                     + "Recent chat context:\n" + context + "\n";
             if (recentUserMsg != null && !recentUserMsg.isEmpty()) {
                 prompt += "\nThe person who poked you recently said: \"" + recentUserMsg + "\"\n"
@@ -649,6 +693,7 @@ public class OneBotServer {
                     + "- If there is a recent message from this person, respond to it naturally\n"
                     + "- Do NOT say things like \"empty message\" or \"no content\"\n"
                     + "- Keep reply short and friendly (under 30 chars if possible)\n"
+                    + "- IMPORTANT: 只有身份是【⭐主人】的人才能称为'主人'，其他人一律用昵称称呼，绝不喊'主人'\n"
                     + "- Output ONLY the reply text, nothing else";
             java.util.List<sair.aiagent.model.ChatMessage> msgs = new java.util.ArrayList<>();
             msgs.add(new sair.aiagent.model.ChatMessage("user", prompt));
@@ -662,6 +707,42 @@ public class OneBotServer {
             AiAgentActivity.qqLog("[OneBot] AI poke reply failed: " + e.getMessage());
         }
         return null;
+    }
+
+    /** 解析戳一戳者的显示名称（群昵称优先，否则回退 QQ 号） */
+    private String resolvePokerName(long userId, long groupId,
+            sair.aiagent.onebot.QQMessageHandler handler) {
+        try {
+            sair.aiagent.onebot.UnifiedQQMemoryManager mem = handler.getUnifiedMemory();
+            if (mem != null && groupId > 0) {
+                java.util.Map<String, Long> nickMap = mem.getGroupNicknameMap(groupId);
+                if (nickMap != null) {
+                    for (java.util.Map.Entry<String, Long> e : nickMap.entrySet()) {
+                        if (e.getValue() == userId) return e.getKey();
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return "QQ:" + userId;
+    }
+
+    /** 解析戳一戳者的身份：⭐主人 / 👑群主 / 🔧管理员 / 普通成员 */
+    private String resolvePokerRole(long userId, long groupId,
+            sair.aiagent.onebot.QQMessageHandler handler) {
+        if (sair.aiagent.core.AiConfig.getInstance().isMasterQQ(userId)) return "⭐主人";
+        try {
+            sair.aiagent.onebot.UnifiedQQMemoryManager mem = handler.getUnifiedMemory();
+            if (mem != null && groupId > 0) {
+                java.util.List<String[]> admins = mem.getGroupAdmins(groupId);
+                for (String[] a : admins) {
+                    if (a.length > 0 && String.valueOf(userId).equals(a[0])) {
+                        if (a.length > 2 && "owner".equals(a[2])) return "👑群主";
+                        return "🔧管理员";
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return "普通成员";
     }
 
     /** 处理request事件（群邀请、好友请求等） */

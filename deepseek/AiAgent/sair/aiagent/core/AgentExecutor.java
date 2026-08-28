@@ -75,6 +75,8 @@ public class AgentExecutor {
     private volatile boolean criticEnabled = false;
     /** 多智能体编排引擎（Harness 多智能体能力，懒创建，opt-in） */
     private volatile AgentOrchestrator orchestrator;
+    /** Agent 总线（递归多智能体通信，懒创建） */
+    private volatile AgentBus agentBus;
 
     public AgentExecutor(Activity selfActivity, DeepSeekClient client, DynamicCodeEngine codeEngine, ConfirmationGate gate) {
         this.selfActivity = selfActivity;
@@ -288,10 +290,79 @@ public class AgentExecutor {
                     toolDispatcher = new ToolDispatcher(actionHandler);
                     // Harness 化升级：注册确定性约束钩子（权限矩阵 + 高危代码拦截 + 结果校验）
                     toolDispatcher.registerHook(new ToolHarnessHook(HarnessConfig.getInstance()));
+                    // 初始化 Agent 总线并注入 dispatcher（call_agent/ask_agent 递归唤起）
+                    if (agentBus == null) {
+                        AgentBus bus = new AgentBus(client, toolDispatcher);
+                        registerAgents(bus);
+                        toolDispatcher.setAgentBus(bus);
+                        agentBus = bus;
+                    }
                 }
             }
         }
         return toolDispatcher;
+    }
+
+    /** 注册三个协作 Agent：main（主模型）、vision（视觉）、passage（段落）。 */
+    private void registerAgents(AgentBus bus) {
+        String execqModel = AiConfig.getInstance().getExecqModel();
+        bus.register(new AgentBus.AgentDef("main",
+                buildStableSystemPrompt(),
+                execqModel,
+                ctx -> (ctx != null && ctx.isExecq()) ? ToolDispatcher.buildExecqTools() : ToolDispatcher.buildAllTools()));
+        bus.register(new AgentBus.AgentDef("vision",
+                VISION_AGENT_PROMPT,
+                execqModel,
+                ctx -> buildVisionAgentTools()));
+        bus.register(new AgentBus.AgentDef("passage",
+                PASSAGE_AGENT_PROMPT,
+                execqModel,
+                ctx -> buildPassageAgentTools()));
+    }
+
+    /** 视觉 Agent 系统提示词。 */
+    private static final String VISION_AGENT_PROMPT =
+        "你是视觉分析 Agent，负责客观分析图像内容。\n"
+      + "工作方式：\n"
+      + "1. 识别图片时调用 vision 工具（传入图片 URL 或 file_id）。\n"
+      + "2. 只做客观识别与转写，不要臆测、不要编造图片里没有的内容。\n"
+      + "3. 当你不确定图片中的某个特征是否符合要求、或需要更多背景线索时，用 ask_agent 向 main 发问，或直接用 web/search/searchglobal 查询线索。\n"
+      + "4. 得到足够信息后，返回结构化的分析结论（图片主体、关键文字、特征判断等）。";
+
+    /** 段落 Agent 系统提示词。 */
+    private static final String PASSAGE_AGENT_PROMPT =
+        "你是段落分析 Agent，负责概括折叠消息（合并转发的多条消息）。\n"
+      + "工作方式：\n"
+      + "1. 阅读折叠消息内容，提炼对话主题、各方观点、与当前对话相关的重点。\n"
+      + "2. 当你不确定某句话是谁说的、或某个信息归属不明确时，用 ask_agent 向 main 发问。\n"
+      + "3. 如果折叠消息里包含图片需要理解，用 call_agent 唤起 vision 分析图片。\n"
+      + "4. 可用 searchglobal/searchnote 查询相关记忆线索。\n"
+      + "5. 最终返回结构化概述（主题背景、各方核心观点、相关重点）。";
+
+    /** 视觉 Agent 工具集。 */
+    private static List<ToolDefinition> buildVisionAgentTools() {
+        List<ToolDefinition> tools = new ArrayList<>();
+        tools.add(new ToolDefinition("vision", "视觉分析图片：调用视觉模型分析并返回图片特征（类型/主体/文字/色调/二维码/违规内容等）")
+                .addString("url", "图片 URL（http/https）或 file_id"));
+        tools.add(new ToolDefinition("web", "抓取指定 URL 的网页/API 内容")
+                .addString("url", "要抓取的完整 URL（http/https）"));
+        tools.add(new ToolDefinition("search", "在必应搜索网页并返回标题、链接、摘要")
+                .addString("query", "搜索关键词"));
+        tools.add(new ToolDefinition("searchglobal", "全局记忆检索：跨群/跨用户检索对话历史、群聊记录和长期记忆")
+                .addString("query", "检索关键词"));
+        return tools;
+    }
+
+    /** 段落 Agent 工具集。 */
+    private static List<ToolDefinition> buildPassageAgentTools() {
+        List<ToolDefinition> tools = new ArrayList<>();
+        tools.add(new ToolDefinition("searchglobal", "全局记忆检索：跨群/跨用户检索对话历史、群聊记录和长期记忆")
+                .addString("query", "检索关键词"));
+        tools.add(new ToolDefinition("searchnote", "在知识库中检索相关笔记")
+                .addString("query", "检索关键词"));
+        tools.add(new ToolDefinition("vision", "视觉分析图片：调用视觉模型分析并返回图片特征")
+                .addString("url", "图片 URL（http/https）或 file_id"));
+        return tools;
     }
 
     /**
@@ -508,7 +579,10 @@ public class AgentExecutor {
     /** Build plugin list from SFW runtime */
     private String buildPluginList() {
         StringBuilder sb = new StringBuilder();
-        for (java.util.Map.Entry<String, Activity> entry : Libraries.activities.entrySet()) {
+        // 按插件名排序，保证 system 前缀字节稳定（DeepSeek 前缀缓存要求前缀逐字节稳定，Map 迭代顺序不稳定会破坏缓存）
+        java.util.List<java.util.Map.Entry<String, Activity>> entries = new java.util.ArrayList<>(Libraries.activities.entrySet());
+        entries.sort(java.util.Map.Entry.comparingByKey());
+        for (java.util.Map.Entry<String, Activity> entry : entries) {
             String name = entry.getKey();
             Activity act = entry.getValue();
             if (act == selfActivity) continue;

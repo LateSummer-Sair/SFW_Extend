@@ -30,6 +30,12 @@ public class FunctionCallingBridge {
 
     private final DeepSeekClient client;
 
+    /** 看图指令关键词（用户明确要求看图片内容） */
+    private static final String[] IMAGE_REQUEST_KEYWORDS = {
+        "看图", "识图", "识别图片", "图片里", "图里", "这张图", "什么图",
+        "图片上", "图上", "帮我看看图", "看看图", "图中", "图内", "图片内容"
+    };
+
     /** 审查者子 Agent（可空；非空时对最终回复做验证闭环）。 */
     private volatile CriticAgent critic;
 
@@ -77,22 +83,46 @@ public class FunctionCallingBridge {
         }
         userContent.append(task);
 
-        // === 多模态图片支持（DeepSeek Vision，替代已移除的在线 OCR）===
-        // QQ 通道消息含图片时，先由 vision 模型纯识别图片得到文字描述，再把描述作为上下文
-        // 交给常规模型 + 工具继续 Function Calling（如 web 搜索实时资料），避免「看图即脑补结论」的割裂。
-        List<String> visionImages = collectVisionImages(ctx);
+        // === 预处理：按需识图 + 折叠消息段落摘要（多模型协作）===
+        // 1. 视觉 Agent：仅在「引用图片」或用户明确「看图指令」时调用，避免无条件识图导致卡死。
+        boolean needVision = shouldRecognizeImage(ctx, task);
+        VisionBatch visionBatch = collectVisionImages(ctx, needVision);
+        // 2. 段落 Agent：折叠消息（当前消息或引用消息）先用主模型生成概述，再交主模型总结。
+        String forwardSummary = null;
+        String forwardText = extractForwardForSummary(ctx);
+        if (forwardText != null) {
+            forwardSummary = summarizeForwardMessage(forwardText);
+        }
+
         String effectiveModel = (model != null) ? model : "";
         List<ToolDefinition> effectiveTools = tools;
-        if (!visionImages.isEmpty()) {
-            String imageUnderstanding = recognizeImages(userContent.toString(), visionImages, ctx);
+        boolean hasPreprocess = !visionBatch.pendingImages.isEmpty() || !visionBatch.descriptions.isEmpty()
+                || visionBatch.hasOversize || (forwardSummary != null && !forwardSummary.isEmpty());
+        if (hasPreprocess) {
+            // 识图：仅对未缓存的图调 vision 模型，已由存图审查缓存的直接复用（节约 token）
+            String imageUnderstanding = recognizeImages(userContent.toString(), visionBatch.pendingImages, ctx);
             StringBuilder combined = new StringBuilder();
+            if (visionBatch.hasOversize) {
+                combined.append("[系统提示] 本次有图片超过3M大小限制，我（bot）不看，已跳过该图。\n\n");
+            }
             // 图片归属提醒（引用他人图片时，明确告知 AI 图片的原发送者，避免归因到当前对话者）
             String ownerHint = buildImageOwnerHint(ctx);
             if (ownerHint != null && !ownerHint.isEmpty()) {
                 combined.append(ownerHint).append("\n\n");
             }
+            for (String desc : visionBatch.descriptions) {
+                combined.append("[图片内容识别结果]\n").append(desc).append("\n\n");
+            }
             if (imageUnderstanding != null && !imageUnderstanding.isEmpty()) {
                 combined.append("[图片内容识别结果]\n").append(imageUnderstanding).append("\n\n");
+            } else if (!visionBatch.pendingImages.isEmpty()) {
+                // 视觉模型不可用/识别失败：明确告知主模型，避免主模型因「未出现识别结果」而不知如何回复
+                combined.append("[图片内容识别结果]\n")
+                        .append("（本次图片识别失败，视觉模型暂不可用，请结合上下文回复，不要凭空编造图片内容）")
+                        .append("\n\n");
+            }
+            if (forwardSummary != null && !forwardSummary.isEmpty()) {
+                combined.append("[折叠消息摘要]\n").append(forwardSummary).append("\n\n");
             }
             combined.append(userContent.toString());
             messages.add(new ChatMessage("user", combined.toString()));
@@ -102,6 +132,7 @@ public class FunctionCallingBridge {
         }
 
         int consecutiveFailures = 0;   // 连续失败次数（任何成功即归零）
+        int fcRound = 0;               // 主模型调用轮次（诊断用）
         int criticRetries = 0;         // 审查者阻断后重新生成次数
         int totalToolCalls = 0;        // 工具调用总次数（尝试次数）
         String lastFailure = null;     // 最后一次失败信息
@@ -123,7 +154,12 @@ public class FunctionCallingBridge {
                     fallbackHinted = true;
                     messages.add(new ChatMessage("user", buildFallbackPrompt()));
                 }
+                fcRound++;
+                long fcCallStart = System.currentTimeMillis();
+                sair.aiagent.AiAgentActivity.debugLog("[FC] 主模型调用 #" + fcRound + " (累计工具调用=" + totalToolCalls + ", messages=" + messages.size() + ")");
                 DeepSeekClient.ToolCallResult r = client.chatSyncWithTools(messages, effectiveTools, "auto", effectiveModel);
+                sair.aiagent.AiAgentActivity.debugLog("[FC] 主模型返回 #" + fcRound + " (耗时" + (System.currentTimeMillis() - fcCallStart) + "ms, "
+                        + (r.hasToolCalls() ? "toolCalls=" + r.toolCalls.size() : "content长度=" + (r.content != null ? r.content.length() : 0)) + ")");
                 if (!r.hasToolCalls()) {
                     String content = (r.content != null && !r.content.trim().isEmpty())
                             ? r.content : "(AI 未返回文本)";
@@ -158,7 +194,7 @@ public class FunctionCallingBridge {
                 for (int ti = 0; ti < r.toolCalls.size(); ti++) {
                     ToolCall tc = r.toolCalls.get(ti);
                     String result = toolResults.get(ti);
-                    boolean failed = isFailureResult(result);
+                    boolean failed = isFailureResult(tc.getName(), result);
                     // 注意：不能按「连续调用同一工具」判空转——递归翻找文件会正常地连续调用 readdir/readfile。
                     // 无进展的识别由 isFailureResult 依据工具返回内容（失败/空结果）完成，见下方。
                     messages.add(ChatMessage.createToolResult(tc.getId(), tc.getName(), result));
@@ -202,34 +238,86 @@ public class FunctionCallingBridge {
         }
     }
 
+    /** 视觉识别批次：缓存命中的描述 + 待 vision 模型识别的图片。 */
+    private static final class VisionBatch {
+        final List<String> descriptions = new ArrayList<>();
+        final List<String> pendingImages = new ArrayList<>();
+        boolean hasOversize = false;
+    }
+
+    /**
+     * 判断是否需要调用视觉模型识图：引用图片 或 用户明确「看图指令」。
+     * <p>非触发时图片仅作占位，不下载、不转 base64、不调视觉模型，避免含图消息卡死。</p>
+     */
+    private boolean shouldRecognizeImage(ToolContext ctx, String task) {
+        if (ctx == null || ctx.qqMsg == null) return false;
+        sair.aiagent.onebot.model.QQMessage qq = ctx.qqMsg;
+        // 引用图片 = 要看
+        if (!qq.getQuotedImageUrls().isEmpty()) return true;
+        String text = (task != null ? task : "") + " " + (qq.getPlainText() != null ? qq.getPlainText() : "");
+        for (String kw : IMAGE_REQUEST_KEYWORDS) {
+            if (text.contains(kw)) return true;
+        }
+        return false;
+    }
+
     /**
      * 收集 QQ 通道消息中的图片 URL，并转换为 Vision API 可用格式（base64 data URI / 可访问 URL）。
      * <p>合并「当前消息图片」与「引用消息图片」，由 {@code ImageDownloader.resolveImageForVision}
      * 统一处理腾讯内网图片的 base64 转换与 NapCat get_image 兜底。</p>
+     * <p>若某张图已由存图审查（StickerManager.reviewSafe）缓存过内容描述，则直接复用描述，
+     * 不再重复调用视觉模型（节约 token）。</p>
      *
-     * @param ctx 工具执行上下文（可为 null，非 QQ 通道时返回空列表）
-     * @return Vision API 可用图片 URL 列表（可能为空）
+     * @param ctx 工具执行上下文（可为 null，非 QQ 通道时返回空批次）
+     * @param recognizeImages 是否需要调用视觉模型识图（false 时仅复用 mark 备注，不调模型）
+     * @return 视觉识别批次（含缓存描述与待识别图片）
      */
-    private static List<String> collectVisionImages(ToolContext ctx) {
-        List<String> result = new ArrayList<>();
-        if (ctx == null || ctx.qqMsg == null) return result;
+    private static VisionBatch collectVisionImages(ToolContext ctx, boolean recognizeImages) {
+        VisionBatch batch = new VisionBatch();
+        if (ctx == null || ctx.qqMsg == null) return batch;
 
         sair.aiagent.onebot.model.QQMessage qq = ctx.qqMsg;
-        List<String> rawUrls = new ArrayList<>();
-        if (qq.hasImage()) {
-            rawUrls.addAll(qq.getImageUrls());
-        }
-        rawUrls.addAll(qq.getQuotedImageUrls());
-
         sair.aiagent.onebot.NapCatApi napcat = ctx.napcatApi;
-        for (String url : rawUrls) {
-            if (url == null || url.isEmpty()) continue;
-            String resolved = sair.aiagent.onebot.ImageDownloader.resolveImageForVision(url, napcat);
-            if (resolved != null && !resolved.isEmpty()) {
-                result.add(resolved);
+
+        // 当前消息图片（无 file/md5 关联）
+        if (qq.hasImage()) {
+            for (String url : qq.getImageUrls()) {
+                processVisionImage(url, null, recognizeImages, batch, napcat);
             }
         }
-        return result;
+        // 引用消息图片（带 file/md5，供 NapCat get_image 兜底下载）
+        List<String> quotedUrls = qq.getQuotedImageUrls();
+        List<String> quotedFiles = qq.getQuotedImageFiles();
+        for (int i = 0; i < quotedUrls.size(); i++) {
+            String url = quotedUrls.get(i);
+            String file = (i < quotedFiles.size()) ? quotedFiles.get(i) : null;
+            processVisionImage(url, file, recognizeImages, batch, napcat);
+        }
+        return batch;
+    }
+
+    /**
+     * 处理单张图片：缓存复用 → 按需识图 → 下载/转换（引用图片带 file/md5 供 NapCat 兜底）。
+     */
+    private static void processVisionImage(String url, String file, boolean recognizeImages,
+                                           VisionBatch batch, sair.aiagent.onebot.NapCatApi napcat) {
+        if (url == null || url.isEmpty()) return;
+        // 优先复用存图审查时缓存的内容描述（mark 备注，同一张图只调一次视觉模型）
+        String cached = StickerManager.getCachedDescription(url);
+        if (cached != null && !cached.isEmpty()) {
+            batch.descriptions.add(cached);
+            return;
+        }
+        // 未要求识图且无备注：跳过该图，不下载、不转 base64、不调视觉模型
+        if (!recognizeImages) return;
+        String resolved = sair.aiagent.onebot.ImageDownloader.resolveImageForVision(url, file, napcat);
+        if (sair.aiagent.onebot.ImageDownloader.isOversizeResult(resolved)) {
+            batch.hasOversize = true;
+            return;
+        }
+        if (resolved != null && !resolved.isEmpty()) {
+            batch.pendingImages.add(resolved);
+        }
     }
 
     /**
@@ -261,6 +349,9 @@ public class FunctionCallingBridge {
      * @return 图片文字描述，失败时返回 null
      */
     private String recognizeImages(String text, List<String> visionImages, ToolContext ctx) {
+        if (visionImages == null || visionImages.isEmpty()) return null;
+        long visionStart = System.currentTimeMillis();
+        sair.aiagent.AiAgentActivity.qqLog("[FC] 视觉模型识别图片开始: " + visionImages.size() + " 张");
         try {
             String prompt = "请仔细识别这张图片，完整转写图中所有文字内容，并描述图片结构、关键信息"
                     + "（如邮件标题、发件人、收件人、正文、日期、关键数据等）。"
@@ -280,10 +371,49 @@ public class FunctionCallingBridge {
             visionMsgs.add(ChatMessage.createMultimodal(prompt, visionImages));
             String result = client.chatSync(visionMsgs, AiConfig.getInstance().getVisionModel());
             if (result != null && !result.trim().isEmpty()) {
+                sair.aiagent.AiAgentActivity.qqLog("[FC] 视觉模型识别完成 (耗时" + (System.currentTimeMillis() - visionStart) + "ms)");
                 return result.trim();
             }
         } catch (Exception e) {
             sair.aiagent.AiAgentActivity.qqLog("[FC] 图片识别失败: " + e.toString());
+        }
+        return null;
+    }
+
+    /**
+     * 段落 Agent：用主模型概括折叠消息（合并转发的多条消息），返回概述文本，失败返回 null。
+     */
+    private String summarizeForwardMessage(String forwardContent) {
+        if (forwardContent == null || forwardContent.trim().isEmpty()) return null;
+        long sumStart = System.currentTimeMillis();
+        sair.aiagent.AiAgentActivity.qqLog("[FC] 段落模型概括折叠消息开始 (长度" + forwardContent.length() + ")");
+        try {
+            String prompt = "请阅读以下折叠消息（合并转发的多条消息），用简洁的语言概括：\n"
+                    + "1. 这段对话讨论的主题与背景\n"
+                    + "2. 各方发言的核心观点/关键信息\n"
+                    + "3. 与当前对话可能相关的重点\n\n"
+                    + "折叠消息内容：\n" + forwardContent;
+            List<ChatMessage> msgs = new ArrayList<>();
+            msgs.add(new ChatMessage("user", prompt));
+            String result = client.chatSync(msgs, AiConfig.getInstance().getExecqModel());
+            sair.aiagent.AiAgentActivity.qqLog("[FC] 段落模型概括完成 (耗时" + (System.currentTimeMillis() - sumStart) + "ms)");
+            return (result != null && !result.trim().isEmpty()) ? result.trim() : null;
+        } catch (Exception e) {
+            sair.aiagent.AiAgentActivity.qqLog("[FC] 折叠消息摘要失败: " + e.toString());
+            return null;
+        }
+    }
+
+    /** 提取需要摘要的折叠消息文本：当前消息折叠内容 或 引用消息中的折叠展开内容。 */
+    private String extractForwardForSummary(ToolContext ctx) {
+        if (ctx == null || ctx.qqMsg == null) return null;
+        sair.aiagent.onebot.model.QQMessage qq = ctx.qqMsg;
+        if (qq.hasForward() && qq.getForwardContent() != null && !qq.getForwardContent().isEmpty()) {
+            return qq.getForwardContent();
+        }
+        String quoted = qq.getQuotedMessageContent();
+        if (quoted != null && quoted.contains("[折叠消息展开内容]")) {
+            return quoted;  // 引用折叠消息时，quotedMessageContent 已含展开内容
         }
         return null;
     }
@@ -351,53 +481,55 @@ public class FunctionCallingBridge {
 
     /**
      * 判断工具执行结果是否属于「失败」——用于连续失败计数与终止保护。
-     * <p>仅识别高置信的失败信号，避免将「文件内容中偶然出现的 error/异常」误判为失败。</p>
+     * <p>按工具类型精确分流：search/web 依据其固定成功/失败前缀判断；其余工具仅检查结果头部，
+     * 避免把「搜索结果摘要 / 网页正文 / 文件内容」中偶然出现的 失败/未找到/无结果 等词误判为失败。</p>
      */
-    private static boolean isFailureResult(String result) {
+    private static boolean isFailureResult(String toolName, String result) {
         if (result == null) return true;
         String r = result.trim();
         if (r.isEmpty()) return false;
-        if (r.startsWith("[工具执行异常]")) return true;
-        // Web 抓取失败（HTTP 错误码 / 网络错误 / 被拒绝）—— 仅检查冒号前的头部，避免正文「失败」字样误判
-        if (r.startsWith("Web GET")) {
-            // 失败模式：Web GET [url] 失败: HTTP xxx / 错误: xxx（英文冒号精确匹配）
-            if (r.contains("失败:") || r.contains("错误:") || r.contains("被拒绝")) return true;
-            // 成功但正文为空/过短 → 视为无进展
+        // 工具执行异常/超时、权限阻断、代码安全阻断、空结果 —— 统一失败信号
+        if (r.startsWith("[工具执行异常]") || r.startsWith("[工具执行超时]")
+                || r.startsWith("[harness]")) {
+            return true;
+        }
+        // search 工具：成功以「[搜索]」开头，失败以「[search]」（小写）开头，精确分流避免摘要误判
+        if ("search".equals(toolName)) {
+            return r.startsWith("[search]");
+        }
+        // web 工具：成功以「Web GET [url] (HTTP xxx」开头，失败为「Web GET [url] 失败:/错误:/被拒绝」
+        if ("web".equals(toolName)) {
+            if (!r.startsWith("Web GET")) return true;
+            int nl = r.indexOf('\n');
+            String statusLine = nl > 0 ? r.substring(0, nl) : r;
+            if (statusLine.contains("失败:") || statusLine.contains("错误:") || statusLine.contains("被拒绝")) return true;
             int httpIdx = r.indexOf("(HTTP ");
             if (httpIdx > 0) {
                 int colon = r.indexOf(':', httpIdx);
                 String body = colon > 0 ? r.substring(colon + 1).trim() : "";
                 if (body.length() < 30) return true;
             }
+            return false;
         }
-        // 高置信失败关键词（成功结果几乎不会包含）
-        if (r.contains("无权限") || r.contains("权限不足") || r.contains("被拒绝")
-                || r.contains("仅主人可用") || r.contains("未知工具") || r.contains("未知操作")
-                || r.contains("文件不存在") || r.contains("目录不存在") || r.contains("发送失败")
-                || r.contains("执行失败") || r.contains("任务执行失败") || r.contains("未就绪")
-                || r.contains("expired") || r.contains("缺少") || r.contains("为空")
-                || r.contains("命令错误") || r.contains("命令中断") || r.contains("未找到")
-                || r.contains("没有找到") || r.contains("无结果") || r.contains("无匹配")
-                || r.contains("未获取") || r.contains("未解析") || r.contains("反爬")
-                || r.contains("无有效") || r.contains("超时") || r.contains("无搜索结果")) {
+        // 其他工具：失败/无进展信号仅检查结果头部（前 80 字符），避免把正文中的 失败/未找到/无结果 等词误判
+        String head = r.length() > 80 ? r.substring(0, 80) : r;
+        if (head.contains("无权限") || head.contains("权限不足") || head.contains("被拒绝")
+                || head.contains("仅主人可用") || head.contains("未知工具") || head.contains("未知操作")
+                || head.contains("文件不存在") || head.contains("目录不存在") || head.contains("发送失败")
+                || head.contains("执行失败") || head.contains("任务执行失败") || head.contains("未就绪")
+                || head.contains("缺少") || head.contains("命令错误") || head.contains("命令中断")
+                || head.contains("未找到") || head.contains("没有找到") || head.contains("无结果")
+                || head.contains("无匹配") || head.contains("未获取") || head.contains("未解析")
+                || head.contains("反爬") || head.contains("无有效") || head.contains("超时")
+                || head.contains("无搜索结果") || head.contains("失败") || head.contains("未初始化")
+                || head.contains("不可用") || head.contains("错误") || head.contains("异常")
+                || head.contains("expired") || head.contains("not found") || head.contains("is empty")
+                || head.contains("not a directory") || head.contains("is a directory")
+                || head.contains("cannot read") || head.contains("too large")
+                || head.contains("not initialized") || head.contains("not available")) {
             return true;
         }
-        // 「失败/未初始化/不可用」较宽泛，仅当出现在结果头部（前 40 字符）才判为失败，避免误伤文件正文
-        String head40 = r.length() > 40 ? r.substring(0, 40) : r;
-        if (head40.contains("失败") || head40.contains("未初始化") || head40.contains("不可用")) {
-            return true;
-        }
-        // 英文失败/无进展信号（FileUtils 等返回，多为开头，仅检查头部避免误伤文件正文）
-        String head60 = r.length() > 60 ? r.substring(0, 60) : r;
-        if (head60.contains("not found") || head60.contains("is empty")
-                || head60.contains("not a directory") || head60.contains("is a directory")
-                || head60.contains("cannot read") || head60.contains("too large")
-                || head60.contains("not initialized") || head60.contains("not available")) {
-            return true;
-        }
-        // 「错误/异常」较宽泛，仅当出现在结果开头 30 字符内才判为失败，避免误伤文件内容
-        String head = r.length() > 30 ? r.substring(0, 30) : r;
-        return head.contains("错误") || head.contains("异常");
+        return false;
     }
 
     /** 构造「工具调用达到硬上限」终止时的告知信息。 */

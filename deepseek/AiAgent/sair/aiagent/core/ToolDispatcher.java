@@ -9,6 +9,7 @@ import java.util.Set;
 
 import sair.aiagent.AiAgentActivity;
 import sair.aiagent.model.AgentAction;
+import sair.aiagent.model.ChatMessage;
 import sair.aiagent.model.ThirdPartySkill;
 import sair.aiagent.model.ToolDefinition;
 import sair.sys.Libraries;
@@ -30,6 +31,8 @@ public class ToolDispatcher {
     private volatile SkillCodeRunner skillCodeRunner;
     /** Harness 生命周期钩子（确定性约束层），按注册顺序执行。 */
     private final List<HarnessHook> hooks = new ArrayList<>();
+    /** Agent 总线（递归多智能体通信；null=未启用 call_agent/ask_agent）。 */
+    private volatile AgentBus agentBus;
 
     public ToolDispatcher(AgentActionHandler actionHandler) {
         this.actionHandler = actionHandler;
@@ -37,6 +40,11 @@ public class ToolDispatcher {
 
     public AgentActionHandler getActionHandler() {
         return actionHandler;
+    }
+
+    /** 注入 Agent 总线，启用 call_agent/ask_agent 递归唤起。 */
+    public void setAgentBus(AgentBus bus) {
+        this.agentBus = bus;
     }
 
     /**
@@ -82,13 +90,13 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("sys", "执行系统命令（shell）")
                 .addString("command", "系统命令"));
 
-        tools.add(new ToolDefinition("evaljs", "动态执行一段 JavaScript 代码（Nashorn 引擎，脚本解释执行，非 Java 动态注入），适合快速脚本、HTTP 请求、数据处理。Java 类用全限定名（如 java.net.URL）")
+        tools.add(new ToolDefinition("evaljs", "动态执行 JavaScript 代码（Nashorn 引擎，非 Java 动态注入），适合脚本/HTTP/数据处理，Java 类用全限定名")
                 .addString("code", "要执行的 JS 代码"));
 
-        tools.add(new ToolDefinition("eval", "编译并执行一段 Java 代码（动态注入，终极兜底）。当其它工具失败时直接写代码完成任务，可用 SFW 内部 API（Libraries/SairCons/Activity）或 JDK 标准类")
+        tools.add(new ToolDefinition("eval", "编译并执行 Java 代码（动态注入，终极兜底），可用 SFW 内部 API（Libraries/SairCons/Activity）或 JDK 标准类")
                 .addString("code", "要执行的 Java 代码"));
 
-        tools.add(new ToolDefinition("web", "抓取指定 URL 的网页或 API 接口内容，自动识别 JSON 接口并原样返回结构化数据，适合查询实时信息、网页内容。URL 必须是完整 http/https 地址")
+        tools.add(new ToolDefinition("web", "抓取指定 URL 的网页/API 内容，自动识别 JSON 原样返回结构化数据。URL 需完整 http/https")
                 .addString("url", "要抓取的完整 URL（http/https）"));
 
         tools.add(new ToolDefinition("search", "在必应搜索网页并返回标题、链接、摘要（适合查实时信息、公开资料、新闻）")
@@ -151,6 +159,9 @@ public class ToolDispatcher {
 
         tools.add(new ToolDefinition("time", "查询当前日期和时间"));
 
+        tools.add(new ToolDefinition("vision", "视觉分析图片：调用视觉模型分析并返回图片特征（类型/主体/文字/色调/二维码/违规内容等），适用于看图理解与内容鉴定")
+                .addString("url", "图片 URL（http/https）或 file_id"));
+
         tools.add(new ToolDefinition("skillinfo", "查询某个技能/工具的完整使用说明书（不熟悉某技能或工具用法时，先调用本工具查详情）")
                 .addString("name", "技能名或工具名（如 weather、eval、sendimage 等）"));
 
@@ -179,6 +190,9 @@ public class ToolDispatcher {
 
         // 三方技能（含代码段）动态注册为 Function Calling 工具（tp_ 前缀），execs/本地始终可用
         addThirdPartyToolTools(tools);
+
+        // 多智能体递归唤起（call_agent/ask_agent）
+        tools.addAll(AgentBus.callAgentTools());
 
         applyStrictIfEnabled(tools);
         return tools;
@@ -211,6 +225,9 @@ public class ToolDispatcher {
 
         tools.add(new ToolDefinition("time", "查询当前日期和时间"));
 
+        tools.add(new ToolDefinition("vision", "视觉分析图片：调用视觉模型分析并返回图片特征（类型/主体/文字/色调/二维码/违规内容等），适用于看图理解与内容鉴定")
+                .addString("url", "图片 URL（http/https）或 file_id"));
+
         tools.add(new ToolDefinition("remember", "记录一条跨会话的持久化记忆")
                 .addString("content", "要记住的内容"));
 
@@ -227,8 +244,8 @@ public class ToolDispatcher {
 
         tools.add(new ToolDefinition("balance", "查询 DeepSeek 账户余额"));
 
-        tools.add(new ToolDefinition("sendsticker", "发送表情包（按上下文匹配库存）")
-                .addOptionalString("context", "表情包匹配上下文，留空则返回库存清单"));
+        tools.add(new ToolDefinition("sendsticker", "发送表情包（按图片内容描述匹配库存）")
+                .addOptionalString("context", "简短表情/情绪关键词（如「猫」「开心」「哭」），留空则返回库存清单"));
 
         tools.add(new ToolDefinition("collectsticker", "收藏表情包（imageUrl|context）")
                 .addString("content", "imageUrl|context 格式"));
@@ -268,6 +285,9 @@ public class ToolDispatcher {
 
         tools.add(new ToolDefinition("setsignature", "修改机器人自己的 QQ 个性签名")
                 .addString("signature", "新的个性签名内容"));
+
+        tools.add(new ToolDefinition("settrigger", "设置/修改 Bot 的消息触发词（仅主人）。多个触发词用 ; 分隔（如 小助手;助手;小助），群聊中提到任一触发词即触发回复。主人说「把触发词改成XX」「新增/删除触发词」「查看触发词」时调用")
+                .addOptionalString("words", "触发词列表，多个用 ; 分隔；留空或填 list/查看 则查询当前触发词"));
 
         tools.add(new ToolDefinition("leavegroup", "退出群聊（仅主人）")
                 .addProperty("dismiss", "boolean", "是否解散群（默认false）", false, null));
@@ -388,6 +408,9 @@ public class ToolDispatcher {
             addThirdPartyToolTools(tools);
         }
 
+        // 多智能体递归唤起（call_agent/ask_agent）
+        tools.addAll(AgentBus.callAgentTools());
+
         applyStrictIfEnabled(tools);
         return tools;
     }
@@ -413,7 +436,10 @@ public class ToolDispatcher {
         SkillBank bank = SkillBank.getInstance();
         ThirdPartySkillStore store = bank == null ? null : bank.getThirdPartyStore();
         if (store == null) return;
-        for (ThirdPartySkill tp : store.getAll()) {
+        // 按技能名排序，保证工具注册顺序字节稳定（DeepSeek 前缀缓存要求 tools 数组字节稳定，ConcurrentHashMap 迭代顺序不稳定会破坏缓存）
+        java.util.List<ThirdPartySkill> sorted = new java.util.ArrayList<>(store.getAll());
+        sorted.sort(java.util.Comparator.comparing(ThirdPartySkill::getName));
+        for (ThirdPartySkill tp : sorted) {
             if (tp == null || !tp.hasCodeBlocks()) continue; // 仅注册含可执行代码段的技能
             String toolName = "tp_" + tp.getName();
             String desc = tp.getAirunDescription();
@@ -445,6 +471,10 @@ public class ToolDispatcher {
      * @return 工具执行结果字符串
      */
     public String execute(String toolName, String argumentsJson, ToolContext ctx) {
+        // 工具调用追踪日志：记录通道 + 工具名 + 参数概要（覆盖 console/execq/execs 全通道）
+        String channel = (ctx != null) ? (ctx.execsMode ? "execs" : ctx.channel) : "console";
+        AiAgentActivity.debugLog("[Tool] [" + channel + "] 调用 " + toolName + briefArgs(argumentsJson));
+
         HarnessHook[] snapshot;
         synchronized (hooks) {
             snapshot = hooks.toArray(new HarnessHook[0]);
@@ -452,12 +482,16 @@ public class ToolDispatcher {
         for (HarnessHook hook : snapshot) {
             try {
                 String blocked = hook.preExecute(toolName, argumentsJson, ctx);
-                if (blocked != null) return blocked;
+                if (blocked != null) {
+                    AiAgentActivity.debugLog("[Tool] [" + channel + "] " + toolName + " 被权限/安全阻断: " + briefText(blocked));
+                    return blocked;
+                }
             } catch (Exception ignored) {
                 // 钩子异常不影响工具执行（护栏自身故障不应阻断业务）
             }
         }
         String result;
+        long start = System.currentTimeMillis();
         try {
             result = executeInternal(toolName, argumentsJson, ctx);
         } catch (Exception e) {
@@ -470,7 +504,25 @@ public class ToolDispatcher {
                 // 后置钩子异常保留原结果
             }
         }
+        AiAgentActivity.debugLog("[Tool] [" + channel + "] " + toolName + " 完成(" + (System.currentTimeMillis() - start) + "ms) → " + briefText(result));
         return result;
+    }
+
+    /** 参数概要：截断到 160 字符，避免超长内容刷屏。 */
+    private static String briefArgs(String args) {
+        if (args == null || args.trim().isEmpty()) return "";
+        String t = args.replace('\n', ' ').replace('\r', ' ').trim();
+        if (t.length() > 160) t = t.substring(0, 160) + "...";
+        return " | " + t;
+    }
+
+    /** 结果概要：截断到 160 字符，避免超长结果刷屏。 */
+    private static String briefText(String s) {
+        if (s == null) return "(null)";
+        String t = s.replace('\n', ' ').replace('\r', ' ').trim();
+        if (t.isEmpty()) return "(空)";
+        if (t.length() > 160) t = t.substring(0, 160) + "...";
+        return t;
     }
 
     /** 工具实际执行（不含钩子），保留原有全部逻辑不变。 */
@@ -537,8 +589,10 @@ public class ToolDispatcher {
             case "skillextract": return act("skillextract", arg(argumentsJson, "focus"));
             case "weather":      return act("weather", arg(argumentsJson, "city"));
             case "time":         return executeTime();
+            case "vision":       return executeVision(argumentsJson, ctx);
             case "setname":      return executeSetName(arg(argumentsJson, "name"), ctx);
             case "setsignature": return executeSetSignature(arg(argumentsJson, "signature"), ctx);
+            case "settrigger":   return executeSetTrigger(arg(argumentsJson, "words"), ctx);
             case "sendsticker":  return actionHandler.executeSendSticker(arg(argumentsJson, "context"));
             case "collectsticker": return actionHandler.executeCollectSticker(arg(argumentsJson, "content"));
             case "clearsticker":  return actionHandler.executeClearSticker();
@@ -581,12 +635,22 @@ public class ToolDispatcher {
             case "alarm":             return executeAlarm(argumentsJson, ctx);
             case "searchglobal":      return executeSearchGlobal(argumentsJson, ctx);
             case "markmessage":       return executeMarkMessage(argumentsJson, ctx);
+            case "call_agent":        return invokeAgent(arg(argumentsJson, "agent"), arg(argumentsJson, "task"), ctx);
+            case "ask_agent":         return invokeAgent(arg(argumentsJson, "agent"), arg(argumentsJson, "question"), ctx);
             default:
                 if (toolName != null && toolName.startsWith("tp_")) {
                     return executeThirdPartyTool(toolName.substring(3), argumentsJson);
                 }
                 return "[工具] 未知工具: " + toolName;
         }
+    }
+
+    /** 唤起指定 Agent（call_agent/ask_agent 工具），通过 AgentBus 递归调度。 */
+    private String invokeAgent(String agent, String task, ToolContext ctx) {
+        if (agentBus == null) {
+            return "[AgentBus] 未初始化（call_agent/ask_agent 不可用）";
+        }
+        return agentBus.invoke(agent, task, ctx);
     }
 
     /** 记录纠正信息（correct 工具）：写入 corrections 表，避免 AI 重复犯错。 */
@@ -616,6 +680,48 @@ public class ToolDispatcher {
     private static String executeTime() {
         return "当前时间: " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss EEEE")
                 .format(new java.util.Date());
+    }
+
+    /** vision 工具的视觉分析提示词：要求视觉模型返回图片的详细特征描述。 */
+    private static final String VISION_PROMPT =
+            "请仔细分析这张图片，并输出详细的结构化描述，包括：\n"
+            + "1. 图片类型（照片/表情包/截图/海报/二维码/漫画等）\n"
+            + "2. 主要对象、人物、场景\n"
+            + "3. 画面中的文字内容（如有）\n"
+            + "4. 整体色调、风格、情绪氛围\n"
+            + "5. 是否含二维码/条形码（如有请尝试描述其用途）\n"
+            + "6. 是否有政治敏感、色情、成人、暴力等违规内容（有则明确标注「违规」）\n"
+            + "请用中文简洁描述，尽量详尽但不要臆测。";
+
+    /** 视觉分析（vision 工具）：下载图片转 Base64 后调用视觉模型，返回图片详细特征描述。 */
+    private String executeVision(String argumentsJson, ToolContext ctx) {
+        String url = arg(argumentsJson, "url");
+        if (url == null || url.trim().isEmpty()) {
+            return "[vision] 请提供 url 参数（图片 URL http/https 或 file_id）";
+        }
+        DeepSeekClient client = actionHandler.getClient();
+        if (client == null) {
+            return "[vision] 视觉模型客户端不可用";
+        }
+        sair.aiagent.onebot.NapCatApi napcat = ctx != null ? ctx.napcatApi : null;
+        try {
+            String visionImage = sair.aiagent.onebot.ImageDownloader.resolveImageForVision(url.trim(), napcat);
+            if (sair.aiagent.onebot.ImageDownloader.isOversizeResult(visionImage)) {
+                return "[vision] 图片超过3M大小限制，我（bot）不看！";
+            }
+            if (visionImage == null) {
+                return "[vision] 图片下载或转换失败，无法分析（可能图片已过期或不可访问）";
+            }
+            java.util.List<ChatMessage> msgs = new java.util.ArrayList<>();
+            msgs.add(ChatMessage.createMultimodal(VISION_PROMPT, java.util.Collections.singletonList(visionImage)));
+            String result = client.chatSync(msgs, AiConfig.getInstance().getVisionModel());
+            if (result == null || result.trim().isEmpty()) {
+                return "[vision] 视觉模型未返回有效结果";
+            }
+            return "[vision] 图片分析结果:\n" + result.trim();
+        } catch (Exception e) {
+            return "[vision] 视觉分析失败: " + e.toString();
+        }
     }
 
     /** 全局记忆检索（searchglobal 工具）：综合群聊历史、对话历史、AI 长期记忆三源检索。 */
@@ -1427,13 +1533,9 @@ public class ToolDispatcher {
         String trimmed = name.trim();
         if (ctx != null && ctx.isExecq() && ctx.napcatApi != null) {
             String resp = ctx.napcatApi.setQQProfile(trimmed, null);
-            AiConfig.getInstance().setBotName(trimmed);
-            AiConfig.getInstance().save();
             return "[setname] QQ昵称已设置: " + trimmed + " " + resp;
         }
-        AiConfig.getInstance().setBotName(trimmed);
-        AiConfig.getInstance().save();
-        return "[setname] 名字已设置为: " + trimmed;
+        return "[setname] 仅QQ通道可修改QQ昵称；修改消息触发词请用 settrigger 工具";
     }
 
     private String executeSetSignature(String signature, ToolContext ctx) {
@@ -1445,6 +1547,24 @@ public class ToolDispatcher {
         }
         String resp = ctx.napcatApi.setSelfLongnick(signature.trim());
         return "[setsignature] 个性签名已设置: " + signature.trim() + " " + resp;
+    }
+
+    private String executeSetTrigger(String words, ToolContext ctx) {
+        // 仅主人可修改触发词
+        if (ctx == null || !ctx.isMaster) {
+            return "[settrigger] 无权限：仅主人可修改触发词";
+        }
+        AiConfig cfg = AiConfig.getInstance();
+        if (words == null || words.trim().isEmpty()
+                || "list".equalsIgnoreCase(words.trim()) || "查看".equals(words.trim())) {
+            java.util.List<String> current = cfg.getTriggerWords();
+            if (current.isEmpty()) return "[settrigger] 当前未设置触发词（@机器人 始终有效）";
+            return "[settrigger] 当前触发词: " + String.join("; ", current);
+        }
+        cfg.setBotName(words); // setBotName 内部按 ; 拆分去重
+        cfg.save();
+        java.util.List<String> list = cfg.getTriggerWords();
+        return "[settrigger] 触发词已设置: " + String.join("; ", list);
     }
 
     // ==================== QQ 媒体发送（execq 通道真实发送） ====================

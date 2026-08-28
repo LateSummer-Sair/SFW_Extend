@@ -1,11 +1,16 @@
 package sair.aiagent.core;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.Base64;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -67,6 +72,7 @@ public class PersistenceManager {
     private final Object lock = new Object();
     private Connection conn;
     private File dbFile;
+    private File dataDir;
 
     /** 临时存储层（内存 LRU + Redis 可选加速，覆盖印象/群印象/纠正查询） */
     private final TemporalStore temporalStore = new TemporalStore(500, 300_000L);
@@ -102,6 +108,7 @@ public class PersistenceManager {
 
         File dir = new File(dataDir);
         dir.mkdirs();
+        this.dataDir = dir;
         dbFile = new File(dir, "aiagent.db");
         boolean isNew = !dbFile.exists();
 
@@ -1798,28 +1805,21 @@ public class PersistenceManager {
 
     // ==================== Notes (knowledge base) ====================
 
-    /** add note (带去重：title 精确匹配时二选一选优，避免重复知识), returns auto-inc id */
+    /** add note (带去重：title 精确匹配时新内容替换旧笔记，保持知识最新), returns auto-inc id */
     public int addNote(String title, String content, String tags) {
         synchronized (lock) {
             String normTitle = title != null ? title.trim() : "";
             String normContent = content != null ? content.trim() : "";
-            // 去重：title 精确匹配，已存在则二选一选优（新内容明显更完整则更新旧笔记，否则保留旧笔记）
+            // 去重：title 精确匹配时，直接用新内容替换旧笔记（保持知识最新）
             if (!normTitle.isEmpty()) {
                 try (java.sql.PreparedStatement ps = conn.prepareStatement(
-                        "SELECT id, content FROM notes WHERE title = ? ORDER BY updated_at DESC LIMIT 1")) {
+                        "SELECT id FROM notes WHERE title = ? ORDER BY updated_at DESC LIMIT 1")) {
                     ps.setString(1, normTitle);
                     try (java.sql.ResultSet rs = ps.executeQuery()) {
                         if (rs.next()) {
                             int oldId = rs.getInt(1);
-                            String oldContent = rs.getString(2);
-                            String oldC = oldContent != null ? oldContent.trim() : "";
-                            // 新内容明显更完整（比旧内容长 50% 且至少多 50 字）才更新，否则保留旧笔记
-                            if (normContent.length() > oldC.length() * 3 / 2 && normContent.length() > oldC.length() + 50) {
-                                updateNote(oldId, normTitle, normContent, tags);
-                                AiAgentActivity.debugLog("[Note] 去重选优：更新已有笔记 #" + oldId + "（新内容更完整）");
-                            } else {
-                                AiAgentActivity.debugLog("[Note] 去重跳过：已有笔记 #" + oldId + " 内容相近，保留旧笔记");
-                            }
+                            updateNote(oldId, normTitle, normContent, tags);
+                            AiAgentActivity.debugLog("[Note] 去重替换：相同标题，已用新内容更新 #" + oldId);
                             return oldId;
                         }
                     }
@@ -1998,6 +1998,344 @@ public class PersistenceManager {
 
     public List<SkillEntry> getPersonaSkills() {
         return skillsDb.getPersonaSkills();
+    }
+
+
+    // ==================== 导入导出（JSON） ====================
+
+    /** 清空所有笔记 */
+    public void clearNotes() {
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM notes");
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    /** 清空所有人物印象 */
+    public void clearImpressions() {
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM impressions");
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    /** 清空所有群印象 */
+    public void clearGroupImpressions() {
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM group_impressions");
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    /** 清空所有表情包数据库记录（不删本地文件） */
+    public void clearStickers() {
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM stickers");
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    /** 列出所有人物印象（不过滤 message_count） */
+    public List<ImpressionEntry> listAllImpressions() {
+        List<ImpressionEntry> list = new ArrayList<>();
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(
+                     "SELECT qq, nickname, emotion_stability, interests, speaking_style,"
+                     + " honesty, image_habit, message_count, first_seen, last_seen, updated_at"
+                     + " FROM impressions")) {
+                while (rs.next()) {
+                    list.add(new ImpressionEntry(rs.getLong(1), rs.getString(2), rs.getString(3),
+                            rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7),
+                            rs.getInt(8), rs.getLong(9), rs.getLong(10), rs.getLong(11)));
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+
+    /** 列出所有群印象 */
+    public List<GroupImpression> getAllGroupImpressions() {
+        List<GroupImpression> list = new ArrayList<>();
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(
+                     "SELECT group_id, group_name, friendliness, atmosphere, message_count,"
+                     + " first_seen, last_seen, updated_at FROM group_impressions")) {
+                while (rs.next()) {
+                    list.add(new GroupImpression(rs.getLong(1), rs.getString(2), rs.getInt(3),
+                            rs.getString(4), rs.getInt(5), rs.getLong(6), rs.getLong(7), rs.getLong(8)));
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
+
+    // ---- DTO ----
+
+    /** 笔记导出记录 */
+    public static class NoteRecord {
+        public String title;
+        public String content;
+        public String tags;
+        public long createdAt;
+        public long updatedAt;
+    }
+
+    /** 印象导出包（人物 + 群） */
+    public static class ImpressionBundle {
+        public List<ImpressionEntry> persons;
+        public List<GroupImpression> groups;
+    }
+
+    /** 表情包导出记录（图片以 Base64 编码内嵌） */
+    public static class StickerRecord {
+        public String imageUrl;
+        public String filePath;
+        public String context;
+        public String keywords;
+        public String remark;
+        public int usageCount;
+        public long createdAt;
+        public String imageBase64;
+    }
+
+    // ---- 长期记忆 ----
+
+    public String exportMemoriesJson() {
+        return gson.toJson(listAllMemories());
+    }
+
+    public int importMemoriesJson(String json) {
+        if (json == null || json.trim().isEmpty()) return 0;
+        List<MemoryEntry> list;
+        try {
+            list = gson.fromJson(json, new TypeToken<List<MemoryEntry>>(){}.getType());
+        } catch (Exception e) { return -1; }
+        if (list == null) return 0;
+        clearMemories();
+        int count = 0;
+        for (MemoryEntry m : list) {
+            if (m == null || m.getContent() == null || m.getContent().trim().isEmpty()) continue;
+            addMemory(m.getContent(), m.getCategory(), m.getImportance());
+            count++;
+        }
+        return count;
+    }
+
+    // ---- 知识库笔记 ----
+
+    public String exportNotesJson() {
+        List<NoteRecord> list = new ArrayList<>();
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(
+                     "SELECT title, content, tags, created_at, updated_at FROM notes ORDER BY id")) {
+                while (rs.next()) {
+                    NoteRecord n = new NoteRecord();
+                    n.title = rs.getString(1);
+                    n.content = rs.getString(2);
+                    n.tags = rs.getString(3);
+                    n.createdAt = rs.getLong(4);
+                    n.updatedAt = rs.getLong(5);
+                    list.add(n);
+                }
+            } catch (SQLException ignored) {}
+        }
+        return gson.toJson(list);
+    }
+
+    public int importNotesJson(String json) {
+        if (json == null || json.trim().isEmpty()) return 0;
+        List<NoteRecord> list;
+        try {
+            list = gson.fromJson(json, new TypeToken<List<NoteRecord>>(){}.getType());
+        } catch (Exception e) { return -1; }
+        if (list == null) return 0;
+        clearNotes();
+        int count = 0;
+        for (NoteRecord n : list) {
+            if (n == null || n.title == null || n.title.trim().isEmpty()) continue;
+            insertNoteRaw(n.title, n.content, n.tags, n.createdAt > 0 ? n.createdAt : System.currentTimeMillis());
+            count++;
+        }
+        return count;
+    }
+
+    private void insertNoteRaw(String title, String content, String tags, long createdAt) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO notes (title, content, tags, created_at, updated_at) VALUES (?,?,?,?,?)")) {
+                long now = System.currentTimeMillis();
+                ps.setString(1, title != null ? title : "");
+                ps.setString(2, content != null ? content : "");
+                ps.setString(3, tags != null ? tags : "");
+                ps.setLong(4, createdAt > 0 ? createdAt : now);
+                ps.setLong(5, now);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    // ---- 印象库（人物 + 群） ----
+
+    public String exportImpressionsJson() {
+        ImpressionBundle bundle = new ImpressionBundle();
+        bundle.persons = listAllImpressions();
+        bundle.groups = getAllGroupImpressions();
+        return gson.toJson(bundle);
+    }
+
+    public int[] importImpressionsJson(String json) {
+        if (json == null || json.trim().isEmpty()) return new int[]{0, 0};
+        ImpressionBundle bundle;
+        try {
+            bundle = gson.fromJson(json, ImpressionBundle.class);
+        } catch (Exception e) { return new int[]{-1, -1}; }
+        int p = 0, g = 0;
+        if (bundle != null) {
+            clearImpressions();
+            if (bundle.persons != null) {
+                for (ImpressionEntry imp : bundle.persons) {
+                    if (imp == null || imp.getQq() <= 0) continue;
+                    upsertImpression(imp);
+                    p++;
+                }
+            }
+            clearGroupImpressions();
+            if (bundle.groups != null) {
+                for (GroupImpression gi : bundle.groups) {
+                    if (gi == null || gi.getGroupId() <= 0) continue;
+                    upsertGroupImpression(gi);
+                    g++;
+                }
+            }
+        }
+        return new int[]{p, g};
+    }
+
+    // ---- 表情库（图片 Base64） ----
+
+    public String exportStickersJson() {
+        List<StickerRecord> list = new ArrayList<>();
+        for (StickerEntry s : listAllStickers()) {
+            StickerRecord r = new StickerRecord();
+            r.imageUrl = s.getImageUrl();
+            r.filePath = s.getFilePath();
+            r.context = s.getContext();
+            r.keywords = s.getKeywords();
+            r.remark = s.getRemark();
+            r.usageCount = s.getUsageCount();
+            r.createdAt = s.getTimestamp();
+            r.imageBase64 = readFileBase64(s.getFilePath());
+            list.add(r);
+        }
+        return gson.toJson(list);
+    }
+
+    public int importStickersJson(String json) {
+        if (json == null || json.trim().isEmpty()) return 0;
+        List<StickerRecord> list;
+        try {
+            list = gson.fromJson(json, new TypeToken<List<StickerRecord>>(){}.getType());
+        } catch (Exception e) { return -1; }
+        if (list == null) return 0;
+        clearStickers();
+        deleteStickerFiles();
+        int count = 0;
+        for (StickerRecord r : list) {
+            if (r == null) continue;
+            String localPath = (r.imageBase64 != null && !r.imageBase64.isEmpty())
+                    ? writeBase64File(r.imageBase64, r.filePath) : "";
+            if (localPath == null) localPath = "";
+            addSticker(r.imageUrl != null ? r.imageUrl : "", localPath,
+                    r.context != null ? r.context : "",
+                    r.keywords != null ? r.keywords : "",
+                    r.remark != null ? r.remark : "");
+            count++;
+        }
+        return count;
+    }
+
+    private String readFileBase64(String path) {
+        if (path == null || path.isEmpty()) return "";
+        try {
+            File f = new File(path);
+            if (!f.exists() || !f.isFile()) return "";
+            return Base64.getEncoder().encodeToString(Files.readAllBytes(f.toPath()));
+        } catch (Exception e) { return ""; }
+    }
+
+    private String writeBase64File(String base64, String hintPath) {
+        if (base64 == null || base64.isEmpty()) return "";
+        try {
+            byte[] bytes = Base64.getDecoder().decode(base64);
+            File dir = (dataDir != null) ? new File(dataDir, "stickers") : new File("stickers");
+            dir.mkdirs();
+            String name = null;
+            if (hintPath != null && !hintPath.isEmpty()) {
+                String hint = new File(hintPath).getName();
+                int dot = hint.lastIndexOf('.');
+                if (dot > 0 && dot < hint.length() - 1) {
+                    String ext = hint.substring(dot);
+                    if (ext.length() <= 6) name = "sticker_" + Math.abs(base64.hashCode()) + "_" + System.currentTimeMillis() + ext;
+                }
+            }
+            if (name == null) name = "sticker_" + System.currentTimeMillis() + "_" + Math.abs(base64.hashCode()) + ".png";
+            File out = new File(dir, name);
+            try (FileOutputStream fos = new FileOutputStream(out)) {
+                fos.write(bytes);
+            }
+            return out.getAbsolutePath();
+        } catch (Exception e) { return ""; }
+    }
+
+    private void deleteStickerFiles() {
+        if (dataDir == null) return;
+        try {
+            File dir = new File(dataDir, "stickers");
+            if (dir.exists() && dir.isDirectory()) {
+                File[] files = dir.listFiles();
+                if (files != null) {
+                    for (File f : files) if (f.isFile()) f.delete();
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    // ---- 文件读写 ----
+
+    public boolean exportJsonToFile(String json, File file) {
+        if (json == null || file == null) return false;
+        try {
+            File parent = file.getParentFile();
+            if (parent != null && !parent.exists()) parent.mkdirs();
+            try (BufferedWriter w = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8))) {
+                w.write(json);
+            }
+            return true;
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[Persistence] export file failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public String readJsonFromFile(File file) {
+        if (file == null || !file.exists() || !file.isFile()) return null;
+        try (Reader r = new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)) {
+            StringBuilder sb = new StringBuilder();
+            char[] buf = new char[4096];
+            int n;
+            while ((n = r.read(buf)) != -1) sb.append(buf, 0, n);
+            return sb.toString();
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[Persistence] read file failed: " + e.getMessage());
+            return null;
+        }
     }
 
 

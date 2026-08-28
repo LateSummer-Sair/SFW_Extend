@@ -60,6 +60,9 @@ public class AgentActionHandler {
     /** 暴露自身 Activity（供 ToolDispatcher 获取数据目录）。 */
     Activity getSelfActivity() { return selfActivity; }
 
+    /** 暴露 DeepSeekClient（供 ToolDispatcher 的 vision 工具调用视觉模型）。 */
+    public DeepSeekClient getClient() { return client; }
+
     String executeAction(AgentAction action) {
         String type = action.getType();
         String content = action.getContent();

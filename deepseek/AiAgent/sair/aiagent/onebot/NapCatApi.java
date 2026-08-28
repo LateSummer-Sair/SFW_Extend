@@ -439,7 +439,7 @@ public class NapCatApi {
      * @param messageId 消息ID
      * @return API响应JSON
      */
-    public String getMessage(int messageId) {
+    public String getMessage(long messageId) {
         Map<String, Object> params = new HashMap<>();
         params.put("message_id", messageId);
         return server.sendApiCall("get_msg", params);

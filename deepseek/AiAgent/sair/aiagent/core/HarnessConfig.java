@@ -104,6 +104,7 @@ public class HarnessConfig {
         permissionMatrix.put("resetdonation", LEVEL_MASTER);
         permissionMatrix.put("setname",       LEVEL_MASTER);
         permissionMatrix.put("setsignature",  LEVEL_MASTER);
+        permissionMatrix.put("settrigger",    LEVEL_MASTER);
         // 仅群内主人（GROUP_MASTER）
         permissionMatrix.put("ban",           LEVEL_GROUP_MASTER);
         permissionMatrix.put("kick",          LEVEL_GROUP_MASTER);

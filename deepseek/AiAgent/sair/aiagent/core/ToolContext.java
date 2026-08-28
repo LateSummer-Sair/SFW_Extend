@@ -42,6 +42,8 @@ public class ToolContext {
     public String model;
     /** 是否为 execs 全权限链路（QQ 通道 execs: 关键字），用于区分 execq 受限与 execs 全权限 */
     public boolean execsMode = false;
+    /** AgentBus 递归唤起深度（随 ctx 对象透传，跨线程工具执行时仍能正确累加，防止无限递归） */
+    public int agentBusDepth = 0;
 
     public ToolContext() {
         this("console");

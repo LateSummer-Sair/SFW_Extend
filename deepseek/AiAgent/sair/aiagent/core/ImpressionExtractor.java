@@ -119,14 +119,28 @@ public class ImpressionExtractor {
         StringBuilder sb = new StringBuilder();
 
         List<String[]> convs = mem.getPrivateConversations(qq, 30);
-        if (convs.isEmpty()) return null;
-
-        for (String[] c : convs) {
-            String roleLabel = "user".equals(c[0]) ? "User" : "Bot";
-            String content = c[1];
-            if (content.length() > 500) content = content.substring(0, 500) + "...";
-            sb.append(roleLabel).append(": ").append(content).append("\n");
+        if (!convs.isEmpty()) {
+            for (String[] c : convs) {
+                String roleLabel = "user".equals(c[0]) ? "User" : "Bot";
+                String content = c[1];
+                if (content != null && content.length() > 500) content = content.substring(0, 500) + "...";
+                sb.append(roleLabel).append(": ").append(content).append("\n");
+            }
         }
+
+        List<String[]> groupMsgs = mem.getUserGroupMessages(qq, 30);
+        if (!groupMsgs.isEmpty()) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append("=== 群聊发言 ===\n");
+            for (String[] g : groupMsgs) {
+                String nickname = (g[0] != null && !g[0].isEmpty()) ? g[0] : "用户";
+                String content = g[1];
+                if (content != null && content.length() > 500) content = content.substring(0, 500) + "...";
+                sb.append(nickname).append(": ").append(content).append("\n");
+            }
+        }
+
+        if (sb.length() == 0) return null;
         return sb.toString();
     }
 

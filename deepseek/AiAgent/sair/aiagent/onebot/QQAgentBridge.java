@@ -165,17 +165,28 @@ class QQAgentBridge {
         sb.append(msg.isGroupMessage() ? " 群聊: " : " 私聊: ");
         sb.append(msg.getPlainText());
         if (msg.hasImage() && !msg.getImageUrls().isEmpty()) {
-            // 图片已通过多模态（DeepSeek Vision）直接传给 AI，此处仅提示数量，不再注入内网 URL 文本
+            // 图片内容由系统按需注入（引用图片或看图指令才识别），此处仅提示数量
             sb.append("\n📷 此消息包含 ").append(msg.getImageUrls().size()).append(" 张图片");
         }
-        if (msg.hasForward() && msg.getForwardContent() != null && !msg.getForwardContent().isEmpty()) {
-            sb.append("\n" + "📨" + " 转发/折叠消息内容:\n").append(msg.getForwardContent());
+        if (msg.hasForward()) {
+            sb.append("\n📨 此消息包含转发/折叠消息，内容概述见 [折叠消息摘要]。");
         }
         if (msg.getQuotedMessageContent() != null && !msg.getQuotedMessageContent().isEmpty()) {
             String quotedSenderLabel = (msg.getQuotedSenderName() != null && !msg.getQuotedSenderName().isEmpty())
                     ? msg.getQuotedSenderName() + "(QQ:" + msg.getQuotedSenderQQ() + ")"
                     : "对方";
-            sb.append("\n💬 被引用的消息（由 ").append(quotedSenderLabel).append(" 发出）: ").append(msg.getQuotedMessageContent());
+            String quotedContent = msg.getQuotedMessageContent();
+            int foldIdx = quotedContent.indexOf("[折叠消息展开内容]");
+            if (foldIdx >= 0) {
+                String head = quotedContent.substring(0, foldIdx).trim();
+                if (!head.isEmpty()) {
+                    sb.append("\n💬 被引用的消息（由 ").append(quotedSenderLabel).append(" 发出，其转发内容已单独生成概述）: ").append(head);
+                } else {
+                    sb.append("\n💬 用户引用了 ").append(quotedSenderLabel).append(" 的折叠消息，内容概述见 [折叠消息摘要]。");
+                }
+            } else {
+                sb.append("\n💬 被引用的消息（由 ").append(quotedSenderLabel).append(" 发出）: ").append(quotedContent);
+            }
         }
         return sb.toString();
     }
@@ -183,22 +194,45 @@ class QQAgentBridge {
     /** 纯@（无附带文字）时的任务描述：结合上下文自然回应，不回复「空消息」。 */
     private String buildBareMentionTask(QQMessage msg) {
         String name = msg.getDisplayName();
+        String roleLabel = buildSpeakerRoleLabel(msg);
+        String identityLine = name + "（QQ:" + msg.getUserId() + "，身份:" + roleLabel + "）";
         String[] recent = findRecentUserMessageWithMark(msg);
         if (recent != null && recent[0] != null && !recent[0].isEmpty()) {
             String content = recent[0];
             String mark = recent[1];
             if (mark != null && !mark.isEmpty()) {
-                return name + " 单独 @ 了你（没有附带文字）。\n"
+                return identityLine + " 单独 @ 了你（没有附带文字）。\n"
                         + "他/她最近说的是：\"" + content + "\"\n"
                         + "这条消息你【之前已经处理过了】，处理结果是：\"" + mark + "\"\n"
-                        + "请基于「已处理」这个事实自然地回应他/她（例如告诉他刚才已经帮他办过了），【绝对不要重复执行原消息里的任务】。";
+                        + "请基于「已处理」这个事实自然地回应他/她（例如告诉他刚才已经帮他办过了），【绝对不要重复执行原消息里的任务】。\n"
+                        + "注意：只有【⭐主人】才能称为'主人'，此人身份是" + roleLabel + "，若不是主人请用昵称称呼。";
             }
-            return name + " 单独 @ 了你（没有附带文字）。\n"
+            return identityLine + " 单独 @ 了你（没有附带文字）。\n"
                     + "请结合他/她最近说的话自然地回应，不要提「空消息」「没内容」之类的话。\n"
-                    + "他/她最近说的是：\"" + content + "\"";
+                    + "他/她最近说的是：\"" + content + "\"\n"
+                    + "注意：只有【⭐主人】才能称为'主人'，此人身份是" + roleLabel + "，若不是主人请用昵称称呼。";
         }
-        return name + " 单独 @ 了你（没有附带文字）。\n"
-                + "请自然地回应他/她（例如打招呼、询问有什么事），不要提「空消息」。";
+        return identityLine + " 单独 @ 了你（没有附带文字）。\n"
+                + "请自然地回应他/她（例如打招呼、询问有什么事），不要提「空消息」。\n"
+                + "注意：只有【⭐主人】才能称为'主人'，此人身份是" + roleLabel + "，若不是主人请用昵称称呼。";
+    }
+
+    /** 判断消息触发者的身份标签：⭐主人 / 👑群主 / 🔧管理员 / 普通成员 */
+    private String buildSpeakerRoleLabel(QQMessage msg) {
+        long uid = msg.getUserId();
+        if (sair.aiagent.core.AiConfig.getInstance().isMasterQQ(uid)) return "⭐主人";
+        if (msg.isGroupMessage() && unifiedMemory != null) {
+            try {
+                java.util.List<String[]> admins = unifiedMemory.getGroupAdmins(msg.getGroupId());
+                for (String[] a : admins) {
+                    if (a.length > 0 && String.valueOf(uid).equals(a[0])) {
+                        if (a.length > 2 && "owner".equals(a[2])) return "👑群主";
+                        return "🔧管理员";
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return "普通成员";
     }
 
     /** 查找该用户最近一条非空消息及其 Mark 备注（返回 [内容, 备注]，备注可能为 null），找不到返回 null。 */
@@ -422,6 +456,8 @@ class QQAgentBridge {
             }
 
             if (aiResponse != null && !aiResponse.trim().isEmpty()) {
+                AiAgentActivity.qqLog("[QQMsg] AI返回文本: 长度=" + aiResponse.length()
+                        + ", 前100字=" + (aiResponse.length() > 100 ? aiResponse.substring(0, 100) + "..." : aiResponse));
                 if (msg.isGroupMessage()) {
                     unifiedMemory.addConversation("assistant", aiResponse, "group",
                         msg.getGroupId(), selfId, null);
@@ -431,6 +467,8 @@ class QQAgentBridge {
                 }
 
                 String cleanResponse = aiResponse.replaceAll("<[^>]+>", "").trim();
+                AiAgentActivity.qqLog("[QQMsg] cleanResponse=" + (cleanResponse.isEmpty() ? "空" : ("非空(长度" + cleanResponse.length() + ")"))
+                        + ", server=" + (server != null) + ", 是否群聊=" + msg.isGroupMessage());
                 if (!cleanResponse.isEmpty()) {
                     List<String> messages;
                     String[] splitParts = aiResponse.split("<split>");
@@ -464,6 +502,7 @@ class QQAgentBridge {
                     if (bareMention && msg.isGroupMessage() && !messages.isEmpty()) {
                         messages.set(0, "[CQ:at,qq=" + msg.getUserId() + "] " + messages.get(0));
                     }
+                    AiAgentActivity.qqLog("[QQMsg] 准备发送 " + messages.size() + " 条回复");
                     sendMultipleReplies(msg, messages);
                 } else {
                     // 兜底：AI 只输出了标签没有纯文本，发送确认提示
@@ -471,6 +510,9 @@ class QQAgentBridge {
                     String brief = task.length() > 30 ? task.substring(0, 30) + "..." : task;
                     sendReply(msg, "\u2705 " + brief + " \u2014 \u5df2\u5904\u7406");
                 }
+            } else {
+                AiAgentActivity.qqLog("[QQMsg] AI返回空文本，发送兜底提示");
+                sendReply(msg, "抱歉，我暂时无法理解这条消息，请换一种说法或稍后再试。");
             }
         } catch (Exception e) {
             AiAgentActivity.qqLog("[QQMsg] Agent执行失败: " + e.toString());

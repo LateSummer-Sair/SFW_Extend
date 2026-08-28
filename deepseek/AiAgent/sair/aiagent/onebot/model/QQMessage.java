@@ -48,6 +48,8 @@ public class QQMessage {
     private final List<String> stickerUrls = new ArrayList<>();
     /** 引用消息中的图片URL列表（用于OCR识别，不参与自动收藏） */
     private final List<String> quotedImageUrls = new ArrayList<>();
+    /** 引用消息中的图片 file（md5）列表，与 quotedImageUrls 一一对应，用于 NapCat get_image 兜底下载 */
+    private final List<String> quotedImageFiles = new ArrayList<>();
     /** 是否包含折叠/转发消息 */
     private boolean hasForward;
     /** 折叠消息中提取的文本内容 */
@@ -104,11 +106,11 @@ public class QQMessage {
         public boolean isMface() { return "mface".equals(type); }
         /** 是否是贴纸消息段 */
         public boolean isSticker() { return "sticker".equals(type); }
-        /** 是否是图片段且为表情包子类型(sub_type=1/3/7) */
+        /** 是否是图片段且为表情包子类型(sub_type=1表情/2热图/3斗图/4智图/7贴图) */
         public boolean isStickerImage() {
             if (!"image".equals(type) || subType == null) return false;
             String s = subType.trim();
-            return "1".equals(s) || "3".equals(s) || "7".equals(s);
+            return "1".equals(s) || "2".equals(s) || "3".equals(s) || "4".equals(s) || "7".equals(s);
         }
     }
 
@@ -180,6 +182,10 @@ public class QQMessage {
     /** 获取引用消息中的图片URL列表（用于OCR识别） */
     public List<String> getQuotedImageUrls() { return quotedImageUrls; }
     public void addQuotedImageUrl(String url) { if (url != null && !url.isEmpty()) this.quotedImageUrls.add(url); }
+
+    /** 获取引用消息中的图片 file（md5）列表（与 quotedImageUrls 一一对应，用于 NapCat get_image 兜底） */
+    public List<String> getQuotedImageFiles() { return quotedImageFiles; }
+    public void addQuotedImageFile(String file) { if (file != null && !file.isEmpty()) this.quotedImageFiles.add(file); }
     
     public boolean hasForward() { return hasForward; }
     public void setHasForward(boolean v) { this.hasForward = v; }
