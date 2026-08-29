@@ -71,6 +71,7 @@ public class AgentActionHandler {
             case "cmd":      result = executeCmd(content); break;
             case "readfile": result = executeReadFile(content); break;
             case "readdir":  result = executeReadDir(content); break;
+            case "findfile": result = executeFindFile(content); break;
             case "sys":      result = executeSys(content); break;
             case "evaljs":   result = executeEvalJs(content); break;
             case "eval":     result = executeEval(content); break;
@@ -130,6 +131,22 @@ public class AgentActionHandler {
         if (!gate.await("readdir", "列出目录: " + path)) return "列出目录被拒绝。";
         EdtUtils.println(C_TOOL, "\n  > 列出目录: " + path);
         return "目录 [" + path + "]:\n" + FileUtils.readDir(path);
+    }
+
+    String executeFindFile(String content) {
+        // content 格式：path 或 path|keyword
+        String path = content;
+        String keyword = "";
+        if (content != null) {
+            int bar = content.indexOf('|');
+            if (bar >= 0) {
+                path = content.substring(0, bar).trim();
+                keyword = content.substring(bar + 1).trim();
+            }
+        }
+        if (!gate.await("findfile", "查找文件: " + path)) return "查找文件被拒绝。";
+        EdtUtils.println(C_TOOL, "\n  > 查找文件: " + path + (keyword.isEmpty() ? "" : " (关键词:" + keyword + ")"));
+        return FileUtils.findFiles(path, keyword);
     }
 
     String executeSys(String command) {

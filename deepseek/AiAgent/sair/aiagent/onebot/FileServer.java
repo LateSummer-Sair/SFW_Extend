@@ -14,6 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
+import sair.aiagent.core.AiConfig;
+
 /**
  * 文件中转 Web 服务 —— 把本地文件以 HTTP URL 形式暴露，供 NapCat 下载后发送给用户。
  *
@@ -32,20 +34,33 @@ public class FileServer {
     private volatile int port = -1;
     private final Map<String, File> registry = new ConcurrentHashMap<>();
     private final AtomicLong idGen = new AtomicLong(0);
+    private volatile String publicHost;   // 对外 URL 的 host（懒解析，重启后重置）
 
     private FileServer() {}
 
     public static FileServer getInstance() { return INSTANCE; }
 
-    /** 启动文件服务（绑定 127.0.0.1，端口自动分配，避免冲突）。 */
+    /**
+     * 启动文件服务（绑定 0.0.0.0 所有网卡，供跨机器 NapCat 访问）。
+     * <p>优先使用配置端口 {@link AiConfig#getFileServerPort()}（默认 2671），
+     * 端口被占用等异常时回退自动分配端口。</p>
+     */
     public synchronized boolean start() {
         if (server != null) return true;
+        int cfgPort = AiConfig.getInstance().getFileServerPort();
+        if (startOn(cfgPort)) return true;
+        // 配置端口不可用（如被占用）：回退自动分配端口，保底可用
+        return startOn(0);
+    }
+
+    private boolean startOn(int bindPort) {
         try {
-            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server = HttpServer.create(new InetSocketAddress("0.0.0.0", bindPort), 0);
             server.createContext("/file/", new FileHandler());
             server.setExecutor(Executors.newFixedThreadPool(4));
             server.start();
             port = server.getAddress().getPort();
+            publicHost = null;   // 重置，让下次 register 重新解析对外地址
             return true;
         } catch (Exception e) {
             server = null;
@@ -62,11 +77,18 @@ public class FileServer {
         }
         registry.clear();
         port = -1;
+        publicHost = null;
     }
 
     public boolean isRunning() { return server != null; }
 
     public int getPort() { return port; }
+
+    /** 返回对外访问的基础 URL（如 http://192.168.1.5:5801/file/），供日志/调试；服务未启动返回 null。 */
+    public String getPublicBaseUrl() {
+        if (server == null || port <= 0) return null;
+        return "http://" + formatHost(resolvePublicHost()) + ":" + port + "/file/";
+    }
 
     /**
      * 注册文件，返回 HTTP URL（NapCat 可通过此 URL 下载文件；AI 也可用 web 工具抓取）。
@@ -77,13 +99,59 @@ public class FileServer {
         if (server == null || file == null || !file.exists() || !file.isFile()) return null;
         String id = Long.toString(idGen.incrementAndGet(), 36) + "_" + sanitize(file.getName());
         registry.put(id, file);
-        return "http://127.0.0.1:" + port + "/file/" + id;
+        return "http://" + formatHost(resolvePublicHost()) + ":" + port + "/file/" + id;
     }
 
     /** 文件名保留字母/数字/点/下划线/横线，避免 URL 特殊字符。 */
     private static String sanitize(String name) {
         if (name == null || name.isEmpty()) return "file";
         return name.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    /** 解析对外可访问的 host：优先配置值，否则自动探测局域网 IPv4，最后回退 127.0.0.1。 */
+    private String resolvePublicHost() {
+        if (publicHost != null) return publicHost;
+        String configured = AiConfig.getInstance().getFileServerHost();
+        if (configured != null && !configured.trim().isEmpty()) {
+            publicHost = configured.trim();
+        } else {
+            publicHost = detectLanIp();
+        }
+        return publicHost;
+    }
+
+    /** 探测本机局域网 IPv4 地址（跳过虚拟网卡），无结果回退 127.0.0.1。 */
+    private static String detectLanIp() {
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> nis = java.net.NetworkInterface.getNetworkInterfaces();
+            String fallback = null;
+            while (nis.hasMoreElements()) {
+                java.net.NetworkInterface ni = nis.nextElement();
+                if (!ni.isUp() || ni.isLoopback()) continue;
+                String name = ni.getName() == null ? "" : ni.getName().toLowerCase();
+                if (name.contains("docker") || name.contains("vmware") || name.contains("virtual")
+                        || name.contains("vbox") || name.contains("wsl") || name.contains("vethernet")) continue;
+                java.util.Enumeration<java.net.InetAddress> addrs = ni.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    java.net.InetAddress addr = addrs.nextElement();
+                    if (addr.isLoopbackAddress()) continue;
+                    if (addr instanceof java.net.Inet4Address) {
+                        String ip = addr.getHostAddress();
+                        if (ip == null || ip.isEmpty()) continue;
+                        if (addr.isSiteLocalAddress()) return ip;   // 内网 IP 优先
+                        if (fallback == null) fallback = ip;
+                    }
+                }
+            }
+            return fallback != null ? fallback : "127.0.0.1";
+        } catch (Exception e) {
+            return "127.0.0.1";
+        }
+    }
+
+    /** IPv6 地址用方括号包裹，确保 URL 合法。 */
+    private static String formatHost(String host) {
+        return (host != null && host.contains(":")) ? ("[" + host + "]") : host;
     }
 
     /** 静态文件处理器：/file/{id} → 从注册表取文件并流式返回。 */

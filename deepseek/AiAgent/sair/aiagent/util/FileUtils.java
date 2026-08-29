@@ -26,6 +26,10 @@ public final class FileUtils {
 
     private static final long MAX_TEXT_SIZE = 10 * 1024 * 1024;
     private static final int MAX_OUTPUT_CHARS = 50_000;
+    private static final int MAX_FIND_RESULTS = 200;
+    private static final int MAX_FIND_DEPTH = 20;
+    /** 多线程遍历线程数：IO 密集，略高于 CPU 核心但上限 8，避免磁盘争抢 */
+    private static final int FIND_THREADS = Math.min(8, Math.max(2, Runtime.getRuntime().availableProcessors() * 2));
 
     private static final String[] IMAGE_EXTENSIONS = {
         ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"
@@ -100,6 +104,91 @@ public final class FileUtils {
         sb.append("Total: ").append(dirCount).append(" dirs, ")
           .append(fileCount).append(" files\n");
         return sb.toString();
+    }
+
+    /**
+     * 递归查找目录下文件名匹配关键词的文件/目录（快速定位，避免逐层 readdir）。
+     * <p>多线程并行遍历不同目录分支（IO 密集场景下并行读盘提速），关键词为子串匹配（忽略大小写），
+     * 空则返回全部；最多返回 {@link #MAX_FIND_RESULTS} 条，深度上限 {@link #MAX_FIND_DEPTH}。</p>
+     */
+    public static String findFiles(String dirPath, String keyword) {
+        if (dirPath == null || dirPath.trim().isEmpty()) {
+            return "Path is empty.";
+        }
+        File dir = new File(dirPath);
+        if (!dir.exists()) return "Directory not found: " + dirPath;
+        if (!dir.isDirectory()) return "Path is not a directory: " + dirPath;
+
+        final String kw = (keyword == null) ? "" : keyword.trim().toLowerCase();
+        final java.util.List<File> matched = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(FIND_THREADS);
+        java.util.concurrent.Phaser phaser = new java.util.concurrent.Phaser(1);
+        try {
+            walkConcurrent(pool, phaser, dir, kw, matched, 0);
+            phaser.arriveAndAwaitAdvance();
+        } catch (Exception ignored) {
+            // 遍历异常不阻断已收集结果
+        } finally {
+            pool.shutdown();
+        }
+
+        // 快照 + 按路径排序，保证输出稳定
+        java.util.List<File> snapshot;
+        synchronized (matched) {
+            snapshot = new java.util.ArrayList<>(matched);
+        }
+        snapshot.sort(new java.util.Comparator<File>() {
+            public int compare(File a, File b) {
+                return a.getAbsolutePath().compareToIgnoreCase(b.getAbsolutePath());
+            }
+        });
+        int total = snapshot.size();
+        java.util.List<File> shown = total > MAX_FIND_RESULTS ? snapshot.subList(0, MAX_FIND_RESULTS) : snapshot;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Find in: ").append(dir.getAbsolutePath()).append("\n");
+        sb.append("Keyword: ").append(kw.isEmpty() ? "(all)" : kw).append("\n");
+        sb.append("------------------------------\n");
+        if (shown.isEmpty()) {
+            sb.append("  (no match)\n");
+        } else {
+            for (File f : shown) {
+                sb.append("  ").append(f.getAbsolutePath());
+                if (f.isFile()) sb.append("  (").append(formatSize(f.length())).append(")");
+                sb.append("\n");
+            }
+            if (total > MAX_FIND_RESULTS) {
+                sb.append("  ... (truncated, more results)\n");
+            }
+        }
+        sb.append("------------------------------\n");
+        sb.append("Total: ").append(total).append(" matches\n");
+        return truncateIfNeeded(sb.toString());
+    }
+
+    private static void walkConcurrent(java.util.concurrent.ExecutorService pool,
+                                       java.util.concurrent.Phaser phaser,
+                                       File dir, String kw, java.util.List<File> matched, int depth) {
+        if (depth > MAX_FIND_DEPTH || matched.size() >= MAX_FIND_RESULTS) return;
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        for (File f : files) {
+            if (matched.size() >= MAX_FIND_RESULTS) return;
+            if (kw.isEmpty() || f.getName().toLowerCase().contains(kw)) {
+                matched.add(f);
+            }
+            if (f.isDirectory()) {
+                phaser.register();
+                pool.submit(() -> {
+                    try {
+                        walkConcurrent(pool, phaser, f, kw, matched, depth + 1);
+                    } finally {
+                        phaser.arriveAndDeregister();
+                    }
+                });
+            }
+        }
     }
 
     // === Private implementation ===

@@ -125,7 +125,7 @@ public class SystemSkillLib {
             "遇到未知/不懂/不确定的事物时，按探索优先级层层递进，最后联网，成功后沉淀笔记：\n\n" +
             "## 探索优先级\n" +
             "①短期记忆上下文 → ②长期记忆上下文 → ③知识库笔记(searchnote) → ④纠错记录 → ⑤本地内容(硬盘/进程) → ⑥联网搜索(web/search)\n" +
-            "- 问本地文件/目录: 用 readdir/readfile 查硬盘\n" +
+            "- 问本地文件/目录: 用 readdir/readfile/findfile 查硬盘\n" +
             "- 问本地进程/软件: 用 cmd/sys 查进程\n" +
             "- 全部本地手段都没有，才联网搜索\n\n" +
             "## 笔记去重\n" +
@@ -137,12 +137,14 @@ public class SystemSkillLib {
             "builtin", "general");
 
         // === 文件操作 ===
-        bank.addBuiltinSkill("文件读写", "tool", "读取和列出文件目录",
+        bank.addBuiltinSkill("文件读写", "tool", "读取和列出文件目录、递归查找文件",
             "`readfile` 工具读取文本文件内容，参数 path 为文件路径。\n" +
-            "`readdir` 工具列出目录中的文件和子目录，参数 path 为目录路径。\n\n" +
+            "`readdir` 工具列出目录中的文件和子目录，参数 path 为目录路径。\n" +
+            "`findfile` 工具递归查找目录树中文件名匹配关键词的文件/目录，参数 path 为起始目录、keyword 为文件名关键词（子串匹配忽略大小写，留空=返回全部）。适合在不确定文件位置时快速定位，避免逐层 readdir 探索。\n\n" +
             "## 示例\n" +
             "- `readfile` /data/config.txt\n" +
-            "- `readdir` /home/user/documents\n\n" +
+            "- `readdir` /home/user/documents\n" +
+            "- `findfile` /home/user keyword=report\n\n" +
             "## 递归翻找文件时的状态判断（重要）\n" +
             "当需要递归查找文件时，每步操作后都要判断工作状态：\n" +
             "- 找到目标 → 工作完成，立即给出结果并停止\n" +

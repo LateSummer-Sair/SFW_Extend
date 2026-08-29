@@ -1636,7 +1636,7 @@ public class NapCatApi {
      * 转义CQ码参数中的特殊字符
      * 将 & [ ] , 替换为 &amp; &#91; &#93; &#44;
      */
-    private static String escapeCQ(String s) {
+    public static String escapeCQ(String s) {
         if (s == null) return "";
         return s.replace("&", "&amp;")
                 .replace("[", "&#91;")

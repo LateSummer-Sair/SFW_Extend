@@ -87,6 +87,10 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("readdir", "列出指定目录的文件与子目录结构")
                 .addOptionalString("path", "目录路径，留空则列出当前目录"));
 
+        tools.add(new ToolDefinition("findfile", "递归查找指定目录下文件名匹配关键词的文件/目录（快速定位，避免逐层 readdir 探索）")
+                .addString("path", "起始目录路径")
+                .addOptionalString("keyword", "文件名关键词（子串匹配，忽略大小写，留空=返回全部）"));
+
         tools.add(new ToolDefinition("sys", "执行系统命令（shell）")
                 .addString("command", "系统命令"));
 
@@ -216,6 +220,10 @@ public class ToolDispatcher {
 
         tools.add(new ToolDefinition("readdir", "列出指定目录的文件与子目录结构")
                 .addOptionalString("path", "目录路径，留空则列出当前目录"));
+
+        tools.add(new ToolDefinition("findfile", "递归查找指定目录下文件名匹配关键词的文件/目录（快速定位，避免逐层 readdir 探索）")
+                .addString("path", "起始目录路径")
+                .addOptionalString("keyword", "文件名关键词（子串匹配，忽略大小写，留空=返回全部）"));
 
         tools.add(new ToolDefinition("readfile", "读取指定文件的文本内容")
                 .addString("path", "文件路径"));
@@ -541,6 +549,12 @@ public class ToolDispatcher {
             }
             case "readfile":     return act("readfile", arg(argumentsJson, "path"));
             case "readdir":      return act("readdir", arg(argumentsJson, "path"));
+            case "findfile": {
+                String fpath = arg(argumentsJson, "path");
+                String fkw = arg(argumentsJson, "keyword");
+                String fcontent = (fkw == null || fkw.trim().isEmpty()) ? fpath : (fpath + "|" + fkw.trim());
+                return act("findfile", fcontent);
+            }
             case "sys":          return act("sys", arg(argumentsJson, "command"));
             case "evaljs": {
                 // execq 通道已彻底禁用动态执行（evaljs），仅本地 execs / QQ execs: 可用
@@ -571,7 +585,7 @@ public class ToolDispatcher {
                 autoStoreSearchResult(query, result);
                 return result;
             }
-            case "remember":     return act("remember", arg(argumentsJson, "content"));
+            case "remember":     return executeRemember(arg(argumentsJson, "content"), ctx);
             case "correct":      return executeCorrect(argumentsJson, ctx);
             case "download":     return act("download", arg(argumentsJson, "url"));
             case "superise":     return act("superise", arg(argumentsJson, "content"));
@@ -651,6 +665,21 @@ public class ToolDispatcher {
             return "[AgentBus] 未初始化（call_agent/ask_agent 不可用）";
         }
         return agentBus.invoke(agent, task, ctx);
+    }
+
+    /** 记录持久化记忆（remember 工具）：execq 通道写入统一记忆库，本地通道写入本地记忆库。 */
+    private String executeRemember(String content, ToolContext ctx) {
+        if (content == null || content.trim().isEmpty()) return "[remember] 记忆内容为空，未记录。";
+        String c = content.trim();
+        // QQ 通道（execq）：写入统一记忆库（unified_memory.db，跨会话跨用户持久化）
+        if (ctx != null && ctx.isExecq()) {
+            sair.aiagent.onebot.UnifiedQQMemoryManager mem = ctx.unifiedMemory;
+            if (mem == null) return "[remember] 统一记忆库不可用，无法记录。";
+            mem.addMemory(c);
+            return "[remember] 已记录到统一记忆库: " + c;
+        }
+        // 本地通道（console）：写入本地记忆库（aiagent.db）
+        return act("remember", c);
     }
 
     /** 记录纠正信息（correct 工具）：写入 corrections 表，避免 AI 重复犯错。 */
@@ -1577,11 +1606,9 @@ public class ToolDispatcher {
         try {
             java.io.File imgFile = new java.io.File(imageContent);
             if (imgFile.exists() && imgFile.isFile()) {
-                sendImageToQq(ctx, imageContent);
-                return "[sendimage] 已发送图片";
+                return checkSendResult("sendimage", sendImageToQq(ctx, imageContent), "已发送图片");
             } else if (imageContent.startsWith("http://") || imageContent.startsWith("https://")) {
-                sendImageToQq(ctx, imageContent);
-                return "[sendimage] 已发送图片";
+                return checkSendResult("sendimage", sendImageToQq(ctx, imageContent), "已发送图片");
             } else {
                 String dataDir = ctx.dataDir;
                 if (dataDir == null || dataDir.isEmpty()) return "[sendimage] 缺少 dataDir，无法渲染文字为图片";
@@ -1589,32 +1616,35 @@ public class ToolDispatcher {
                 String fileName = "img_" + System.currentTimeMillis() + ".png";
                 java.io.File outputFile = new java.io.File(outputDir, fileName);
                 sair.aiagent.util.ImageRenderer.renderTextToImage(imageContent, outputFile);
-                sendImageToQq(ctx, outputFile.getAbsolutePath());
-                return "[sendimage] 图片已渲染并发送";
+                return checkSendResult("sendimage", sendImageToQq(ctx, outputFile.getAbsolutePath()), "图片已渲染并发送");
             }
         } catch (Exception e) {
             return "[sendimage] 发送失败: " + e.toString();
         }
     }
 
-    private void sendImageToQq(ToolContext ctx, String fileOrUrl) {
+    /** 发送图片，返回 NapCat API 原始响应（成功 JSON / 失败 JSON / 超时 null）。 */
+    private String sendImageToQq(ToolContext ctx, String fileOrUrl) {
+        String param = resolveMediaParam(fileOrUrl);
+        AiAgentActivity.debugLog("[sendimage] file参数=" + abbreviate(param, 200));
         if (ctx.qqMsg.isGroupMessage()) {
-            ctx.napcatApi.sendGroupImage(ctx.qqMsg.getGroupId(), fileOrUrl);
+            return ctx.napcatApi.sendGroupImage(ctx.qqMsg.getGroupId(), param);
         } else {
-            ctx.napcatApi.sendPrivateImage(ctx.qqMsg.getUserId(), fileOrUrl);
+            return ctx.napcatApi.sendPrivateImage(ctx.qqMsg.getUserId(), param);
         }
     }
 
-    /** 发送语音到当前 QQ 会话。 */
+    /** 发送语音到当前 QQ 会话（本地路径自动走文件中转服务，供跨机器 NapCat 下载）。 */
     private String executeSendRecordQq(String path, ToolContext ctx) {
         if (ctx.napcatApi == null || ctx.qqMsg == null) return "[sendrecord] 缺少 QQ 上下文";
         if (path == null || path.trim().isEmpty()) return "[sendrecord] 语音文件路径为空";
         String recordPath = path.trim();
         try {
+            String fileParam = resolveMediaParam(recordPath);
             if (ctx.qqMsg.isGroupMessage()) {
-                ctx.napcatApi.sendGroupRecord(ctx.qqMsg.getGroupId(), recordPath);
+                ctx.napcatApi.sendGroupRecord(ctx.qqMsg.getGroupId(), fileParam);
             } else {
-                ctx.napcatApi.sendPrivateRecord(ctx.qqMsg.getUserId(), recordPath);
+                ctx.napcatApi.sendPrivateRecord(ctx.qqMsg.getUserId(), fileParam);
             }
             return "[sendrecord] 已发送语音";
         } catch (Exception e) {
@@ -1786,6 +1816,93 @@ public class ToolDispatcher {
             }
         } catch (Exception ignored) {}
         return null;
+    }
+
+    /**
+     * 本地文件路径 → 文件中转服务 URL（跨机器 NapCat 可下载）。
+     * <p>中转服务不可用或 host 为 loopback（跨机器不可达）时，回退 base64 编码，
+     * 让 NapCat 直接解码，彻底摆脱对「NapCat 能访问 Windows 本机文件」的依赖。
+     * URL / file:// / base64:// 原样透传。</p>
+     */
+    public static String resolveMediaParam(String fileOrUrl) {
+        if (fileOrUrl == null) return fileOrUrl;
+        String p = fileOrUrl.trim();
+        if (p.startsWith("http://") || p.startsWith("https://")
+                || p.startsWith("file://") || p.startsWith("base64://")) {
+            return p;
+        }
+        java.io.File f = new java.io.File(p);
+        if (f.exists() && f.isFile()) {
+            // 1. 优先文件中转服务（HTTP URL），但 host 必须是跨机器可访问的非 loopback 地址
+            String transferUrl = toTransferUrl(f);
+            if (transferUrl != null && !isLoopbackUrl(transferUrl)) {
+                AiAgentActivity.debugLog("[Media] 本地文件经文件中转: " + transferUrl);
+                return transferUrl;
+            }
+            if (transferUrl != null) {
+                AiAgentActivity.debugLog("[Media] 文件中转 host 为 loopback（跨机器不可达），改用 base64: " + transferUrl);
+            }
+            // 2. 中转不可用/不可达：本地文件转 base64，NapCat 直接解码，无需访问本机文件
+            String b64 = toBase64Param(f);
+            if (b64 != null) {
+                AiAgentActivity.debugLog("[Media] 本地文件转 base64: " + f.getName() + " (" + f.length() + " bytes)");
+                return b64;
+            }
+            AiAgentActivity.debugLog("[Media] 本地文件过大无法 base64，回退原始路径（仅本机 NapCat 可用）: " + p);
+        }
+        return p;
+    }
+
+    /** 判断 URL host 是否为 loopback/任意地址（跨机器 NapCat 无法访问）。 */
+    private static boolean isLoopbackUrl(String url) {
+        if (url == null) return false;
+        String u = url.toLowerCase();
+        return u.contains("://127.") || u.contains("://localhost")
+                || u.contains("://[::1]") || u.contains("://0.0.0.0");
+    }
+
+    /** 本地文件 → base64:// 参数（NapCat 直接解码）。超过 8MB 或读取失败返回 null。 */
+    private static String toBase64Param(java.io.File f) {
+        try {
+            long len = f.length();
+            if (len <= 0 || len > 8 * 1024 * 1024) return null;
+            byte[] data = java.nio.file.Files.readAllBytes(f.toPath());
+            return "base64://" + java.util.Base64.getEncoder().encodeToString(data);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 构建可直接嵌入消息的 [CQ:image,file=...] 码（本地文件自动走中转/base64，并对 CQ 特殊字符转义）。 */
+    public static String buildImageCq(String fileOrUrl) {
+        String param = resolveMediaParam(fileOrUrl);
+        if (param == null || param.isEmpty()) return null;
+        return "[CQ:image,file=" + sair.aiagent.onebot.NapCatApi.escapeCQ(param) + "]";
+    }
+
+    /** 截断超长字符串用于日志打印，避免刷屏。 */
+    private static String abbreviate(String s, int max) {
+        if (s == null) return "null";
+        if (s.length() <= max) return s;
+        return s.substring(0, max) + "...(共" + s.length() + "字符)";
+    }
+
+    /** 解析 NapCat API 响应：成功返回 okMsg，失败/超时返回可读错误。 */
+    private static String checkSendResult(String tool, String resp, String okMsg) {
+        if (resp == null || resp.isEmpty()) {
+            return "[" + tool + "] 发送超时或失败（NapCat 无响应，请检查文件是否可被 NapCat 访问）";
+        }
+        try {
+            String status = sair.aiagent.onebot.util.JsonUtil.extractString(resp, "status");
+            long retcode = sair.aiagent.onebot.util.JsonUtil.extractLong(resp, "retcode");
+            if ("failed".equalsIgnoreCase(status) || retcode != 0) {
+                String msg = sair.aiagent.onebot.util.JsonUtil.extractString(resp, "message");
+                String wording = sair.aiagent.onebot.util.JsonUtil.extractString(resp, "wording");
+                return "[" + tool + "] 发送失败: " + (msg != null && !msg.isEmpty() ? msg
+                        : wording != null && !wording.isEmpty() ? wording : ("retcode=" + retcode));
+            }
+        } catch (Exception ignored) {}
+        return "[" + tool + "] " + okMsg;
     }
 
     /**

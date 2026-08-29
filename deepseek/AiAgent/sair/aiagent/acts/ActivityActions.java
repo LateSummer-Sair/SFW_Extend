@@ -204,6 +204,7 @@ public class ActivityActions {
         println(C_INFO, "top_p   : " + (cfg.getTopP() < 0 ? "(默认)" : String.valueOf(cfg.getTopP())));
         println(C_INFO, "最大输出: " + (cfg.getMaxOutputTokens() <= 0 ? "(默认)" : String.valueOf(cfg.getMaxOutputTokens())));
         println(C_INFO, "strict  : " + (cfg.isStrictMode() ? "开" : "关"));
+        println(C_INFO, "文件端口: " + cfg.getFileServerPort());
         println(C_INFO, "提示词  : " + cfg.getSystemPrompt().length() + " 字符");
         println(C_INFO, "对话    : " + act.getHistory().size() + " 条/~"
                 + act.getHistory().estimateTotalTokens() + " tokens");
@@ -230,6 +231,8 @@ public class ActivityActions {
             println(C_INFO, "strict      Function Calling 严格模式：on=切 /beta+严格JSON Schema(工具调用更可靠)，off=关闭");
             println(C_INFO, "userid      DeepSeek user_id（缓存隔离/内容安全标识）");
             println(C_INFO, "botname     Bot 消息触发词（多个用 ; 分隔，群聊中提到任一触发词触发回复）");
+            println(C_INFO, "fileport    文件中转服务端口（跨机器 NapCat 下载文件用，默认 2671，重启后生效）");
+            println(C_INFO, "filehost    文件中转服务对外地址（跨机器时填 Windows 本机内网 IP，如 192.168.1.5，空=自动探测）");
             return true;
         }
         String[] parts = args.trim().split("\\s+", 2);
@@ -279,6 +282,16 @@ public class ActivityActions {
                 case "botname": case "trigger": case "triggerword":
                     cfg.setBotName(val);
                     println(C_INFO, "触发词 -> " + String.join("; ", cfg.getTriggerWords()));
+                    break;
+                case "fileport": case "fileserverport":
+                    int fp = Integer.parseInt(val);
+                    if (fp < 1 || fp > 65535) return err("端口范围 1~65535");
+                    cfg.setFileServerPort(fp);
+                    println(C_INFO, "fileServerPort -> " + cfg.getFileServerPort() + "（重启后生效）");
+                    break;
+                case "filehost": case "fileserverhost":
+                    cfg.setFileServerHost(val);
+                    println(C_INFO, "fileServerHost -> " + (cfg.getFileServerHost().isEmpty() ? "(自动探测)" : cfg.getFileServerHost()) + "（重启后生效）");
                     break;
                 default:
                     return err("未知配置项: " + key + "（输入 ai/setconfig 查看可配置项）");

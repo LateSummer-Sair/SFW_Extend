@@ -110,6 +110,12 @@ public class AiConfig {
     /** 文件下载目录（接收主人发送的文件存储位置） */
     private String fileDownloadPath = "";
 
+    /** 文件中转服务对外访问地址（供跨机器 NapCat 下载；空=自动探测局域网 IP） */
+    private String fileServerHost = "";
+
+    /** 文件中转服务端口（默认 2671） */
+    private int fileServerPort = 2671;
+
     /** 配置文件路径（init后设置） */
     private File configFile;
 
@@ -187,6 +193,9 @@ public class AiConfig {
             botName = p.getProperty("botName", "");
             // 文件下载目录
             fileDownloadPath = p.getProperty("fileDownloadPath", "");
+            // 文件中转服务对外访问地址（空=自动探测局域网 IP）
+            fileServerHost = p.getProperty("fileServerHost", "");
+            try { fileServerPort = Integer.parseInt(p.getProperty("fileServerPort", "2671")); } catch (NumberFormatException ignored) {}
             // DeepSeek 高级参数
             reasoningEffort = p.getProperty("reasoningEffort", "high");
             try { temperature = Double.parseDouble(p.getProperty("temperature", "-1")); } catch (NumberFormatException ignored) {}
@@ -246,6 +255,8 @@ public class AiConfig {
             // AI机器人名字
             p.setProperty("botName", botName);
             p.setProperty("fileDownloadPath", fileDownloadPath);
+            p.setProperty("fileServerHost", fileServerHost);
+            p.setProperty("fileServerPort", String.valueOf(fileServerPort));
             // DeepSeek 高级参数
             p.setProperty("reasoningEffort", reasoningEffort);
             p.setProperty("temperature", String.valueOf(temperature));
@@ -353,6 +364,16 @@ public class AiConfig {
     
     /** 设置文件下载目录 */
     public void setFileDownloadPath(String path) { this.fileDownloadPath = (path != null) ? path.trim() : ""; }
+
+    /** 获取文件中转服务对外访问地址（空=自动探测局域网 IP） */
+    public String getFileServerHost() { return fileServerHost; }
+    /** 设置文件中转服务对外访问地址 */
+    public void setFileServerHost(String host) { this.fileServerHost = (host != null) ? host.trim() : ""; }
+
+    /** 获取文件中转服务端口 */
+    public int getFileServerPort() { return fileServerPort; }
+    /** 设置文件中转服务端口（范围 1~65535，非法回退默认 2671） */
+    public void setFileServerPort(int port) { this.fileServerPort = (port > 0 && port <= 65535) ? port : 2671; }
 
     // ==================== 模型智能路由 (v2.4) ====================
     

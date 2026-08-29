@@ -35,7 +35,7 @@ import sair.user.Activity;
 import sair.user.PrintRunnable;
 
 /**
- * AiAgent V3.7 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
+ * AiAgent V3.8 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
  *
  * <h3>架构</h3>
  * 路由与命令实现分离 —— {@code main()} 仅做初始化 + 委托 {@link ActivityActions#route}，
@@ -311,7 +311,8 @@ public class AiAgentActivity extends Activity {
             // === 文件中转 Web 服务（发送本地文件以 HTTP URL 中转给 NapCat） ===
             try {
                 if (sair.aiagent.onebot.FileServer.getInstance().start()) {
-                    debugLog("[FileServer] 文件中转服务已启动，端口=" + sair.aiagent.onebot.FileServer.getInstance().getPort());
+                    String base = sair.aiagent.onebot.FileServer.getInstance().getPublicBaseUrl();
+                    debugLog("[FileServer] 文件中转服务已启动，对外地址=" + base);
                 } else {
                     debugLog("[FileServer] 文件中转服务启动失败，文件发送回退本地路径");
                 }
@@ -336,7 +337,7 @@ public class AiAgentActivity extends Activity {
         String n = getName();
         return new String[] {
             Pathes.printSplit,
-            "AiAgent V3.7 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出 · OneBot QQ",
+            "AiAgent V3.8 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出 · OneBot QQ",
             "DeepSeek API, 流式打字机效果, Agent自主操作, 持久化记忆, JS/Java动态注入",
             "配置:",
             "\t" + n + "/setkey [密钥]        设置API密钥",
@@ -366,7 +367,7 @@ public class AiAgentActivity extends Activity {
             "\t" + n + "/yes                  确认高危操作 (反射/系统命令/动态注入)",
             "\t" + n + "/no                   拒绝高危操作",
             "Agent工具 (Function Calling):",
-            "\t系统/文件: cmd, readfile, readdir, sys, evaljs, eval, web, download",
+            "\t系统/文件: cmd, readfile, readdir, findfile, sys, evaljs, eval, web, download",
             "\t记忆/知识: remember, note, searchnote, schedule, skillextract, skillinfo",
             "\t媒体/文件: sendimage, sendrecord, sendfile, batchrename, batchconvert",
             "\t图片注释: setimageremark (注释与图片MD5强绑定持久化)",

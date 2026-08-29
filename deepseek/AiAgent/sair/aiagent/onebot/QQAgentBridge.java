@@ -487,10 +487,21 @@ class QQAgentBridge {
                             // execq 随机触发：按概率从库存随机挑一个表情包，作为单独一条图片消息追加（不与文字拼接）
                             if (Math.random() < STICKER_RANDOM_PROBABILITY) {
                                 StickerEntry match = agentExecutor.getStickerManager().randomSticker();
-                                if (match != null && match.getImageUrl() != null && !match.getImageUrl().isEmpty()) {
-                                    // 图片单独作为一条消息发送，避免与文字混排导致突兀或发送失败
-                                    messages.add("[CQ:image,file=" + match.getImageUrl() + "]");
-                                    AiAgentActivity.qqLog("[QQMsg] Sticker #" + match.getId() + " (random) sent as separate msg");
+                                if (match != null) {
+                                    // 优先用本地文件（经文件中转/base64），本地已被清理才回退原始 QQ URL
+                                    String cq = null;
+                                    String localPath = match.getFilePath();
+                                    if (localPath != null && !localPath.isEmpty()
+                                            && new java.io.File(localPath).exists()) {
+                                        cq = sair.aiagent.core.ToolDispatcher.buildImageCq(localPath);
+                                    } else if (match.getImageUrl() != null && !match.getImageUrl().isEmpty()) {
+                                        cq = sair.aiagent.core.ToolDispatcher.buildImageCq(match.getImageUrl());
+                                    }
+                                    if (cq != null) {
+                                        // 图片单独作为一条消息发送，避免与文字混排导致突兀或发送失败
+                                        messages.add(cq);
+                                        AiAgentActivity.qqLog("[QQMsg] Sticker #" + match.getId() + " (random) sent as separate msg");
+                                    }
                                 }
                             }
                         } catch (Exception ex) {

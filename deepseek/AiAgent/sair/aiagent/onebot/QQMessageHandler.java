@@ -424,6 +424,18 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                                     }
                                     AiAgentActivity.qqLog("[QQMsg] 主动发送" + messages.size() + "条消息到群 " + finalGroupId);
                                 }
+                            } else {
+                                // 兜底：AI 仅输出标签无纯文本
+                                if (server != null) {
+                                    server.sendGroupMsg(finalGroupId, "✅ 已处理");
+                                    AiAgentActivity.qqLog("[QQMsg] 主动查看仅标签无文本，发送兜底");
+                                }
+                            }
+                        } else {
+                            // 兜底：AI 返回空响应
+                            if (server != null) {
+                                server.sendGroupMsg(finalGroupId, "抱歉，我暂时无法处理这条消息。");
+                                AiAgentActivity.qqLog("[QQMsg] 主动查看返回空响应，发送兜底");
                             }
                         }
                     } catch (Exception e) {
