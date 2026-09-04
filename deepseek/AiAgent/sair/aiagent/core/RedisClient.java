@@ -146,6 +146,27 @@ public final class RedisClient {
         return enabled && available.get();
     }
 
+    /** Redis 是否启用。 */
+    public boolean isEnabled() { return enabled; }
+
+    /** Redis 主机。 */
+    public String getHost() { return host; }
+
+    /** Redis 端口。 */
+    public int getPort() { return port; }
+
+    /** Redis 数据库编号。 */
+    public int getDb() { return db; }
+
+    /** Redis key 前缀。 */
+    public String getKeyPrefix() { return keyPrefix; }
+
+    /** 运行时状态摘要。 */
+    public String statusSummary() {
+        if (!enabled) return "disabled";
+        return (isAvailable() ? "available" : "degraded") + " " + host + ":" + port + "/" + db;
+    }
+
     // ==================== 内部实现 ====================
 
     private String fullKey(String key) {
@@ -332,7 +353,7 @@ public final class RedisClient {
     private void startHealthCheck() {
         if (running) return;
         running = true;
-        healthThread = new Thread(() -> {
+        healthThread = ThreadManager.getInstance().newDaemonThread("AiAgent-RedisHealth", () -> {
             while (running) {
                 try { Thread.sleep(HEALTH_CHECK_INTERVAL_MS); } catch (InterruptedException e) { break; }
                 if (!running) break;
@@ -342,8 +363,7 @@ public final class RedisClient {
                     }
                 } catch (Exception ignored) {}
             }
-        }, "AiAgent-RedisHealth");
-        healthThread.setDaemon(true);
+        });
         healthThread.start();
     }
 

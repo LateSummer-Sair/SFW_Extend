@@ -53,7 +53,7 @@ public class MemoryLifecycleManager {
     public synchronized void start() {
         if (running) return;
         running = true;
-        maintenanceThread = new Thread(new Runnable() {
+        maintenanceThread = ThreadManager.getInstance().newDaemonThread("MemLifecycle", new Runnable() {
             public void run() {
                 AiAgentActivity.debugLog("[MemLifecycle] daemon started (interval=30min)");
                 while (running) {
@@ -72,8 +72,7 @@ public class MemoryLifecycleManager {
                 }
                 AiAgentActivity.debugLog("[MemLifecycle] daemon stopped");
             }
-        }, "MemLifecycle");
-        maintenanceThread.setDaemon(true);
+        });
         maintenanceThread.start();
     }
 

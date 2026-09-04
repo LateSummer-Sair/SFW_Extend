@@ -11,7 +11,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 
 import sair.aiagent.core.AiConfig;
@@ -31,10 +31,16 @@ public class FileServer {
     private static final FileServer INSTANCE = new FileServer();
 
     private volatile HttpServer server;
+    private volatile ExecutorService executor;
+    private volatile Thread cleanupThread;
     private volatile int port = -1;
     private final Map<String, File> registry = new ConcurrentHashMap<>();
+    private final Map<String, Long> registeredAt = new ConcurrentHashMap<>();
     private final AtomicLong idGen = new AtomicLong(0);
     private volatile String publicHost;   // 对外 URL 的 host（懒解析，重启后重置）
+
+    /** 注册文件最多保留时长（10 分钟）。 */
+    private static final long REGISTRY_TTL_MS = 10 * 60 * 1000L;
 
     private FileServer() {}
 
@@ -57,12 +63,18 @@ public class FileServer {
         try {
             server = HttpServer.create(new InetSocketAddress("0.0.0.0", bindPort), 0);
             server.createContext("/file/", new FileHandler());
-            server.setExecutor(Executors.newFixedThreadPool(4));
+            executor = sair.aiagent.core.ThreadManager.getInstance().newNamedFixed("FileServer", 4);
+            server.setExecutor(executor);
             server.start();
             port = server.getAddress().getPort();
             publicHost = null;   // 重置，让下次 register 重新解析对外地址
+            startCleanupThread();
             return true;
         } catch (Exception e) {
+            if (executor != null) {
+                executor.shutdownNow();
+                executor = null;
+            }
             server = null;
             port = -1;
             return false;
@@ -71,18 +83,41 @@ public class FileServer {
 
     /** 停止文件服务并清空注册表。 */
     public synchronized void stop() {
+        if (cleanupThread != null) {
+            cleanupThread.interrupt();
+            cleanupThread = null;
+        }
         if (server != null) {
             server.stop(0);
             server = null;
         }
+        if (executor != null) {
+            executor.shutdownNow();
+            executor = null;
+        }
         registry.clear();
+        registeredAt.clear();
         port = -1;
         publicHost = null;
+    }
+
+    private void startCleanupThread() {
+        if (cleanupThread != null) return;
+        cleanupThread = sair.aiagent.core.ThreadManager.getInstance().newDaemonThread("FileServer-Cleanup", () -> {
+            while (server != null) {
+                try { Thread.sleep(60_000L); } catch (InterruptedException e) { break; }
+                cleanupExpired();
+            }
+        });
+        cleanupThread.start();
     }
 
     public boolean isRunning() { return server != null; }
 
     public int getPort() { return port; }
+
+    /** 当前注册表内可下载文件数。 */
+    public int getRegisteredFileCount() { return registry.size(); }
 
     /** 返回对外访问的基础 URL（如 http://192.168.1.5:5801/file/），供日志/调试；服务未启动返回 null。 */
     public String getPublicBaseUrl() {
@@ -97,9 +132,21 @@ public class FileServer {
      */
     public String register(File file) {
         if (server == null || file == null || !file.exists() || !file.isFile()) return null;
+        cleanupExpired();
         String id = Long.toString(idGen.incrementAndGet(), 36) + "_" + sanitize(file.getName());
         registry.put(id, file);
+        registeredAt.put(id, System.currentTimeMillis());
         return "http://" + formatHost(resolvePublicHost()) + ":" + port + "/file/" + id;
+    }
+
+    private void cleanupExpired() {
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, Long> e : registeredAt.entrySet()) {
+            if (now - e.getValue() > REGISTRY_TTL_MS) {
+                registry.remove(e.getKey());
+                registeredAt.remove(e.getKey());
+            }
+        }
     }
 
     /** 文件名保留字母/数字/点/下划线/横线，避免 URL 特殊字符。 */

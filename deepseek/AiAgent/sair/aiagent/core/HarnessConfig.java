@@ -14,6 +14,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import sair.aiagent.AiAgentActivity;
+
 /**
  * HarnessConfig —— Harness 化升级的「确定性约束」配置中心。
  *
@@ -151,7 +153,10 @@ public class HarnessConfig {
         if (configFile == null || !configFile.exists()) return;
         try (FileInputStream fis = new FileInputStream(configFile)) {
             JsonElement root = JsonParser.parseReader(new InputStreamReader(fis, StandardCharsets.UTF_8));
-            if (root == null || !root.isJsonObject()) return;
+            if (root == null || !root.isJsonObject()) {
+                AiAgentActivity.debugLog("[HarnessConfig] 配置文件不是 JSON 对象，使用默认约束: " + configFile.getAbsolutePath());
+                return;
+            }
             JsonObject obj = root.getAsJsonObject();
 
             // 权限矩阵
@@ -198,8 +203,8 @@ public class HarnessConfig {
                     }
                 }
             }
-        } catch (Exception ignored) {
-            // 解析失败回退默认值
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[HarnessConfig] 配置解析失败，使用默认约束: " + e.toString());
         } finally {
             lastLoadedMtime = configFile.lastModified();
         }
@@ -288,11 +293,23 @@ public class HarnessConfig {
         if (requireNonEmptyTools.contains(toolName) && result.trim().isEmpty()) {
             return "[harness] 工具 " + toolName + " 返回空内容";
         }
-        if (result.length() > maxResultLength) {
-            return result.substring(0, maxResultLength)
-                    + "\n...[harness] 结果过长已截断(" + result.length() + " → " + maxResultLength + ")";
+        int limit = getMaxResultLengthForTool(toolName);
+        if (result.length() > limit) {
+            return result.substring(0, limit)
+                    + "\n...[harness] 结果过长已截断(" + result.length() + " → " + limit + ")";
         }
         return result;
+    }
+
+    /** 按工具类型收紧结果长度，避免 readfile/web/search 等大文本占用过多 token。 */
+    public int getMaxResultLengthForTool(String toolName) {
+        if ("readfile".equals(toolName) || "web".equals(toolName) || "search".equals(toolName)) {
+            return Math.min(maxResultLength, 6000);
+        }
+        if ("readdir".equals(toolName) || "findfile".equals(toolName) || "searchglobal".equals(toolName)) {
+            return Math.min(maxResultLength, 8000);
+        }
+        return maxResultLength;
     }
 
     // ==================== Getter（供外部查询/热加载/调试） ====================

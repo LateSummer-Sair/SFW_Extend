@@ -3,7 +3,11 @@ package sair.aiagent.core;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import sair.aiagent.AiAgentActivity;
@@ -32,6 +36,25 @@ public class AgentBus {
 
     /** 递归唤起最大深度，防止无限循环（A→B→A→B…）。 */
     public static final int MAX_DEPTH = 6;
+
+    /** 子 Agent 单次工具调用预算（比主循环更紧，避免子 Agent 耗尽全局预算）。 */
+    private static final int SUB_AGENT_MAX_TOOL_CALLS = 8;
+    /** 子 Agent 单次执行超时（毫秒）。 */
+    private static final long SUB_AGENT_TIMEOUT_MS = 300_000L;
+    /** 子 Agent 结果回传前的最大字符数。 */
+    private static final int SUB_AGENT_RESULT_MAX_CHARS = 1200;
+    /** 子 Agent 结果缓存（agent|task → result），避免重复唤起重复消耗 token。 */
+    private final Map<String, CacheEntry> resultCache = new ConcurrentHashMap<>();
+    /** 结果缓存最大条数。 */
+    private static final int RESULT_CACHE_MAX = 256;
+    /** 结果缓存有效期（毫秒）。 */
+    private static final long RESULT_CACHE_TTL_MS = 10 * 60 * 1000L;
+
+    private static final class CacheEntry {
+        final String value;
+        final long ts;
+        CacheEntry(String value, long ts) { this.value = value; this.ts = ts; }
+    }
 
     /** 单个 Agent 的定义。 */
     public static final class AgentDef {
@@ -86,6 +109,13 @@ public class AgentBus {
         if (d >= MAX_DEPTH) {
             return "[AgentBus] 递归唤起深度超限（已达 " + MAX_DEPTH + "），已停止继续唤起，请基于已有信息直接给出结论";
         }
+        String cacheKey = def.name + "|" + (task == null ? "" : task);
+        CacheEntry cachedEntry = resultCache.get(cacheKey);
+        if (cachedEntry != null && System.currentTimeMillis() - cachedEntry.ts < RESULT_CACHE_TTL_MS) {
+            AiAgentActivity.debugLog("[AgentBus] ← Agent[" + name.trim() + "] 缓存命中");
+            return cachedEntry.value;
+        }
+        if (cachedEntry != null) resultCache.remove(cacheKey);
         if (ctx != null) ctx.agentBusDepth = d + 1;
         String taskBrief = (task == null ? "" : task);
         if (taskBrief.length() > 120) taskBrief = taskBrief.substring(0, 120) + "...";
@@ -104,7 +134,13 @@ public class AgentBus {
                 if (!names.contains(ct.getName())) merged.add(ct);
             }
             FunctionCallingBridge bridge = new FunctionCallingBridge(client);
-            String result = bridge.runWithDispatcher(task, def.systemPrompt, null, merged, def.model, dispatcher, ctx, null);
+            bridge.setMaxToolCalls(SUB_AGENT_MAX_TOOL_CALLS);
+            String result = invokeWithTimeout(bridge, task, def, merged, ctx);
+            result = truncateResult(result);
+            if (resultCache.size() >= RESULT_CACHE_MAX) {
+                resultCache.clear();
+            }
+            resultCache.put(cacheKey, new CacheEntry(result, System.currentTimeMillis()));
             String resultBrief = (result == null ? "(null)" : result);
             if (resultBrief.length() > 120) resultBrief = resultBrief.substring(0, 120) + "...";
             AiAgentActivity.debugLog("[AgentBus] ← Agent[" + name.trim() + "] 返回 (耗时" + (System.currentTimeMillis() - invokeStart) + "ms): " + resultBrief);
@@ -117,17 +153,45 @@ public class AgentBus {
         }
     }
 
+    /** 子 Agent 执行加超时保护。 */
+    private String invokeWithTimeout(final FunctionCallingBridge bridge, final String task,
+                                     final AgentDef def, final List<ToolDefinition> merged,
+                                     final ToolContext ctx) {
+        ExecutorService pool = ThreadManager.getInstance().newNamedCached("AgentBus");
+        Future<String> f = pool.submit(new Callable<String>() {
+            @Override
+            public String call() throws Exception {
+                return bridge.runWithDispatcher(task, def.systemPrompt, null, merged, def.model, dispatcher, ctx, null);
+            }
+        });
+        try {
+            return f.get(SUB_AGENT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            f.cancel(true);
+            return "[AgentBus] 子 Agent \"" + def.name + "\" 执行超时（>" + (SUB_AGENT_TIMEOUT_MS / 1000) + "s）";
+        } catch (Exception e) {
+            return "[AgentBus] 子 Agent \"" + def.name + "\" 执行失败: " + e.toString();
+        }
+    }
+
+    /** 回传前截断，避免长结果放大父 Agent token。 */
+    private static String truncateResult(String result) {
+        if (result == null) return null;
+        if (result.length() <= SUB_AGENT_RESULT_MAX_CHARS) return result;
+        return result.substring(0, SUB_AGENT_RESULT_MAX_CHARS) + "\n…(子 Agent 结果过长已截断)";
+    }
+
     /** 返回 Agent 间通信工具（call_agent / ask_agent），供子 Agent 工具集注入。 */
     public static List<ToolDefinition> callAgentTools() {
         List<ToolDefinition> tools = new ArrayList<>();
         tools.add(new ToolDefinition("call_agent",
-                "唤起另一个 Agent 执行子任务并获取结果。可用 Agent：main（主模型，主管全局上下文与资源）、vision（视觉模型，分析图像）、passage（段落模型，概括折叠消息）。把需要对方完成的子任务完整描述清楚，拿到结果后继续你的工作")
-                .addString("agent", "Agent 名：main/vision/passage")
-                .addString("task", "交给该 Agent 的任务描述"));
+                "唤起子 Agent 执行任务并返回结果。可用：main(主模型)/vision(看图)/passage(概括折叠消息)")
+                .addString("agent", "main/vision/passage")
+                .addString("task", "子任务描述"));
         tools.add(new ToolDefinition("ask_agent",
-                "向另一个 Agent 发问并获取答案（工作中遇到疑问时请教，如某信息不确定、某句话是谁说的、某特征是否符合要求）。可用 Agent：main/vision/passage")
-                .addString("agent", "Agent 名：main/vision/passage")
-                .addString("question", "要请教的问题"));
+                "向子 Agent 请教问题。可用：main/vision/passage")
+                .addString("agent", "main/vision/passage")
+                .addString("question", "问题"));
         return tools;
     }
 }

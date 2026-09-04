@@ -170,6 +170,7 @@ public class ImpressionExtractor {
                 if (!isEmpty(di.honesty)) result.setHonesty(di.honesty);
                 if (!isEmpty(di.imageHabit)) result.setImageHabit(di.imageHabit);
                 if (!isEmpty(di.nickname)) result.setNickname(di.nickname);
+                if (di.impressionLevel != null) result.setImpressionLevel(di.impressionLevel);
                 result.setUpdatedAt(System.currentTimeMillis());
             } else {
                 result = new ImpressionEntry(qq);
@@ -179,6 +180,7 @@ public class ImpressionExtractor {
                 result.setSpeakingStyle(di.speakingStyle != null ? di.speakingStyle : "");
                 result.setHonesty(di.honesty != null ? di.honesty : "");
                 result.setImageHabit(di.imageHabit != null ? di.imageHabit : "");
+                result.setImpressionLevel(di.impressionLevel != null ? di.impressionLevel : 0);
                 result.setUpdatedAt(System.currentTimeMillis());
             }
 
@@ -216,7 +218,8 @@ public class ImpressionExtractor {
         sb.append("2. interests 兴趣爱好：喜欢什么事物、游戏、话题？常说什么词汇？\n");
         sb.append("3. speakingStyle 说话风格：话多还是话少？发长文还是短句？语气特点？\n");
         sb.append("4. honesty 虚实态度：务实真诚还是爱吹牛夸大？\n");
-        sb.append("5. imageHabit 图片习惯：喜欢发图片吗？发图频率如何？\n\n");
+        sb.append("5. imageHabit 图片习惯：喜欢发图片吗？发图频率如何？\n");
+        sb.append("6. impressionLevel 印象好坏：-100~100 整数，正数=印象好，负数=印象差，0=中性。\n\n");
 
         sb.append("=== 重要规则 ===\n");
         sb.append("- 基于对话历史客观分析，不要凭空猜测\n");
@@ -226,7 +229,7 @@ public class ImpressionExtractor {
 
         sb.append("输出格式（JSON）：\n");
         sb.append("{\"nickname\":\"昵称\",\"emotionStability\":\"...\",\"interests\":\"...\",");
-        sb.append("\"speakingStyle\":\"...\",\"honesty\":\"...\",\"imageHabit\":\"...\"}\n");
+        sb.append("\"speakingStyle\":\"...\",\"honesty\":\"...\",\"imageHabit\":\"...\",\"impressionLevel\":0}\n");
         sb.append("Output ONLY the JSON object, no other text.");
 
         return sb.toString();
@@ -242,6 +245,7 @@ public class ImpressionExtractor {
         String speakingStyle;
         String honesty;
         String imageHabit;
+        Integer impressionLevel;
     }
 
     private DistilledImpression parseResponse(String response) {

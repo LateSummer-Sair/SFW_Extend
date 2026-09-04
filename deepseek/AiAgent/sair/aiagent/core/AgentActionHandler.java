@@ -22,6 +22,8 @@ import sair.user.Activity;
 
 public class AgentActionHandler {
 
+    private static final long MAX_DOWNLOAD_BYTES = 100L * 1024 * 1024; // 100MB
+
     private static final Color C_TOOL = new Color(255, 200, 100);
 
     private final ConfirmationGate gate;
@@ -156,7 +158,7 @@ public class AgentActionHandler {
         SwingUtilities.invokeLater(() -> ConsFrame.printComponent(panel));
         final StringBuilder result = new StringBuilder();
         final Object lock = new Object();
-        new Thread(() -> {
+        ThreadManager.getInstance().newDaemonThread("AiAgent-AgentSys", () -> {
             try {
                 SysConsoleExecutor.executeWithListener(command, new SysConsoleExecutor.OutputListener() {
                     public void onStart() {}
@@ -173,7 +175,7 @@ public class AgentActionHandler {
             } finally {
                 synchronized (lock) { if (result.length() == 0) result.append("ERROR: 命令执行线程异常退出"); lock.notify(); }
             }
-        }, "AiAgent-AgentSys").start();
+        }).start();
         synchronized (lock) {
             try { lock.wait(35_000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return "系统命令中断。"; }
         }
@@ -244,15 +246,10 @@ public class AgentActionHandler {
     String executeDownload(String url) {
         url = url.trim();
         if (!url.startsWith("http://") && !url.startsWith("https://")) return "下载地址无效: " + url;
-        try {
-            java.net.URI uri = new java.net.URI(url);
-            if (isInternalHost(uri.getHost())) {
-                EdtUtils.println(FCM.Error_Color, "\n  [下载] 拒绝内网地址: " + uri.getHost());
-                return "下载 [" + url + "] 被拒绝: 禁止访问内网地址 (" + uri.getHost() + ")";
-            }
-        } catch (Exception e) { return "下载 [" + url + "] 错误: URL格式无效 - " + e.getMessage(); }
+        String current = url;
         if (!gate.await("download", "下载文件: " + url)) return "下载被拒绝。";
-        String fileName = extractFileName(url);
+
+        String fileName = extractFileName(current);
         String dataDir = selfActivity.getDataDir();
         File downloadDir = new File(dataDir, "downloads"); downloadDir.mkdirs();
         File targetFile = new File(downloadDir, fileName);
@@ -265,35 +262,66 @@ public class AgentActionHandler {
                 if (!targetFile.exists()) { fileName = base + "_" + i + ext; break; }
             }
         }
-        EdtUtils.println(new Color(120, 200, 255), "\n  [下载] " + url + " -> " + fileName);
-        java.net.HttpURLConnection conn = null;
-        java.io.BufferedInputStream bis = null;
-        java.io.FileOutputStream fos = null;
-        try {
-            conn = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
-            conn.setRequestMethod("GET"); conn.setConnectTimeout(15_000); conn.setReadTimeout(120_000);
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; AiAgent-SFW/1.4)");
-            conn.setInstanceFollowRedirects(true);
-            int code = conn.getResponseCode();
-            if (code >= 200 && code < 400) {
+
+        for (int hop = 0; hop <= 5; hop++) {
+            try {
+                java.net.URI uri = new java.net.URI(current);
+                String host = uri.getHost();
+                if (isInternalHost(host)) {
+                    return "下载被拒绝: 禁止访问内网地址 (" + host + ")";
+                }
+            } catch (Exception e) {
+                return "下载 [" + current + "] 错误: URL格式无效 - " + e.getMessage();
+            }
+
+            EdtUtils.println(new Color(120, 200, 255), "\n  [下载] " + current + " -> " + fileName);
+            java.net.HttpURLConnection conn = null;
+            java.io.BufferedInputStream bis = null;
+            java.io.FileOutputStream fos = null;
+            try {
+                conn = (java.net.HttpURLConnection) new java.net.URL(current).openConnection();
+                conn.setRequestMethod("GET"); conn.setConnectTimeout(15_000); conn.setReadTimeout(120_000);
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; AiAgent-SFW/1.4)");
+                conn.setInstanceFollowRedirects(false);
+                int code = conn.getResponseCode();
+                if (code >= 300 && code < 400) {
+                    String loc = conn.getHeaderField("Location");
+                    if (loc != null && !loc.trim().isEmpty()) {
+                        current = new java.net.URL(new java.net.URL(current), loc.trim()).toString();
+                        continue;
+                    }
+                    return "下载 [" + current + "] 失败: HTTP " + code + " 缺少 Location";
+                }
+                if (code < 200 || code >= 300) {
+                    return "下载 [" + current + "] 失败: HTTP " + code;
+                }
                 bis = new java.io.BufferedInputStream(conn.getInputStream());
                 fos = new java.io.FileOutputStream(targetFile);
                 byte[] buf = new byte[8192]; long downloaded = 0; int n;
-                while ((n = bis.read(buf)) != -1) { fos.write(buf, 0, n); downloaded += n; }
+                while ((n = bis.read(buf)) != -1) {
+                    fos.write(buf, 0, n); downloaded += n;
+                    if (downloaded > MAX_DOWNLOAD_BYTES) {
+                        fos.flush(); bis.close(); fos.close(); conn.disconnect();
+                        targetFile.delete();
+                        return "下载 [" + current + "] 失败: 文件超过大小上限 (" + formatSize(MAX_DOWNLOAD_BYTES) + ")";
+                    }
+                }
                 fos.flush(); bis.close(); fos.close(); conn.disconnect();
                 String sizeStr = formatSize(downloaded);
                 String relPath = "downloads/" + fileName;
-                if (memoryManager != null) memoryManager.add("下载文件: " + relPath + " | 来源: " + url + " | 大小: " + sizeStr);
+                if (memoryManager != null) memoryManager.add("下载文件: " + relPath + " | 来源: " + current + " | 大小: " + sizeStr);
                 return "下载完成: " + relPath + " (" + sizeStr + ")\n绝对路径: " + targetFile.getAbsolutePath();
+            } catch (java.io.FileNotFoundException e) {
+                return "下载 [" + current + "] 失败: 文件不存在 (404)";
+            } catch (Exception e) {
+                return "下载 [" + current + "] 错误: " + e.toString();
+            } finally {
+                try { if (bis != null) bis.close(); } catch (Exception ignored) {}
+                try { if (fos != null) fos.close(); } catch (Exception ignored) {}
+                if (conn != null) conn.disconnect();
             }
-            conn.disconnect(); return "下载 [" + url + "] 失败: HTTP " + code;
-        } catch (java.io.FileNotFoundException e) { return "下载 [" + url + "] 失败: 文件不存在 (404)";
-        } catch (Exception e) { return "下载 [" + url + "] 错误: " + e.toString();
-        } finally {
-            try { if (bis != null) bis.close(); } catch (Exception ignored) {}
-            try { if (fos != null) fos.close(); } catch (Exception ignored) {}
-            if (conn != null) conn.disconnect();
         }
+        return "下载 [" + url + "] 失败: 重定向次数超限";
     }
 
     String executeSurprise(String content) {

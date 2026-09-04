@@ -35,19 +35,32 @@ class QQPromptBuilder {
 
     String buildDynamicContext(QQMessage msg, List<String> punishmentRecords) {
         StringBuilder sb = new StringBuilder(8192);
+        // 纯文本只提取一次，后续复用，避免每处调用重复执行 CQ 码正则剥离
+        final String plainText = msg.getPlainText();
+
+        // 稳定工具索引置于动态上下文首部：技能不变时逐字节稳定，作为 user 消息前缀命中 KV 缓存
+        if (agentExecutor != null && agentExecutor.getSkillBank() != null) {
+            boolean isExecsMsg = plainText != null && plainText.trim().startsWith("execs:");
+            String skillChannel = isExecsMsg ? "execs" : "execq";
+            String skillsCtx = agentExecutor.getSkillBank().buildStableIndex(skillChannel, 800);
+            if (skillsCtx != null) sb.append(skillsCtx).append("\n\n");
+        }
 
         Set<Long> masterQQSet = AiConfig.getInstance().getMasterQQs();
         Set<Long> adminSet = new HashSet<>();
         Set<Long> ownerSet = new HashSet<>();
         Map<Long, String> roleCache = new LinkedHashMap<>();
+        List<String[]> groupAdmins = null;
+        Map<String, Long> groupNickMap = null;
         if (msg.isGroupMessage() && unifiedMemory != null) {
-            List<String[]> admins = unifiedMemory.getGroupAdmins(msg.getGroupId());
-            for (String[] a : admins) {
+            groupAdmins = unifiedMemory.getGroupAdmins(msg.getGroupId());
+            for (String[] a : groupAdmins) {
                 long aid = Long.parseLong(a[0]);
                 roleCache.put(aid, a[2]);
                 if ("owner".equals(a[2])) ownerSet.add(aid);
                 else adminSet.add(aid);
             }
+            groupNickMap = unifiedMemory.getGroupNicknameMap(msg.getGroupId());
         }
 
         sb.append("## 当前上下文\n");
@@ -95,7 +108,7 @@ class QQPromptBuilder {
             int mc = 0;
             for (Long mu : msg.getMentionedUsers()) {
                 if (mc > 0) sb.append(", ");
-                String tagName = resolveUserName(mu, msg.getGroupId(), unifiedMemory);
+                String tagName = resolveUserName(mu, groupNickMap);
                 sb.append(tagName).append("(QQ:").append(mu).append(")");
                 if (masterQQSet.contains(mu)) sb.append("⭐");
                 if (ownerSet.contains(mu)) sb.append("👑");
@@ -106,8 +119,9 @@ class QQPromptBuilder {
         }
         sb.append("\n");
 
+        boolean needsCrossContext = needsCrossContext(plainText);
         // === 注入 Bot 已知群列表（跨群操作支撑） ===
-        if (unifiedMemory != null) {
+        if (needsCrossContext && unifiedMemory != null) {
             Map<Long, String> knownGroups = unifiedMemory.getAllKnownGroups();
             if (!knownGroups.isEmpty()) {
                 sb.append("## Bot 已加入的群(群名→群号)\n");
@@ -124,28 +138,29 @@ class QQPromptBuilder {
         }
 
         // === 注入 Bot 好友列表（私聊场景支撑） ===
-        if (unifiedMemory != null) {
+        if (needsCrossContext && unifiedMemory != null) {
             Map<Long, String> knownFriends = unifiedMemory.getAllKnownFriends();
             if (knownFriends.isEmpty() && napcatApi != null) {
-                // 缓存为空时实时拉取并缓存好友昵称
-                try {
-                    String resp = napcatApi.getFriendList();
-                    String dataArr = sair.aiagent.onebot.util.JsonUtil.extractArray(resp, "data");
-                    if (dataArr != null && !dataArr.trim().isEmpty()) {
-                        for (String f : sair.aiagent.onebot.util.JsonUtil.splitJsonArray(dataArr)) {
-                            String uid = sair.aiagent.onebot.util.JsonUtil.extractString(f, "user_id");
-                            String nick = sair.aiagent.onebot.util.JsonUtil.extractString(f, "nickname");
-                            String remark = sair.aiagent.onebot.util.JsonUtil.extractString(f, "remark");
-                            if (uid != null && !uid.isEmpty()) {
-                                String name = (remark != null && !remark.isEmpty()) ? remark : (nick != null ? nick : "");
-                                if (!name.isEmpty()) {
-                                    try { unifiedMemory.setFriendName(Long.parseLong(uid), name); } catch (NumberFormatException ignored) {}
+                // 缓存为空时后台异步拉取，本次先不阻塞；下次消息即可使用
+                execPool.submit(() -> {
+                    try {
+                        String resp = napcatApi.getFriendList();
+                        String dataArr = sair.aiagent.onebot.util.JsonUtil.extractArray(resp, "data");
+                        if (dataArr != null && !dataArr.trim().isEmpty()) {
+                            for (String f : sair.aiagent.onebot.util.JsonUtil.splitJsonArray(dataArr)) {
+                                String uid = sair.aiagent.onebot.util.JsonUtil.extractString(f, "user_id");
+                                String nick = sair.aiagent.onebot.util.JsonUtil.extractString(f, "nickname");
+                                String remark = sair.aiagent.onebot.util.JsonUtil.extractString(f, "remark");
+                                if (uid != null && !uid.isEmpty()) {
+                                    String name = (remark != null && !remark.isEmpty()) ? remark : (nick != null ? nick : "");
+                                    if (!name.isEmpty()) {
+                                        try { unifiedMemory.setFriendName(Long.parseLong(uid), name); } catch (NumberFormatException ignored) {}
+                                    }
                                 }
                             }
                         }
-                    }
-                } catch (Exception ignored) {}
-                knownFriends = unifiedMemory.getAllKnownFriends();
+                    } catch (Exception ignored) {}
+                });
             }
             if (!knownFriends.isEmpty()) {
                 sb.append("## Bot 的好友(昵称→QQ号)\n");
@@ -198,8 +213,8 @@ class QQPromptBuilder {
         }
 
         if (msg.isGroupMessage() && unifiedMemory != null) {
-            Map<String, Long> nickMap = unifiedMemory.getGroupNicknameMap(msg.getGroupId());
-            if (!nickMap.isEmpty()) {
+            Map<String, Long> nickMap = groupNickMap;
+            if (nickMap != null && !nickMap.isEmpty()) {
                 sb.append("## 群昵称→QQ映射(⭐主人👑群主🔧管理,无图标=普通成员群昵称)\n");
                 int nc = 0;
                 for (Map.Entry<String, Long> e : nickMap.entrySet()) {
@@ -212,8 +227,8 @@ class QQPromptBuilder {
                 }
                 sb.append("\n");
             }
-            List<String[]> admins = unifiedMemory.getGroupAdmins(msg.getGroupId());
-            if (!admins.isEmpty()) {
+            List<String[]> admins = groupAdmins;
+            if (admins != null && !admins.isEmpty()) {
                 sb.append("## 群管理员/群主\n");
                 StringBuilder ownerLine = new StringBuilder();
                 StringBuilder adminLine = new StringBuilder();
@@ -252,13 +267,19 @@ class QQPromptBuilder {
             }
         }
 
+        boolean needsGlobalChat = needsCrossContext || needsContinuation(plainText);
         if (msg.isGroupMessage()) {
-            appendGroupChatHistory(sb, msg, masterQQSet, ownerSet, adminSet);
+            appendGroupChatHistory(sb, msg, masterQQSet, ownerSet, adminSet, needsGlobalChat, needsCrossContext);
         } else {
-            appendPrivateChatHistory(sb, msg);
+            appendPrivateChatHistory(sb, msg, needsCrossContext);
         }
 
-        appendImpressionAndMemories(sb, msg);
+        // 印象只取一次，供偏好门控与印象注入复用（避免每条消息查两次小表）
+        sair.aiagent.model.ImpressionEntry imp = null;
+        sair.aiagent.core.PersistenceManager pm = sair.aiagent.core.PersistenceManager.getInstance();
+        if (pm != null) imp = pm.getImpression(msg.getUserId());
+
+        appendImpressionAndMemories(sb, msg, plainText, imp);
 
         // === Journal: inject recent cross-session activity log (补齐execq通道) ===
         if (agentExecutor != null && agentExecutor.getJournal() != null) {
@@ -269,20 +290,24 @@ class QQPromptBuilder {
         }
 
         // === Notes: auto-inject relevant knowledge base entries (补齐execq通道) ===
+        // 短消息不触发笔记/纠正 FTS 检索，与记忆检索同一门控
         SkillBank notesBank = SkillBank.getInstance();
-        if (notesBank != null && notesBank.getPersistenceManager() != null && msg.getPlainText() != null) {
-            String notesCtx = notesBank.getPersistenceManager().buildNotesContext(msg.getPlainText());
+        if (notesBank != null && notesBank.getPersistenceManager() != null
+                && plainText != null && hasMeaningfulQuery(plainText)) {
+            String notesCtx = notesBank.getPersistenceManager().buildNotesContext(plainText);
             if (notesCtx != null) {
                 sb.append("\n").append(notesCtx).append("\n");
             }
             // === Corrections: auto-inject relevant correction records (避免重复犯错) ===
-            String corrCtx = notesBank.getPersistenceManager().buildCorrectionsContext(msg.getPlainText(), 1200);
+            String corrCtx = notesBank.getPersistenceManager().buildCorrectionsContext(plainText, 1200);
             if (corrCtx != null) {
                 sb.append("\n").append(corrCtx).append("\n");
             }
         }
 
         if (emotionManager != null) sb.append(emotionManager.buildRichEmotionContext(msg.getUserId()));
+
+        appendPreferenceContext(sb, msg, imp);
 
         if (punishmentRecords != null && !punishmentRecords.isEmpty()) {
             sb.append("## 违规处罚\n");
@@ -291,11 +316,7 @@ class QQPromptBuilder {
         }
 
         if (agentExecutor != null && agentExecutor.getSkillBank() != null) {
-            boolean isExecsMsg = msg.getPlainText() != null && msg.getPlainText().trim().startsWith("execs:");
-            String skillChannel = isExecsMsg ? "execs" : "execq";
-            String skillsCtx = agentExecutor.getSkillBank().buildCompactIndex(skillChannel, 800);
-            if (skillsCtx != null) sb.append("\n").append(skillsCtx).append("\n");
-            String routeHint = agentExecutor.getSkillBank().getBestRoute(msg.getPlainText());
+            String routeHint = agentExecutor.getSkillBank().getBestRoute(plainText);
             if (routeHint != null) sb.append(routeHint).append("\n");
         }
 
@@ -307,10 +328,11 @@ class QQPromptBuilder {
     }
 
     private void appendGroupChatHistory(StringBuilder sb, QQMessage msg, Set<Long> masterQQSet,
-                                         Set<Long> ownerSet, Set<Long> adminSet) {
-        List<String[]> groupHistory = unifiedMemory.getRecentGroupChatHistoryWithMark(msg.getGroupId(), 25);
+                                         Set<Long> ownerSet, Set<Long> adminSet, boolean needsGlobalChat,
+                                         boolean needsCrossContext) {
+        List<String[]> groupHistory = unifiedMemory.getRecentGroupChatHistoryWithMessageId(msg.getGroupId(), 12);
         if (!groupHistory.isEmpty()) {
-            sb.append("## 临时群上下文(近25条,⭐主人👑群主🔧管理,其余=群昵称;带〖已处理〗标记的说明你处理过该消息,不要重复执行)\n");
+            sb.append("## 临时群上下文(近12条,⭐主人👑群主🔧管理,其余=群昵称;带〖已处理〗标记的说明你处理过该消息,不要重复执行)\n");
             for (String[] h : groupHistory) {
                 long hUid = Long.parseLong(h[0]);
                 String hName = h[1]; String content = h[2];
@@ -321,23 +343,33 @@ class QQPromptBuilder {
                 else if (adminSet.contains(hUid)) prefix.append("🔧");
                 if (prefix.length() > 0) prefix.append(" ");
                 sb.append(prefix).append(hName).append(": ").append(content);
+                if (h.length > 4 && h[4] != null && !"0".equals(h[4])) {
+                    sb.append(" [msg_id=").append(h[4]).append("]");
+                }
                 if (h.length > 3 && h[3] != null && !h[3].isEmpty()) {
                     sb.append(" 〖已处理:").append(h[3]).append("〗");
                 }
                 sb.append("\n");
             }
             sb.append("\n");
+            sb.append("## 引用回复规则\n");
+            sb.append("当引用某条消息能让回复更自然、更明确时，可以引用当前群聊候选消息。\n");
+            sb.append("只能引用上面带 [msg_id=...] 的当前群聊消息，不能引用跨群、私聊或不存在的消息。\n");
+            sb.append("需要引用时，最终回复必须使用格式：<quote id=\"消息ID\">回复正文</quote>。\n");
+            sb.append("不需要引用时，正常输出文本，不要输出 quote 标签。\n\n");
         }
-        // 跨群续聊：注入最近其他群聊的话题（时间维度兜底，解决"继续上一个群的话题"这类无关键词元引用）
-        List<String> globalGroupChat = unifiedMemory.getRecentGroupChatHistoryGlobal(12, msg.getGroupId());
-        if (!globalGroupChat.isEmpty()) {
-            sb.append("## 最近其他群聊话题(跨群续聊)\n");
-            for (String h : globalGroupChat) {
-                sb.append("- ").append(h).append("\n");
+        // 跨群续聊：仅在跨群/找人/传话 或 续聊关键词 时注入最近其他群聊话题，普通聊天不再浪费 token
+        if (needsGlobalChat) {
+            List<String> globalGroupChat = unifiedMemory.getRecentGroupChatHistoryGlobal(12, msg.getGroupId());
+            if (!globalGroupChat.isEmpty()) {
+                sb.append("## 最近其他群聊话题(跨群续聊)\n");
+                for (String h : globalGroupChat) {
+                    sb.append("- ").append(h).append("\n");
+                }
+                sb.append("\n");
             }
-            sb.append("\n");
         }
-        List<String[]> personalConvs = unifiedMemory.getPrivateConversations(msg.getUserId(), 15);
+        List<String[]> personalConvs = unifiedMemory.getPrivateConversations(msg.getUserId(), 8);
         if (!personalConvs.isEmpty()) {
             sb.append("## 与该用户的历史\n");
             for (String[] c : personalConvs) {
@@ -348,11 +380,13 @@ class QQPromptBuilder {
             }
             sb.append("\n");
         }
-        appendGlobalConversations(sb, msg, 30, 15, masterQQSet, ownerSet, adminSet);
+        if (needsCrossContext) {
+            appendGlobalConversations(sb, msg, 30, 15, masterQQSet, ownerSet, adminSet);
+        }
     }
 
-    private void appendPrivateChatHistory(StringBuilder sb, QQMessage msg) {
-        List<String[]> convs = unifiedMemory.getPrivateConversations(msg.getUserId(), 25);
+    private void appendPrivateChatHistory(StringBuilder sb, QQMessage msg, boolean needsCrossContext) {
+        List<String[]> convs = unifiedMemory.getPrivateConversations(msg.getUserId(), 12);
         if (!convs.isEmpty()) {
             sb.append("## 与该用户的历史\n");
             for (String[] c : convs) {
@@ -363,7 +397,9 @@ class QQPromptBuilder {
             }
             sb.append("\n");
         }
-        appendGlobalConversations(sb, msg, 20, 10, Collections.emptySet(), Collections.emptySet(), Collections.emptySet());
+        if (needsCrossContext) {
+            appendGlobalConversations(sb, msg, 20, 10, Collections.emptySet(), Collections.emptySet(), Collections.emptySet());
+        }
     }
 
     private void appendGlobalConversations(StringBuilder sb, QQMessage msg, int fetch, int show,
@@ -396,17 +432,51 @@ class QQPromptBuilder {
         sb.append("\n");
     }
 
-    private void appendImpressionAndMemories(StringBuilder sb, QQMessage msg) {
-        SkillBank bank = SkillBank.getInstance();
-        if (bank != null && bank.getPersistenceManager() != null) {
-            sair.aiagent.model.ImpressionEntry imp = bank.getPersistenceManager().getImpression(msg.getUserId());
-            if (imp != null && imp.hasContent()) {
-                sb.append("## 对该用户的印象\n");
-                sb.append(imp.toPromptContext()).append("\n\n");
-            }
+    private void appendPreferenceContext(StringBuilder sb, QQMessage msg, sair.aiagent.model.ImpressionEntry imp) {
+        sair.aiagent.core.PersistenceManager pm = sair.aiagent.core.PersistenceManager.getInstance();
+        if (pm == null) return;
+        long userId = msg.getUserId();
+        long groupId = msg.isGroupMessage() ? msg.getGroupId() : 0;
+
+        // 印象差的人，其个人偏好不注入（需印象改观后生效）
+        boolean userBad = false;
+        if (imp != null && imp.isBad()) userBad = true;
+
+        java.util.List<String[]> all = new java.util.ArrayList<>();
+        all.addAll(pm.listPreferences("global", 0));
+        if (!userBad) all.addAll(pm.listPreferences("user", userId));
+        if (groupId > 0) all.addAll(pm.listPreferences("group", groupId));
+
+        if (all.isEmpty()) return;
+        // 按 importance 降序，同 key 高优先级覆盖低优先级
+        java.util.Map<String, String[]> merged = new java.util.LinkedHashMap<>();
+        all.sort((a, b) -> Integer.compare(parseImportance(b[2]), parseImportance(a[2])));
+        for (String[] p : all) {
+            if (p == null || p.length < 3) continue;
+            merged.putIfAbsent(p[0], p);
         }
-        if (unifiedMemory != null && msg.getPlainText() != null) {
-            List<String> relatedMemories = unifiedMemory.searchMemories(msg.getPlainText(), 3);
+        if (merged.isEmpty()) return;
+
+        sb.append("## 结构化偏好/设定（优先级从高到低，必须遵守）\n");
+        for (String[] p : merged.values()) {
+            sb.append("- ").append(p[0]).append(": ").append(p[1]).append("\n");
+        }
+        sb.append("\n");
+    }
+
+    private static int parseImportance(String s) {
+        try { return Integer.parseInt(s); } catch (Exception e) { return 0; }
+    }
+
+    private void appendImpressionAndMemories(StringBuilder sb, QQMessage msg, String plainText, sair.aiagent.model.ImpressionEntry imp) {
+        // 关系/好感度已由 buildRichEmotionContext 统一注入，此处不再重复（去重省 token）
+        if (imp != null && imp.hasContent()) {
+            sb.append("## 对该用户的印象\n");
+            sb.append(imp.toPromptContext()).append("\n\n");
+        }
+        // 短消息（如"好的/嗯/哈哈"）不触发 FTS 记忆检索，省去每消息的 FTS + N-gram LIKE 查询
+        if (unifiedMemory != null && plainText != null && hasMeaningfulQuery(plainText)) {
+            List<String> relatedMemories = unifiedMemory.searchMemories(plainText, 3);
             if (relatedMemories != null && !relatedMemories.isEmpty()) {
                 sb.append("## 相关记忆\n");
                 for (String mem : relatedMemories) {
@@ -416,7 +486,7 @@ class QQPromptBuilder {
                 sb.append("\n");
             }
             // 跨群检索群聊历史（群与群之间的记忆共享，如「隔壁群谁喊妈妈」）
-            List<String> relatedHistory = unifiedMemory.searchGroupChatHistory(msg.getPlainText(), 5);
+            List<String> relatedHistory = unifiedMemory.searchGroupChatHistory(plainText, 5);
             if (relatedHistory != null && !relatedHistory.isEmpty()) {
                 sb.append("## 跨群相关群聊记录\n");
                 for (String h : relatedHistory) {
@@ -427,6 +497,28 @@ class QQPromptBuilder {
         }
     }
 
+    /** 文本去除空白与标点后是否达到可检索长度（短语气词不触发记忆检索）。 */
+    private static boolean hasMeaningfulQuery(String text) {
+        if (text == null) return false;
+        return text.replaceAll("[\\s\\p{Punct}]+", "").length() >= 4;
+    }
+
+    private static boolean needsCrossContext(String text) {
+        if (text == null || text.trim().isEmpty()) return false;
+        String t = text;
+        return t.contains("跨群") || t.contains("去别的群") || t.contains("去群") || t.contains("找群")
+                || t.contains("群号") || t.contains("好友") || t.contains("私聊") || t.contains("传话")
+                || t.contains("转告") || t.contains("找人") || t.contains("@");
+    }
+
+    /** 续聊关键词：无明确关键词但语义指向“接着聊上一个话题”时，才回填跨群话题。 */
+    private static boolean needsContinuation(String text) {
+        if (text == null || text.trim().isEmpty()) return false;
+        String t = text;
+        return t.contains("继续") || t.contains("接着") || t.contains("刚才") || t.contains("上次")
+                || t.contains("上一个") || t.contains("之前") || t.contains("然后呢") || t.contains("然后");
+    }
+
     static String resolveUserName(long qq, long groupId, UnifiedQQMemoryManager mem) {
         if (mem != null) {
             Map<String, Long> nickMap = mem.getGroupNicknameMap(groupId);
@@ -434,6 +526,16 @@ class QQPromptBuilder {
                 for (Map.Entry<String, Long> e : nickMap.entrySet()) {
                     if (e.getValue() == qq) return e.getKey();
                 }
+            }
+        }
+        return String.valueOf(qq);
+    }
+
+    /** 用已缓存的群昵称映射反查 QQ→昵称（避免重复查库）。 */
+    static String resolveUserName(long qq, Map<String, Long> nickMap) {
+        if (nickMap != null) {
+            for (Map.Entry<String, Long> e : nickMap.entrySet()) {
+                if (e.getValue() == qq) return e.getKey();
             }
         }
         return String.valueOf(qq);

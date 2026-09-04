@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import sair.aiagent.AiAgentActivity;
 
@@ -40,6 +41,39 @@ public class UnifiedQQMemoryManager {
     private final String dbPath;
     private Connection conn;
     private final Object lock = new Object();
+    /** 对话写入计数：降低 conversations 裁剪（DELETE）执行频率。 */
+    private int conversationWrites = 0;
+
+    /** 群管理员/昵称映射短 TTL 缓存（60s），避免每条群消息重复查询多行结果。 */
+    private static final long GROUP_CACHE_TTL_MS = 60_000L;
+    private final Map<Long, TtlCache<List<String[]>>> groupAdminsCache = new ConcurrentHashMap<>();
+    private final Map<Long, TtlCache<Map<String, Long>>> groupNickMapCache = new ConcurrentHashMap<>();
+    private final Map<Long, TtlCache<String>> groupNameCache = new ConcurrentHashMap<>();
+    /** 个人昵称映射纯 TTL 缓存（60s，不随 addConversation 失效，昵称变化不频繁）。 */
+    private volatile Map<String, Long> cachedPersonalNickMap;
+    private volatile long cachedPersonalNickMapTime;
+
+    /** 群成员角色/昵称内存快照：用于跳过「值未变化」的重复 REPLACE 写库。
+     *  角色/昵称变化不频繁，仅在检测到变化时才落库，减少每条群消息的写放大。 */
+    private final Map<Long, Map<Long, String>> memberRoleCache = new ConcurrentHashMap<>();
+    private final Map<Long, Map<Long, String>> memberNickCache = new ConcurrentHashMap<>();
+
+    /** 带时间戳的简单 TTL 缓存项。 */
+    private static final class TtlCache<T> {
+        final long time;
+        final T value;
+        TtlCache(long time, T value) { this.time = time; this.value = value; }
+    }
+
+    private <T> T getCached(Map<Long, TtlCache<T>> cache, long groupId) {
+        TtlCache<T> e = cache.get(groupId);
+        if (e != null && System.currentTimeMillis() - e.time < GROUP_CACHE_TTL_MS) return e.value;
+        return null;
+    }
+
+    private <T> void putCached(Map<Long, TtlCache<T>> cache, long groupId, T value) {
+        cache.put(groupId, new TtlCache<>(System.currentTimeMillis(), value));
+    }
 
     /**
      * 构造统一记忆管理器。
@@ -141,6 +175,7 @@ public class UnifiedQQMemoryManager {
                     "  nickname TEXT," +
                     "  content TEXT NOT NULL," +
                     "  group_id INTEGER NOT NULL," +
+                    "  message_id INTEGER NOT NULL DEFAULT 0," +
                     "  created_at INTEGER NOT NULL," +
                     "  mark TEXT" +  // AI 自用 Mark 备注（标记已处理/处理结果）
                     ")"
@@ -203,6 +238,14 @@ public class UnifiedQQMemoryManager {
                 // 幂等迁移：老库补 mark 列（列已存在时 ALTER TABLE 会报错，静默忽略）
                 ensureColumn("conversations", "mark TEXT");
                 ensureColumn("group_chat_history", "mark TEXT");
+                ensureColumn("group_chat_history", "message_id INTEGER NOT NULL DEFAULT 0");
+
+                // 热路径查询索引：避免每消息的全表扫描（私聊历史/去重/群聊近期历史）
+                try (Statement idxStmt = conn.createStatement()) {
+                    idxStmt.execute("CREATE INDEX IF NOT EXISTS idx_conv_source ON conversations(source_type, source_id)");
+                    idxStmt.execute("CREATE INDEX IF NOT EXISTS idx_conv_sender ON conversations(sender_id)");
+                    idxStmt.execute("CREATE INDEX IF NOT EXISTS idx_gch_group_time ON group_chat_history(group_id, created_at)");
+                } catch (SQLException ignored) {}
             }
         }
     }
@@ -286,11 +329,14 @@ public class UnifiedQQMemoryManager {
                 ps.executeUpdate();
             } catch (SQLException ignored) {}
 
-            // 裁剪：保留最近 CONV_MAX 条
-            try (Statement stmt = conn.createStatement()) {
-                stmt.execute("DELETE FROM conversations WHERE id NOT IN " +
-                        "(SELECT id FROM conversations ORDER BY created_at DESC LIMIT " + CONV_MAX + ")");
-            } catch (SQLException ignored) {}
+            // 裁剪：每 50 次写入才裁剪一次（保留最近 CONV_MAX 条），避免每次写入都执行 DELETE 子查询
+            if (++conversationWrites >= 50) {
+                conversationWrites = 0;
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.execute("DELETE FROM conversations WHERE id NOT IN " +
+                            "(SELECT id FROM conversations ORDER BY created_at DESC LIMIT " + CONV_MAX + ")");
+                } catch (SQLException ignored) {}
+            }
         }
     }
 
@@ -458,6 +504,34 @@ public class UnifiedQQMemoryManager {
         return list;
     }
 
+    /** 统一对话历史条数。 */
+    public int countConversations() {
+        return countTable("conversations");
+    }
+
+    /** QQ 通道 AI 独立记忆条数。 */
+    public int countMemories() {
+        return countTable("memories");
+    }
+
+    /** 群聊完整历史条数。 */
+    public int countGroupHistory() {
+        return countTable("group_chat_history");
+    }
+
+    /** 通用表计数，失败返回 0。 */
+    private int countTable(String table) {
+        if (conn == null || table == null || table.trim().isEmpty()) return 0;
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM " + table)) {
+                return rs.next() ? rs.getInt(1) : 0;
+            } catch (SQLException ignored) {
+                return 0;
+            }
+        }
+    }
+
     /** 搜索相关记忆（FTS5 全文搜索 + LIKE 回退） */
     public List<String> searchMemories(String query, int maxResults) {
         List<String> list = new ArrayList<>();
@@ -609,16 +683,22 @@ public class UnifiedQQMemoryManager {
 
     /** 添加一条群聊消息到完整历史（持久化，不限制数量） */
     public void addGroupChatMessage(long userId, String nickname, String content, long groupId) {
+        addGroupChatMessage(userId, nickname, content, groupId, 0L);
+    }
+
+    /** 添加一条群聊消息到完整历史，并保存 OneBot message_id。 */
+    public void addGroupChatMessage(long userId, String nickname, String content, long groupId, long messageId) {
         if (content == null || content.trim().isEmpty()) return;
         String displayNick = nickname != null ? nickname : "未知用户";
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO group_chat_history (user_id, nickname, content, group_id, created_at) VALUES (?,?,?,?,?)")) {
+                    "INSERT INTO group_chat_history (user_id, nickname, content, group_id, message_id, created_at) VALUES (?,?,?,?,?,?)")) {
                 ps.setLong(1, userId);
                 ps.setString(2, displayNick);
                 ps.setString(3, content.trim());
                 ps.setLong(4, groupId);
-                ps.setLong(5, System.currentTimeMillis());
+                ps.setLong(5, messageId);
+                ps.setLong(6, System.currentTimeMillis());
                 ps.executeUpdate();
             } catch (SQLException ignored) {}
             
@@ -629,6 +709,10 @@ public class UnifiedQQMemoryManager {
     
     /** 记录群昵称→QQ号映射 */
     private void recordGroupNickname(long groupId, long userId, String nickname) {
+        // 昵称未变化则跳过写库（昵称变化不频繁，避免每条群消息都 REPLACE）
+        Map<Long, String> nicks = memberNickCache.computeIfAbsent(groupId, k -> new ConcurrentHashMap<>());
+        String prev = nicks.get(userId);
+        if (nickname != null && nickname.equals(prev)) return;
         try (PreparedStatement ps = conn.prepareStatement(
                 "REPLACE INTO group_nicknames (group_id, user_id, nickname, updated_at) VALUES (?,?,?,?)")) {
             ps.setLong(1, groupId);
@@ -637,6 +721,9 @@ public class UnifiedQQMemoryManager {
             ps.setLong(4, System.currentTimeMillis());
             ps.executeUpdate();
         } catch (SQLException ignored) {}
+        if (nickname != null) nicks.put(userId, nickname);
+        // 不在此失效群缓存：本方法经 addGroupChatMessage 每条群消息都调用，失效会让缓存形同虚设。
+        // 昵称变化不频繁，60s TTL 缓存自动刷新即可。
     }
     
     /** 根据群号和昵称查找QQ号 */
@@ -654,8 +741,10 @@ public class UnifiedQQMemoryManager {
         return null;
     }
     
-    /** 获取群内所有昵称映射（昵称→QQ号） */
+    /** 获取群内所有昵称映射（昵称→QQ号）；60s 短缓存。 */
     public java.util.Map<String, Long> getGroupNicknameMap(long groupId) {
+        java.util.Map<String, Long> cached = getCached(groupNickMapCache, groupId);
+        if (cached != null) return cached;
         java.util.Map<String, Long> map = new java.util.LinkedHashMap<>();
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
@@ -672,6 +761,7 @@ public class UnifiedQQMemoryManager {
                 }
             } catch (SQLException ignored) {}
         }
+        putCached(groupNickMapCache, groupId, map);
         return map;
     }
 
@@ -729,6 +819,34 @@ public class UnifiedQQMemoryManager {
         }
         return list;
     }
+
+    /** 获取特定群的最近N条消息（含 Mark 和 message_id，返回 [user_id, nickname, content, mark, message_id]），时间升序。 */
+    public List<String[]> getRecentGroupChatHistoryWithMessageId(long groupId, int limit) {
+        List<String[]> list = new ArrayList<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT user_id, nickname, content, mark, message_id FROM group_chat_history WHERE group_id = ? ORDER BY created_at DESC LIMIT ?")) {
+                ps.setLong(1, groupId);
+                ps.setInt(2, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    List<String[]> tempList = new ArrayList<>();
+                    while (rs.next()) {
+                        tempList.add(new String[] {
+                            String.valueOf(rs.getLong(1)),
+                            rs.getString(2),
+                            rs.getString(3),
+                            rs.getString(4),
+                            String.valueOf(rs.getLong(5))
+                        });
+                    }
+                    for (int i = tempList.size() - 1; i >= 0; i--) {
+                        list.add(tempList.get(i));
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
+    }
     
     /** 给群聊历史中「该群该用户最近一条相同内容」的消息打 Mark 备注（AI 自用，标记已处理）。 */
     public void setGroupMessageMark(long groupId, long userId, String content, String mark) {
@@ -754,6 +872,20 @@ public class UnifiedQQMemoryManager {
         }
     }
     
+    /** 按 OneBot message_id 给群聊历史打 Mark 备注（引用回复语义回填：标记该消息已被 Bot 回复）。 */
+    public void setGroupMessageMarkById(long groupId, long messageId, String mark) {
+        if (groupId <= 0 || messageId <= 0 || mark == null || mark.trim().isEmpty()) return;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE group_chat_history SET mark = ? WHERE group_id = ? AND message_id = ?")) {
+                ps.setString(1, mark.trim());
+                ps.setLong(2, groupId);
+                ps.setLong(3, messageId);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
     /** 查询群聊历史中该用户最近一条相同内容消息的 Mark 备注（无则返回 null）。 */
     public String getGroupMessageMark(long groupId, long userId, String content) {
         if (content == null || content.trim().isEmpty()) return null;
@@ -796,6 +928,10 @@ public class UnifiedQQMemoryManager {
     public void recordGroupMemberRole(long groupId, long userId, String nickname, String role) {
         if (role == null || role.isEmpty()) return;
         String displayNick = nickname != null ? nickname : "未知";
+        // 角色未变化则跳过写库（角色变化不频繁，避免每条群消息都 REPLACE）
+        Map<Long, String> roles = memberRoleCache.computeIfAbsent(groupId, k -> new ConcurrentHashMap<>());
+        String prev = roles.get(userId);
+        if (role.equals(prev)) return;
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
                     "REPLACE INTO group_members (group_id, user_id, nickname, role, updated_at) VALUES (?,?,?,?,?)")) {
@@ -807,10 +943,15 @@ public class UnifiedQQMemoryManager {
                 ps.executeUpdate();
             } catch (SQLException ignored) {}
         }
+        roles.put(userId, role);
+        // 不在此失效群缓存：本方法每条群消息都调用，失效会让 getGroupAdmins/getGroupNicknameMap 缓存形同虚设。
+        // 角色变化不频繁，60s TTL 缓存自动刷新即可。
     }
 
-    /** 获取群内管理员和群主列表（返回 [userId, nickname, role]） */
+    /** 获取群内管理员和群主列表（返回 [userId, nickname, role]）；60s 短缓存。 */
     public List<String[]> getGroupAdmins(long groupId) {
+        List<String[]> cached = getCached(groupAdminsCache, groupId);
+        if (cached != null) return cached;
         List<String[]> list = new ArrayList<>();
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
@@ -827,6 +968,7 @@ public class UnifiedQQMemoryManager {
                 }
             } catch (SQLException ignored) {}
         }
+        putCached(groupAdminsCache, groupId, list);
         return list;
     }
 
@@ -861,6 +1003,8 @@ public class UnifiedQQMemoryManager {
 
     /** 获取跨群个人昵称→QQ映射表（从私聊+群聊历史提取） */
     public Map<String, Long> getPersonalNicknameMap() {
+        Map<String, Long> cached = cachedPersonalNickMap;
+        if (cached != null && System.currentTimeMillis() - cachedPersonalNickMapTime < GROUP_CACHE_TTL_MS) return cached;
         Map<String, Long> map = new LinkedHashMap<>();
         synchronized (lock) {
             // GROUP BY 避免 DISTINCT+非SELECT列ORDER BY 的歧义
@@ -876,6 +1020,8 @@ public class UnifiedQQMemoryManager {
                 }
             } catch (SQLException ignored) {}
         }
+        cachedPersonalNickMap = map;
+        cachedPersonalNickMapTime = System.currentTimeMillis();
         return map;
     }
 
@@ -913,11 +1059,16 @@ public class UnifiedQQMemoryManager {
         if (name != null && !name.trim().isEmpty()) {
             setState("group_name_" + groupId, name.trim());
         }
+        groupNameCache.remove(groupId);
     }
 
-    /** 获取缓存的群名（无缓存返回 null） */
+    /** 获取缓存的群名（无缓存返回 null）；60s 短缓存。 */
     public String getGroupName(long groupId) {
-        return getState("group_name_" + groupId);
+        String cached = getCached(groupNameCache, groupId);
+        if (cached != null) return cached;
+        String name = getState("group_name_" + groupId);
+        if (name != null) putCached(groupNameCache, groupId, name);
+        return name;
     }
 
     /** 获取所有已知群（群号→群名），从 app_state 表 group_name_ 前缀查询。 */

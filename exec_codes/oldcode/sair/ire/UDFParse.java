@@ -51,9 +51,6 @@ public class UDFParse {
 	}
 
 	Boolean compiler() throws MalformedURLException {
-		Object o = javaFileObjectMap.get(fullClassName);
-		if (o != null)
-			return true;
 		if (compiler == null)
 			return null;
 		StandardJavaFileManager standardFileManager = compiler.getStandardFileManager(diagnosticsCollector, null, null);
@@ -132,38 +129,68 @@ public class UDFParse {
 				javaFileObjectMap.remove(k);
 	}
 
+	/** 移除指定类的编译字节码（用于热更新缓存清理） */
+	public static void removeClasses(Collection<String> classNames) {
+		for (String cn : classNames)
+			javaFileObjectMap.remove(cn);
+	}
+
+	/** 移除单个类：同时清理字节码缓存与 UDFParse 映射（用于 cpjavafile/newobject 手动卸载） */
+	public static void removeClass(String fullClassName) {
+		javaFileObjectMap.remove(fullClassName);
+		javaUDFParseMap.remove(fullClassName);
+	}
+
+	/** 判断某个类是否已有编译字节码缓存 */
+	public static boolean hasClass(String fullClassName) {
+		return javaFileObjectMap.containsKey(fullClassName);
+	}
+
 	/** 构建编译期 classpath：当前 SFW 类加载链 + act 加载器 + 额外 jar */
 	private static String buildClasspath(Collection<String> extraJars) {
-		HashSet<String> set = new HashSet<String>();
+		Set<String> set = new HashSet<String>();
 		// 加入所有 act 加载器（ExecLoaders）中的 jar，确保 IRE 插件自身（含 IREHelper）在编译 classpath 中。
-		// 注意：SairBaseLoader.findClass 使用不带 CodeSource 的 defineClass，类的 getCodeSource() 为 null，
-		// 因此不能靠 CodeSource 定位插件位置，必须直接遍历 act 加载器。
 		for (SairLoader actLoader : LoaderManager.ExecLoaders.values()) {
 			if (actLoader == null)
 				continue;
 			for (File file : actLoader.getAllJarFile())
-				set.add(file.getAbsolutePath() + File.pathSeparator);
+				addClasspathEntry(set, file);
 		}
 		for (ClassLoader classloader : urlClassLoaders) {
 			if (classloader instanceof SairLoader) {
-				Collection<File> con = ((SairLoader) classloader).getAllJarFile();
-				for (File file : con)
-					set.add(file.getAbsolutePath() + File.pathSeparator);
+				for (File file : ((SairLoader) classloader).getAllJarFile())
+					addClasspathEntry(set, file);
 			} else {
 				String paths = System.getProperty("java.class.path");
 				if (paths != null)
-					for (String p : paths.split(String.valueOf(File.pathSeparator)))
-						set.add(p + File.pathSeparator);
+					for (String p : paths.split(java.util.regex.Pattern.quote(File.pathSeparator)))
+						if (p != null && !p.trim().isEmpty())
+							set.add(p);
 			}
 		}
 		if (extraJars != null)
 			for (String j : extraJars)
 				if (j != null && !j.trim().isEmpty())
-					set.add(j + File.pathSeparator);
+					addClasspathEntry(set, new File(j));
+
 		StringBuilder sb = new StringBuilder();
-		for (String p : set)
+		for (String p : set) {
+			if (sb.length() > 0)
+				sb.append(File.pathSeparator);
 			sb.append(p);
+		}
 		return sb.toString();
+	}
+
+	/** 仅添加存在的 jar 或目录到 classpath 集合（#14：去重、过滤非 jar、去掉尾部分隔符） */
+	private static void addClasspathEntry(Set<String> set, File file) {
+		if (file == null)
+			return;
+		String p = file.getAbsolutePath();
+		if (!file.exists())
+			return;
+		if (file.isDirectory() || p.toLowerCase().endsWith(".jar"))
+			set.add(p);
 	}
 
 	String getCompilerMessage() {
@@ -180,19 +207,15 @@ public class UDFParse {
 	 */
 
 	private static String getFullClassName(String sourceCode) {
-		String className = "";
-		Pattern pattern = Pattern.compile("package\\s+\\S+\\s*;");
-		Matcher matcher = pattern.matcher(sourceCode);
-		if (matcher.find()) {
-			className = matcher.group().replaceFirst("package", "").replace(";", "").trim() + ".";
-		}
-
-		pattern = Pattern.compile("class((?:(?!extends).))+");
-		matcher = pattern.matcher(sourceCode);
-		if (matcher.find()) {
-			className += matcher.group().replaceFirst("class", "").replace("{", "").trim();
-		}
-		return className;
+		String pkg = "";
+		Matcher m = Pattern.compile("package\\s+([\\w.]+)\\s*;").matcher(sourceCode);
+		if (m.find())
+			pkg = m.group(1) + ".";
+		// 匹配顶层 class/interface/enum，忽略修饰符、泛型参数与 extends/implements 部分
+		Matcher c = Pattern.compile("\\b(?:class|interface|enum)\\s+([A-Za-z_$][\\w$]*)").matcher(sourceCode);
+		if (c.find())
+			return pkg + c.group(1);
+		return pkg;
 	}
 
 	private static class StringJavaFileObject extends SimpleJavaFileObject {

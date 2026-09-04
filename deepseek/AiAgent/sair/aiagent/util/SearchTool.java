@@ -48,15 +48,35 @@ public final class SearchTool {
             return "[search] 请提供搜索关键词";
         }
         query = query.trim();
+        String url;
         try {
-            String url = "https://www.bing.com/search?q="
+            url = "https://www.bing.com/search?q="
                     + URLEncoder.encode(query, StandardCharsets.UTF_8.name())
                     + "&count=20&mkt=zh-CN";
+        } catch (Exception e) {
+            return "[search] 搜索关键词编码失败: " + e.toString();
+        }
 
-            Document doc = Jsoup.connect(url)
-                    .userAgent(USER_AGENT)
-                    .timeout(TIMEOUT_MS)
-                    .get();
+        Document doc = null;
+        Exception last = null;
+        for (int attempt = 0; attempt < 3 && doc == null; attempt++) {
+            try {
+                doc = Jsoup.connect(url)
+                        .userAgent(USER_AGENT)
+                        .timeout(TIMEOUT_MS)
+                        .get();
+            } catch (Exception e) {
+                last = e;
+                if (attempt < 2) {
+                    try { Thread.sleep(600L * (attempt + 1)); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                }
+            }
+        }
+        try {
+            if (doc == null) {
+                return "[search] 搜索失败: " + (last != null ? last.toString() : "网络异常");
+            }
 
             Elements items = doc.select("li.b_algo");
             if (items.isEmpty()) {

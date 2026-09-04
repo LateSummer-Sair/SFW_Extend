@@ -35,7 +35,7 @@ import sair.user.Activity;
 import sair.user.PrintRunnable;
 
 /**
- * AiAgent V3.8 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
+ * AiAgent V3.9 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
  *
  * <h3>架构</h3>
  * 路由与命令实现分离 —— {@code main()} 仅做初始化 + 委托 {@link ActivityActions#route}，
@@ -337,7 +337,7 @@ public class AiAgentActivity extends Activity {
         String n = getName();
         return new String[] {
             Pathes.printSplit,
-            "AiAgent V3.8 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出 · OneBot QQ",
+            "AiAgent V3.9 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出 · OneBot QQ",
             "DeepSeek API, 流式打字机效果, Agent自主操作, 持久化记忆, JS/Java动态注入",
             "配置:",
             "\t" + n + "/setkey [密钥]        设置API密钥",
@@ -347,6 +347,7 @@ public class AiAgentActivity extends Activity {
             "\t" + n + "/setprompt [提示词]   设置系统提示词",
             "\t" + n + "/showprompt           显示当前提示词",
             "\t" + n + "/config              显示配置信息",
+            "\t" + n + "/status              显示运行时状态（OneBot/Redis/FileServer/线程/轨迹/计数）",
             "\t" + n + "/setconfig <key> <value>  设置配置项（思考模式/温度/top_p等，输入 setconfig 看用法）",
             "对话:",
             "\t" + n + "/execs [任务]         Agent模式 (原生Function Calling，免确认全能)",
@@ -433,6 +434,11 @@ public class AiAgentActivity extends Activity {
     @Override
     public void exit() {
         stopAutoClear();
+        // === 停止定时任务调度（先取消 future，再统一关闭线程池） ===
+        if (cronScheduler != null) {
+            cronScheduler.stop();
+            cronScheduler = null;
+        }
         // === 统一线程治理：中断所有 ThreadManager 注册的守护线程（含 AutoDistill） ===
         try { sair.aiagent.core.ThreadManager.getInstance().shutdown(); } catch (Exception ignored) {}
         // === 停止三方技能库文件监听 ===
@@ -482,7 +488,7 @@ public class AiAgentActivity extends Activity {
     public synchronized void startAutoClear() {
         if (autoClearEnabled) return;
         autoClearEnabled = true;
-        autoClearThread = new Thread(() -> {
+        autoClearThread = sair.aiagent.core.ThreadManager.getInstance().newDaemonThread("AiAgent-AutoClear", () -> {
             debugLog("[AutoClear] 守护线程启动，每3分钟清屏一次");
             while (autoClearEnabled) {
                 try { Thread.sleep(180_000); } catch (InterruptedException e) { break; }
@@ -497,8 +503,7 @@ public class AiAgentActivity extends Activity {
                 }
             }
             debugLog("[AutoClear] 守护线程退出");
-        }, "AiAgent-AutoClear");
-        autoClearThread.setDaemon(true);
+        });
         autoClearThread.start();
     }
 
@@ -584,6 +589,13 @@ public class AiAgentActivity extends Activity {
     /** OneBot QQ 集成 */
     public OneBotServer getOneBotServer()              { return oneBotServer; }
     public QQMessageHandler getOneBotMessageHandler()   { return oneBotMessageHandler; }
+
+    /** 运行时状态查询所需组件。 */
+    public PersistenceManager getPersistenceManager()   { return persistenceManager; }
+    public CronScheduler getCronScheduler()             { return cronScheduler; }
+    public AlarmScheduler getAlarmScheduler()           { return alarmScheduler; }
+    public sair.aiagent.core.ThirdPartySkillStore getThirdPartySkillStore() { return thirdPartySkillStore; }
+    public sair.aiagent.core.AgentSkillStore getAgentSkillStore()           { return agentSkillStore; }
 
     public Thread getActiveThread()             { return activeThread; }
     public void setActiveThread(Thread t)       { this.activeThread = t; }

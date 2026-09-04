@@ -26,7 +26,73 @@ import sair.user.Activity;
  */
 public class ToolDispatcher {
 
+    /** 可安全并行执行的只读工具（本地与 QQ 通用）。 */
+    private static final java.util.Set<String> READONLY_TOOLS = new java.util.HashSet<>(java.util.Arrays.asList(
+            "readfile", "readdir", "findfile", "web", "search", "weather", "time", "vision",
+            "searchnote", "searchglobal", "skillinfo", "balance", "grouplist", "groupmembers",
+            "friendlist", "pendingrequests", "getselfinfo", "donationlist", "queryaffection",
+            "affectionrank"));
+
+    /** 判断工具是否只读、可安全并行。 */
+    public static boolean isReadonlyTool(String toolName) {
+        return toolName != null && READONLY_TOOLS.contains(toolName);
+    }
+
+    /** 有副作用/有状态、必须串行执行的工具。 */
+    private static final java.util.Set<String> STATEFUL_TOOLS = new java.util.HashSet<>(java.util.Arrays.asList(
+            "cmd", "sys", "evaljs", "eval", "download", "batchrename", "batchconvert",
+            "remember", "correct", "note", "schedule", "sendimage", "sendrecord", "sendfile",
+            "editprompt", "superise", "stop", "skillextract", "thirdskill", "callskill",
+            "alarm", "markmessage", "setimageremark", "setname", "setsignature", "settrigger",
+            "sendsticker", "collectsticker", "clearsticker", "ban", "kick", "muteall",
+            "setadmin", "setcard", "setgroupname", "leavegroup", "block", "unblock", "delfriend",
+            "poke", "sendlike", "sendfileto", "relay", "forwardmsg", "sendgroupmsg",
+            "approvefriend", "rejectfriend", "acceptgroupinvite", "rejectgroupinvite",
+            "recorddonation", "resetdonation", "setaffection", "call_agent", "ask_agent"));
+
+    /** 判断工具是否有副作用、必须串行。 */
+    public static boolean isStatefulTool(String toolName) {
+        return toolName != null && STATEFUL_TOOLS.contains(toolName);
+    }
+
+    /** 按工具类型返回执行超时（毫秒）。 */
+    public static long timeoutForTool(String toolName) {
+        if (toolName == null) return 120_000L;
+        switch (toolName) {
+            case "time": case "balance": case "skillinfo": case "getpreference":
+            case "markmessage": case "getselfinfo": case "pendingrequests":
+            case "friendlist": case "grouplist": case "groupmembers":
+            case "queryaffection": case "affectionrank": case "donationlist":
+                return 15_000L;
+            case "web": case "search": case "weather": case "readfile":
+            case "readdir": case "findfile": case "searchnote": case "searchglobal":
+            case "vision": case "sendsticker": case "collectsticker":
+                return 60_000L;
+            case "download": case "eval": case "evaljs": case "sys": case "cmd":
+            case "batchrename": case "batchconvert": case "sendimage": case "sendrecord":
+            case "sendfile": case "sendfileto": case "relay": case "forwardmsg":
+            case "sendgroupmsg": case "call_agent": case "ask_agent":
+                return 180_000L;
+            default:
+                return 120_000L;
+        }
+    }
+
     private final AgentActionHandler actionHandler;
+
+    /** 工具集缓存（三方技能变更时失效）。 */
+    private static volatile List<ToolDefinition> cachedAllTools;
+    private static volatile List<ToolDefinition> cachedExecqTools;
+    private static volatile List<ToolDefinition> cachedExecsTools;
+    private static volatile boolean cachedStrict = false;
+    private static volatile boolean cachedThirdPartyFlag = false;
+
+    /** 三方技能增删后调用，使工具集缓存失效。 */
+    public static void invalidateToolSetCache() {
+        cachedAllTools = null;
+        cachedExecqTools = null;
+        cachedExecsTools = null;
+    }
     /** 三方技能代码段执行器（懒创建，仅 execs/本地通道使用）。 */
     private volatile SkillCodeRunner skillCodeRunner;
     /** Harness 生命周期钩子（确定性约束层），按注册顺序执行。 */
@@ -76,9 +142,13 @@ public class ToolDispatcher {
 
     /** 本地通道（console/execs）全量工具注册。 */
     public static List<ToolDefinition> buildAllTools() {
+        boolean strict = AiConfig.getInstance().isStrictMode();
+        if (cachedAllTools != null && cachedStrict == strict) {
+            return cachedAllTools;
+        }
         List<ToolDefinition> tools = new ArrayList<>();
 
-        tools.add(new ToolDefinition("cmd", "执行 SFW 插件命令（格式：组件名/函数名 参数，空格分隔）。不确定组件时先用 cmd /help 或 cmd 组件名/help 查询可用命令")
+        tools.add(new ToolDefinition("cmd", "执行SFW插件命令（组件名/函数名 参数）。不确定先 cmd /help 或 cmd 组件名/help")
                 .addString("command", "插件命令"));
 
         tools.add(new ToolDefinition("readfile", "读取指定文件的文本内容")
@@ -100,11 +170,11 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("eval", "编译并执行 Java 代码（动态注入，终极兜底），可用 SFW 内部 API（Libraries/SairCons/Activity）或 JDK 标准类")
                 .addString("code", "要执行的 Java 代码"));
 
-        tools.add(new ToolDefinition("web", "抓取指定 URL 的网页/API 内容，自动识别 JSON 原样返回结构化数据。URL 需完整 http/https")
-                .addString("url", "要抓取的完整 URL（http/https）"));
+        tools.add(new ToolDefinition("web", "抓取网页/API内容，自动识别JSON返回。URL需完整http/https")
+                .addString("url", "完整URL"));
 
-        tools.add(new ToolDefinition("search", "在必应搜索网页并返回标题、链接、摘要（适合查实时信息、公开资料、新闻）")
-                .addString("query", "搜索关键词"));
+        tools.add(new ToolDefinition("search", "必应搜索，返回标题/链接/摘要")
+                .addString("query", "关键词"));
 
         tools.add(new ToolDefinition("remember", "记录一条跨会话的持久化记忆")
                 .addString("content", "要记住的内容"));
@@ -137,8 +207,8 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("schedule", "创建/管理定时任务，命令格式：add \"cron\" \"command\" | list | remove id | enable id | disable id")
                 .addString("content", "完整子命令字符串"));
 
-        tools.add(new ToolDefinition("note", "知识库操作，命令格式：add title|content|tags | search query | list | get id | delete id | update id title|content|tags")
-                .addString("content", "完整子命令字符串"));
+        tools.add(new ToolDefinition("note", "知识库：add title|content|tags / search q / list / get id / delete id / update id title|content|tags")
+                .addString("content", "子命令"));
 
         tools.add(new ToolDefinition("searchnote", "在知识库中检索相关笔记")
                 .addString("query", "检索关键词"));
@@ -192,6 +262,15 @@ public class ToolDispatcher {
                 .addOptionalString("message", "要标记或查询的消息内容（set 留空=当前消息；get 必填）")
                 .addOptionalString("mark", "备注内容（set 时必填，如「已记录XXX捐赠10元」）"));
 
+        tools.add(new ToolDefinition("setpreference", "设置一条结构化偏好/设定（如找文件优先在哪找、谁能读哪个文件、发消息用什么语气）。scope=user/group/global，key=偏好名，value=偏好内容")
+                .addString("scope", "user/group/global")
+                .addString("key", "偏好名（如 file_search_priority、reply_tone）")
+                .addString("value", "偏好内容"));
+
+        tools.add(new ToolDefinition("getpreference", "查询结构化偏好。scope=user/group/global，key 留空则列出该 scope 下全部偏好")
+                .addString("scope", "user/group/global")
+                .addOptionalString("key", "偏好名，留空列出全部"));
+
         // 三方技能（含代码段）动态注册为 Function Calling 工具（tp_ 前缀），execs/本地始终可用
         addThirdPartyToolTools(tools);
 
@@ -199,11 +278,18 @@ public class ToolDispatcher {
         tools.addAll(AgentBus.callAgentTools());
 
         applyStrictIfEnabled(tools);
+        cachedAllTools = tools;
+        cachedStrict = strict;
         return tools;
     }
 
     /** QQ 通道（execq）受限工具注册。 */
     public static List<ToolDefinition> buildExecqTools() {
+        boolean strict = AiConfig.getInstance().isStrictMode();
+        boolean thirdParty = AiConfig.getInstance().isThirdPartyCodeExecq();
+        if (cachedExecqTools != null && cachedStrict == strict && cachedThirdPartyFlag == thirdParty) {
+            return cachedExecqTools;
+        }
         List<ToolDefinition> tools = new ArrayList<>();
 
         tools.add(new ToolDefinition("cmd", "执行 SFW 命令（execq 通道仅允许 help，其他命令一律禁止）")
@@ -244,8 +330,8 @@ public class ToolDispatcher {
                 .addString("content", "纠正内容")
                 .addOptionalString("viewpoint", "观点标签（同一主题多观点时区分用，可留空）"));
 
-        tools.add(new ToolDefinition("note", "知识库操作，命令格式：add title|content|tags | search query | list | get id | delete id | update id title|content|tags")
-                .addString("content", "完整子命令字符串"));
+        tools.add(new ToolDefinition("note", "知识库：add title|content|tags / search q / list / get id / delete id / update id title|content|tags")
+                .addString("content", "子命令"));
 
         tools.add(new ToolDefinition("searchnote", "在知识库中检索相关笔记")
                 .addString("query", "检索关键词"));
@@ -408,6 +494,15 @@ public class ToolDispatcher {
                 .addOptionalString("message", "要标记或查询的消息内容（set 留空=当前消息；get 必填）")
                 .addOptionalString("mark", "备注内容（set 时必填，如「已记录XXX捐赠10元」）"));
 
+        tools.add(new ToolDefinition("setpreference", "设置一条结构化偏好/设定。scope=user/group/global，key=偏好名，value=偏好内容")
+                .addString("scope", "user/group/global")
+                .addString("key", "偏好名")
+                .addString("value", "偏好内容"));
+
+        tools.add(new ToolDefinition("getpreference", "查询结构化偏好。scope=user/group/global，key 留空则列出该 scope 下全部偏好")
+                .addString("scope", "user/group/global")
+                .addOptionalString("key", "偏好名，留空列出全部"));
+
         // 三方技能代码段执行能力（callskill + tp_ 动态工具）：默认放权给用户，用户可通过配置关闭
         if (AiConfig.getInstance().isThirdPartyCodeExecq()) {
             tools.add(new ToolDefinition("callskill", "调用三方技能（data/skills/*.md）内嵌代码段的 airun 入口函数。args 为 JSON（字符串用引号包裹、对象用 {}）")
@@ -420,11 +515,14 @@ public class ToolDispatcher {
         tools.addAll(AgentBus.callAgentTools());
 
         applyStrictIfEnabled(tools);
+        cachedExecqTools = tools;
+        cachedThirdPartyFlag = thirdParty;
         return tools;
     }
 
-    /** QQ execs 全权限工具集 = 本地全量工具 + QQ 专属工具（按名去重）。 */
+    /** QQ execs 全权限工具集 = 本地全量工具 + QQ 专属工具（按名去重）；结果缓存，三方技能变更时失效。 */
     public static List<ToolDefinition> buildExecsTools() {
+        if (cachedExecsTools != null) return cachedExecsTools;
         List<ToolDefinition> tools = new ArrayList<>(buildAllTools());
         Set<String> names = new HashSet<>();
         for (ToolDefinition t : tools) names.add(t.getName());
@@ -433,6 +531,7 @@ public class ToolDispatcher {
                 tools.add(t);
             }
         }
+        cachedExecsTools = tools;
         return tools;
     }
 
@@ -481,7 +580,11 @@ public class ToolDispatcher {
     public String execute(String toolName, String argumentsJson, ToolContext ctx) {
         // 工具调用追踪日志：记录通道 + 工具名 + 参数概要（覆盖 console/execq/execs 全通道）
         String channel = (ctx != null) ? (ctx.execsMode ? "execs" : ctx.channel) : "console";
+        long start = System.currentTimeMillis();
         AiAgentActivity.debugLog("[Tool] [" + channel + "] 调用 " + toolName + briefArgs(argumentsJson));
+        auditToolAccess(toolName, argumentsJson, ctx);
+        String fileBlock = checkQqFileAccess(toolName, argumentsJson, ctx);
+        if (fileBlock != null) return fileBlock;
 
         HarnessHook[] snapshot;
         synchronized (hooks) {
@@ -492,6 +595,8 @@ public class ToolDispatcher {
                 String blocked = hook.preExecute(toolName, argumentsJson, ctx);
                 if (blocked != null) {
                     AiAgentActivity.debugLog("[Tool] [" + channel + "] " + toolName + " 被权限/安全阻断: " + briefText(blocked));
+                    recordToolTrace(toolName, channel, argumentsJson, blocked, false,
+                            System.currentTimeMillis() - start, "blocked");
                     return blocked;
                 }
             } catch (Exception ignored) {
@@ -499,11 +604,14 @@ public class ToolDispatcher {
             }
         }
         String result;
-        long start = System.currentTimeMillis();
+        boolean success = true;
+        String outcome = "ok";
         try {
             result = executeInternal(toolName, argumentsJson, ctx);
         } catch (Exception e) {
             result = "[工具执行异常] " + toolName + ": " + e.toString();
+            success = false;
+            outcome = "error";
         }
         for (HarnessHook hook : snapshot) {
             try {
@@ -512,8 +620,74 @@ public class ToolDispatcher {
                 // 后置钩子异常保留原结果
             }
         }
-        AiAgentActivity.debugLog("[Tool] [" + channel + "] " + toolName + " 完成(" + (System.currentTimeMillis() - start) + "ms) → " + briefText(result));
+        if (isTraceFailureResult(result)) {
+            success = false;
+            outcome = result != null && result.startsWith("[harness]") ? "blocked" : "error";
+        }
+        long duration = System.currentTimeMillis() - start;
+        AiAgentActivity.debugLog("[Tool] [" + channel + "] " + toolName + " 完成(" + duration + "ms) → " + briefText(result));
+        recordToolTrace(toolName, channel, argumentsJson, result, success, duration, outcome);
         return result;
+    }
+
+    /** QQ 通道文件访问策略：配置了根目录时，仅允许根目录内路径。 */
+    private static String checkQqFileAccess(String toolName, String argumentsJson, ToolContext ctx) {
+        if (ctx == null || !ctx.isExecq()) return null;
+        if (!"readfile".equals(toolName) && !"readdir".equals(toolName) && !"findfile".equals(toolName)) return null;
+        String path = arg(argumentsJson, "path");
+        if (path == null || path.trim().isEmpty()) return null; // readdir/findfile 空路径按现有逻辑处理
+        if (!AiConfig.getInstance().isQqFileAccessAllowed(path.trim())) {
+            return "[harness] 文件访问阻断：" + toolName + " 路径不在允许的根目录内";
+        }
+        return null;
+    }
+
+    /** 对高风险/文件访问工具做审计日志（QQ 文件访问、本地高危执行）。 */
+    private static void auditToolAccess(String toolName, String argumentsJson, ToolContext ctx) {
+        if (toolName == null) return;
+        boolean qq = ctx != null && ctx.isExecq();
+        if (("readfile".equals(toolName) || "readdir".equals(toolName) || "findfile".equals(toolName)) && qq) {
+            AiAgentActivity.debugLog("[Audit] QQ文件访问 tool=" + toolName
+                    + " user=" + (ctx.senderQQ > 0 ? ctx.senderQQ : 0)
+                    + " args=" + briefArgs(argumentsJson));
+        }
+        if (("cmd".equals(toolName) || "sys".equals(toolName) || "eval".equals(toolName) || "evaljs".equals(toolName))
+                && ctx != null && !ctx.isExecq()) {
+            AiAgentActivity.debugLog("[Audit] 本地高危执行 tool=" + toolName + " args=" + briefArgs(argumentsJson));
+        }
+    }
+
+    /** 判断工具结果是否应标记为失败，用于遥测准确性。 */
+    private static boolean isTraceFailureResult(String result) {
+        if (result == null) return false;
+        String r = result.trim();
+        return r.startsWith("[harness]") || r.startsWith("[代码执行失败]")
+                || r.startsWith("[工具执行异常]") || r.startsWith("[工具] 未知工具");
+    }
+
+    /** 轻量工具调用遥测：独立于 HarnessTrace，失败静默忽略。 */
+    private static void recordToolTrace(String toolName, String channel, String argumentsJson,
+                                        String result, boolean success, long durationMs, String outcome) {
+        try {
+            final PersistenceManager pm = PersistenceManager.getInstance();
+            if (pm == null) return;
+            final ToolCallTrace trace = new ToolCallTrace(
+                    ToolCallTrace.newTraceId(),
+                    toolName,
+                    channel,
+                    briefArgs(argumentsJson),
+                    briefText(result),
+                    success,
+                    durationMs,
+                    outcome,
+                    System.currentTimeMillis());
+            // 异步落库：遥测不阻塞工具执行主链路
+            ThreadManager.getInstance().newNamedSingle("TraceWriter").submit(() -> {
+                try { pm.saveToolTrace(trace); } catch (Exception ignored) {}
+            });
+        } catch (Exception ignored) {
+            // 遥测异常不影响工具执行
+        }
     }
 
     /** 参数概要：截断到 160 字符，避免超长内容刷屏。 */
@@ -533,6 +707,24 @@ public class ToolDispatcher {
         return t;
     }
 
+    /** QQ 通道文件路径处理：空路径优先落到插件数据目录，显式路径保持全局可访问。 */
+    private static String[] resolveQqPath(ToolContext ctx, String path, boolean allowEmptyAsDataDir) {
+        if (ctx == null || !ctx.isExecq() || ctx.execsMode) {
+            return new String[]{path, null};
+        }
+        String p = (path == null) ? "" : path.trim();
+        if (p.isEmpty()) {
+            if (!allowEmptyAsDataDir) {
+                return new String[]{null, "[readfile] 无权限：execq 通道必须提供明确文件路径"};
+            }
+            p = ctx.dataDir;
+        }
+        if (p == null || p.isEmpty()) {
+            return new String[]{null, "[readfile] 无权限：execq 通道缺少数据目录"};
+        }
+        return new String[]{p, null};
+    }
+
     /** 工具实际执行（不含钩子），保留原有全部逻辑不变。 */
     private String executeInternal(String toolName, String argumentsJson, ToolContext ctx) {
         switch (toolName) {
@@ -547,12 +739,24 @@ public class ToolDispatcher {
                 }
                 return act("cmd", cmdArg);
             }
-            case "readfile":     return act("readfile", arg(argumentsJson, "path"));
-            case "readdir":      return act("readdir", arg(argumentsJson, "path"));
+            case "readfile": {
+                String path = arg(argumentsJson, "path");
+                String[] resolved = resolveQqPath(ctx, path, false);
+                if (resolved[1] != null) return resolved[1];
+                return act("readfile", resolved[0]);
+            }
+            case "readdir": {
+                String path = arg(argumentsJson, "path");
+                String[] resolved = resolveQqPath(ctx, path, true);
+                if (resolved[1] != null) return resolved[1];
+                return act("readdir", resolved[0]);
+            }
             case "findfile": {
                 String fpath = arg(argumentsJson, "path");
                 String fkw = arg(argumentsJson, "keyword");
-                String fcontent = (fkw == null || fkw.trim().isEmpty()) ? fpath : (fpath + "|" + fkw.trim());
+                String[] resolved = resolveQqPath(ctx, fpath, true);
+                if (resolved[1] != null) return resolved[1];
+                String fcontent = (fkw == null || fkw.trim().isEmpty()) ? resolved[0] : (resolved[0] + "|" + fkw.trim());
                 return act("findfile", fcontent);
             }
             case "sys":          return act("sys", arg(argumentsJson, "command"));
@@ -633,7 +837,7 @@ public class ToolDispatcher {
             case "skillinfo":       return executeSkillInfo(arg(argumentsJson, "name"));
             case "setimageremark":   return executeSetImageRemark(argumentsJson);
             case "thirdskill":       return executeThirdSkill(arg(argumentsJson, "content"));
-            case "callskill":        return executeCallSkill(argumentsJson);
+            case "callskill":        return executeCallSkill(argumentsJson, ctx);
             case "pendingrequests":    return executePendingRequests(ctx);
             case "approvefriend":      return executeApproveFriend(arg(argumentsJson, "flag"), ctx);
             case "rejectfriend":       return executeRejectFriend(arg(argumentsJson, "flag"), ctx);
@@ -649,11 +853,13 @@ public class ToolDispatcher {
             case "alarm":             return executeAlarm(argumentsJson, ctx);
             case "searchglobal":      return executeSearchGlobal(argumentsJson, ctx);
             case "markmessage":       return executeMarkMessage(argumentsJson, ctx);
+            case "setpreference":     return executeSetPreference(argumentsJson, ctx);
+            case "getpreference":     return executeGetPreference(argumentsJson, ctx);
             case "call_agent":        return invokeAgent(arg(argumentsJson, "agent"), arg(argumentsJson, "task"), ctx);
             case "ask_agent":         return invokeAgent(arg(argumentsJson, "agent"), arg(argumentsJson, "question"), ctx);
             default:
                 if (toolName != null && toolName.startsWith("tp_")) {
-                    return executeThirdPartyTool(toolName.substring(3), argumentsJson);
+                    return executeThirdPartyTool(toolName.substring(3), argumentsJson, ctx);
                 }
                 return "[工具] 未知工具: " + toolName;
         }
@@ -741,12 +947,16 @@ public class ToolDispatcher {
             if (visionImage == null) {
                 return "[vision] 图片下载或转换失败，无法分析（可能图片已过期或不可访问）";
             }
-            java.util.List<ChatMessage> msgs = new java.util.ArrayList<>();
-            msgs.add(ChatMessage.createMultimodal(VISION_PROMPT, java.util.Collections.singletonList(visionImage)));
-            String result = client.chatSync(msgs, AiConfig.getInstance().getVisionModel());
+            String cacheKey = sair.aiagent.onebot.ImageRecognizer.visionCacheKey(visionImage);
+            String cached = sair.aiagent.onebot.ImageRecognizer.getCachedVisionResult(cacheKey);
+            if (cached != null) {
+                return "[vision] 图片分析结果:\n" + cached;
+            }
+            String result = client.chatVision(java.util.Collections.singletonList(visionImage), VISION_PROMPT);
             if (result == null || result.trim().isEmpty()) {
                 return "[vision] 视觉模型未返回有效结果";
             }
+            sair.aiagent.onebot.ImageRecognizer.putCachedVisionResult(cacheKey, result);
             return "[vision] 图片分析结果:\n" + result.trim();
         } catch (Exception e) {
             return "[vision] 视觉分析失败: " + e.toString();
@@ -868,6 +1078,97 @@ public class ToolDispatcher {
         }
 
         return "[markmessage] 用法: action=set（打备注，mark 必填）/ get（查备注，message 必填）/ list（列出最近带备注消息）";
+    }
+
+    /** 设置结构化偏好（setpreference 工具）。 */
+    private String executeSetPreference(String argumentsJson, ToolContext ctx) {
+        String scope = arg(argumentsJson, "scope");
+        String key = arg(argumentsJson, "key");
+        String value = arg(argumentsJson, "value");
+        if (scope == null || scope.trim().isEmpty()) scope = "user";
+        scope = scope.trim().toLowerCase();
+        if (!"user".equals(scope) && !"group".equals(scope) && !"global".equals(scope)) {
+            return "[setpreference] scope 必须是 user/group/global";
+        }
+        if (key == null || key.trim().isEmpty()) return "[setpreference] 缺少 key";
+        if (value == null || value.trim().isEmpty()) return "[setpreference] 缺少 value";
+
+        long targetId = 0;
+        boolean isMaster = ctx == null || ctx.isMaster;
+        int affection = 0;
+        if (ctx != null) {
+            if ("group".equals(scope) && ctx.qqMsg != null && ctx.qqMsg.isGroupMessage()) {
+                targetId = ctx.qqMsg.getGroupId();
+            } else if ("user".equals(scope)) {
+                targetId = ctx.senderQQ > 0 ? ctx.senderQQ : 0;
+            }
+            if (ctx.emotionManager != null && targetId > 0) {
+                affection = ctx.emotionManager.getAffection(targetId);
+            }
+        }
+
+        // 印象差的人不接受任何设定（主人除外）
+        if (!isMaster && "user".equals(scope) && targetId > 0) {
+            PersistenceManager pm = PersistenceManager.getInstance();
+            if (pm != null) {
+                sair.aiagent.model.ImpressionEntry imp = pm.getImpression(targetId);
+                if (imp != null && imp.isBad()) {
+                    return "[setpreference] 该用户当前印象较差，暂不接受偏好设定，待印象改观后再试";
+                }
+            }
+        }
+
+        // 优先级：主人最高；其余按好感度映射 importance
+        int importance;
+        if (isMaster) {
+            importance = 10;
+        } else if (affection >= 800) {
+            importance = 8;
+        } else if (affection >= 400) {
+            importance = 6;
+        } else if (affection >= 200) {
+            importance = 4;
+        } else {
+            importance = 2;
+        }
+
+        PersistenceManager pm = PersistenceManager.getInstance();
+        if (pm == null) return "[setpreference] 持久化层未初始化";
+        pm.setPreference(scope, targetId, key.trim(), value.trim(), importance);
+        return "[setpreference] 已设置 " + scope + "/" + targetId + " 的偏好 [" + key.trim() + "]（importance=" + importance + "）";
+    }
+
+    /** 查询结构化偏好（getpreference 工具）。 */
+    private String executeGetPreference(String argumentsJson, ToolContext ctx) {
+        String scope = arg(argumentsJson, "scope");
+        String key = arg(argumentsJson, "key");
+        if (scope == null || scope.trim().isEmpty()) scope = "user";
+        scope = scope.trim().toLowerCase();
+        if (!"user".equals(scope) && !"group".equals(scope) && !"global".equals(scope)) {
+            return "[getpreference] scope 必须是 user/group/global";
+        }
+        long targetId = 0;
+        if (ctx != null) {
+            if ("group".equals(scope) && ctx.qqMsg != null && ctx.qqMsg.isGroupMessage()) {
+                targetId = ctx.qqMsg.getGroupId();
+            } else if ("user".equals(scope)) {
+                targetId = ctx.senderQQ > 0 ? ctx.senderQQ : 0;
+            }
+        }
+        PersistenceManager pm = PersistenceManager.getInstance();
+        if (pm == null) return "[getpreference] 持久化层未初始化";
+        if (key != null && !key.trim().isEmpty()) {
+            String v = pm.getPreference(scope, targetId, key.trim());
+            return v != null ? "[getpreference] " + key.trim() + " = " + v
+                    : "[getpreference] 未找到 " + scope + "/" + targetId + " 的偏好 [" + key.trim() + "]";
+        }
+        java.util.List<String[]> list = pm.listPreferences(scope, targetId);
+        if (list.isEmpty()) return "[getpreference] " + scope + "/" + targetId + " 暂无偏好";
+        StringBuilder sb = new StringBuilder("[getpreference] ").append(scope).append("/").append(targetId).append(" 的偏好:\n");
+        for (String[] p : list) {
+            sb.append("- ").append(p[0]).append(" = ").append(p[1]).append(" (importance=").append(p[2]).append(")\n");
+        }
+        return sb.toString().trim();
     }
 
     /** 查询技能/工具的完整说明书（skillinfo 工具）。 */
@@ -1403,7 +1704,7 @@ public class ToolDispatcher {
     }
 
     /** 调用三方技能代码段 airun 入口（callskill 工具）。是否在 execq/QQ 通道可用由 setthirdpartycode 配置决定。 */
-    private String executeCallSkill(String json) {
+    private String executeCallSkill(String json, ToolContext ctx) {
         String skillName = arg(json, "skill");
         if (skillName == null || skillName.trim().isEmpty()) return "[callskill] 缺少 skill 参数（技能名）";
         String argsJson = arg(json, "args");
@@ -1411,15 +1712,19 @@ public class ToolDispatcher {
         if (store == null) return "[callskill] 三方技能库未初始化";
         ThirdPartySkill skill = store.get(skillName.trim());
         if (skill == null) return "[callskill] 未找到三方技能: " + skillName.trim();
+        String blocked = checkThirdPartySkillExecqSafety(skill, ctx);
+        if (blocked != null) return blocked;
         return invokeSkill(skill, argsJson);
     }
 
     /** 执行动态注册的三方技能工具（tp_ 前缀），组装入参后调用 airun 入口。 */
-    private String executeThirdPartyTool(String skillName, String argumentsJson) {
+    private String executeThirdPartyTool(String skillName, String argumentsJson, ToolContext ctx) {
         ThirdPartySkillStore store = SkillBank.getInstance().getThirdPartyStore();
         if (store == null) return "[callskill] 三方技能库未初始化";
         ThirdPartySkill skill = store.get(skillName);
         if (skill == null) return "[callskill] 未找到三方技能: " + skillName;
+        String blocked = checkThirdPartySkillExecqSafety(skill, ctx);
+        if (blocked != null) return blocked;
         String argsJson = argumentsJson;
         // 未声明 airun 参数时，工具只有一个 args 字段，取出其原始 JSON 作为 airun 入参
         if (!skill.hasAirunSchema()) {
@@ -1427,6 +1732,22 @@ public class ToolDispatcher {
             if (raw != null && !raw.trim().isEmpty()) argsJson = raw;
         }
         return invokeSkill(skill, argsJson);
+    }
+
+    private static String checkThirdPartySkillExecqSafety(ThirdPartySkill skill, ToolContext ctx) {
+        if (ctx == null || !ctx.isExecq() || ctx.execsMode || ctx.isMaster) return null;
+        if (skill == null || skill.getCodeBlocks() == null || skill.getCodeBlocks().isEmpty()) return null;
+        StringBuilder code = new StringBuilder();
+        for (String block : skill.getCodeBlocks().values()) {
+            if (block != null) code.append(block).append('\n');
+        }
+        String c = code.toString().toLowerCase();
+        for (String pattern : HarnessConfig.getInstance().getForbiddenCodePatterns()) {
+            if (c.contains(pattern)) {
+                return "[harness] 代码安全阻断：三方技能 " + skill.getName() + " 含禁用模式 '" + pattern + "'";
+            }
+        }
+        return null;
     }
 
     /** 实际调用三方技能 airun 入口（懒创建 SkillCodeRunner）。 */
@@ -1479,17 +1800,20 @@ public class ToolDispatcher {
     private static void autoStoreSearchResult(String query, String result) {
         if (query == null || query.trim().isEmpty()) return;
         if (!isSearchSuccess(result)) return;
-        PersistenceManager pm = PersistenceManager.getInstance();
-        if (pm == null) return;
-        String q = query.trim();
-        try {
-            int id = pm.addNote("[联网搜索] " + q, truncateNote(result.trim()), q);
-            if (id >= 0) {
-                AiAgentActivity.debugLog("[AutoNote] 搜索成功已沉淀笔记 #" + id + ": " + q);
+        final String q = query.trim();
+        final String note = truncateNote(result.trim());
+        ThreadManager.getInstance().newNamedCached("AutoNote").submit(() -> {
+            PersistenceManager pm = PersistenceManager.getInstance();
+            if (pm == null) return;
+            try {
+                int id = pm.addNote("[联网搜索] " + q, note, q);
+                if (id >= 0) {
+                    AiAgentActivity.debugLog("[AutoNote] 搜索成功已沉淀笔记 #" + id + ": " + q);
+                }
+            } catch (Exception ignored) {
+                // 沉淀失败不影响主流程
             }
-        } catch (Exception ignored) {
-            // 沉淀失败不影响主流程
-        }
+        });
     }
 
     /**
@@ -1499,17 +1823,20 @@ public class ToolDispatcher {
     private static void autoStoreWebResult(String url, String result) {
         if (url == null || url.trim().isEmpty()) return;
         if (!isWebSuccess(result)) return;
-        PersistenceManager pm = PersistenceManager.getInstance();
-        if (pm == null) return;
-        String u = url.trim();
-        try {
-            int id = pm.addNote("[网页抓取] " + u, truncateNote(result.trim()), u);
-            if (id >= 0) {
-                AiAgentActivity.debugLog("[AutoNote] 抓取成功已沉淀笔记 #" + id + ": " + u);
+        final String u = url.trim();
+        final String note = truncateNote(result.trim());
+        ThreadManager.getInstance().newNamedCached("AutoNote").submit(() -> {
+            PersistenceManager pm = PersistenceManager.getInstance();
+            if (pm == null) return;
+            try {
+                int id = pm.addNote("[网页抓取] " + u, note, u);
+                if (id >= 0) {
+                    AiAgentActivity.debugLog("[AutoNote] 抓取成功已沉淀笔记 #" + id + ": " + u);
+                }
+            } catch (Exception ignored) {
+                // 沉淀失败不影响主流程
             }
-        } catch (Exception ignored) {
-            // 沉淀失败不影响主流程
-        }
+        });
     }
 
     /** 判断搜索结果是否成功：SearchTool 成功以 [搜索] 开头，失败一律以 [search] 开头。 */

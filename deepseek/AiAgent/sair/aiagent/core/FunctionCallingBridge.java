@@ -30,6 +30,9 @@ public class FunctionCallingBridge {
 
     private final DeepSeekClient client;
 
+    /** 本次循环的工具调用硬上限，可由调用方（子 Agent）覆盖。 */
+    private volatile int maxToolCalls = MAX_TOTAL_TOOL_CALLS;
+
     /** 看图指令关键词（用户明确要求看图片内容） */
     private static final String[] IMAGE_REQUEST_KEYWORDS = {
         "看图", "识图", "识别图片", "图片里", "图里", "这张图", "什么图",
@@ -46,6 +49,11 @@ public class FunctionCallingBridge {
     /** 设置审查者子 Agent，启用最终回复验证闭环。 */
     public void setCritic(CriticAgent critic) {
         this.critic = critic;
+    }
+
+    /** 设置本次循环的工具调用硬上限（子 Agent 可收紧预算）。 */
+    public void setMaxToolCalls(int max) {
+        this.maxToolCalls = Math.max(1, max);
     }
 
     /**
@@ -181,12 +189,13 @@ public class FunctionCallingBridge {
                 messages.add(ChatMessage.createAssistantWithToolCalls(r.content, r.reasoningContent, r.toolCalls));
                 totalToolCalls += r.toolCalls.size();
                 // 接近硬上限：注入一次收尾提示，引导 AI 基于已有信息尽快输出最终结果
-                if (!wrapUpHinted && totalToolCalls >= WARN_TOOL_CALLS) {
+                int warnThreshold = Math.max(1, maxToolCalls * 3 / 4);
+                if (!wrapUpHinted && totalToolCalls >= warnThreshold) {
                     wrapUpHinted = true;
                     messages.add(new ChatMessage("user", buildWrapUpPrompt(totalToolCalls)));
                 }
                 // 硬上限：强制终止，返回已执行进度说明，避免永久不回复
-                if (totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
+                if (totalToolCalls >= maxToolCalls) {
                     traceSuccess = false;
                     return buildToolCallLimitMessage(totalToolCalls);
                 }
@@ -227,12 +236,15 @@ public class FunctionCallingBridge {
     private void recordTrace(String task, ToolContext ctx, int toolCalls, boolean success,
                              long startTime, String verdict) {
         try {
-            PersistenceManager pm = PersistenceManager.getInstance();
+            final PersistenceManager pm = PersistenceManager.getInstance();
             if (pm == null) return;
             String mode = (ctx != null && ctx.channel != null) ? ctx.channel : "console";
-            HarnessTrace trace = new HarnessTrace(HarnessTrace.newTaskId(), mode, task, toolCalls,
+            final HarnessTrace trace = new HarnessTrace(HarnessTrace.newTaskId(), mode, task, toolCalls,
                     success, System.currentTimeMillis() - startTime, verdict, System.currentTimeMillis());
-            pm.saveTrace(trace);
+            // 异步落库：可观测性不应阻塞主链路
+            ThreadManager.getInstance().newNamedSingle("TraceWriter").submit(() -> {
+                try { pm.saveTrace(trace); } catch (Exception ignored) {}
+            });
         } catch (Exception ignored) {
             // 轨迹落库失败不影响业务
         }
@@ -353,26 +365,28 @@ public class FunctionCallingBridge {
         long visionStart = System.currentTimeMillis();
         sair.aiagent.AiAgentActivity.qqLog("[FC] 视觉模型识别图片开始: " + visionImages.size() + " 张");
         try {
-            String prompt = "请仔细识别这张图片，完整转写图中所有文字内容，并描述图片结构、关键信息"
+            String prompt = "请仔细识别图片，完整转写图中所有文字内容，并描述图片结构、关键信息"
                     + "（如邮件标题、发件人、收件人、正文、日期、关键数据等）。"
                     + "只做客观识别与转写，不要分析、不要下结论。";
-            // 图片归属说明：引用别人的图片时，明确告知 AI 这张图是谁发的
-            if (ctx != null && ctx.qqMsg != null) {
-                String sender = ctx.qqMsg.getQuotedSenderName();
-                long senderQQ = ctx.qqMsg.getQuotedSenderQQ();
-                long currentUser = ctx.qqMsg.getUserId();
-                if (sender != null && !sender.isEmpty() && senderQQ > 0 && senderQQ != currentUser) {
-                    prompt = "注意：这张（些）图片是被引用的消息里的，它是【" + sender + "(QQ:" + senderQQ
-                            + ")】发的，不是当前与你对话的人发的。\n\n" + prompt;
+            if (visionImages.size() == 1) {
+                String cacheKey = sair.aiagent.onebot.ImageRecognizer.visionCacheKey(visionImages.get(0));
+                String cached = sair.aiagent.onebot.ImageRecognizer.getCachedVisionResult(cacheKey);
+                if (cached != null) {
+                    sair.aiagent.AiAgentActivity.qqLog("[FC] 视觉模型识别缓存命中: " + cacheKey);
+                    return cached;
                 }
-            }
-            prompt += "\n\n用户消息背景：\n" + (text != null ? text : "");
-            List<ChatMessage> visionMsgs = new ArrayList<>();
-            visionMsgs.add(ChatMessage.createMultimodal(prompt, visionImages));
-            String result = client.chatSync(visionMsgs, AiConfig.getInstance().getVisionModel());
-            if (result != null && !result.trim().isEmpty()) {
-                sair.aiagent.AiAgentActivity.qqLog("[FC] 视觉模型识别完成 (耗时" + (System.currentTimeMillis() - visionStart) + "ms)");
-                return result.trim();
+                String result = client.chatVision(visionImages, prompt);
+                if (result != null && !result.trim().isEmpty()) {
+                    sair.aiagent.onebot.ImageRecognizer.putCachedVisionResult(cacheKey, result);
+                    sair.aiagent.AiAgentActivity.qqLog("[FC] 视觉模型识别完成 (耗时" + (System.currentTimeMillis() - visionStart) + "ms)");
+                    return result.trim();
+                }
+            } else {
+                String result = client.chatVision(visionImages, prompt);
+                if (result != null && !result.trim().isEmpty()) {
+                    sair.aiagent.AiAgentActivity.qqLog("[FC] 视觉模型识别完成 (耗时" + (System.currentTimeMillis() - visionStart) + "ms)");
+                    return result.trim();
+                }
             }
         } catch (Exception e) {
             sair.aiagent.AiAgentActivity.qqLog("[FC] 图片识别失败: " + e.toString());
@@ -418,6 +432,16 @@ public class FunctionCallingBridge {
         return null;
     }
 
+    private static boolean allParallelSafe(List<ToolCall> toolCalls, boolean local) {
+        if (toolCalls == null || toolCalls.isEmpty()) return false;
+        for (ToolCall tc : toolCalls) {
+            if (tc == null) return false;
+            if (ToolDispatcher.isStatefulTool(tc.getName())) return false;
+            if (!local && !ToolDispatcher.isReadonlyTool(tc.getName())) return false;
+        }
+        return true;
+    }
+
     /**
      * 执行本轮 tool_calls：多个工具且本地通道时并发执行（独立工具并行），
      * QQ 通道或单工具时串行执行（保证 QQ 状态安全与结果顺序稳定）。
@@ -427,7 +451,7 @@ public class FunctionCallingBridge {
         List<String> results = new ArrayList<>(n);
         for (int i = 0; i < n; i++) results.add(null);
         if (n == 0) return results;
-        boolean parallel = (n > 1) && (ctx == null || !ctx.isExecq());
+        boolean parallel = (n > 1) && allParallelSafe(toolCalls, ctx == null || !ctx.isExecq());
         if (!parallel) {
             for (int i = 0; i < n; i++) {
                 results.set(i, executeOne(toolCalls.get(i), ctx, dispatcher));
@@ -458,7 +482,7 @@ public class FunctionCallingBridge {
     /** 执行单个工具，异常统一转为失败结果；单工具 120s 超时保护，防止卡死线程池。 */
     private String executeOne(ToolCall tc, ToolContext ctx, ToolDispatcher dispatcher) {
         java.util.concurrent.ExecutorService pool =
-                ThreadManager.getInstance().newNamedCached("FC-ToolExec");
+                ThreadManager.getInstance().newNamedFixed("FC-ToolExec", 8);
         java.util.concurrent.Future<String> f = pool.submit(new java.util.concurrent.Callable<String>() {
             @Override
             public String call() {
@@ -469,11 +493,12 @@ public class FunctionCallingBridge {
                 }
             }
         });
+        long timeoutMs = ToolDispatcher.timeoutForTool(tc.getName());
         try {
-            return f.get(120, java.util.concurrent.TimeUnit.SECONDS);
+            return f.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.TimeoutException te) {
             f.cancel(true);
-            return "[工具执行超时] " + tc.getName() + " 执行超过 120s，已中断";
+            return "[工具执行超时] " + tc.getName() + " 执行超过 " + (timeoutMs / 1000) + "s，已中断";
         } catch (Exception e) {
             return "[工具执行异常] " + tc.getName() + ": " + e.toString();
         }

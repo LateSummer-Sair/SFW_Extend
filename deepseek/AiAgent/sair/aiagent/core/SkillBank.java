@@ -361,6 +361,23 @@ public class SkillBank {
      * AI 根据索引调用工具后，再由 {@link #getTagDetail} 按需注入详情。
      */
     public String buildCompactIndex(String channel, int maxTokens) {
+        StringBuilder sb = new StringBuilder();
+        String stable = buildStableIndex(channel, maxTokens);
+        if (stable != null) sb.append(stable);
+        // Tier 2: Route hint from cache（任务相关，非稳定前缀，不进入 buildStableIndex）
+        if (routeCache != null) {
+            String routeHint = routeCache.getRouteHint(null);  // context-free hint
+            if (routeHint != null) sb.append(routeHint);
+        }
+        if (sb.length() < 20) return null;
+        return sb.toString();
+    }
+
+    /**
+     * 构建「稳定」工具索引（Tier0 三方技能 + Tier1 内置技能），不含任务相关路由提示。
+     * <p>输出在技能不变时逐字节稳定，适合放进 system 前缀或动态上下文首部，命中 KV 前缀缓存。</p>
+     */
+    public String buildStableIndex(String channel, int maxTokens) {
         if (pm == null) return null;
         int budget = (maxTokens > 0 ? maxTokens : 800) * 4;
         int used = 0;
@@ -393,14 +410,6 @@ public class SkillBank {
                 if (used + line.length() > budget) break;
                 sb.append(line);
                 used += line.length();
-            }
-        }
-
-        // Tier 2: Route hint from cache
-        if (routeCache != null) {
-            String routeHint = routeCache.getRouteHint(null);  // context-free hint
-            if (routeHint != null && used + routeHint.length() <= budget) {
-                sb.append(routeHint);
             }
         }
 

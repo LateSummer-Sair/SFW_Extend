@@ -46,24 +46,14 @@ public class OneBotServer {
     private ServerSocket serverSocket;
     private Thread acceptThread;
     private final List<WebSocketConnection> connections = new CopyOnWriteArrayList<>();
+    private volatile WebSocketConnection activeApiConnection;
+    private volatile java.util.concurrent.ScheduledFuture<?> keepAliveFuture;
     
     /** API调用等待队列：echo → 响应Future */
     private final ConcurrentHashMap<String, CompletableFuture<String>> pendingApiCalls = new ConcurrentHashMap<>();
 
     /** WebSocket 连接处理线程池：有界队列 + 拒绝策略，防止连接洪峰线程爆炸。 */
-    private final ExecutorService connPool = new ThreadPoolExecutor(
-            4, 8, 60L, TimeUnit.SECONDS,
-            new LinkedBlockingQueue<Runnable>(256),
-            new ThreadFactory() {
-                private final AtomicInteger seq = new AtomicInteger(1);
-                @Override
-                public Thread newThread(Runnable r) {
-                    Thread t = new Thread(r, "OneBot-Conn-" + seq.getAndIncrement());
-                    t.setDaemon(true);
-                    return t;
-                }
-            },
-            new ThreadPoolExecutor.CallerRunsPolicy());
+    private volatile ExecutorService connPool = createConnPool();
 
     // === 配置项 ===
     private int port = DEFAULT_PORT;
@@ -76,6 +66,22 @@ public class OneBotServer {
     private String dataDir;
 
     public OneBotServer() {}
+
+    private static ExecutorService createConnPool() {
+        return new ThreadPoolExecutor(
+                4, 8, 60L, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<Runnable>(256),
+                new ThreadFactory() {
+                    private final AtomicInteger seq = new AtomicInteger(1);
+                    @Override
+                    public Thread newThread(Runnable r) {
+                        Thread t = new Thread(r, "OneBot-Conn-" + seq.getAndIncrement());
+                        t.setDaemon(true);
+                        return t;
+                    }
+                },
+                new ThreadPoolExecutor.DiscardOldestPolicy());
+    }
 
     // ==================== 配置 ====================
 
@@ -99,11 +105,15 @@ public class OneBotServer {
             return false;
         }
         try {
+            if (connPool == null || connPool.isShutdown()) {
+                connPool = createConnPool();
+            }
             serverSocket = new ServerSocket(port);
             running.set(true);
             acceptThread = new Thread(this::acceptLoop, "OneBot-Acceptor");
             acceptThread.setDaemon(true);
             acceptThread.start();
+            startKeepAlive();
             AiAgentActivity.qqLog("[OneBot] 服务器已启动，端口: " + port);
             return true;
         } catch (IOException e) {
@@ -115,6 +125,7 @@ public class OneBotServer {
     /** 停止WebSocket服务器 */
     public synchronized void stop() {
         running.set(false);
+        stopKeepAlive();
         // 关闭所有连接
         for (WebSocketConnection conn : connections) {
             conn.close();
@@ -127,12 +138,36 @@ public class OneBotServer {
             }
         } catch (IOException ignored) {}
         // 关闭连接处理线程池（已提交连接会继续处理完，拒绝新提交）
-        connPool.shutdown();
+        ExecutorService pool = connPool;
+        if (pool != null) {
+            pool.shutdown();
+        }
         AiAgentActivity.qqLog("[OneBot] 服务器已停止");
     }
 
     public boolean isRunning() { return running.get(); }
     public int getConnectionCount() { return wsClientCount.get(); }
+
+    /** 启动主动 ping 保活，避免长连接被中间设备断开。 */
+    private void startKeepAlive() {
+        if (keepAliveFuture != null) return;
+        keepAliveFuture = sair.aiagent.core.ThreadManager.getInstance()
+                .newNamedScheduled("OneBot-KeepAlive", 1)
+                .scheduleWithFixedDelay(() -> {
+                    for (WebSocketConnection c : connections) {
+                        if (c.isOpen()) {
+                            try { c.sendFrame(0x09, new byte[0]); } catch (Exception ignored) {}
+                        }
+                    }
+                }, 30, 30, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    private void stopKeepAlive() {
+        if (keepAliveFuture != null) {
+            keepAliveFuture.cancel(false);
+            keepAliveFuture = null;
+        }
+    }
 
     // ==================== 接受连接循环 ====================
 
@@ -192,12 +227,13 @@ public class OneBotServer {
         pendingApiCalls.put(echo, future);
         
         AiAgentActivity.qqLog("[OneBot] 发送API: " + (payload.length() > 200 ? payload.substring(0, 200) + "..." : payload));
-        // 广播到所有连接
-        for (WebSocketConnection c : connections) {
-            if (c.isOpen()) {
-                c.sendText(payload);
-            }
+        WebSocketConnection target = chooseApiConnection();
+        if (target == null) {
+            pendingApiCalls.remove(echo);
+            AiAgentActivity.qqLog("[OneBot] API调用失败: 没有可用连接");
+            return null;
         }
+        target.sendText(payload);
         
         // 等待响应（10秒超时）
         try {
@@ -215,6 +251,16 @@ public class OneBotServer {
         }
     }
     
+    /** 选择当前 API 调用应发送到的连接，避免多连接时重复执行。 */
+    private WebSocketConnection chooseApiConnection() {
+        WebSocketConnection active = activeApiConnection;
+        if (active != null && active.isOpen()) return active;
+        for (WebSocketConnection c : connections) {
+            if (c.isOpen()) return c;
+        }
+        return null;
+    }
+
     /** 处理API响应（由WebSocket连接的onTextMessage调用） */
     void onApiResponse(String text) {
         String echo = JsonUtil.extractString(text, "echo");
@@ -301,6 +347,9 @@ public class OneBotServer {
 
         void close() {
             if (open.compareAndSet(true, false)) {
+                if (activeApiConnection == this) {
+                    activeApiConnection = null;
+                }
                 try { sendCloseFrame(); } catch (Exception ignored) {}
                 try { socket.close(); } catch (IOException ignored) {}
                 wsClientCount.decrementAndGet();
@@ -319,6 +368,7 @@ public class OneBotServer {
                 }
 
                 AiAgentActivity.qqLog("[OneBot] 客户端已连接: " + remoteAddr);
+                activeApiConnection = this;
 
                 // 2. 读取帧循环
                 readFrames();

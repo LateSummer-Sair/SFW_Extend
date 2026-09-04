@@ -51,7 +51,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
             EXECQ_POOL_SIZE, Math.max(EXECQ_POOL_SIZE, 6), 60L, TimeUnit.SECONDS,
             new LinkedBlockingQueue<Runnable>(256),
             r -> { Thread t = new Thread(r, "OneBot-ExecQ"); t.setDaemon(true); return t; },
-            new ThreadPoolExecutor.CallerRunsPolicy());
+            new ThreadPoolExecutor.DiscardOldestPolicy());
 
     /** 解析 execq 线程池大小（系统属性 aiagent.execq.poolSize，默认 3，限幅 1..32）。 */
     private static int resolveExecqPoolSize() {
@@ -79,15 +79,24 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
         return t;
     });
 
-    /** 语音转文字线程池（多线程异步，全程自动监听每条消息，发现语音立即唤起线程转文字，不阻塞消息处理主流程） */
-    private final ExecutorService voiceTranscribePool = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "OneBot-VoiceTranscribe");
-        t.setDaemon(true);
-        return t;
-    });
+    /** 语音转文字线程池（有界，避免语音洪峰线程爆炸） */
+    private final ExecutorService voiceTranscribePool = new ThreadPoolExecutor(
+            2, 4, 60L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<Runnable>(64),
+            r -> { Thread t = new Thread(r, "OneBot-VoiceTranscribe"); t.setDaemon(true); return t; },
+            new ThreadPoolExecutor.DiscardOldestPolicy());
 
     /** 语音转文字缓存：语音消息 messageId → 转文字文本（供引用语音直接定位，避免重复转换） */
-    private final Map<Long, String> voiceTextCache = new ConcurrentHashMap<>();
+    /** 语音转文字缓存：messageId → 文本，有界 LRU（access-order），防止长期运行无限增长。 */
+    private static final int VOICE_TEXT_CACHE_MAX = 500;
+    private final Map<Long, String> voiceTextCache = Collections.synchronizedMap(
+        new LinkedHashMap<Long, String>(128, 0.75f, true) {
+            private static final long serialVersionUID = 1L;
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Long, String> eldest) {
+                return size() > VOICE_TEXT_CACHE_MAX;
+            }
+        });
 
     /** 是否启用主动查看功能 */
     private volatile boolean proactiveCheckEnabled = false;
@@ -111,7 +120,6 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
     private EmotionStateManager emotionManager;
 
     /** 好友通过时间戳（用于反滥用：5分钟内发起群邀请则拒+警告） */
-    private final Map<Long, Long> friendAcceptTimestamps = new ConcurrentHashMap<>();
 
     /** 待处理请求池（好友申请/群邀请交由 AI 决策） */
     private final PendingRequestPool pendingRequestPool = new PendingRequestPool();
@@ -796,26 +804,6 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
         }
     }
     
-    /** @deprecated 委托给 ForwardMessageExpander */
-    private String extractForwardMsgContent(String apiResponse) {
-        return ForwardMessageExpander.extractForwardMsgContent(apiResponse);
-    }
-
-    /** @deprecated 委托给 ForwardMessageExpander */
-    private String extractMsgSegmentsText(String apiResponse) {
-        return ForwardMessageExpander.extractMsgSegmentsText(apiResponse);
-    }
-    
-    /** @deprecated 委托给 ForwardMessageExpander */
-    private String extractForwardIdFromMsgJson(String apiResponse) {
-        return ForwardMessageExpander.extractForwardIdFromMsgJson(apiResponse);
-    }
-    
-    /** @deprecated 委托给 ForwardMessageExpander */
-    private String extractForwardText(String forwardContent) {
-        return ForwardMessageExpander.extractForwardText(forwardContent);
-    }
-
     // ==================== 消息处理 ====================
 
     /**
@@ -871,6 +859,9 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                     AiAgentActivity.qqLog("[QQMsg] 同步展开折叠消息失败: " + e.toString());
                 }
             }
+            // 折叠消息展开后，纯文本已稳定，这里计算一次供本段复用（避免多次正则提取）
+            final String plainText = msg.getPlainText();
+
             // === 记录所有群聊消息到历史记录（无论是否@） ===
             if (msg.isGroupMessage()) {
                 // 0. 记录群成员角色（用于@管理员/群主时查表）
@@ -903,14 +894,14 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 unifiedMemory.addGroupChatMessage(
                     msg.getUserId(),
                     msg.getDisplayName(),
-                    msg.getPlainText(),
-                    msg.getGroupId()
+                    plainText,
+                    msg.getGroupId(),
+                    msg.getMessageId()
                 );
                 
                 // 2. 如果消息触发了AI响应，也记录到个人对话历史（长期存储）
                 boolean shouldRespond = msg.isAtBot(); // 仅响应@自己的消息
                 if (!shouldRespond) {
-                    String plainText = msg.getPlainText();
                     if (sair.aiagent.core.AiConfig.getInstance().matchesTrigger(plainText)) {
                         shouldRespond = true;
                     }
@@ -920,7 +911,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                     // 记录到统一对话历史，标记为群聊来源和个人ID（长期存储个人印象）
                     unifiedMemory.addConversation(
                         "user",
-                        msg.getPlainText(),
+                        plainText,
                         "group",
                         msg.getGroupId(),
                         msg.getUserId(),  // 使用个人QQ号作为标识
@@ -931,7 +922,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 // 私聊：记录到统一对话历史，标记为私聊来源
                 unifiedMemory.addConversation(
                     "user",
-                    msg.getPlainText(),
+                    plainText,
                     "private",
                     msg.getUserId(),
                     msg.getUserId(),
@@ -945,7 +936,6 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 
                 // 检查是否命中任一触发词（多个触发词用 ; 分隔）
                 if (!shouldRespond) {
-                    String plainText = msg.getPlainText();
                     if (sair.aiagent.core.AiConfig.getInstance().matchesTrigger(plainText)) {
                         shouldRespond = true;
                         AiAgentActivity.qqLog("[QQMsg] 检测到触发词: " + plainText);
@@ -977,7 +967,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 boolean shouldBlock = internalAgents.checkAndEnforceRules(
                     qq, 
                     msg.isGroupMessage() ? msg.getGroupId() : 0,
-                    msg.getPlainText()
+                    plainText
                 );
                 
                 if (shouldBlock) {
@@ -1076,12 +1066,27 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                         msg.getUserId(), msg.getUserId(), msg.getDisplayName());
                 }
                 AiAgentActivity.qqLog("[QQMsg] 语音异步转文字完成并注入聊天记录: " + text);
+                // 私聊语音：转文字成功后主动补一条自然确认，避免用户被"稍后重试"晾着
+                if (msg.isPrivateMessage() && server != null) {
+                    try {
+                        String brief = text.length() > 40 ? text.substring(0, 40) + "…" : text;
+                        server.sendPrivateMsg(msg.getUserId(), "我听见啦，你说的是「" + brief + "」~ 刚那条语音转好了文字，直接发文字或再说一遍我都能接着聊。");
+                    } catch (Exception ignored) {}
+                }
             } else {
                 AiAgentActivity.qqLog("[QQMsg] 语音转文字失败或无内容: messageId=" + msg.getMessageId());
             }
         } catch (Exception e) {
             AiAgentActivity.qqLog("[QQMsg] 语音异步转文字异常: " + e.toString());
         }
+    }
+
+    /** 判断文本是否疑似引用图片（用于门控“历史图片回看”的同步网络调用）。 */
+    private static boolean looksLikeImageReference(String text) {
+        if (text == null || text.trim().isEmpty()) return false;
+        String t = text;
+        return t.contains("图") || t.contains("照片") || t.contains("看图") || t.contains("识别")
+                || t.contains("p图");
     }
 
     /**
@@ -1210,7 +1215,9 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
             }
 
             // === 历史图片回看：当前消息无图且未引用图片时，从最近历史消息中找回用户刚发的图片 ===
-            if (!msg.hasImage() && msg.getQuotedImageUrls().isEmpty() && napcatApi != null) {
+            // 仅在消息疑似引用图片时同步拉取，普通文本消息跳过，避免每次消息都触发 NapCat 网络调用拖慢响应
+            if (!msg.hasImage() && msg.getQuotedImageUrls().isEmpty() && napcatApi != null
+                    && looksLikeImageReference(msg.getPlainText())) {
                 try {
                     String historyJson = null;
                     if (msg.isGroupMessage() && msg.getGroupId() > 0) {
@@ -1405,6 +1412,16 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
         pendingRequestPool.add(new PendingRequestPool.PendingRequest(
             "friend", flag, userId, 0, comment));
         AiAgentActivity.qqLog("[QQMsg] 好友申请已入池，待AI决策: userId=" + userId);
+        notifyMasters("[Bot] 收到新的好友申请：QQ " + userId
+                + (comment != null && !comment.isEmpty() ? "，留言：" + comment : "") + "。可用 pendingrequests 查看并决策。");
+    }
+
+    /** 私聊提醒所有主人。 */
+    private void notifyMasters(String text) {
+        if (server == null || text == null) return;
+        for (Long qq : sair.aiagent.core.AiConfig.getInstance().getMasterQQs()) {
+            try { server.sendPrivateMsg(qq, text); } catch (Exception ignored) {}
+        }
     }
 
     // ==================== 群邀请处理 ====================
@@ -1437,61 +1454,10 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
         pendingRequestPool.add(new PendingRequestPool.PendingRequest(
             "group", flag, userId, groupId, null));
         AiAgentActivity.qqLog("[QQMsg] 群邀请已入池，待AI决策: userId=" + userId + " groupId=" + groupId);
+        notifyMasters("[Bot] 收到新的群邀请：邀请者 QQ " + userId + "，群号 " + groupId + "。可用 pendingrequests 查看并决策。");
     }
 
     // ==================== 图片多模态支持 ====================
-
-    /**
-     * 下载图片并转换为 base64 data URI。
-     * <p>用于 DeepSeek Vision API：当 QQ 图片 URL 对 API 不可访问时，
-     * 通过本地下载转为 base64 后传入。</p>
-     *
-     * @param imageUrl 图片 URL
-     * @return base64 data URI 字符串（如 "data:image/jpeg;base64,..."），失败返回 null
-     */
-    /** @deprecated 委托给 ImageDownloader */
-    private String downloadImageAsBase64(String imageUrl) {
-        return ImageDownloader.downloadImageAsBase64(imageUrl);
-    }
-
-    /**
-     * 解析图片 URL 为 Vision API 可用格式。
-     * <p>策略：优先使用原始 URL（DeepSeek 可直接访问公网 URL），
-     * 若 URL 看起来像腾讯内网地址则下载转 base64。</p>
-     *
-     * @param imageUrl 原始图片 URL
-     * @return Vision API 可用的图片 URL 或 base64 data URI，失败返回 null
-     */
-    /** @deprecated 委托给 ImageDownloader */
-    private String resolveImageForVision(String imageUrl) {
-        return ImageDownloader.resolveImageForVision(imageUrl);
-    }
-
-    /**
-     * 执行真正的execs链路（与SFW控制台execs完全一样）。
-     * 实时推送每一轮的思考和执行结果给主人。
-     * @param msg QQ消息对象
-     * @param task 任务描述（已去掉execs:前缀）
-     * @param responseSender 消息发送回调
-     * @return 执行结果摘要
-     */
-    /** @deprecated delegated to QQAgentBridge */
-    private String executeRealExecs(QQMessage msg, String task, Consumer<String> responseSender) {
-        if (agentBridge != null) return agentBridge.executeRealExecs(msg, task, responseSender);
-        return "[错误] AI引擎未就绪";
-    }
-
-    /**
-     * 将execs思考过程以QQ原生合并转发（合并转发）消息卡片发送。
-     * <p>按 [第N轮思考] 标识拆分为多个转发节点，每轮思考为一个节点，
-     * 最终形成一个可折叠/展开的消息卡片。</p>
-     * @param msg 原始QQ消息（用于获取群号/私聊对象）
-     * @param thinkingText 累积的思考文本（含 [第N轮思考] 标记）
-     */
-    /** @deprecated delegated to QQAgentBridge */
-    private void sendThinkingAsForward(QQMessage msg, String thinkingText) {
-        if (agentBridge != null) agentBridge.sendThinkingAsForward(msg, thinkingText);
-    }
 
     /**
      * 执行QQ通道的Agent处理。
@@ -1507,11 +1473,6 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
     /** @deprecated delegated to QQAgentBridge */
     private void sendReply(QQMessage msg, String text) {
         if (agentBridge != null) agentBridge.sendReply(msg, text);
-    }
-
-    /** @deprecated delegated to QQAgentBridge */
-    private void sendMultipleReplies(QQMessage msg, List<String> texts) {
-        if (agentBridge != null) agentBridge.sendMultipleReplies(msg, texts);
     }
 
     /** @deprecated delegated to QQAgentBridge */
@@ -1531,17 +1492,6 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
     /** 构建 execq 通道动态上下文（历史/记忆/情绪等，下沉 user 消息） */
     private String buildDynamicContext(QQMessage msg, List<String> punishmentRecords) {
         if (promptBuilder != null) return promptBuilder.buildDynamicContext(msg, punishmentRecords);
-        return "";
-    }
-
-    /** @deprecated delegated to QQPromptBuilder */
-    private String resolveUserName(long qq, long groupId, UnifiedQQMemoryManager mem) {
-        return QQPromptBuilder.resolveUserName(qq, groupId, mem);
-    }
-
-    /** @deprecated delegated to QQAgentBridge */
-    private String buildTaskDescription(QQMessage msg) {
-        if (agentBridge != null) return agentBridge.buildTaskDescription(msg);
         return "";
     }
 

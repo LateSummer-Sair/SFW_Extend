@@ -309,7 +309,9 @@ public class AgentExecutor {
         bus.register(new AgentBus.AgentDef("main",
                 buildStableSystemPrompt(),
                 execqModel,
-                ctx -> (ctx != null && ctx.isExecq()) ? ToolDispatcher.buildExecqTools() : ToolDispatcher.buildAllTools()));
+                ctx -> (ctx != null && ctx.execsMode) ? ToolDispatcher.buildExecsTools()
+                        : (ctx != null && ctx.isExecq()) ? ToolDispatcher.buildExecqTools()
+                        : ToolDispatcher.buildAllTools()));
         bus.register(new AgentBus.AgentDef("vision",
                 VISION_AGENT_PROMPT,
                 execqModel,
@@ -676,6 +678,18 @@ public class AgentExecutor {
             String memCtx = memoryManager.buildContext(currentTask);
             if (memCtx != null) {
                 sb.append("\n").append(memCtx).append("\n");
+            }
+        }
+
+        // === Structured preferences (global, master-set) ===
+        if (skillBank != null && skillBank.getPersistenceManager() != null) {
+            java.util.List<String[]> prefs = skillBank.getPersistenceManager().listPreferences("global", 0);
+            if (prefs != null && !prefs.isEmpty()) {
+                sb.append("\n## 结构化偏好/设定（必须遵守）\n");
+                for (String[] p : prefs) {
+                    if (p != null && p.length >= 2) sb.append("- ").append(p[0]).append(": ").append(p[1]).append("\n");
+                }
+                sb.append("\n");
             }
         }
 

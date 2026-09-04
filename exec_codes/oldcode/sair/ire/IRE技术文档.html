@@ -19,13 +19,10 @@ body{
              radial-gradient(1000px 700px at -10% 30%,#2a1440 0%,transparent 55%),var(--bg);
   color:var(--txt); line-height:1.75; overflow-x:hidden;
 }
-/* 顶部进度条 */
 #progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--grad);z-index:99;box-shadow:0 0 12px var(--pink)}
-/* 粒子背景 */
 #particles{position:fixed;inset:0;pointer-events:none;z-index:0}
 .p{position:absolute;border-radius:50%;background:rgba(139,92,246,.5);animation:float linear infinite}
 @keyframes float{0%{transform:translateY(0) scale(1);opacity:0}10%{opacity:.7}90%{opacity:.4}100%{transform:translateY(-110vh) scale(.3);opacity:0}}
-/* 侧边导航 */
 .sidebar{
   position:fixed;left:0;top:0;bottom:0;width:270px;z-index:20;
   background:linear-gradient(180deg,rgba(16,22,41,.95),rgba(10,14,26,.95));
@@ -45,9 +42,7 @@ body{
 .nav a:hover{color:var(--txt);background:rgba(139,92,246,.12);border-color:var(--line);transform:translateX(4px)}
 .nav a.active{color:#fff;background:linear-gradient(90deg,rgba(255,77,141,.22),rgba(139,92,246,.18));border-color:rgba(139,92,246,.5);box-shadow:0 0 16px rgba(139,92,246,.25)}
 .nav a .num{display:inline-block;min-width:20px;margin-right:8px;font-size:11px;color:var(--cyan);font-family:monospace}
-/* 汉堡按钮 */
 #burger{position:fixed;top:16px;left:16px;z-index:30;display:none;width:42px;height:42px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--txt);font-size:20px;cursor:pointer}
-/* 主区 */
 .main{margin-left:270px;position:relative;z-index:5}
 .hero{
   min-height:62vh;display:flex;flex-direction:column;justify-content:center;align-items:center;
@@ -60,7 +55,6 @@ body{
 #typewriter .caret{display:inline-block;width:2px;height:20px;background:var(--green);vertical-align:-3px;animation:blink 1s step-end infinite}
 @keyframes blink{50%{opacity:0}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
-/* 内容区 */
 .content{max-width:960px;margin:0 auto;padding:20px 40px 120px}
 section{margin-bottom:70px;scroll-margin-top:30px}
 section .anchor{display:block;position:relative;top:-90px;visibility:hidden}
@@ -80,7 +74,6 @@ p{color:var(--txt);margin:10px 0;font-size:15px}
 .card:hover{transform:translateY(-4px);border-color:rgba(139,92,246,.6);box-shadow:0 14px 40px rgba(0,0,0,.4),0 0 24px rgba(139,92,246,.15)}
 .card::after{content:"";position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.05),transparent);transform:skewX(-20deg);transition:left .6s}
 .card:hover::after{left:120%}
-/* 代码块 */
 .code-wrap{position:relative;margin:16px 0;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#0b1020;box-shadow:0 10px 30px rgba(0,0,0,.35)}
 .code-wrap .bar{display:flex;align-items:center;gap:6px;padding:10px 14px;background:#10162b;border-bottom:1px solid var(--line)}
 .code-wrap .bar .dot{width:11px;height:11px;border-radius:50%}
@@ -90,22 +83,17 @@ p{color:var(--txt);margin:10px 0;font-size:15px}
 .code-wrap pre code{color:#cdd6f4}
 .copy{position:absolute;right:12px;top:42px;padding:4px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--muted);font-size:12px;cursor:pointer;transition:.25s}
 .copy:hover{color:#fff;border-color:var(--cyan);box-shadow:0 0 10px rgba(34,211,238,.4)}
-/* 语法高亮 */
 .k{color:#ff79c6;font-weight:600}.t{color:#8be9fd}.s{color:#f1fa8c}.c{color:#6272a4;font-style:italic}.n{color:#bd93f9}.m{color:#ffb86c}
-/* 表格 */
 table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px;overflow:hidden;border-radius:12px}
 th,td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line)}
 th{background:var(--card2);color:var(--cyan);font-weight:600}
 tr:hover td{background:rgba(139,92,246,.07)}
 td code{background:rgba(139,92,246,.18);padding:2px 7px;border-radius:6px;font-size:13px;color:var(--cyan)}
-/* 滚动渐入 */
 .reveal{opacity:0;transform:translateY(30px);transition:opacity .7s ease,transform .7s ease}
 .reveal.visible{opacity:1;transform:none}
-/* 回到顶部 */
 #top{position:fixed;right:26px;bottom:26px;width:46px;height:46px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--txt);font-size:20px;cursor:pointer;z-index:25;opacity:0;pointer-events:none;transition:.3s}
 #top.show{opacity:1;pointer-events:auto}
 #top:hover{border-color:var(--pink);box-shadow:0 0 14px rgba(255,77,141,.5)}
-/* 响应式 */
 @media(max-width:920px){
   .sidebar{transform:translateX(-100%)}
   .sidebar.open{transform:none}
@@ -124,25 +112,27 @@ td code{background:rgba(139,92,246,.18);padding:2px 7px;border-radius:6px;font-s
 <aside class="sidebar">
   <div class="logo">
     <h1>IRE 语言</h1>
-    <p>Java 魔改 · 脚本技术文档</p>
+    <p>Java 语法拓展层 · 脚本技术文档</p>
   </div>
   <nav class="nav" id="nav">
     <a href="#intro"><span class="num">01</span>简介</a>
     <a href="#quickstart"><span class="num">02</span>快速开始</a>
-    <a href="#group"><span class="num">03</span>文件与 group</a>
-    <a href="#types"><span class="num">04</span>基础类型</a>
-    <a href="#vars"><span class="num">05</span>变量与字段</a>
-    <a href="#fc"><span class="num">06</span>函数 fc</a>
-    <a href="#import"><span class="num">07</span>import 导入</a>
-    <a href="#jar"><span class="num">08</span>jar 导入</a>
-    <a href="#call"><span class="num">09</span>调用 ire / ir</a>
-    <a href="#flow"><span class="num">10</span>控制流</a>
-    <a href="#expr"><span class="num">11</span>表达式与运算</a>
-    <a href="#cast"><span class="num">12</span>类型转换</a>
-    <a href="#array"><span class="num">13</span>数组</a>
-    <a href="#generic"><span class="num">14</span>泛型与 Java 类型</a>
-    <a href="#interop"><span class="num">15</span>Java 互操作</a>
-    <a href="#demo"><span class="num">16</span>完整示例</a>
+    <a href="#design"><span class="num">03</span>定位与设计</a>
+    <a href="#group"><span class="num">04</span>文件与 group</a>
+    <a href="#inherit"><span class="num">05</span>继承与实现</a>
+    <a href="#types"><span class="num">06</span>类型别名</a>
+    <a href="#var"><span class="num">07</span>var 推断</a>
+    <a href="#vars"><span class="num">08</span>变量与字段</a>
+    <a href="#modblock"><span class="num">09</span>批量修饰符作用域</a>
+    <a href="#fc"><span class="num">10</span>函数 fc</a>
+    <a href="#import"><span class="num">11</span>import 导入</a>
+    <a href="#jar"><span class="num">12</span>jar 导入</a>
+    <a href="#call"><span class="num">13</span>调用 ire / ir</a>
+    <a href="#flow"><span class="num">14</span>控制流</a>
+    <a href="#expr"><span class="num">15</span>表达式与运算</a>
+    <a href="#interop"><span class="num">16</span>Java 互操作</a>
+    <a href="#runtime"><span class="num">17</span>运行时特性</a>
+    <a href="#demo"><span class="num">18</span>完整示例</a>
   </nav>
 </aside>
 
@@ -150,7 +140,7 @@ td code{background:rgba(139,92,246,.18);padding:2px 7px;border-radius:6px;font-s
   <header class="hero">
     <div class="badge">IRE · Script Language</div>
     <h2>IRE 脚本语言</h2>
-    <p class="sub">一门对 Java 魔改的脚本语言。表达式与语法直接透传 Java 运行时，无需手动编译，转译后由系统自动动态编译执行。兼容 ir 文件，拥有完整的类型系统与控制流能力。</p>
+    <p class="sub">一门建立在 Java 之上的语法拓展层。完全兼容 Java 所有关键字，表达式与语法原样透传 Java 运行时；在此之上叠加 group / fc / var 推断 / 批量修饰符 / 继承糖等特色语法。转译后由系统自动动态编译执行。</p>
     <div id="typewriter"><span class="caret"></span></div>
   </header>
 
@@ -160,13 +150,14 @@ td code{background:rgba(139,92,246,.18);padding:2px 7px;border-radius:6px;font-s
       <h3 class="sec">01 · 简介</h3>
       <div class="card reveal">
         <p>IRE 是对 SFW 框架的扩充，为 <code>ir</code> 这种纯配置脚本补上了真正的语言能力。它的设计核心是「<b style="color:var(--pink)">转译为 Java 源码 → 动态编译 → 当前运行时反射执行</b>」。</p>
-        <p class="muted">优先级、注释、转义、异常处理全部沿用 Java 规则。你在 IRE 里写的表达式，最终就是合法的 Java 表达式。</p>
+        <p class="muted">IRE 不是一门新语言，而是 <b>Java 的语法拓展层</b>：所有 Java 关键字、语句、表达式、注解、泛型、lambda 全部原样透传；ire 只额外提供少量糖（group / fc / var / import{} / jar{} / 类型别名）。</p>
         <table>
           <tr><th>能力</th><th>说明</th></tr>
           <tr><td>文件扩展名</td><td><code>.ire</code></td></tr>
           <tr><td>执行命令</td><td><code>ire/run [path] [args...]</code></td></tr>
-          <tr><td>入口函数</td><td><code>fc main(String args)</code></td></tr>
+          <tr><td>入口函数</td><td><code>fc main(String args)</code>（非 static 实例方法）</td></tr>
           <tr><td>兼容性</td><td>可直接 import 并调用 <code>.ir</code> 文件</td></tr>
+          <tr><td>Java 兼容</td><td>class / interface / enum / 泛型 / 注解 / lambda 全部透传</td></tr>
         </table>
       </div>
     </section>
@@ -183,14 +174,31 @@ td code{background:rgba(139,92,246,.18);padding:2px 7px;border-radius:6px;font-s
 }</code></pre></div>
         <p>在 SFW 中执行：</p>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">shell</span></div><button class="copy">复制</button><pre><code>ire/run C:\path\to\Hello.ire a b c</code></pre></div>
-        <p class="muted">入口参数 <code>a b c</code> 会被拼接成单个字符串 <code>"a b c"</code> 传给 <code>main(String args)</code>。</p>
+        <p class="muted">入口参数 <code>a b c</code> 会被拼接成单个字符串 <code>"a b c"</code> 传给 <code>main(String args)</code>。<code>fc main</code> 会转译为非 static 的实例方法 <code>public Object main(String args)</code>，运行时先实例化再调用。</p>
+      </div>
+    </section>
+
+    <section id="design"><span class="anchor"></span>
+      <h3 class="sec">03 · 定位与设计</h3>
+      <div class="card reveal">
+        <p>IRE 的定位是「<b>把 Java 变成动态的、可控的、可拓展的、针对当前运行时的语言</b>」。它不是重新实现一套类型系统，而是给 Java 蒙一层薄薄的糖衣。</p>
+        <table>
+          <tr><th>糖</th><th>含义</th></tr>
+          <tr><td><code>group X { ... }</code></td><td>转译为 <code>public class X { ... }</code>（唯一 public class）</td></tr>
+          <tr><td><code>fc f(...) { ... }</code></td><td>转译为方法（默认 <code>public static</code>，支持前置修饰符）</td></tr>
+          <tr><td><code>var x = expr</code></td><td>转译期类型推断，产物是原汁原味的 Java 类型</td></tr>
+          <tr><td><code>[修饰符] : { ... }</code></td><td>批量修饰符作用域</td></tr>
+          <tr><td><code>class A+B</code> / <code>class A:B</code></td><td><code>+</code> = extends，<code>:</code> = implements</td></tr>
+          <tr><td><code>Int</code>/<code>Bool</code>/<code>Char</code>/<code>LLong</code></td><td>类型别名，转译为 <code>Integer</code>/<code>Boolean</code>/<code>Character</code>/<code>BigInteger</code></td></tr>
+        </table>
+        <p class="muted">其余一切（所有 Java 关键字、语句、表达式、注解、lambda、嵌套类）逐字符原样透传。</p>
       </div>
     </section>
 
     <section id="group"><span class="anchor"></span>
-      <h3 class="sec">03 · 文件与 group</h3>
+      <h3 class="sec">04 · 文件与 group</h3>
       <div class="card reveal">
-        <p>一个 <code>.ire</code> 文件<b>只能有一个 <code>group</code></b>，它会被转译成一个 Java 类（包名固定为 <code>sair.ire.script</code>），类名即 group 名。</p>
+        <p>一个 <code>.ire</code> 文件<b>只能有一个 <code>group</code></b>，它转译为唯一的 public class（包名固定为 <code>sair.ire.script</code>），类名即 group 名。除此之外，文件里<b>可以存在其它非 public 的 class / interface / enum</b>。</p>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">MyIre.ire</span></div><button class="copy">复制</button><pre><code>import {
     java:sair.sys.SairCons;
     java:sair.FCM;
@@ -202,74 +210,191 @@ group MyIre {
     fc main(String args) {
         SairCons.println(FCM.split_Color, args);
     }
+}
+
+class Helper {          // 非 public 类，原样透传
+    Int x = 1;
+}
+
+interface Callback { }  // 接口，原样透传</code></pre></div>
+        <p class="muted">group 内可以出现字段、<code>fc</code> 方法、批量修饰符作用域，以及任意 Java 类成员（嵌套类、static 块等）。</p>
+      </div>
+    </section>
+
+    <section id="inherit"><span class="anchor"></span>
+      <h3 class="sec">05 · 继承与实现</h3>
+      <div class="card reveal">
+        <p>类声明支持两种语法糖，同时<b>原 Java 关键字依然支持</b>：</p>
+        <table>
+          <tr><th>ire 写法</th><th>转译为</th></tr>
+          <tr><td><code>class A+B { }</code></td><td><code>class A extends B { }</code></td></tr>
+          <tr><td><code>class A:B { }</code></td><td><code>class A implements B { }</code></td></tr>
+          <tr><td><code>class A+B:C { }</code></td><td><code>class A extends B implements C { }</code></td></tr>
+          <tr><td><code>class A extends B { }</code></td><td>原样透传（原关键字）</td></tr>
+        </table>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>group Store:java.io.Serializable {   // group 也支持继承/实现糖
+    // → public class Store implements java.io.Serializable
+}
+
+class Cache+java.util.HashMap {      // class 支持 extends 糖
+    // → class Cache extends java.util.HashMap
 }</code></pre></div>
-        <p class="muted">group 内只允许出现 <code>fc</code> 函数和字段声明。</p>
+        <p class="muted">注意：泛型 <code>&lt;...&gt;</code> 内部的 <code>+</code> / <code>:</code> 不会被替换。</p>
+        <div class="card">
+          <p style="color:var(--amber)">★ 关于多继承（class A+B+C+D）</p>
+          <p>Java 本身不支持类多继承（<code>class A extends B extends C</code> 非法）。当前 IRE 的 <code>+</code> 仅表示<b>单继承</b>（<code>extends</code>），<code>:</code> 表示<b>实现</b>（<code>implements</code>）；<code>class A+B+C+D</code> 这类多继承尚不支持，规划中的落地思路如下：</p>
+          <table>
+            <tr><th>方案</th><th>转译形式</th><th>说明</th></tr>
+            <tr><td>接口 mixin</td><td><code>class A implements B, C, D</code>（B/C/D 转 interface + default 方法）</td><td>方法多继承最干净；字段需转 getter/setter</td></tr>
+            <tr><td>组合 + 委托</td><td><code>class A { B b; C c; D d; }</code> + 委托方法</td><td>实现简单，但非真继承</td></tr>
+            <tr><td>成员展平</td><td>把 B/C/D 的字段与方法复制进 A</td><td>语义最强，但需源码可见</td></tr>
+            <tr><td>继承链 + 多接口</td><td><code>class A extends B implements C, D</code></td><td>字段单继承、方法多继承</td></tr>
+          </table>
+        </div>
       </div>
     </section>
 
     <section id="types"><span class="anchor"></span>
-      <h3 class="sec">04 · 基础类型</h3>
+      <h3 class="sec">06 · 类型别名</h3>
       <div class="card reveal">
         <table>
           <tr><th>IRE 类型</th><th>转译为 Java</th><th>说明</th></tr>
           <tr><td><code>Bool</code></td><td><code>Boolean</code></td><td>布尔</td></tr>
           <tr><td><code>Int</code></td><td><code>Integer</code></td><td>整数</td></tr>
-          <tr><td><code>Long</code></td><td><code>Long</code></td><td>长整型</td></tr>
-          <tr><td><code>Double</code></td><td><code>Double</code></td><td>双精度浮点</td></tr>
+          <tr><td><code>Long</code></td><td><code>Long</code></td><td>长整型（恒等）</td></tr>
+          <tr><td><code>Double</code></td><td><code>Double</code></td><td>双精度浮点（恒等）</td></tr>
           <tr><td><code>Char</code></td><td><code>Character</code></td><td>字符</td></tr>
-          <tr><td><code>String</code></td><td><code>String</code></td><td>字符串</td></tr>
+          <tr><td><code>String</code></td><td><code>String</code></td><td>字符串（恒等）</td></tr>
           <tr><td><code>LLong</code></td><td><code>java.math.BigInteger</code></td><td>超长整型</td></tr>
-          <tr><td><code>var</code></td><td><code>Object</code></td><td>可接收一切类型</td></tr>
+          <tr><td><code>var</code></td><td>（推断）</td><td>见下一节 var 推断</td></tr>
         </table>
-        <p class="muted">声明处统一使用 IRE 类型名，转译时自动替换为对应 Java 类型；基础类型一律转译为封装类型，可直接作泛型实参（如 <code>List&lt;Int&gt;</code> → <code>List&lt;Integer&gt;</code>）。</p>
+        <p class="muted">类型别名按词边界替换，字符串/注释内不替换。基础类型统一转译为封装类型，可直接作泛型实参（如 <code>List&lt;Int&gt;</code> → <code>List&lt;Integer&gt;</code>）。</p>
+      </div>
+    </section>
+
+    <section id="var"><span class="anchor"></span>
+      <h3 class="sec">07 · var 类型推断</h3>
+      <div class="card reveal">
+        <p><code>var</code> 在<b>转译期</b>就推断出真实类型，产物是原汁原味的 Java 类型，而不是 <code>Object</code>。</p>
+        <table>
+          <tr><th>写法</th><th>推断结果</th></tr>
+          <tr><td><code>var x = 1</code></td><td><code>int x = 1</code></td></tr>
+          <tr><td><code>var s = "hi"</code></td><td><code>String s = "hi"</code></td></tr>
+          <tr><td><code>var b = true</code></td><td><code>boolean b = true</code></td></tr>
+          <tr><td><code>var d = 1.5</code></td><td><code>double d = 1.5</code></td></tr>
+          <tr><td><code>var list = new ArrayList&lt;Int&gt;()</code></td><td><code>ArrayList&lt;Integer&gt; list = ...</code></td></tr>
+          <tr><td><code>var arr = new int[5]</code></td><td><code>int[] arr = ...</code></td></tr>
+          <tr><td><code>var x = (String) y</code></td><td><code>String x = ...</code></td></tr>
+          <tr><td><code>var x = foo()</code></td><td>foo 的返回类型（本 group 与跨 group，含 fc 推断返回类型）</td></tr>
+          <tr><td><code>var x = 1 + 2.5</code></td><td><code>double x = ...</code>（数值提升）</td></tr>
+          <tr><td><code>var x = cond ? 1 : 2</code></td><td><code>int x = ...</code>（公共类型）</td></tr>
+        </table>
+        <p class="muted">无法静态推断时（<code>null</code>、lambda、未知类的字段/方法）回退 <code>Object</code>。</p>
+        <h4><span class="dot">◆</span>for-each 元素推断</h4>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>var list = new ArrayList&lt;Int&gt;();
+for (var x : list) { ... }        // x → Integer
+
+var m = new HashMap&lt;String, Int&gt;();
+for (var e : m.entrySet()) { ... } // e → Map.Entry&lt;String, Integer&gt;
+for (var k : m.keySet()) { ... }   // k → String
+for (var v : m.values()) { ... }   // v → Integer</code></pre></div>
       </div>
     </section>
 
     <section id="vars"><span class="anchor"></span>
-      <h3 class="sec">05 · 变量与字段</h3>
+      <h3 class="sec">08 · 变量与字段</h3>
       <div class="card reveal">
         <h4><span class="dot">◆</span>局部变量</h4>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>String name = "Sair";
 Int age = 18;
-Double pi = 3.14159;
-var anything = "可以接收任何类型";</code></pre></div>
+var anything = "自动推断为 String";</code></pre></div>
         <h4><span class="dot">◆</span>字段</h4>
-        <p>group 内直接声明，转译为 <code>public static</code> 字段。</p>
+        <p>group 内的字段<b>默认是实例字段</b>（与 Java 语义一致）；需要静态字段时显式声明 <code>static</code>。</p>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>group Store {
-    Int total = 0;
-    String title = "未命名";
+    static Int total = 0;     // 静态字段
+    String title = "未命名";  // 实例字段（默认）
 
-    fc main(String args) {
-        total = 100;
-        title = "新标题";
+    fc reset() {              // fc 不默认 public/static，是包私有实例方法（无 return → Object）
+        total = 100;          // ✓ 实例方法可访问静态字段
+        title = "新标题";      // ✓ 实例方法也可访问实例字段
+    }
+
+    static fc Int getTotal() { // 显式 static，仍是包私有
+        return total;          // ✓ 静态方法只能访问静态字段
+        // return title;       // ✗ 静态方法不能访问实例字段
     }
 }</code></pre></div>
+        <p class="muted">注意：<code>fc</code> 不默认 <code>public</code> 也不默认 <code>static</code>（与 Java 一致）；要 public/static 需显式修饰符。静态方法内只能访问 <code>static</code> 字段。</p>
+      </div>
+    </section>
+
+    <section id="modblock"><span class="anchor"></span>
+      <h3 class="sec">09 · 批量修饰符作用域</h3>
+      <div class="card reveal">
+        <p>用 <code>[修饰符] : { ... }</code> 把修饰符<b>批量应用</b>到块内每个字段声明与 fc 方法。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>private static : {
+    int i = 0;
+    var a = null;
+}
+// → private static int i = 0;
+//   private static Object a = null;
+
+static : {
+    Object o = null;
+}
+// → static Object o = null;
+
+private : {
+    fc foo() { ... }
+    fc bar() { ... }
+}
+// → private static Object foo() { ... }
+//   private static Object bar() { ... }</code></pre></div>
+        <p class="muted">语法是 <code>修饰符 + 冒号 + 花括号</code>（有冒号），与 Java 的 <code>static { }</code>（无冒号静态初始化块）不冲突。</p>
       </div>
     </section>
 
     <section id="fc"><span class="anchor"></span>
-      <h3 class="sec">06 · 函数 fc</h3>
+      <h3 class="sec">10 · 函数 fc</h3>
       <div class="card reveal">
-        <p>所有函数用 <code>fc</code> 修饰，统一编译为 <code>public static</code> 方法。</p>
-        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>// 无显式返回类型：默认返回 Object，无 return 时返回 null
-fc sayHello(String str) {
+        <p>所有函数用 <code>fc</code> 声明，语法为 <code>[修饰符] fc [返回类型] 函数名(参数) { ... }</code>（<b>修饰符在 fc 之前</b>）。<code>fc</code> <b>强制返回</b>（与 <code>void</code> 冲突）；<b>无显式返回类型时从函数体推断返回类型</b>；不默认 <code>public</code> 也不默认 <code>static</code>，与 Java 完全一致。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>// 无显式返回类型：从函数体推断
+fc getNumber() {                // return 1 → int getNumber()
+    return 1;
+}
+
+fc sayHello(String str) {       // 无 return → Object sayHello()，补 return null
     SairCons.println(FCM.split_Color, str);
 }
 
-// 显式返回类型：Int
-fc add(Int a, Int b) {
-    return a + b;
-}
+// 前置修饰符（与 Java 一致，缺省即包私有 + 非 static）
+private fc helper() { ... }         // → private Object helper()
+protected fc Int calc() { ... }     // → protected Integer calc()
+final fc Int getX() { return 1; }   // → final Integer getX()
+static fc Int count() { ... }       // → static Integer count()
+public static fc Int total() { ... }// → public static Integer total()
 
-// 无 return 时统一返回 null
-fc Int zero() {
+// 显式返回类型
+fc Int add(Int a, Int b) {
+    return a + b;
 }</code></pre></div>
-        <p class="muted">无 return 时统一返回 <code>null</code>（基础类型已转译为封装类型，不再返回 0/0L/0.0/false/空字符）。</p>
+        <p class="muted"><code>fc</code> 强制返回，<b>与 <code>void</code> 冲突</b>（<code>fc void foo()</code> 会报错）；无显式返回类型时：写了 <code>return</code> 就推断返回值类型（可与 <code>var</code> 联动），没写 <code>return</code> 就补 <code>return null</code> 并推断为 <code>Object</code>。</p>
+
+        <h4><span class="dot">◆</span>main 入口</h4>
+        <p><code>fc main(String args)</code> 是运行时入口：转译为实例方法，区别于 Java 的 <code>public static void main(String[])</code>。运行时先实例化，再通过 <code>getDeclaredMethod</code> + <code>setAccessible</code> 反射调用（不受可见性限制）。</p>
+        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>group Test {
+    fc main(String args) {
+        return args;
+    }
+}
+// → public class Test {
+//     String main(String args) { return args; }   // 返回类型被推断为 String
+//   }</code></pre></div>
       </div>
     </section>
 
     <section id="import"><span class="anchor"></span>
-      <h3 class="sec">07 · import 导入</h3>
+      <h3 class="sec">11 · import 导入</h3>
       <div class="card reveal">
         <p><code>import { }</code> 支持三种导入：<b>Java 类</b>、<b>.ire 文件</b>、<b>.ir 文件</b>，以及<b>目录一级扫描</b>。</p>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>import {
@@ -297,7 +422,7 @@ fc Int zero() {
     </section>
 
     <section id="jar"><span class="anchor"></span>
-      <h3 class="sec">08 · jar 导入</h3>
+      <h3 class="sec">12 · jar 导入</h3>
       <div class="card reveal">
         <p><code>jar { }</code> 用于导入第三方 jar，用法与路径规则和 import 一致。</p>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>jar {
@@ -312,11 +437,12 @@ fc Int zero() {
     </section>
 
     <section id="call"><span class="anchor"></span>
-      <h3 class="sec">09 · 调用 ire / ir</h3>
+      <h3 class="sec">13 · 调用 ire / ir</h3>
       <div class="card reveal">
         <h4><span class="dot">◆</span>调用 ire 代码</h4>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>String args = "hello";
-MyLib.func1(args);          // 调用其他 group 的静态函数</code></pre></div>
+MyLib.func1(args);          // 调用其他 group 的静态函数
+// 注意：func1 需声明为 public static fc（跨 group 需 public + static）</code></pre></div>
         <h4><span class="dot">◆</span>调用 ir 代码</h4>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>MyLib2.LabelName_1;   // 跳转执行 ir 中的指定标签块
 MyLib2.LabelName_2;
@@ -326,8 +452,9 @@ MyLib2;               // 无标签时按 ir 默认主流程顺序执行</code></
     </section>
 
     <section id="flow"><span class="anchor"></span>
-      <h3 class="sec">10 · 控制流</h3>
+      <h3 class="sec">14 · 控制流</h3>
       <div class="card reveal">
+        <p>控制流语句全部透传 Java，支持 if/else、switch/case、for、while、do-while、try/catch/finally、synchronized、assert、标签、try-with-resources 等。</p>
         <h4><span class="dot">◆</span>if / else</h4>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>if (x &gt; 10) {
     return "大";
@@ -351,6 +478,7 @@ MyLib2;               // 无标签时按 ir 默认主流程顺序执行</code></
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>for (Int i = 0; i &lt; 10; i = i + 1) {
     SairCons.println(FCM.split_Color, i);
 }
+for (var x : list) { ... }   // 增强 for，元素类型自动推断
 
 while (x &gt; 0) {
     x = x - 1;
@@ -371,88 +499,23 @@ do {
     </section>
 
     <section id="expr"><span class="anchor"></span>
-      <h3 class="sec">11 · 表达式与运算</h3>
+      <h3 class="sec">15 · 表达式与运算</h3>
       <div class="card reveal">
-        <p>表达式整体透传 Java，支持完整运算能力。</p>
+        <p>表达式整体透传 Java，支持完整运算能力（含多字符运算符、方法引用、lambda 等）。</p>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>Int a = (1 + 2) * 3;          // 数学运算
 Int b = a % 4;                // 取模
 Int c = a &lt;&lt; 2;               // 位移
 Int d = a &amp; 0xFF;             // 位运算
 Bool ok = a &gt; 5 &amp;&amp; b &lt; 3;    // 逻辑
 String s = ok ? "yes" : "no"; // 三目
-a += 1; a++;                  // 自增与赋值</code></pre></div>
-      </div>
-    </section>
-
-    <section id="cast"><span class="anchor"></span>
-      <h3 class="sec">12 · 类型转换</h3>
-      <div class="card reveal">
-        <p>使用 IRE 类型名做强转，转译时自动替换为 Java 类型。</p>
-        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>Double x = 3.14;
-Int y = (Int) x;             // → (Integer) x
-
-var obj = "hello";
-String s = (String) obj;     // → (String) obj</code></pre></div>
-      </div>
-    </section>
-
-    <section id="array"><span class="anchor"></span>
-      <h3 class="sec">13 · 数组</h3>
-      <div class="card reveal">
-        <p>数组类型支持字段、局部变量、参数与返回类型，也支持多维。</p>
-        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>group Arr {
-    Int[] nums = new Int[3];
-    String[][] matrix;
-
-    fc Int[] makeArr(Int n) {
-        Int[] a = new Int[n];
-        for (Int i = 0; i &lt; n; i = i + 1) {
-            a[i] = i * 2;
-        }
-        return a;
-    }
-
-    fc main(String args) {
-        Int[] r = makeArr(3);
-        return r[2];
-    }
-}</code></pre></div>
-        <p class="muted">数组类型的函数无 return 时默认返回 <code>null</code>。</p>
-      </div>
-    </section>
-
-    <section id="generic"><span class="anchor"></span>
-      <h3 class="sec">14 · 泛型与 Java 类型</h3>
-      <div class="card reveal">
-        <p>声明位置支持任意 Java 类名、限定名与泛型参数（含嵌套）。</p>
-        <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>import {
-    java:java.util.List;
-    java:java.util.Map;
-    java:java.util.ArrayList;
-    java:java.util.HashMap;
-}
-
-group Store {
-    java.util.List&lt;String&gt; items;
-    Map&lt;String, List&lt;Integer&gt;&gt; map;
-
-    fc java.util.List&lt;String&gt; getList() {
-        return new ArrayList&lt;String&gt;();
-    }
-
-    fc main(String args) {
-        List&lt;String&gt; l = new ArrayList&lt;String&gt;();
-        l.add("x");
-        Map&lt;String, Integer&gt; m = new HashMap&lt;String, Integer&gt;();
-        return l.size();
-    }
-}</code></pre></div>
-        <p class="muted">基础类型已统一转译为封装类型，可直接用 <code>Int</code> 作泛型实参：<code>List&lt;Int&gt;</code> → <code>List&lt;Integer&gt;</code>、<code>Map&lt;String, Int&gt;</code> → <code>Map&lt;String, Integer&gt;</code>。</p>
+a += 1; a++;                  // 自增与赋值
+Int x = (Int) 3.14;           // 强转（(Int) → (Integer)）
+Runnable r = () -&gt; { };       // lambda 原样透传</code></pre></div>
       </div>
     </section>
 
     <section id="interop"><span class="anchor"></span>
-      <h3 class="sec">15 · Java 互操作</h3>
+      <h3 class="sec">16 · Java 互操作</h3>
       <div class="card reveal">
         <p>可直接调用任意 Java 静态 public 方法、创建对象、使用 Java 类库。</p>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">ire</span></div><button class="copy">复制</button><pre><code>import {
@@ -477,8 +540,22 @@ group Demo {
       </div>
     </section>
 
+    <section id="runtime"><span class="anchor"></span>
+      <h3 class="sec">17 · 运行时特性</h3>
+      <div class="card reveal">
+        <table>
+          <tr><th>特性</th><th>说明</th></tr>
+          <tr><td>热更新自动重载</td><td>被 <code>ire/run</code> 执行过的 .ire 文件（含 import）会被监控；文件变更后自动用最近一次参数重新执行。<code>ire/monreload [on|off]</code> 切换</td></tr>
+          <tr><td>源码哈希缓存</td><td>脚本内容未变化时跳过转译与编译，直接复用上次字节码</td></tr>
+          <tr><td>编译失败转储</td><td>编译失败时把生成的 Java 源码转储到 <code>data/sair.ire.IRE/debug/</code> 便于排查</td></tr>
+          <tr><td>监控列表</td><td><code>ire/monlist</code> 列出被监控的文件及其状态</td></tr>
+          <tr><td>卸载已编译类</td><td><code>ire/rmclass [className]</code> 清理 cpjavafile/newobject 的编译缓存</td></tr>
+        </table>
+      </div>
+    </section>
+
     <section id="demo"><span class="anchor"></span>
-      <h3 class="sec">16 · 完整示例</h3>
+      <h3 class="sec">18 · 完整示例</h3>
       <div class="card reveal">
         <p>综合示例：两个文件，<code>MyIre2.ire</code> 在 <code>MyIre.ire</code> 的上级目录。</p>
         <div class="code-wrap"><div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="lang">MyIre2.ire</span></div><button class="copy">复制</button><pre><code>import {
@@ -487,11 +564,11 @@ group Demo {
 }
 
 group MyIre2 {
-    fc sayHello(String str) {
+    public static fc sayHello(String str) {   // 跨 group 调用需 public + static
         SairCons.println(FCM.split_Color, str);
     }
 
-    fc Int doubleIt(Int x) {
+    public static fc Int doubleIt(Int x) {    // 跨 group 调用需 public + static
         return x * 2;
     }
 }</code></pre></div>
@@ -500,9 +577,16 @@ group MyIre2 {
 }
 
 group MyIre {
+    private static Int count = 0;
+
+    private fc Int increment() {
+        count = count + 1;
+        return count;
+    }
+
     fc main(String args) {
         MyIre2.sayHello("hello world!!!");
-        Int result = MyIre2.doubleIt(21);
+        var result = MyIre2.doubleIt(21);   // result → Integer
         return result;   // 42
     }
 }</code></pre></div>
@@ -579,7 +663,7 @@ onScroll();
 function highlight(code){
   return code
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|\b(0x[0-9a-fA-F]+|\d+(?:\.\d+)?[LfFdD]?)\b|\b(group|fc|if|else|for|while|do|switch|case|default|break|continue|return|try|catch|finally|throw|import|jar|new|this|super|true|false|null)\b|\b(Bool|Int|Double|String|Long|LLong|Char|var)\b/g,
+    .replace(/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|\b(0x[0-9a-fA-F]+|\d+(?:\.\d+)?[LfFdD]?)\b|\b(group|fc|if|else|for|while|do|switch|case|default|break|continue|return|try|catch|finally|throw|import|jar|new|this|super|true|false|null|class|interface|enum|extends|implements|public|private|protected|static|final|synchronized|abstract|var)\b|\b(Bool|Int|Double|String|Long|LLong|Char)\b/g,
     function(m,c,s,n,k,t){
       if(c)return '<span class="c">'+c+'</span>';
       if(s)return '<span class="s">'+s+'</span>';

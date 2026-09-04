@@ -3,6 +3,7 @@ package sair.aiagent.util;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -73,6 +74,11 @@ public final class WebFetcher {
         }
         String current = url;
         for (int hop = 0; hop <= MAX_META_REDIRECTS; hop++) {
+            String host = hostOf(current);
+            if (isInternalHost(host)) {
+                return new FetchResult(-1, current, null, null, null, false,
+                        "禁止访问内网地址 (" + host + ")", null);
+            }
             FetchResult r = fetchOnceWithRetry(current);
             if (r.redirectUrl != null) {
                 current = r.redirectUrl;
@@ -109,6 +115,11 @@ public final class WebFetcher {
             configure(conn);
             int status = conn.getResponseCode();
             String finalUrl = conn.getURL().toString();
+            String finalHost = hostOf(finalUrl);
+            if (isInternalHost(finalHost)) {
+                return new FetchResult(status, finalUrl, null, null, null, false,
+                        "禁止访问内网地址 (" + finalHost + ")", null);
+            }
 
             if (status >= 300 && status < 400) {
                 String loc = conn.getHeaderField("Location");
@@ -120,6 +131,9 @@ public final class WebFetcher {
                         resolve(url, loc.trim()));
             }
             if (status != 200) {
+                if (status == 429 || status == 500 || status == 502 || status == 503 || status == 504) {
+                    throw new java.io.IOException("HTTP " + status);
+                }
                 return new FetchResult(status, finalUrl, null, null, null, false, "HTTP " + status, null);
             }
 
@@ -166,7 +180,7 @@ public final class WebFetcher {
     private static void configure(HttpURLConnection conn) {
         conn.setConnectTimeout(CONNECT_TIMEOUT);
         conn.setReadTimeout(READ_TIMEOUT);
-        conn.setInstanceFollowRedirects(true);
+        conn.setInstanceFollowRedirects(false);
         conn.setRequestProperty("User-Agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
         conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
@@ -263,6 +277,43 @@ public final class WebFetcher {
         if (u.isEmpty()) return null;
         if (!u.startsWith("http://") && !u.startsWith("https://")) u = "https://" + u;
         return u;
+    }
+
+    private static String hostOf(String url) {
+        try {
+            return new URI(url).getHost();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean isInternalHost(String host) {
+        if (host == null || host.isEmpty()) return true;
+        String lower = host.toLowerCase();
+        if (lower.equals("localhost") || lower.equals("127.0.0.1") || lower.equals("0.0.0.0")) return true;
+        if (lower.startsWith("10.") || lower.startsWith("192.168.")) return true;
+        if (lower.startsWith("172.")) {
+            try {
+                int second = Integer.parseInt(lower.substring(4, lower.indexOf('.', 4)));
+                if (second >= 16 && second <= 31) return true;
+            } catch (Exception ignored) {}
+        }
+        try {
+            InetAddress addr = InetAddress.getByName(host);
+            String ip = addr.getHostAddress();
+            if (ip == null) return false;
+            if (ip.equals("127.0.0.1") || ip.equals("0.0.0.0") || ip.startsWith("10.") || ip.startsWith("192.168.")) return true;
+            if (ip.startsWith("172.")) {
+                int di = ip.indexOf('.', 4);
+                if (di > 0) {
+                    int s = Integer.parseInt(ip.substring(4, di));
+                    if (s >= 16 && s <= 31) return true;
+                }
+            }
+            if (ip.startsWith("169.254.")) return true;
+            if (ip.equals("::1") || ip.startsWith("fe80:") || ip.startsWith("fc") || ip.startsWith("fd")) return true;
+        } catch (Exception ignored) {}
+        return false;
     }
 
     // ==================== 正文提取 ====================

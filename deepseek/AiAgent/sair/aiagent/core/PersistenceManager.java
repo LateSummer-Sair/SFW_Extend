@@ -57,6 +57,9 @@ public class PersistenceManager {
     private static final int FTS_MAX_RESULTS = 5;
     private static final int CTX_MAX_CHARS = 2000;
 
+    private int toolTraceInsertCount = 0;
+    private int harnessTraceInsertCount = 0;
+
     /** Escape FTS5 special characters to prevent syntax errors in MATCH queries */
     private static String sanitizeFtsQuery(String query) {
         if (query == null || query.isEmpty()) return query;
@@ -123,6 +126,7 @@ public class PersistenceManager {
 
             skillsDb = new PersistenceSkills(conn, lock);
             createTables();
+            ensureSchemaVersion();
 
             if (isNew) {
                 AiAgentActivity.debugLog("[Persistence] new DB created at " + dbFile.getAbsolutePath());
@@ -275,26 +279,6 @@ public class PersistenceManager {
                     "  created_at INTEGER NOT NULL" +
                     ")");
 
-                // 系统闹钟表（AI Alarm：到点唤醒 AI 走 Agent 链路）
-                stmt.execute(
-                    "CREATE TABLE IF NOT EXISTS alarms (" +
-                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                    "  scope TEXT NOT NULL DEFAULT 'REMIND'," +
-                    "  schedule TEXT NOT NULL DEFAULT ''," +
-                    "  task TEXT NOT NULL DEFAULT ''," +
-                    "  snapshot TEXT," +
-                    "  notes TEXT," +
-                    "  channel TEXT NOT NULL DEFAULT 'console'," +
-                    "  sender_qq INTEGER NOT NULL DEFAULT 0," +
-                    "  is_group INTEGER NOT NULL DEFAULT 0," +
-                    "  group_id INTEGER NOT NULL DEFAULT 0," +
-                    "  is_master INTEGER NOT NULL DEFAULT 0," +
-                    "  repeat INTEGER NOT NULL DEFAULT 0," +
-                    "  enabled INTEGER NOT NULL DEFAULT 1," +
-                    "  last_run INTEGER NOT NULL DEFAULT 0," +
-                    "  created_at INTEGER NOT NULL" +
-                    ")");
-
                 // 笔记表
                 stmt.execute(
                     "CREATE TABLE IF NOT EXISTS notes (" +
@@ -389,12 +373,28 @@ public class PersistenceManager {
                     "  speaking_style TEXT NOT NULL DEFAULT ''," +
                     "  honesty TEXT NOT NULL DEFAULT ''," +
                     "  image_habit TEXT NOT NULL DEFAULT ''," +
+                    "  impression_level INTEGER NOT NULL DEFAULT 0," +
                     "  message_count INTEGER NOT NULL DEFAULT 0," +
                     "  first_seen INTEGER NOT NULL," +
                     "  last_seen INTEGER NOT NULL," +
                     "  updated_at INTEGER NOT NULL" +
                     ")"
                 );
+
+                // 结构化偏好表（scope=user/group/global，target_id=QQ号/群号/0）
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS user_preferences (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  scope TEXT NOT NULL DEFAULT 'user'," +
+                    "  target_id INTEGER NOT NULL DEFAULT 0," +
+                    "  pref_key TEXT NOT NULL DEFAULT ''," +
+                    "  pref_value TEXT NOT NULL DEFAULT ''," +
+                    "  importance INTEGER NOT NULL DEFAULT 0," +
+                    "  updated_at INTEGER NOT NULL," +
+                    "  UNIQUE(scope, target_id, pref_key)" +
+                    ")"
+                );
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_pref_scope_target ON user_preferences(scope, target_id)");
 
                 // 群印象表
                 stmt.execute(
@@ -455,6 +455,24 @@ public class PersistenceManager {
                 stmt.execute("CREATE INDEX IF NOT EXISTS idx_htrace_mode ON harness_traces(mode)");
                 stmt.execute("CREATE INDEX IF NOT EXISTS idx_htrace_time ON harness_traces(created_at)");
 
+                // 工具调用轻量遥测表（与 harness_traces 分离，不改变 HarnessTrace 语义）
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS tool_call_traces (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  trace_id TEXT NOT NULL," +
+                    "  tool_name TEXT NOT NULL DEFAULT ''," +
+                    "  channel TEXT NOT NULL DEFAULT 'console'," +
+                    "  arguments TEXT NOT NULL DEFAULT ''," +
+                    "  result TEXT NOT NULL DEFAULT ''," +
+                    "  success INTEGER NOT NULL DEFAULT 0," +
+                    "  duration_ms INTEGER NOT NULL DEFAULT 0," +
+                    "  outcome TEXT NOT NULL DEFAULT 'ok'," +
+                    "  created_at INTEGER NOT NULL" +
+                    ")"
+                );
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_tooltrace_time ON tool_call_traces(created_at)");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_tooltrace_tool ON tool_call_traces(tool_name)");
+
                 // triggers for skills FTS
                 stmt.execute(
                     "CREATE TRIGGER IF NOT EXISTS sft_ai AFTER INSERT ON skills BEGIN " +
@@ -477,6 +495,12 @@ public class PersistenceManager {
                     "END"
                 );
 
+                // === 高频查询索引 ===
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_mem_importance ON memories(importance, created_at)");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at)");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_imp_last_seen ON impressions(last_seen)");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_corr_topic ON corrections(topic)");
+
                 // === Schema 迁移：老库补列（幂等，避免用户手动重置数据库） ===
                 ensureColumn(stmt, "skills", "scope", "TEXT NOT NULL DEFAULT 'task'");
                 ensureColumn(stmt, "skills", "content_hash", "TEXT NOT NULL DEFAULT ''");
@@ -485,8 +509,22 @@ public class PersistenceManager {
                 ensureColumn(stmt, "stickers", "keywords", "TEXT NOT NULL DEFAULT ''");
                 ensureColumn(stmt, "stickers", "file_path", "TEXT NOT NULL DEFAULT ''");
                 ensureColumn(stmt, "stickers", "remark", "TEXT NOT NULL DEFAULT ''");
+                ensureColumn(stmt, "impressions", "impression_level", "INTEGER NOT NULL DEFAULT 0");
 
             }
+        }
+    }
+
+    /** 使用 PRAGMA user_version 记录 schema 版本，方便未来迁移。 */
+    private void ensureSchemaVersion() {
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement()) {
+                try (ResultSet rs = stmt.executeQuery("PRAGMA user_version")) {
+                    if (rs.next() && rs.getInt(1) == 0) {
+                        stmt.execute("PRAGMA user_version = 1");
+                    }
+                }
+            } catch (SQLException ignored) {}
         }
     }
 
@@ -546,6 +584,24 @@ public class PersistenceManager {
             } catch (SQLException ignored) {
                 // 轨迹落库失败不影响业务
             }
+            if (++harnessTraceInsertCount % 100 == 0) {
+                cleanupHarnessTraces(5000);
+            }
+        }
+    }
+
+    /** 清理过旧 harness 执行轨迹，只保留最近 keep 条。 */
+    public void cleanupHarnessTraces(int keep) {
+        if (conn == null || keep <= 0) return;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM harness_traces WHERE id NOT IN (" +
+                    "SELECT id FROM harness_traces ORDER BY id DESC LIMIT ?)")) {
+                ps.setInt(1, keep);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {
+                // 清理失败不影响业务
+            }
         }
     }
 
@@ -581,6 +637,107 @@ public class PersistenceManager {
         return traces;
     }
 
+    // ==================== Tool Call Traces ====================
+
+    /**
+     * 持久化一条工具调用轻量遥测。失败静默忽略（可观测性不应阻断业务）。
+     */
+    public void saveToolTrace(ToolCallTrace trace) {
+        if (trace == null || conn == null) return;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO tool_call_traces (trace_id, tool_name, channel, arguments, result, success, duration_ms, outcome, created_at) " +
+                    "VALUES (?,?,?,?,?,?,?,?,?)")) {
+                ps.setString(1, trace.traceId);
+                ps.setString(2, ToolCallTrace.truncate(trace.toolName, 120));
+                ps.setString(3, ToolCallTrace.truncate(trace.channel, 32));
+                ps.setString(4, ToolCallTrace.truncate(trace.arguments, 500));
+                ps.setString(5, ToolCallTrace.truncate(trace.result, 500));
+                ps.setInt(6, trace.success ? 1 : 0);
+                ps.setLong(7, trace.durationMs);
+                ps.setString(8, ToolCallTrace.truncate(trace.outcome, 32));
+                ps.setLong(9, trace.timestamp);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {
+                // 遥测落库失败不影响业务
+            }
+            if (++toolTraceInsertCount % 100 == 0) {
+                cleanupToolTraces(5000);
+            }
+        }
+    }
+
+    /** 清理过旧工具调用遥测，只保留最近 keep 条。 */
+    public void cleanupToolTraces(int keep) {
+        if (conn == null || keep <= 0) return;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM tool_call_traces WHERE id NOT IN (" +
+                    "SELECT id FROM tool_call_traces ORDER BY id DESC LIMIT ?)")) {
+                ps.setInt(1, keep);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {
+                // 清理失败不影响业务
+            }
+        }
+    }
+
+    /**
+     * 按时间倒序列出最近 N 条工具调用遥测。
+     * @param limit 最大条数
+     */
+    public List<ToolCallTrace> listToolTraces(int limit) {
+        List<ToolCallTrace> traces = new ArrayList<>();
+        if (conn == null) return traces;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT trace_id, tool_name, channel, arguments, result, success, duration_ms, outcome, created_at " +
+                    "FROM tool_call_traces ORDER BY id DESC LIMIT ?")) {
+                ps.setInt(1, Math.max(1, limit));
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        traces.add(new ToolCallTrace(
+                                rs.getString("trace_id"),
+                                rs.getString("tool_name"),
+                                rs.getString("channel"),
+                                rs.getString("arguments"),
+                                rs.getString("result"),
+                                rs.getInt("success") != 0,
+                                rs.getLong("duration_ms"),
+                                rs.getString("outcome"),
+                                rs.getLong("created_at")));
+                    }
+                }
+            } catch (SQLException ignored) {
+                // 读取失败返回空列表
+            }
+        }
+        return traces;
+    }
+
+    /** 工具调用遥测总数。 */
+    public int toolTraceCount() {
+        return countTable("tool_call_traces");
+    }
+
+    /** Harness 执行轨迹总数。 */
+    public int harnessTraceCount() {
+        return countTable("harness_traces");
+    }
+
+    /** 通用表计数，失败返回 0。 */
+    private int countTable(String table) {
+        if (conn == null || table == null || table.trim().isEmpty()) return 0;
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM " + table)) {
+                return rs.next() ? rs.getInt(1) : 0;
+            } catch (SQLException ignored) {
+                return 0;
+            }
+        }
+    }
+
     // ==================== Memories ====================
 
     /**
@@ -592,6 +749,7 @@ public class PersistenceManager {
      */
     public MemoryEntry addMemory(String content, String category, int importance) {
         if (content == null || content.trim().isEmpty()) return null;
+        temporalStore.invalidateByPrefix("memctx:");
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO memories (category, content, importance, created_at, updated_at) VALUES (?,?,?,?,?)",
@@ -623,6 +781,7 @@ public class PersistenceManager {
 
     /** 按 ID 删除 */
     public boolean removeMemory(int id) {
+        temporalStore.invalidateByPrefix("memctx:");
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
                     "DELETE FROM memories WHERE id=?")) {
@@ -636,6 +795,7 @@ public class PersistenceManager {
 
     /** 清空所有记忆 */
     public void clearMemories() {
+        temporalStore.invalidateByPrefix("memctx:");
         synchronized (lock) {
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute("DELETE FROM memories");
@@ -737,6 +897,9 @@ public class PersistenceManager {
     /** 构建记忆上下文字符串（供 System Prompt 注入）。
      *  按 重要性×新鲜度 加权排序：FTS5 rank 得分 × (1 + importance/10) × 时间衰减因子 */
     public String buildMemoryContext(String query, int maxChars) {
+        String cacheKey = "memctx:" + (query == null ? "" : query);
+        String cached = temporalStore.get(cacheKey, String.class);
+        if (cached != null) return cached;
         List<MemoryEntry> related = searchMemories(query, FTS_MAX_RESULTS * 2);
         if (related.isEmpty()) return null;
 
@@ -771,7 +934,9 @@ public class PersistenceManager {
             chars += line.length();
             count++;
         }
-        return sb.toString();
+        String result = sb.toString();
+        temporalStore.put(cacheKey, result, 60_000L);
+        return result;
     }
 
     /** 计算记忆的综合得分：importance (0-10) × 时间衰减 (30天半衰期) */
@@ -792,6 +957,9 @@ public class PersistenceManager {
      * before each AI invocation to inject relevant knowledge into the system prompt.
      */
     public String buildNotesContext(String query, int maxChars) {
+        String cacheKey = "notectx:" + (query == null ? "" : query);
+        String cached = temporalStore.get(cacheKey, String.class);
+        if (cached != null) return cached;
         java.util.List<String[]> related = searchNotes(query, 5);
         if (related.isEmpty()) return null;
 
@@ -811,7 +979,9 @@ public class PersistenceManager {
             sb.append(line);
             chars += line.length();
         }
-        return sb.toString();
+        String result = sb.toString();
+        temporalStore.put(cacheKey, result, 60_000L);
+        return result;
     }
 
     /** Convenience: build notes context with default char limit */
@@ -867,10 +1037,16 @@ public class PersistenceManager {
                         "(SELECT id FROM journal ORDER BY created_at DESC LIMIT " + JRN_MAX + ")");
             } catch (SQLException ignored) {}
         }
+        // 失效日志上下文缓存（60s TTL 兜底，Redis 短暂旧值可接受）
+        temporalStore.invalidateByPrefix("journalctx:");
     }
 
-    /** 构建最近 N 条日志上下文 */
+    /** 构建最近 N 条日志上下文（结果缓存 60s，写入日志时失效）。 */
     public String buildJournalContext(int maxEntries) {
+        String cacheKey = "journalctx:" + maxEntries;
+        String cached = temporalStore.get(cacheKey, String.class);
+        if (cached != null) return cached;
+        String journalCtx = null;
         synchronized (lock) {
             List<String[]> entries = new ArrayList<>();
             try (Statement stmt = conn.createStatement();
@@ -924,8 +1100,12 @@ public class PersistenceManager {
                 sb.append(line);
                 totalChars += line.length();
             }
-            return sb.toString();
+            journalCtx = sb.toString();
         }
+        if (journalCtx != null) {
+            temporalStore.put(cacheKey, journalCtx, 60_000L);
+        }
+        return journalCtx;
     }
 
     // ==================== Conversations ====================
@@ -1159,7 +1339,7 @@ public class PersistenceManager {
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT qq, nickname, emotion_stability, interests, speaking_style,"
-                    + " honesty, image_habit, message_count, first_seen, last_seen, updated_at"
+                    + " honesty, image_habit, impression_level, message_count, first_seen, last_seen, updated_at"
                     + " FROM impressions WHERE qq=?")) {
                 ps.setLong(1, qq);
                 try (ResultSet rs = ps.executeQuery()) {
@@ -1167,8 +1347,8 @@ public class PersistenceManager {
                         ImpressionEntry imp = new ImpressionEntry(
                             rs.getLong(1), rs.getString(2), rs.getString(3),
                             rs.getString(4), rs.getString(5), rs.getString(6),
-                            rs.getString(7), rs.getInt(8), rs.getLong(9),
-                            rs.getLong(10), rs.getLong(11));
+                            rs.getString(7), rs.getInt(8), rs.getInt(9), rs.getLong(10),
+                            rs.getLong(11), rs.getLong(12));
                         temporalStore.put("imp:" + qq, imp);
                         return imp;
                     }
@@ -1183,7 +1363,7 @@ public class PersistenceManager {
         List<ImpressionEntry> list = new ArrayList<>();
         synchronized (lock) {
             String sql = "SELECT qq, nickname, emotion_stability, interests, speaking_style,"
-                    + " honesty, image_habit, message_count, first_seen, last_seen, updated_at"
+                    + " honesty, image_habit, impression_level, message_count, first_seen, last_seen, updated_at"
                     + " FROM impressions WHERE message_count > 5 ORDER BY last_seen DESC LIMIT ?";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setInt(1, limit);
@@ -1192,8 +1372,8 @@ public class PersistenceManager {
                         list.add(new ImpressionEntry(
                             rs.getLong(1), rs.getString(2), rs.getString(3),
                             rs.getString(4), rs.getString(5), rs.getString(6),
-                            rs.getString(7), rs.getInt(8), rs.getLong(9),
-                            rs.getLong(10), rs.getLong(11)));
+                            rs.getString(7), rs.getInt(8), rs.getInt(9), rs.getLong(10),
+                            rs.getLong(11), rs.getLong(12)));
                     }
                 }
             } catch (SQLException ignored) {}
@@ -1208,12 +1388,13 @@ public class PersistenceManager {
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO impressions (qq, nickname, emotion_stability, interests,"
-                    + " speaking_style, honesty, image_habit, message_count, first_seen,"
-                    + " last_seen, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+                    + " speaking_style, honesty, image_habit, impression_level, message_count, first_seen,"
+                    + " last_seen, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
                     + " ON CONFLICT(qq) DO UPDATE SET"
                     + " nickname=excluded.nickname, emotion_stability=excluded.emotion_stability,"
                     + " interests=excluded.interests, speaking_style=excluded.speaking_style,"
                     + " honesty=excluded.honesty, image_habit=excluded.image_habit,"
+                    + " impression_level=excluded.impression_level,"
                     + " message_count=excluded.message_count, last_seen=excluded.last_seen,"
                     + " updated_at=excluded.updated_at")) {
                 ps.setLong(1, imp.getQq());
@@ -1223,10 +1404,11 @@ public class PersistenceManager {
                 ps.setString(5, imp.getSpeakingStyle());
                 ps.setString(6, imp.getHonesty());
                 ps.setString(7, imp.getImageHabit());
-                ps.setInt(8, imp.getMessageCount());
-                ps.setLong(9, imp.getFirstSeen());
-                ps.setLong(10, imp.getLastSeen());
-                ps.setLong(11, imp.getUpdatedAt());
+                ps.setInt(8, imp.getImpressionLevel());
+                ps.setInt(9, imp.getMessageCount());
+                ps.setLong(10, imp.getFirstSeen());
+                ps.setLong(11, imp.getLastSeen());
+                ps.setLong(12, imp.getUpdatedAt());
                 ps.executeUpdate();
             } catch (SQLException e) {
                 AiAgentActivity.debugLog("[Persistence] upsertImpression FAILED: " + e.getMessage());
@@ -1332,7 +1514,9 @@ public class PersistenceManager {
 
     /** 记录一条群消息（轻量，累计消息数） */
     public void recordGroupImpressionMessage(long groupId, String groupName) {
-        temporalStore.invalidate("gimp:" + groupId);
+        // 不在此失效 gimp 缓存：本方法每条群消息都调用，失效会让 getGroupImpression 缓存形同虚设。
+        // 唯一消费方（30%拒答判定）只读 friendliness/atmosphere，二者仅在 upsert/adjust 时变化并已失效。
+        // message_count 仅用于导出，不参与缓存读取，短暂滞后可接受。
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO group_impressions (group_id, group_name, friendliness, atmosphere, message_count, first_seen, last_seen, updated_at)"
@@ -1349,6 +1533,99 @@ public class PersistenceManager {
                 ps.executeUpdate();
             } catch (SQLException ignored) {}
         }
+    }
+
+    // ==================== User Preferences (结构化偏好) ====================
+
+    /** 设置/更新一条结构化偏好。 */
+    public void setPreference(String scope, long targetId, String key, String value, int importance) {
+        if (key == null || key.trim().isEmpty() || value == null) return;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO user_preferences (scope, target_id, pref_key, pref_value, importance, updated_at)"
+                    + " VALUES (?,?,?,?,?,?)"
+                    + " ON CONFLICT(scope, target_id, pref_key) DO UPDATE SET"
+                    + " pref_value=excluded.pref_value, importance=excluded.importance, updated_at=excluded.updated_at")) {
+                ps.setString(1, scope != null ? scope : "user");
+                ps.setLong(2, targetId);
+                ps.setString(3, key.trim());
+                ps.setString(4, value);
+                ps.setInt(5, Math.max(0, Math.min(10, importance)));
+                ps.setLong(6, System.currentTimeMillis());
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                AiAgentActivity.debugLog("[Persistence] setPreference FAILED: " + e.getMessage());
+            }
+        }
+        // 偏好写入后按精确 key 失效列表缓存（内存 + Redis 都清，避免旧偏好被 Redis 回源）
+        temporalStore.invalidate("pref:" + (scope != null ? scope : "user") + ":" + targetId);
+    }
+
+    /** 读取单条偏好。 */
+    public String getPreference(String scope, long targetId, String key) {
+        if (key == null || key.trim().isEmpty()) return null;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT pref_value FROM user_preferences WHERE scope=? AND target_id=? AND pref_key=?")) {
+                ps.setString(1, scope != null ? scope : "user");
+                ps.setLong(2, targetId);
+                ps.setString(3, key.trim());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return rs.getString(1);
+                }
+            } catch (SQLException ignored) {}
+        }
+        return null;
+    }
+
+    /** 列出某 scope+target 的所有偏好，返回 [key, value, importance]（结果缓存，setPreference 时失效）。 */
+    public List<String[]> listPreferences(String scope, long targetId) {
+        String scopeN = scope != null ? scope : "user";
+        String cacheKey = "pref:" + scopeN + ":" + targetId;
+        List<String[]> cached = temporalStore.get(cacheKey, new TypeToken<List<String[]>>(){}.getType());
+        if (cached != null) return cached;
+        List<String[]> list = new ArrayList<>();
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT pref_key, pref_value, importance FROM user_preferences WHERE scope=? AND target_id=? ORDER BY importance DESC, updated_at DESC")) {
+                ps.setString(1, scopeN);
+                ps.setLong(2, targetId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        list.add(new String[]{rs.getString(1), rs.getString(2), String.valueOf(rs.getInt(3))});
+                    }
+                }
+            } catch (SQLException ignored) {}
+        }
+        temporalStore.put(cacheKey, list, 60_000L);
+        return list;
+    }
+
+    /** 印象差的人数（impression_level < 0）。 */
+    public int countBadImpressions() {
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM impressions WHERE impression_level < 0")) {
+                return rs.next() ? rs.getInt(1) : 0;
+            } catch (SQLException ignored) {}
+        }
+        return 0;
+    }
+
+    /** 列出所有偏好（供状态/调试）。 */
+    public List<String[]> listAllPreferences() {
+        List<String[]> list = new ArrayList<>();
+        synchronized (lock) {
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(
+                         "SELECT scope, target_id, pref_key, pref_value, importance FROM user_preferences ORDER BY scope, target_id, importance DESC")) {
+                while (rs.next()) {
+                    list.add(new String[]{rs.getString(1), String.valueOf(rs.getLong(2)),
+                            rs.getString(3), rs.getString(4), String.valueOf(rs.getInt(5))});
+                }
+            } catch (SQLException ignored) {}
+        }
+        return list;
     }
 
     // ==================== Corrections (纠正记录) ====================
@@ -1725,10 +2002,18 @@ public class PersistenceManager {
 
     /** 列出所有闹钟 */
     public List<AlarmEntry> listAlarms() {
+        return listAlarms(false);
+    }
+
+    /** 列出闹钟；onlyEnabled=true 时只返回启用项（调度轮询用）。 */
+    public List<AlarmEntry> listAlarms(boolean onlyEnabled) {
         List<AlarmEntry> list = new ArrayList<>();
         synchronized (lock) {
+            String sql = onlyEnabled
+                    ? "SELECT * FROM alarms WHERE enabled=1 ORDER BY created_at"
+                    : "SELECT * FROM alarms ORDER BY created_at";
             try (Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery("SELECT * FROM alarms ORDER BY created_at")) {
+                 ResultSet rs = stmt.executeQuery(sql)) {
                 while (rs.next()) {
                     list.add(mapAlarm(rs));
                 }
@@ -1807,6 +2092,7 @@ public class PersistenceManager {
 
     /** add note (带去重：title 精确匹配时新内容替换旧笔记，保持知识最新), returns auto-inc id */
     public int addNote(String title, String content, String tags) {
+        temporalStore.invalidateByPrefix("notectx:");
         synchronized (lock) {
             String normTitle = title != null ? title.trim() : "";
             String normContent = content != null ? content.trim() : "";
@@ -1912,6 +2198,7 @@ public class PersistenceManager {
 
     /** delete note */
     public boolean removeNote(int id) {
+        temporalStore.invalidateByPrefix("notectx:");
         synchronized (lock) {
             try (java.sql.PreparedStatement ps = conn.prepareStatement("DELETE FROM notes WHERE id=?")) {
                 ps.setInt(1, id);
@@ -1922,6 +2209,7 @@ public class PersistenceManager {
 
     /** update note */
     public boolean updateNote(int id, String title, String content, String tags) {
+        temporalStore.invalidateByPrefix("notectx:");
         synchronized (lock) {
             try (java.sql.PreparedStatement ps = conn.prepareStatement(
                     "UPDATE notes SET title=?, content=?, tags=?, updated_at=? WHERE id=?")) {
@@ -2005,6 +2293,7 @@ public class PersistenceManager {
 
     /** 清空所有笔记 */
     public void clearNotes() {
+        temporalStore.invalidateByPrefix("notectx:");
         synchronized (lock) {
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute("DELETE FROM notes");
@@ -2046,12 +2335,12 @@ public class PersistenceManager {
             try (Statement stmt = conn.createStatement();
                  ResultSet rs = stmt.executeQuery(
                      "SELECT qq, nickname, emotion_stability, interests, speaking_style,"
-                     + " honesty, image_habit, message_count, first_seen, last_seen, updated_at"
+                     + " honesty, image_habit, impression_level, message_count, first_seen, last_seen, updated_at"
                      + " FROM impressions")) {
                 while (rs.next()) {
                     list.add(new ImpressionEntry(rs.getLong(1), rs.getString(2), rs.getString(3),
                             rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7),
-                            rs.getInt(8), rs.getLong(9), rs.getLong(10), rs.getLong(11)));
+                            rs.getInt(8), rs.getInt(9), rs.getLong(10), rs.getLong(11), rs.getLong(12)));
                 }
             } catch (SQLException ignored) {}
         }

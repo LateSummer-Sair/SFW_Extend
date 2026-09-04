@@ -19,8 +19,22 @@ class DeepSeekResponseParser {
 
     // ==================== SSE 流式解析 ====================
 
-    /** 从SSE的data JSON中提取 delta.reasoning_content */
+    /** 从SSE的data JSON中提取 delta.reasoning_content（优先 Gson，失败回退正则）。 */
     static String extractReasoningDelta(String json) {
+        try {
+            com.google.gson.JsonObject root =
+                    com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+            com.google.gson.JsonArray choices = root.getAsJsonArray("choices");
+            if (choices != null && choices.size() > 0) {
+                com.google.gson.JsonObject delta = choices.get(0).getAsJsonObject().getAsJsonObject("delta");
+                if (delta != null && delta.has("reasoning_content") && !delta.get("reasoning_content").isJsonNull()) {
+                    return delta.get("reasoning_content").getAsString();
+                }
+            }
+            return "";
+        } catch (Exception ignored) {
+            // 回退正则
+        }
         int deltaIdx = json.indexOf("\"delta\"");
         if (deltaIdx < 0) return "";
         int braceStart = json.indexOf('{', deltaIdx + 8);
@@ -49,8 +63,23 @@ class DeepSeekResponseParser {
         return m.find() ? jsonUnescape(m.group(1)) : "";
     }
 
-    /** 从SSE的data JSON中提取 delta.content */
+    /** 从SSE的data JSON中提取 delta.content（优先 Gson，失败回退正则）。 */
     static String extractDelta(String json) {
+        try {
+            com.google.gson.JsonObject root =
+                    com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+            com.google.gson.JsonArray choices = root.getAsJsonArray("choices");
+            if (choices != null && choices.size() > 0) {
+                com.google.gson.JsonObject delta = choices.get(0).getAsJsonObject().getAsJsonObject("delta");
+                if (delta != null && delta.has("content") && !delta.get("content").isJsonNull()) {
+                    com.google.gson.JsonElement c = delta.get("content");
+                    if (c.isJsonPrimitive()) return c.getAsString();
+                }
+            }
+            return "";
+        } catch (Exception ignored) {
+            // 回退正则
+        }
         int deltaIdx = json.indexOf("\"delta\"");
         if (deltaIdx < 0) return "";
         int braceStart = json.indexOf('{', deltaIdx + 8);
@@ -81,8 +110,23 @@ class DeepSeekResponseParser {
 
     // ==================== 非流式响应解析 ====================
 
-    /** 从非流式响应的JSON中提取 message.reasoning_content 字段 */
+    /** 从非流式响应的JSON中提取 message.reasoning_content 字段（优先 Gson，失败回退正则）。 */
     static String extractReasoningContent(String json) {
+        try {
+            com.google.gson.JsonObject root =
+                    com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+            com.google.gson.JsonArray choices = root.getAsJsonArray("choices");
+            if (choices != null && choices.size() > 0) {
+                com.google.gson.JsonObject msg =
+                        choices.get(0).getAsJsonObject().getAsJsonObject("message");
+                if (msg != null && msg.has("reasoning_content") && !msg.get("reasoning_content").isJsonNull()) {
+                    return msg.get("reasoning_content").getAsString();
+                }
+            }
+            return "";
+        } catch (Exception ignored) {
+            // 回退正则
+        }
         int msgIdx = json.indexOf("\"message\"");
         if (msgIdx < 0) return "";
         int msgBrace = json.indexOf('{', msgIdx + 9);
@@ -111,8 +155,24 @@ class DeepSeekResponseParser {
         return m.find() ? jsonUnescape(m.group(1)) : "";
     }
 
-    /** 从非流式响应的JSON中提取 message.content 字段 */
+    /** 从非流式响应的JSON中提取 message.content 字段（优先 Gson，失败回退正则）。 */
     static String extractFirstContent(String json) {
+        try {
+            com.google.gson.JsonObject root =
+                    com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+            com.google.gson.JsonArray choices = root.getAsJsonArray("choices");
+            if (choices != null && choices.size() > 0) {
+                com.google.gson.JsonObject msg =
+                        choices.get(0).getAsJsonObject().getAsJsonObject("message");
+                if (msg != null && msg.has("content") && !msg.get("content").isJsonNull()) {
+                    com.google.gson.JsonElement c = msg.get("content");
+                    if (c.isJsonPrimitive()) return c.getAsString();
+                }
+            }
+            return "";
+        } catch (Exception ignored) {
+            // 回退正则
+        }
         int msgIdx = json.indexOf("\"message\"");
         if (msgIdx < 0) {
             Pattern p = Pattern.compile(

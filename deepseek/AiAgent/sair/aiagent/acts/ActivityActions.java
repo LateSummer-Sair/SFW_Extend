@@ -4,8 +4,10 @@ import java.awt.Color;
 import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import sair.aiagent.util.EdtUtils;
 
@@ -44,81 +46,81 @@ public class ActivityActions {
 
     private final AiAgentActivity act;
     private final OneBotCommandActions oneBotCmd;
+    private final Map<String, Function<String, Object>> commands = new LinkedHashMap<>();
 
     public ActivityActions(AiAgentActivity act) {
         this.act = act;
         this.oneBotCmd = new OneBotCommandActions(act);
+        registerCommands();
     }
 
     // ==================== 命令路由 ====================
 
     public Object route(String funcName, String args) {
         AiAgentActivity.debugLog("路由: " + funcName);
-        switch (funcName) {
-            case "chat":       return handleExecs(args);
-            case "exec":       return handleExecs(args);
-            case "execs":      return handleExecs(args);
-            case "execfc":     return handleExecs(args);
-            case "orchestrate": return handleOrchestrate(args);
-            case "harnesseval": return handleHarnessEval();
-            case "criticon":   return handleCriticOn();
-            case "criticoff":  return handleCriticOff();
-            case "setkey":     return handleSetKey(args);
-            case "seturl":     return handleSetUrl(args);
-            case "setmodel":   return handleSetModel(args);
-            case "setthirdpartycode": return handleSetThirdPartyCode(args);
-            case "setprompt":  return handleSetPrompt(args);
-            case "showprompt": return handleShowPrompt();
-            case "memories":   return handleMemories();
-            case "forget":     return handleForget(args);
-            case "forgetall":  return handleForgetAll();
-            case "yes":        return handleYes();
-            case "no":         return handleNo();
-            case "config":     return handleConfig();
-            case "setconfig":  return handleSetConfig(args);
-            case "reset":      return handleReset();
-            case "stop":       return handleStop();
-            case "mood":       return handleMood();
-            // === OneBot QQ 通道 ===
-            case "execq":               return oneBotCmd.handleExecq(args);
-            case "onebotconnect":      return oneBotCmd.handleOneBotConnect();
-            case "onebotdisconnect":   return oneBotCmd.handleOneBotDisconnect();
-            case "onebotstatus":       return oneBotCmd.handleOneBotStatus();
-            case "onebotsetport":      return oneBotCmd.handleOneBotSetPort(args);
-            case "onebotsettoken":     return oneBotCmd.handleOneBotSetToken(args);
-            case "onebotsetselfid":    return oneBotCmd.handleOneBotSetSelfId(args);
-            case "onebotsetprompt":   return oneBotCmd.handleOneBotSetPrompt(args);
-            case "onebotshowprompt":  return oneBotCmd.handleOneBotShowPrompt();
-            // === 主动查看配置 ===
-            case "onebotenableproactive": return oneBotCmd.handleOneBotEnableProactive();
-            case "onebotdisableproactive": return oneBotCmd.handleOneBotDisableProactive();
-            case "onebotaddgroup":       return oneBotCmd.handleOneBotAddGroup(args);
-            case "onebotremovegroup":    return oneBotCmd.handleOneBotRemoveGroup(args);
-            case "onebotlistgroups":     return oneBotCmd.handleOneBotListGroups();
-            // === 拟人化监听队列开关 ===
-            case "onebotenablelisten":   return oneBotCmd.handleOneBotEnableListen();
-            case "onebotdisablelisten":  return oneBotCmd.handleOneBotDisableListen();
-            case "resetaffection":       return oneBotCmd.handleResetAffection();
-            case "resetdonations":      return oneBotCmd.handleResetDonations();
-            // === 自动清屏 ===
-            case "autoclearon":  return handleAutoClearOn();
-            case "autoclearoff": return handleAutoClearOff();
-            case "qqlogon":   return handleQqLogOn();
-            case "qqlogoff":  return handleQqLogOff();
-            // === Skills ===
-            case "skills":         return handleSkills();
-            case "skillsearch":    return handleSkillSearch(args);
-            case "skilldelete":    return handleSkillDelete(args);
-            case "skillextract":   return handleSkillExtract();
-            case "skillevolve":    return handleSkillEvolve();
-            case "skillinfo":      return handleSkillInfo(args);
-            case "skillexport":    return handleSkillExport(args);
-            case "skillexportall": return handleSkillExportAll();
-            case "clearstickers":  return handleClearStickers();
-            case "exportdata":     return handleExportData(args);
-            case "importdata":     return handleImportData(args);
-            default:           return false;
-        }
+        Function<String, Object> handler = commands.get(funcName);
+        return handler != null ? handler.apply(args) : false;
+    }
+
+    private void registerCommands() {
+        commands.put("chat", this::handleExecs);
+        commands.put("exec", this::handleExecs);
+        commands.put("execs", this::handleExecs);
+        commands.put("execfc", this::handleExecs);
+        commands.put("orchestrate", this::handleOrchestrate);
+        commands.put("harnesseval", a -> handleHarnessEval());
+        commands.put("criticon", a -> handleCriticOn());
+        commands.put("criticoff", a -> handleCriticOff());
+        commands.put("setkey", this::handleSetKey);
+        commands.put("seturl", this::handleSetUrl);
+        commands.put("setmodel", this::handleSetModel);
+        commands.put("setthirdpartycode", this::handleSetThirdPartyCode);
+        commands.put("setprompt", this::handleSetPrompt);
+        commands.put("showprompt", a -> handleShowPrompt());
+        commands.put("memories", a -> handleMemories());
+        commands.put("forget", this::handleForget);
+        commands.put("forgetall", a -> handleForgetAll());
+        commands.put("yes", a -> handleYes());
+        commands.put("no", a -> handleNo());
+        commands.put("config", a -> handleConfig());
+        commands.put("setconfig", this::handleSetConfig);
+        commands.put("status", a -> handleStatus());
+        commands.put("reset", a -> handleReset());
+        commands.put("stop", a -> handleStop());
+        commands.put("mood", a -> handleMood());
+        commands.put("execq", oneBotCmd::handleExecq);
+        commands.put("onebotconnect", a -> oneBotCmd.handleOneBotConnect());
+        commands.put("onebotdisconnect", a -> oneBotCmd.handleOneBotDisconnect());
+        commands.put("onebotstatus", a -> oneBotCmd.handleOneBotStatus());
+        commands.put("onebotsetport", oneBotCmd::handleOneBotSetPort);
+        commands.put("onebotsettoken", oneBotCmd::handleOneBotSetToken);
+        commands.put("onebotsetselfid", oneBotCmd::handleOneBotSetSelfId);
+        commands.put("onebotsetprompt", oneBotCmd::handleOneBotSetPrompt);
+        commands.put("onebotshowprompt", a -> oneBotCmd.handleOneBotShowPrompt());
+        commands.put("onebotenableproactive", a -> oneBotCmd.handleOneBotEnableProactive());
+        commands.put("onebotdisableproactive", a -> oneBotCmd.handleOneBotDisableProactive());
+        commands.put("onebotaddgroup", oneBotCmd::handleOneBotAddGroup);
+        commands.put("onebotremovegroup", oneBotCmd::handleOneBotRemoveGroup);
+        commands.put("onebotlistgroups", a -> oneBotCmd.handleOneBotListGroups());
+        commands.put("onebotenablelisten", a -> oneBotCmd.handleOneBotEnableListen());
+        commands.put("onebotdisablelisten", a -> oneBotCmd.handleOneBotDisableListen());
+        commands.put("resetaffection", a -> oneBotCmd.handleResetAffection());
+        commands.put("resetdonations", a -> oneBotCmd.handleResetDonations());
+        commands.put("autoclearon", a -> handleAutoClearOn());
+        commands.put("autoclearoff", a -> handleAutoClearOff());
+        commands.put("qqlogon", a -> handleQqLogOn());
+        commands.put("qqlogoff", a -> handleQqLogOff());
+        commands.put("skills", a -> handleSkills());
+        commands.put("skillsearch", this::handleSkillSearch);
+        commands.put("skilldelete", this::handleSkillDelete);
+        commands.put("skillextract", a -> handleSkillExtract());
+        commands.put("skillevolve", a -> handleSkillEvolve());
+        commands.put("skillinfo", this::handleSkillInfo);
+        commands.put("skillexport", this::handleSkillExport);
+        commands.put("skillexportall", a -> handleSkillExportAll());
+        commands.put("clearstickers", a -> handleClearStickers());
+        commands.put("exportdata", this::handleExportData);
+        commands.put("importdata", this::handleImportData);
     }
 
     // ==================== 配置命令 ====================
@@ -215,6 +217,112 @@ public class ActivityActions {
         return true;
     }
 
+    /** 运行时状态总览：OneBot / Redis / FileServer / 线程池 / 轨迹 / 技能与记忆计数。 */
+    public Object handleStatus() {
+        println(C_SYS, "== AiAgent Runtime Status ==");
+
+        sair.aiagent.onebot.OneBotServer oneBot = act.getOneBotServer();
+        if (oneBot == null) {
+            println(C_INFO, "OneBot    : 未初始化");
+        } else {
+            println(C_INFO, "OneBot    : " + (oneBot.isRunning() ? "运行中" : "已停止")
+                    + " | 端口 " + oneBot.getPort()
+                    + " | 连接 " + oneBot.getConnectionCount()
+                    + " | Token " + (act.getConfig().getOnebotToken().isEmpty() ? "(未设置)" : "已设置"));
+        }
+
+        sair.aiagent.core.RedisClient redis = sair.aiagent.core.RedisClient.getInstance();
+        println(C_INFO, "Redis     : " + redis.statusSummary()
+                + " | prefix=" + redis.getKeyPrefix());
+
+        sair.aiagent.onebot.FileServer fileServer = sair.aiagent.onebot.FileServer.getInstance();
+        String fileUrl = fileServer.getPublicBaseUrl();
+        println(C_INFO, "FileServer: " + (fileServer.isRunning() ? "运行中" : "已停止")
+                + " | 端口 " + (fileServer.getPort() > 0 ? String.valueOf(fileServer.getPort()) : "-")
+                + " | 注册文件 " + fileServer.getRegisteredFileCount()
+                + (fileUrl != null ? " | " + fileUrl : ""));
+
+        println(C_INFO, "Threads   : " + sair.aiagent.core.ThreadManager.getInstance().statusSummary());
+        println(C_INFO, "DeepSeek  : " + act.getClient().getUsageSummary());
+        for (Map.Entry<String, long[]> e : act.getClient().getUsageByModel().entrySet()) {
+            long[] u = e.getValue();
+            long cacheTotal = u[2] + u[3];
+            double hitRate = cacheTotal > 0 ? (double) u[2] / cacheTotal * 100 : 0;
+            println(C_INFO, "  model=" + e.getKey()
+                    + " prompt=" + u[0]
+                    + " comp=" + u[1]
+                    + " cacheHit=" + u[2]
+                    + " cacheMiss=" + u[3]
+                    + " hitRate=" + String.format("%.0f%%", hitRate));
+        }
+
+        sair.aiagent.core.PersistenceManager pm = act.getPersistenceManager();
+        int coreMemories = act.getMemory().size();
+        int skills = sair.aiagent.core.SkillBank.getInstance().listAll().size();
+        int thirdPartySkills = act.getThirdPartySkillStore() != null ? act.getThirdPartySkillStore().size() : 0;
+        int skillPackages = act.getAgentSkillStore() != null ? act.getAgentSkillStore().size() : 0;
+        int cronTasks = pm != null ? pm.listCronTasks().size() : 0;
+        int alarms = pm != null ? pm.listAlarms().size() : 0;
+        int harnessTraces = pm != null ? pm.harnessTraceCount() : 0;
+        int toolTraces = pm != null ? pm.toolTraceCount() : 0;
+        int preferences = pm != null ? pm.listAllPreferences().size() : 0;
+        int badImpressions = pm != null ? pm.countBadImpressions() : 0;
+
+        println(C_INFO, "Counts    : memories=" + coreMemories
+                + ", skills=" + skills
+                + ", thirdPartySkills=" + thirdPartySkills
+                + ", skillPackages=" + skillPackages
+                + ", cronTasks=" + cronTasks
+                + ", alarms=" + alarms
+                + ", harnessTraces=" + harnessTraces
+                + ", toolTraces=" + toolTraces
+                + ", preferences=" + preferences
+                + ", badImpressions=" + badImpressions);
+
+        if (act.getOneBotMessageHandler() != null) {
+            sair.aiagent.onebot.UnifiedQQMemoryManager qqMemory = act.getOneBotMessageHandler().getUnifiedMemory();
+            if (qqMemory != null) {
+                println(C_INFO, "QQ Memory : conversations=" + qqMemory.countConversations()
+                        + ", memories=" + qqMemory.countMemories()
+                        + ", groupHistory=" + qqMemory.countGroupHistory()
+                        + ", knownGroups=" + qqMemory.getAllKnownGroups().size()
+                        + ", knownFriends=" + qqMemory.getAllKnownFriends().size());
+            }
+        }
+
+        if (pm != null) {
+            SimpleDateFormat fmt = new SimpleDateFormat("HH:mm:ss");
+            List<sair.aiagent.core.HarnessTrace> recentHarness = pm.listTraces(5);
+            println(C_SYS, "Recent Harness traces (" + recentHarness.size() + "):");
+            for (sair.aiagent.core.HarnessTrace t : recentHarness) {
+                println(C_INFO, "  " + fmt.format(new Date(t.timestamp))
+                        + " [" + t.mode + "] " + (t.success ? "OK" : "FAIL")
+                        + " tools=" + t.toolCalls
+                        + " " + t.durationMs + "ms"
+                        + " | " + brief(t.task, 80));
+            }
+
+            List<sair.aiagent.core.ToolCallTrace> recentTools = pm.listToolTraces(5);
+            println(C_SYS, "Recent tool calls (" + recentTools.size() + "):");
+            for (sair.aiagent.core.ToolCallTrace t : recentTools) {
+                println(C_INFO, "  " + fmt.format(new Date(t.timestamp))
+                        + " [" + t.channel + "] " + t.toolName
+                        + " " + t.outcome
+                        + " " + t.durationMs + "ms"
+                        + " | " + brief(t.result, 80));
+            }
+        }
+        return true;
+    }
+
+    private static String brief(String text, int maxLen) {
+        if (text == null) return "(null)";
+        String t = text.replace('\n', ' ').replace('\r', ' ').trim();
+        if (t.isEmpty()) return "(空)";
+        if (t.length() > maxLen) t = t.substring(0, maxLen) + "...";
+        return t;
+    }
+
     /**
      * 统一配置开关：ai/setconfig &lt;key&gt; &lt;value&gt;，长期存储的 config.properties
      * 均可由命令控制，无需手动编辑文件。
@@ -233,6 +341,7 @@ public class ActivityActions {
             println(C_INFO, "botname     Bot 消息触发词（多个用 ; 分隔，群聊中提到任一触发词触发回复）");
             println(C_INFO, "fileport    文件中转服务端口（跨机器 NapCat 下载文件用，默认 2671，重启后生效）");
             println(C_INFO, "filehost    文件中转服务对外地址（跨机器时填 Windows 本机内网 IP，如 192.168.1.5，空=自动探测）");
+            println(C_INFO, "qqfileroots QQ 通道文件访问根目录（分号分隔；留空=不限制，重启后生效）");
             return true;
         }
         String[] parts = args.trim().split("\\s+", 2);
@@ -292,6 +401,10 @@ public class ActivityActions {
                 case "filehost": case "fileserverhost":
                     cfg.setFileServerHost(val);
                     println(C_INFO, "fileServerHost -> " + (cfg.getFileServerHost().isEmpty() ? "(自动探测)" : cfg.getFileServerHost()) + "（重启后生效）");
+                    break;
+                case "qqfileroots": case "qqfileaccessroots":
+                    cfg.setQqFileAccessRoots(val);
+                    println(C_INFO, "qqFileAccessRoots -> " + (cfg.getQqFileAccessRoots().isEmpty() ? "(不限制)" : cfg.getQqFileAccessRoots()) + "（重启后生效）");
                     break;
                 default:
                     return err("未知配置项: " + key + "（输入 ai/setconfig 查看可配置项）");
@@ -513,7 +626,6 @@ public class ActivityActions {
         if (memoryContext != null) {
             println(C_MEM, "[记忆] 找到相关记忆，已注入上下文。");
         }
-        act.getAgent().setMemoryContext(memoryContext);
 
         sair.aiagent.core.SkillBank fcBank = sair.aiagent.core.SkillBank.getInstance();
         if (fcBank != null && fcBank.getPersistenceManager() != null) {
@@ -531,7 +643,7 @@ public class ActivityActions {
         println(C_INFO, "[execs] 使用原生 Function Calling 执行（免确认全能模式）...");
 
         AiAgentActivity.debugLog("handleExecs: 启动后台线程");
-        act.setActiveThread(new Thread(new Runnable() {
+        act.setActiveThread(sair.aiagent.core.ThreadManager.getInstance().newDaemonThread("AiAgent-Execs", new Runnable() {
             public void run() {
                 AiAgentActivity.debugLog("ExecsThread: 开始");
                 try {
@@ -554,8 +666,7 @@ public class ActivityActions {
                     AiAgentActivity.debugLog("ExecsThread: 结束");
                 }
             }
-        }, "AiAgent-Execs"));
-        act.getActiveThread().setDaemon(true);
+        }));
         act.getActiveThread().start();
 
         return true;
@@ -580,7 +691,7 @@ public class ActivityActions {
         final String fTask = task;
         println(C_INFO, "[orchestrate] 多智能体编排（模式=" + fMode + "）执行中...");
 
-        act.setActiveThread(new Thread(() -> {
+        act.setActiveThread(sair.aiagent.core.ThreadManager.getInstance().newDaemonThread("AiAgent-Orchestrate", () -> {
             try {
                 String result = act.getAgent().executeOrchestrated(fTask, fMode, new sair.aiagent.core.ToolContext("console"), null);
                 if (result != null && !result.isEmpty()) {
@@ -598,8 +709,7 @@ public class ActivityActions {
                 act.getGate().setBypassConfirm(false);
                 if (act.getActiveThread() == Thread.currentThread()) act.setActiveThread(null);
             }
-        }, "AiAgent-Orchestrate"));
-        act.getActiveThread().setDaemon(true);
+        }));
         act.getActiveThread().start();
         return true;
     }

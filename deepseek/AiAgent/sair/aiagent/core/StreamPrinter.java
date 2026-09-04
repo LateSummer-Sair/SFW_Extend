@@ -82,8 +82,9 @@ public class StreamPrinter {
 
     // ==================== 内部状态 ====================
 
-    /** 条目阻塞队列（线程安全） */
-    private final BlockingQueue<Item> queue = new LinkedBlockingQueue<>();
+    /** 条目阻塞队列（线程安全，有界防 OOM） */
+    private static final int QUEUE_CAPACITY = 20_000;
+    private final BlockingQueue<Item> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
 
     /** 当前打印颜色 */
     private volatile Color currentColor = C_AI;
@@ -107,8 +108,7 @@ public class StreamPrinter {
     private synchronized void startThread() {
         if (active) return;
         active = true;
-        printerThread = new Thread(this::printLoop, "AiAgent-StreamPrinter");
-        printerThread.setDaemon(true);
+        printerThread = ThreadManager.getInstance().newDaemonThread("AiAgent-StreamPrinter", this::printLoop);
         printerThread.start();
     }
 

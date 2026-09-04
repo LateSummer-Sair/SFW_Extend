@@ -31,6 +31,8 @@ public class ListeningStateManager {
 
     /** 同群自动续期次数上限 */
     private static final int MAX_AUTO_ENQUEUE = 8;
+    /** 同群自动续期最小间隔，避免同一话题连续插话 */
+    private static final long MIN_AUTO_ENQUEUE_INTERVAL_MS = 12000L;
     /** 监听窗口下限（毫秒） */
     private static final int LISTEN_MIN_MS = 8000;
     /** 监听窗口上限（毫秒） */
@@ -45,6 +47,8 @@ public class ListeningStateManager {
 
     /** 各群自动续期次数统计 */
     private final Map<Long, Integer> autoEnqueueCount = new ConcurrentHashMap<>();
+    /** 各群最近一次自动续期时间戳，用于同话题冷却 */
+    private final Map<Long, Long> lastAutoEnqueueAt = new ConcurrentHashMap<>();
 
     /** 情绪状态管理器（用于高好感度用户的主动关注概率监听） */
     private volatile EmotionStateManager emotionManager;
@@ -76,12 +80,19 @@ public class ListeningStateManager {
             return false;
         }
 
+        long now = System.currentTimeMillis();
+        long last = lastAutoEnqueueAt.getOrDefault(gid, 0L);
+        if (now - last < MIN_AUTO_ENQUEUE_INTERVAL_MS) {
+            return false;
+        }
+
         boolean relevant = (handler != null && handler.isRelevant(msg, ctx));
         if (!relevant && !shouldProactiveListen(msg)) {
             return false;
         }
 
         autoEnqueueCount.merge(gid, 1, Integer::sum);
+        lastAutoEnqueueAt.put(gid, now);
         AiAgentActivity.qqLog("[Listen] " + (relevant ? "监听续期命中" : "主动关注命中")
                 + ": 群" + gid + " user=" + msg.getUserId()
                 + " count=" + autoEnqueueCount.get(gid));
@@ -105,7 +116,10 @@ public class ListeningStateManager {
 
     /** 主动触发（@/名字/私聊）时重置该群自动续期计数 */
     public void resetAutoEnqueueCount(long groupId) {
-        if (groupId > 0) autoEnqueueCount.remove(groupId);
+        if (groupId > 0) {
+            autoEnqueueCount.remove(groupId);
+            lastAutoEnqueueAt.remove(groupId);
+        }
     }
 
     /** 注入情绪状态管理器（供主动关注概率监听使用） */

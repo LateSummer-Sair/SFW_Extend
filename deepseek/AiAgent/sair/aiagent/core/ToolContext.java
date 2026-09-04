@@ -57,4 +57,25 @@ public class ToolContext {
     public boolean isExecq() {
         return "execq".equals(channel);
     }
+
+    /** 浅拷贝一份上下文，供并行子 Agent 独立使用，避免并发修改同一 depth/字段。 */
+    public ToolContext copy() {
+        ToolContext c = new ToolContext(this.channel);
+        c.qqMsg = this.qqMsg;
+        c.napcatApi = this.napcatApi;
+        c.unifiedMemory = this.unifiedMemory;
+        c.internalAgents = this.internalAgents;
+        c.senderQQ = this.senderQQ;
+        c.affection = this.affection;
+        c.isMaster = this.isMaster;
+        c.dataDir = this.dataDir;
+        c.pendingRequestPool = this.pendingRequestPool;
+        c.emotionManager = this.emotionManager;
+        c.stableSystemPrompt = this.stableSystemPrompt;
+        c.dynamicContext = this.dynamicContext;
+        c.model = this.model;
+        c.execsMode = this.execsMode;
+        c.agentBusDepth = 0;
+        return c;
+    }
 }

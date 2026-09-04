@@ -33,7 +33,7 @@
         <div class="section-head reveal">
           <div class="section-tag">Layers</div>
           <h2>分层架构</h2>
-          <p class="desc">9 个包 · 92 个 Java 源文件，按职责划分为 4 层。</p>
+          <p class="desc">9 个包 · 93 个 Java 源文件，按职责划分为 4 层。</p>
         </div>
         <div class="flow-box reveal">
           <div class="flow">
@@ -200,25 +200,26 @@
           </div>
           <div class="flow-caption">QQ 通道完整链路</div>
         </div>
+        <div class="callout reveal"><div class="co-icon">💬</div><div>引用回复由 QQAgentBridge 解析最终回复中的 <code>&lt;quote id="消息ID"&gt;回复正文&lt;/quote&gt;</code> 标记，再转换为 OneBot <code>[CQ:reply,id=消息ID]</code> 前缀发送；无引用标记时正常输出文本。</div></div>
       </section>
 
       <section class="section" id="structure">
         <div class="section-head reveal">
           <div class="section-tag">Structure</div>
           <h2>目录结构</h2>
-          <p class="desc">9 个包，92 个 Java 源文件，共 31,602 行代码。</p>
+          <p class="desc">9 个包，93 个 Java 源文件，共 37,211 行代码。</p>
         </div>
         <div class="table-wrap reveal">
           <table>
             <thead><tr><th>包</th><th>文件数</th><th>行数</th><th>职责</th></tr></thead>
             <tbody>
-              <tr><td class="cmd-name">sair.aiagent</td><td>1</td><td>624</td><td>插件入口 AiAgentActivity</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.core</td><td>46</td><td>16,170</td><td>核心引擎：Agent / FC / 工具 / 持久化 / 技能 / Harness / 多智能体</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.model</td><td>12</td><td>1,250</td><td>数据模型 POJO</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.acts</td><td>2</td><td>1,147</td><td>命令委托层</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.onebot</td><td>22</td><td>11,038</td><td>QQ OneBot 机器人模块（含 model/util 子目录）</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.util</td><td>7</td><td>1,100</td><td>工具：网页抓取 / 天气 / 图片渲染 / 文件</td></tr>
-              <tr><td class="cmd-name">sair.aiagent.ui</td><td>2</td><td>273</td><td>彩蛋窗口 / 系统控制台面板</td></tr>
+              <tr><td class="cmd-name">sair.aiagent</td><td>1</td><td>632</td><td>插件入口 AiAgentActivity</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.core</td><td>47</td><td>18,575</td><td>核心引擎：Agent / FC / 工具 / 持久化 / 技能 / Harness / 多智能体</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.model</td><td>12</td><td>1,587</td><td>数据模型 POJO</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.acts</td><td>2</td><td>1,243</td><td>命令委托层</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.onebot</td><td>22</td><td>12,005</td><td>QQ OneBot 机器人模块（含 model/util 子目录）</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.util</td><td>7</td><td>1,410</td><td>工具：网页抓取 / 天气 / 图片渲染 / 文件</td></tr>
+              <tr><td class="cmd-name">sair.aiagent.ui</td><td>2</td><td>320</td><td>彩蛋窗口 / 系统控制台面板</td></tr>
             </tbody>
           </table>
         </div>
@@ -228,7 +229,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.8 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
+        <p><span class="brand">AiAgent</span> v3.9 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
         <p style="margin-top:6px">分层架构 · Function Calling 循环 · 多智能体协作 · 上下文注入链 · 拟人化监听态 · OneBot QQ 模块 · 目录结构</p>
       </div>
     </footer>

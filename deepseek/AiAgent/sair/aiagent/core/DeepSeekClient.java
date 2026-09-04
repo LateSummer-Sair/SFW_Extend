@@ -10,8 +10,10 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -55,6 +57,12 @@ public class DeepSeekClient {
     /** HTTP超时：读取（5分钟，足够长响应） */
     private static final int READ_TIMEOUT = 300_000;
 
+    /** 共享 Gson 实例（避免每轮 Function Calling 重复 new Gson）。 */
+    private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
+    /** 工具集序列化缓存：按工具列表对象身份缓存，避免每轮重复序列化 tools 数组。 */
+    private static volatile List<ToolDefinition> cachedToolsKey;
+    private static volatile com.google.gson.JsonArray cachedToolsArr;
+
     /** 非流式请求默认 max_tokens */
     private static final int DEFAULT_MAX_TOKENS = 4096;
     /** Agent/execs 模式 max_tokens（支持长输出） */
@@ -69,6 +77,9 @@ public class DeepSeekClient {
     private volatile long totalCompletionTokens = 0;
     private volatile long totalCacheHitTokens = 0;
     private volatile long totalCacheMissTokens = 0;
+
+    /** 按模型拆分的 token 用量：model -> [prompt, completion, cacheHit, cacheMiss] */
+    private final Map<String, long[]> usageByModel = new ConcurrentHashMap<>();
 
     // ==================== 配置引用 ====================
 
@@ -117,6 +128,10 @@ public class DeepSeekClient {
         public boolean hasToolCalls() { return toolCalls != null && !toolCalls.isEmpty(); }
     }
 
+    /** 视觉模型稳定 system 前缀，避免动态用户背景污染 Prompt Cache。 */
+    private static final String VISION_SYSTEM_PROMPT =
+            "你是图片识别模型。只做客观识别、转写和描述，不臆测图片中没有的内容。";
+
     /** 流式聊天返回结果 */
     public static class StreamResult {
         public final String content;
@@ -139,14 +154,28 @@ public class DeepSeekClient {
     /** 流式聊天 — 返回 content + reasoning_content */
     public StreamResult chatStreamFull(List<ChatMessage> messages, String modelOverride) throws IOException {
         String jsonBody = buildRequestBody(messages, true, modelOverride);
-        HttpURLConnection conn = createConnection(true);
-        try {
-            sendRequest(conn, jsonBody);
-            checkResponse(conn);
-            return readStreamResponse(conn);
-        } finally {
-            conn.disconnect();
+        IOException last = null;
+        for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            HttpURLConnection conn = createConnection(true);
+            try {
+                sendRequest(conn, jsonBody);
+                checkResponse(conn);
+                return readStreamResponse(conn, modelOverride);
+            } catch (IOException e) {
+                last = e;
+                if (!isRetryable(e)) throw e;
+                AiAgentActivity.debugLog("[DeepSeek] stream retry " + (attempt + 1) + "/" + MAX_RETRIES + ": " + e.getMessage());
+                try {
+                    Thread.sleep(RETRY_BASE_MS * (attempt + 1));
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            } finally {
+                conn.disconnect();
+            }
         }
+        throw last != null ? last : new IOException("DeepSeek stream request failed");
     }
 
     /**
@@ -161,21 +190,22 @@ public class DeepSeekClient {
         return chatSync(messages, AiConfig.getInstance().getExecqModel());
     }
 
+    /** 视觉模型调用：固定 system 前缀 + user 多模态消息。 */
+    public String chatVision(List<String> imageUrls, String userText) throws IOException {
+        List<ChatMessage> msgs = new ArrayList<>();
+        msgs.add(new ChatMessage("system", VISION_SYSTEM_PROMPT));
+        msgs.add(ChatMessage.createMultimodal(userText, imageUrls));
+        return chatSync(msgs, AiConfig.getInstance().getVisionModel());
+    }
+
     /** 非流式聊天 — 返回 content + reasoning_content */
     public SyncResult chatSyncFull(List<ChatMessage> messages, String modelOverride) throws IOException {
         String jsonBody = buildRequestBody(messages, false, modelOverride);
-        HttpURLConnection conn = createConnection(false);
-        try {
-            sendRequest(conn, jsonBody);
-            checkResponse(conn);
-            String json = DeepSeekResponseParser.readAll(conn.getInputStream());
-            String content = DeepSeekResponseParser.extractFirstContent(json);
-            String reasoning = DeepSeekResponseParser.extractReasoningContent(json);
-            trackUsage(json);
-            return new SyncResult(content, reasoning);
-        } finally {
-            conn.disconnect();
-        }
+        String json = sendChatRequestWithRetry(jsonBody);
+        String content = DeepSeekResponseParser.extractFirstContent(json);
+        String reasoning = DeepSeekResponseParser.extractReasoningContent(json);
+        trackUsage(json, effectiveModel(modelOverride));
+        return new SyncResult(content, reasoning);
     }
 
     /**
@@ -191,19 +221,47 @@ public class DeepSeekClient {
     public ToolCallResult chatSyncWithTools(List<ChatMessage> messages, List<ToolDefinition> tools,
                                             String toolChoice, String modelOverride) throws IOException {
         String jsonBody = buildRequestBody(messages, false, modelOverride, tools, toolChoice);
-        HttpURLConnection conn = createConnection(false);
-        try {
-            sendRequest(conn, jsonBody);
-            checkResponse(conn);
-            String json = DeepSeekResponseParser.readAll(conn.getInputStream());
-            String content = DeepSeekResponseParser.extractFirstContent(json);
-            String reasoning = DeepSeekResponseParser.extractReasoningContent(json);
-            List<ToolCall> toolCalls = DeepSeekResponseParser.extractToolCalls(json);
-            trackUsage(json);
-            return new ToolCallResult(content, reasoning, toolCalls);
-        } finally {
-            conn.disconnect();
+        String json = sendChatRequestWithRetry(jsonBody);
+        String content = DeepSeekResponseParser.extractFirstContent(json);
+        String reasoning = DeepSeekResponseParser.extractReasoningContent(json);
+        List<ToolCall> toolCalls = DeepSeekResponseParser.extractToolCalls(json);
+        trackUsage(json, effectiveModel(modelOverride));
+        return new ToolCallResult(content, reasoning, toolCalls);
+    }
+
+    private String effectiveModel(String modelOverride) {
+        return (modelOverride != null && !modelOverride.isEmpty())
+                ? modelOverride : AiConfig.getInstance().getExecqModel();
+    }
+
+    private String sendChatRequestWithRetry(String jsonBody) throws IOException {
+        IOException last = null;
+        for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            HttpURLConnection conn = createConnection(false);
+            try {
+                sendRequest(conn, jsonBody);
+                checkResponse(conn);
+                return DeepSeekResponseParser.readAll(conn.getInputStream());
+            } catch (IOException e) {
+                last = e;
+                if (!isRetryable(e)) throw e;
+                AiAgentActivity.debugLog("[DeepSeek] retry " + (attempt + 1) + "/" + MAX_RETRIES + ": " + e.getMessage());
+                try {
+                    Thread.sleep(RETRY_BASE_MS * (attempt + 1));
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            } finally {
+                conn.disconnect();
+            }
         }
+        throw last != null ? last : new IOException("DeepSeek request failed");
+    }
+
+    private static boolean isRetryable(IOException e) {
+        String msg = e != null ? e.getMessage() : "";
+        return msg != null && (msg.contains("429") || msg.contains("500") || msg.contains("503"));
     }
 
     // ==================== HTTP通信 ====================
@@ -446,10 +504,17 @@ public class DeepSeekClient {
 
         // --- tools (Function Calling) ---
         if (tools != null && !tools.isEmpty()) {
-            com.google.gson.Gson gson = new com.google.gson.Gson();
-            JsonArray toolsArr = new JsonArray();
-            for (ToolDefinition td : tools) {
-                toolsArr.add(gson.toJsonTree(td.toRequestObject()));
+            JsonArray toolsArr;
+            // 工具列表对象身份不变（ToolDispatcher 缓存）时复用已序列化的 tools 数组，避免每轮重复序列化
+            if (cachedToolsKey == tools) {
+                toolsArr = cachedToolsArr;
+            } else {
+                toolsArr = new JsonArray();
+                for (ToolDefinition td : tools) {
+                    toolsArr.add(GSON.toJsonTree(td.toRequestObject()));
+                }
+                cachedToolsKey = tools;
+                cachedToolsArr = toolsArr;
             }
             root.add("tools", toolsArr);
             if (toolChoice != null && !toolChoice.isEmpty()) {
@@ -470,7 +535,7 @@ public class DeepSeekClient {
      * 将字符送入 StreamPrinter 队列。
      * </p>
      */
-    private StreamResult readStreamResponse(HttpURLConnection conn)
+    private StreamResult readStreamResponse(HttpURLConnection conn, String modelOverride)
             throws IOException {
         StringBuilder fullContent = new StringBuilder();
         StringBuilder fullReasoning = new StringBuilder();
@@ -496,7 +561,7 @@ public class DeepSeekClient {
                 }
 
                 // Track usage from last chunk (has finish_reason + usage)
-                trackUsage(data);
+                trackUsage(data, effectiveModel(modelOverride));
             }
         }
         return new StreamResult(fullContent.toString(), fullReasoning.toString());
@@ -537,7 +602,7 @@ public class DeepSeekClient {
     // ==================== Token 用量追踪 ====================
 
     /** Track usage from API response JSON (works for both stream chunks and sync) */
-    private void trackUsage(String json) {
+    private void trackUsage(String json, String model) {
         if (json == null || !json.contains("\"usage\"")) return;
         try {
             // Only count final chunks (has finish_reason or is non-stream)
@@ -550,10 +615,27 @@ public class DeepSeekClient {
             Matcher cm = cp.matcher(json);
             Matcher hm = hp.matcher(json);
             Matcher mm = mp.matcher(json);
-            if (pm.find()) totalPromptTokens += Long.parseLong(pm.group(1));
-            if (cm.find()) totalCompletionTokens += Long.parseLong(cm.group(1));
-            if (hm.find()) totalCacheHitTokens += Long.parseLong(hm.group(1));
-            if (mm.find()) totalCacheMissTokens += Long.parseLong(mm.group(1));
+            long prompt = pm.find() ? Long.parseLong(pm.group(1)) : 0;
+            long completion = cm.find() ? Long.parseLong(cm.group(1)) : 0;
+            long hit = hm.find() ? Long.parseLong(hm.group(1)) : 0;
+            long miss = mm.find() ? Long.parseLong(mm.group(1)) : 0;
+            totalPromptTokens += prompt;
+            totalCompletionTokens += completion;
+            totalCacheHitTokens += hit;
+            totalCacheMissTokens += miss;
+            String key = (model != null && !model.isEmpty()) ? model : "unknown";
+            long[] arr = usageByModel.get(key);
+            if (arr == null) {
+                arr = new long[4];
+                long[] old = usageByModel.putIfAbsent(key, arr);
+                if (old != null) arr = old;
+            }
+            synchronized (arr) {
+                arr[0] += prompt;
+                arr[1] += completion;
+                arr[2] += hit;
+                arr[3] += miss;
+            }
         } catch (Exception ignored) {}
     }
 
@@ -561,6 +643,20 @@ public class DeepSeekClient {
     public long[] getUsageStats() {
         return new long[] { totalPromptTokens, totalCompletionTokens,
                 totalCacheHitTokens, totalCacheMissTokens };
+    }
+
+    /** Get per-model token usage snapshot. */
+    public Map<String, long[]> getUsageByModel() {
+        Map<String, long[]> snapshot = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, long[]> e : usageByModel.entrySet()) {
+            long[] arr = e.getValue();
+            long[] copy;
+            synchronized (arr) {
+                copy = new long[] { arr[0], arr[1], arr[2], arr[3] };
+            }
+            snapshot.put(e.getKey(), copy);
+        }
+        return snapshot;
     }
 
     /** Get formatted usage summary */
@@ -581,8 +677,14 @@ public class DeepSeekClient {
 
     // ==================== 余额查询 ====================
 
+    private volatile String cachedBalance;
+    private volatile long cachedBalanceAt;
+
     /** 查询 DeepSeek 账户余额。返回格式化的余额字符串，失败返回 null。 */
     public String queryBalance() throws IOException {
+        if (cachedBalance != null && System.currentTimeMillis() - cachedBalanceAt < 60_000L) {
+            return cachedBalance;
+        }
         String apiUrl = config.getApiUrl();
         if (!apiUrl.endsWith("/")) apiUrl += "/";
         URL url = new URL(apiUrl + "user/balance");
@@ -618,7 +720,14 @@ public class DeepSeekClient {
                 if (gm.find()) sb.append(" (granted:").append(gm.group(1)).append(")");
                 if (um.find()) sb.append(" (toppedUp:").append(um.group(1)).append(")");
             }
-            return sb.length() > 0 ? sb.toString() : json;
+            String result = sb.length() > 0 ? sb.toString() : json;
+            if (sb.length() > 0) {
+                cachedBalance = result;
+                cachedBalanceAt = System.currentTimeMillis();
+            } else {
+                cachedBalance = null;
+            }
+            return result;
         } finally {
             conn.disconnect();
         }

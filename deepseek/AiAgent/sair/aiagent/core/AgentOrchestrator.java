@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import sair.aiagent.AiAgentActivity;
 import sair.aiagent.model.ChatMessage;
 import sair.aiagent.model.ToolDefinition;
 
@@ -78,6 +79,17 @@ public class AgentOrchestrator {
     /** 步骤行解析：形如 "1." / "1)" / "1、" / "1 " 开头。 */
     private static final Pattern STEP_LINE = Pattern.compile("^\\s*\\d+\\s*[.)、]?\\s*(.+)$");
 
+    /** 流水线最大步骤数，防止规划器输出爆炸。 */
+    private static final int MAX_STEPS = 6;
+    /** fanout 最大子任务数。 */
+    private static final int MAX_SUBTASKS = 6;
+    /** fanout 最大并行度。 */
+    private static final int MAX_FANOUT_PARALLEL = 3;
+    /** 子 Agent 结果/合成输入截断长度。 */
+    private static final int RESULT_MAX_CHARS = 1200;
+    /** 子 Agent 单次工具调用预算。 */
+    private static final int SUB_AGENT_MAX_TOOL_CALLS = 12;
+
     private final DeepSeekClient client;
     private final ToolDispatcher dispatcher;
     /** 审查者子 Agent（可空，非空时对最终回复做验证闭环）。 */
@@ -134,7 +146,11 @@ public class AgentOrchestrator {
         for (int i = 0; i < steps.size(); i++) {
             if (stopCheck != null && stopCheck.getAsBoolean()) return buildSoFar(context);
             String step = steps.get(i);
-            String stepTask = step + (context.length() > 0 ? "\n\n前序步骤的成果参考：\n" + context : "");
+            String prev = context.length() > 0 ? context.toString() : null;
+            if (prev != null && prev.length() > RESULT_MAX_CHARS) {
+                prev = prev.substring(prev.length() - RESULT_MAX_CHARS) + "\n…(前序上下文已截断)";
+            }
+            String stepTask = step + (prev != null ? "\n\n前序步骤的成果参考：\n" + prev : "");
             String result = runSubAgent(stepTask, base, tools, model, ctx, stopCheck);
             context.append("[步骤").append(i + 1).append("] ").append(step).append("\n")
                    .append(result).append("\n\n");
@@ -147,25 +163,34 @@ public class AgentOrchestrator {
     private String runFanoutFanin(String task, String base, List<ToolDefinition> tools,
                                   String model, ToolContext ctx, java.util.function.BooleanSupplier stopCheck) {
         List<String> subtasks = planSteps(task, model, FANOUT_SYSTEM);
+        if (subtasks.size() > MAX_SUBTASKS) {
+            subtasks = new ArrayList<>(subtasks.subList(0, MAX_SUBTASKS));
+        }
         if (subtasks.size() <= 1) {
             // 无法拆分，直接单 Agent 执行
             return runSubAgent(task, base, tools, model, ctx, stopCheck);
         }
-        // 并发执行独立子任务
-        int n = Math.min(subtasks.size(), 4);
+        // 并发执行独立子任务（有界并行，每个子任务独立上下文）
+        int n = Math.min(subtasks.size(), MAX_FANOUT_PARALLEL);
         ExecutorService pool = ThreadManager.getInstance().newNamedFixed("Orchestrator-Fanout", n);
         List<Future<String>> futures = new ArrayList<>();
         for (final String sub : subtasks) {
+            final ToolContext subCtx = ctx != null ? ctx.copy() : null;
             futures.add(pool.submit(new Callable<String>() {
                 @Override
                 public String call() {
-                    return runSubAgent(sub, base, tools, model, ctx, stopCheck);
+                    return runSubAgent(sub, base, tools, model, subCtx, stopCheck);
                 }
             }));
         }
         // 收集结果（保持子任务顺序）
         List<String> results = new ArrayList<>();
         for (int i = 0; i < futures.size(); i++) {
+            if (stopCheck != null && stopCheck.getAsBoolean()) {
+                cancelAll(futures);
+                results.add("(已停止)");
+                continue;
+            }
             try {
                 String r = futures.get(i).get(600, TimeUnit.SECONDS);
                 results.add((r == null || r.trim().isEmpty()) ? "(子任务未产出结果)" : r);
@@ -195,8 +220,13 @@ public class AgentOrchestrator {
                                String model, ToolContext ctx, java.util.function.BooleanSupplier stopCheck) {
         FunctionCallingBridge bridge = new FunctionCallingBridge(client);
         bridge.setCritic(critic);
-        return bridge.runWithDispatcher(task, stableSystem, null, tools, model,
+        bridge.setMaxToolCalls(SUB_AGENT_MAX_TOOL_CALLS);
+        String result = bridge.runWithDispatcher(task, stableSystem, null, tools, model,
                 dispatcher, ctx, stopCheck);
+        if (result != null && result.length() > RESULT_MAX_CHARS) {
+            return result.substring(0, RESULT_MAX_CHARS) + "\n…(子任务结果过长已截断)";
+        }
+        return result;
     }
 
     // ==================== 规划 / 路由 / 聚合 ====================
@@ -208,7 +238,7 @@ public class AgentOrchestrator {
             List<ChatMessage> msgs = new ArrayList<>();
             msgs.add(new ChatMessage("system", systemPrompt));
             msgs.add(new ChatMessage("user", task));
-            String resp = client.chatSync(msgs, model);
+            String resp = client.chatSync(msgs, flashModel());
             steps = parseSteps(resp);
         } catch (Exception ignored) {
             // 规划失败回退
@@ -216,7 +246,14 @@ public class AgentOrchestrator {
         if (steps.isEmpty()) {
             steps.add(task);
         }
+        if (steps.size() > MAX_STEPS) {
+            steps = new ArrayList<>(steps.subList(0, MAX_STEPS));
+        }
         return steps;
+    }
+
+    private String flashModel() {
+        return sair.aiagent.core.AiConfig.getInstance().getExecqModel();
     }
 
     /** 解析步骤列表（每行 "数字. 内容"）。 */
@@ -240,7 +277,7 @@ public class AgentOrchestrator {
             List<ChatMessage> msgs = new ArrayList<>();
             msgs.add(new ChatMessage("system", ROUTER_SYSTEM));
             msgs.add(new ChatMessage("user", task));
-            String resp = client.chatSync(msgs, model);
+            String resp = client.chatSync(msgs, flashModel());
             if (resp != null) {
                 String r = resp.trim().toLowerCase();
                 if (r.contains("coder")) return "coder";
@@ -263,14 +300,16 @@ public class AgentOrchestrator {
     private String synthesize(String task, List<String> subtasks, List<String> results, String model) {
         StringBuilder body = new StringBuilder();
         for (int i = 0; i < subtasks.size(); i++) {
+            String r = results.get(i) == null ? "" : results.get(i);
+            if (r.length() > RESULT_MAX_CHARS) r = r.substring(0, RESULT_MAX_CHARS) + "\n…(已截断)";
             body.append("【子任务").append(i + 1).append("】").append(subtasks.get(i)).append("\n")
-                .append(results.get(i)).append("\n\n");
+                .append(r).append("\n\n");
         }
         try {
             List<ChatMessage> msgs = new ArrayList<>();
             msgs.add(new ChatMessage("system", SYNTHESIZER_SYSTEM));
             msgs.add(new ChatMessage("user", "原始任务：\n" + task + "\n\n子任务结果：\n" + body));
-            String resp = client.chatSync(msgs, model);
+            String resp = client.chatSync(msgs, flashModel());
             if (resp != null && !resp.trim().isEmpty()) return resp.trim();
         } catch (Exception ignored) {}
         return body.toString().trim();
@@ -280,5 +319,11 @@ public class AgentOrchestrator {
     private static String buildSoFar(StringBuilder context) {
         String s = context.toString().trim();
         return s.isEmpty() ? "(已停止)" : s + "\n\n(已停止)";
+    }
+
+    private static void cancelAll(List<Future<String>> futures) {
+        for (Future<String> f : futures) {
+            if (f != null) f.cancel(true);
+        }
     }
 }

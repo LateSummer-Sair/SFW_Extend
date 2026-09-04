@@ -6,7 +6,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -58,22 +62,50 @@ public class ThreadManager {
         };
     }
 
-    /** 创建/复用命名缓存线程池（无界，按需扩容，空闲回收）。 */
+    /** 创建/复用命名缓存线程池（有界，按需扩容，空闲回收）。 */
     public ExecutorService newNamedCached(String name) {
         ExecutorService e = pools.get(name);
         if (e == null) {
-            e = Executors.newCachedThreadPool(namedDaemonFactory(name));
-            pools.put(name, e);
+            ExecutorService created = new ThreadPoolExecutor(0, 32, 60L, TimeUnit.SECONDS,
+                    new SynchronousQueue<Runnable>(), namedDaemonFactory(name),
+                    new ThreadPoolExecutor.CallerRunsPolicy());
+            e = pools.putIfAbsent(name, created);
+            if (e == null) e = created;
         }
         return e;
+    }
+
+    /** 创建/复用命名调度线程池。 */
+    public ScheduledExecutorService newNamedScheduled(String name, int corePoolSize) {
+        ExecutorService e = pools.get(name);
+        if (e == null) {
+            ExecutorService created = Executors.newScheduledThreadPool(Math.max(1, corePoolSize),
+                    namedDaemonFactory(name));
+            e = pools.putIfAbsent(name, created);
+            if (e == null) e = created;
+        }
+        return (ScheduledExecutorService) e;
     }
 
     /** 创建/复用命名固定线程池。 */
     public ExecutorService newNamedFixed(String name, int nThreads) {
         ExecutorService e = pools.get(name);
         if (e == null) {
-            e = Executors.newFixedThreadPool(nThreads, namedDaemonFactory(name));
-            pools.put(name, e);
+            synchronized (this) {
+                e = pools.get(name);
+                if (e == null) {
+                    e = Executors.newFixedThreadPool(Math.max(1, nThreads), namedDaemonFactory(name));
+                    pools.put(name, e);
+                }
+            }
+        } else if (e instanceof java.util.concurrent.ThreadPoolExecutor) {
+            java.util.concurrent.ThreadPoolExecutor tpe = (java.util.concurrent.ThreadPoolExecutor) e;
+            int current = tpe.getMaximumPoolSize();
+            int want = Math.max(1, nThreads);
+            if (current != want) {
+                tpe.setCorePoolSize(want);
+                tpe.setMaximumPoolSize(want);
+            }
         }
         return e;
     }
@@ -82,8 +114,9 @@ public class ThreadManager {
     public ExecutorService newNamedSingle(String name) {
         ExecutorService e = pools.get(name);
         if (e == null) {
-            e = Executors.newSingleThreadExecutor(namedDaemonFactory(name));
-            pools.put(name, e);
+            ExecutorService created = Executors.newSingleThreadExecutor(namedDaemonFactory(name));
+            e = pools.putIfAbsent(name, created);
+            if (e == null) e = created;
         }
         return e;
     }
@@ -111,5 +144,26 @@ public class ThreadManager {
             try { t.interrupt(); } catch (Exception ignored) {}
         }
         daemonThreads.clear();
+    }
+
+    /** 运行时状态摘要：线程池数量 + 守护线程存活/总数 + 各池活跃线程/队列深度。 */
+    public String statusSummary() {
+        int alive = 0;
+        for (Thread t : daemonThreads) {
+            if (t != null && t.isAlive()) alive++;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("pools=").append(pools.size())
+          .append(", daemonThreads=").append(alive).append("/").append(daemonThreads.size());
+        for (Map.Entry<String, ExecutorService> e : pools.entrySet()) {
+            if (e.getValue() instanceof ThreadPoolExecutor) {
+                ThreadPoolExecutor tpe = (ThreadPoolExecutor) e.getValue();
+                sb.append("\n    ").append(e.getKey())
+                  .append(": active=").append(tpe.getActiveCount())
+                  .append("/").append(tpe.getMaximumPoolSize())
+                  .append(" queue=").append(tpe.getQueue().size());
+            }
+        }
+        return sb.toString();
     }
 }

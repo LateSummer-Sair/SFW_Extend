@@ -498,9 +498,15 @@ public class StickerManager {
                 AiAgentActivity.debugLog("[Sticker] review: image resolve failed, treat as unsafe");
                 return false;
             }
-            List<ChatMessage> msgs = new ArrayList<>();
-            msgs.add(ChatMessage.createMultimodal(REVIEW_PROMPT, Collections.singletonList(visionImage)));
-            String result = client.chatSync(msgs, AiConfig.getInstance().getVisionModel());
+            String cacheKey = sair.aiagent.onebot.ImageRecognizer.visionCacheKey(visionImage);
+            String cachedVision = sair.aiagent.onebot.ImageRecognizer.getCachedVisionResult(cacheKey);
+            String result = cachedVision;
+            if (result == null) {
+                result = client.chatVision(Collections.singletonList(visionImage), REVIEW_PROMPT);
+                if (result != null && !result.trim().isEmpty()) {
+                    sair.aiagent.onebot.ImageRecognizer.putCachedVisionResult(cacheKey, result);
+                }
+            }
             if (result == null || result.trim().isEmpty()) {
                 AiAgentActivity.debugLog("[Sticker] review: empty result, treat as unsafe");
                 return false;

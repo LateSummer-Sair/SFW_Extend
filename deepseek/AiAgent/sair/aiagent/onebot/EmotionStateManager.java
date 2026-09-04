@@ -169,7 +169,7 @@ public class EmotionStateManager {
         this.persistence = persistence;
         loadFromPersistence();
         
-        decayThread = new Thread(() -> {
+        decayThread = sair.aiagent.core.ThreadManager.getInstance().newDaemonThread("EmotionDecay", () -> {
             while (running) {
                 try {
                     Thread.sleep(60000);
@@ -178,8 +178,7 @@ public class EmotionStateManager {
                     break;
                 }
             }
-        }, "EmotionDecay");
-        decayThread.setDaemon(true);
+        });
         decayThread.start();
     }
     
@@ -558,8 +557,9 @@ public class EmotionStateManager {
     /** 记录群成员关系（群消息时调用），同时更新内存缓存与数据库。 */
     public void recordGroupMember(long groupId, long userId) {
         if (groupId <= 0 || userId <= 0) return;
-        groupMembers.computeIfAbsent(groupId, k -> ConcurrentHashMap.newKeySet()).add(userId);
-        if (persistence != null) {
+        Set<Long> members = groupMembers.computeIfAbsent(groupId, k -> ConcurrentHashMap.newKeySet());
+        // 仅新成员写库：内存集合启动时已加载，老成员无需每条消息重复 INSERT OR IGNORE
+        if (members.add(userId) && persistence != null) {
             persistence.recordGroupMember(groupId, userId);
         }
     }

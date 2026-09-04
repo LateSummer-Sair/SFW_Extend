@@ -26,11 +26,8 @@ public class GroupModeratorAgent {
     private final Map<Long, GroupModerationConfig> groupConfigs = new ConcurrentHashMap<>();
     
     /** 定时任务调度器 */
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(5, r -> {
-        Thread t = new Thread(r, "GroupModerator");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ScheduledExecutorService scheduler =
+            sair.aiagent.core.ThreadManager.getInstance().newNamedScheduled("GroupModerator", 5);
     
     /** 正在监控的群号集合 */
     private final Set<Long> monitoringGroups = ConcurrentHashMap.newKeySet();
@@ -291,14 +288,14 @@ public class GroupModeratorAgent {
         }
         
         // 2. 检查敏感词（如果启用）
-        if (config.isSensitiveWordCheckEnabled()) {
-            // TODO: 集成InternalAgents的敏感词检测
+        if (config.isSensitiveWordCheckEnabled() && internalAgents != null && internalAgents.hasSensitiveWord(content)) {
+            return new ViolationResult(true, "发送敏感内容");
         }
         
         // 3. 检查广告（如果启用）
         if (config.isAdCheckEnabled()) {
-            if (containsAdKeywords(content)) {
-                return new ViolationResult(true, "发送广告");
+            if (containsAdKeywords(content) || containsLink(content)) {
+                return new ViolationResult(true, "发送广告/链接");
             }
         }
         
@@ -320,6 +317,12 @@ public class GroupModeratorAgent {
                lower.contains("二维码") ||
                lower.contains("微信") ||
                lower.contains("公众号");
+    }
+
+    private boolean containsLink(String content) {
+        if (content == null) return false;
+        String lower = content.toLowerCase();
+        return lower.contains("http://") || lower.contains("https://") || lower.contains("www.");
     }
     
     /**

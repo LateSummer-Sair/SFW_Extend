@@ -22,15 +22,15 @@
         <h1><span class="gradient-text">AiAgent</span> · 智能代理插件</h1>
         <p class="lead">
           SairFrameWork 框架的 AI 智能代理 —— 原生 Function Calling 多轮循环、三层通道权限模型、
-          多智能体协作（AgentBus 递归通信 + AgentOrchestrator 编排）、技能自进化、四层记忆系统、
+          多智能体协作（AgentBus 递归通信 + AgentOrchestrator 编排）、技能自进化、八库记忆系统、
           QQ OneBot 机器人（统一记忆 + 群管理 + 好感度体系）、多模态图片识别。
           对接 DeepSeek V4 Vision API，流式逐字输出，SQLite 全局持久化，统一多线程治理。
         </p>
         <div class="stat-grid">
-          <div class="stat-card reveal"><div class="tint tint-cyan"></div><div class="num" data-target="92">0</div><div class="label">Java 源文件</div></div>
-          <div class="stat-card reveal" data-delay="1"><div class="tint tint-purple"></div><div class="num" data-target="31602">0</div><div class="label">代码行数</div></div>
-          <div class="stat-card reveal" data-delay="2"><div class="tint tint-magenta"></div><div class="num" data-target="57">0</div><div class="label">用户命令</div></div>
-          <div class="stat-card reveal" data-delay="3"><div class="tint tint-amber"></div><div class="num" data-target="71">0</div><div class="label">FC 工具</div></div>
+          <div class="stat-card reveal"><div class="tint tint-cyan"></div><div class="num" data-target="93">0</div><div class="label">Java 源文件</div></div>
+          <div class="stat-card reveal" data-delay="1"><div class="tint tint-purple"></div><div class="num" data-target="37211">0</div><div class="label">代码行数</div></div>
+          <div class="stat-card reveal" data-delay="2"><div class="tint tint-magenta"></div><div class="num" data-target="58">0</div><div class="label">用户命令</div></div>
+          <div class="stat-card reveal" data-delay="3"><div class="tint tint-amber"></div><div class="num" data-target="74">0</div><div class="label">FC 工具</div></div>
         </div>
       </div>
     </header>
@@ -49,7 +49,7 @@
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">三层通道权限模型</div><div class="f-desc">本地 execs（全量工具）→ QQ execq 普通消息（受限工具 + 仅 NapCat 技能）→ QQ execs: 关键字（全工具 + 全技能）。越权立即终止</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">技能自进化 + scope 四分类</div><div class="f-desc">SkillBank + SkillExtractor LLM 轨迹蒸馏 + RouteCache 路径权重缓存。scope 分 general/execq/task/persona，按通道按需注入</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">三方技能库（含代码段执行）</div><div class="f-desc">单文件 md 支持 java/js/nodejs/python 代码段，airun 入口签名动态注册为 tp_ 工具，直接 Function Calling 调用；agentskills.io 技能包渐进式披露</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">四层记忆系统</div><div class="f-desc">memories（持久记忆）/ notes（知识库）/ skills（技能）/ impressions（人格印象）四层架构，FTS5 全文检索 + 重要性加权 + 时间衰减</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">八库记忆系统</div><div class="f-desc">memories / notes / skills / impressions / conversations / stickers / corrections / group_impressions 八库架构，FTS5 全文检索 + 重要性加权 + 时间衰减</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">QQ OneBot v11 机器人</div><div class="f-desc">反向 WebSocket 接手群聊私聊，统一记忆库区分群聊/私聊，完整群管理（禁言/踢出/拉黑/设管/改群名/退群），跨群操作</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">多模态图片识别</div><div class="f-desc">DeepSeek V4 Vision 多模态直接看图理解（彻底移除在线 OCR），图片注释 MD5 强绑定持久化</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">人格印象系统</div><div class="f-desc">ImpressionExtractor 蒸馏每个 QQ 用户 5 维人格画像，回复时自动注入印象上下文实现个性化交互</div></div></li>
@@ -62,9 +62,9 @@
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">好友申请 / 群邀请 AI 决策</div><div class="f-desc">好友申请与群邀请不再自动处理，进入待处理请求池，AI 通过 pendingrequests/approvefriend/acceptgroupinvite 等工具按好感度决策；捐赠由主人私聊告知，AI 用 recorddonation 工具记录</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">Cron 定时 + 自动清屏</div><div class="f-desc">标准 cron 表达式持久化定时任务，重启恢复；AutoClear 守护线程每 3 分钟防日志 OOM</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">系统闹钟（AI Alarm）</div><div class="f-desc">alarm 工具创建到点唤醒 AI 的闹钟：语义解析 once/daily/weekly 三种 schedule，上下文快照持久化，到点重建上下文走 Agent 链路执行任务；普通用户到点仅提醒、主人走受限链路、execs/本地走全权限</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">配置持久化 + AES 加密</div><div class="f-desc">API Key AES-GCM 加密存储（兼容旧 ECB 回退），DeepSeek 高级参数（reasoning/温度/频率惩罚）自动保存</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">配置持久化 + AES 加密 + 校验日志</div><div class="f-desc">API Key AES-GCM 加密存储（兼容旧 ECB 回退），DeepSeek 高级参数（reasoning/温度/频率惩罚）自动保存，加载后校验关键配置并记录回退日志</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">模型智能路由</div><div class="f-desc">model=auto 时本地 execs 走 deepseek-v4-pro（深度推理）、QQ execq 走 deepseek-v4-flash（轻量快速）</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">Harness 可观测性</div><div class="f-desc">HarnessTrace 执行轨迹 SQLite 持久化 + HarnessEval 评测报告（成功率/平均工具调用/耗时），FC 循环全程埋点（/harnesseval）</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">Harness 可观测性 + 工具遥测</div><div class="f-desc">HarnessTrace 执行轨迹 SQLite 持久化 + HarnessEval 评测报告（成功率/平均工具调用/耗时），ToolCallTrace 记录每次工具调用轻量遥测，ai/status 查看运行时状态与最近轨迹</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">五级上下文压缩管线</div><div class="f-desc">ContextPipeline L1 token 预算 → L2 截断 → L3 LLM 摘要 → L4 重要性加权 → L5 FTS 检索，动态分配各层上下文预算</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">统一多线程治理</div><div class="f-desc">ThreadManager 统一命名线程池 + OneBot 连接池 + FC 多工具并发执行 + execPool 可配置背压 + 工具执行 120s 超时</div></div></li>
         </ul>
@@ -80,11 +80,11 @@
           <a href="architecture.html" class="card tilt"><div class="card-icon ic-cyan">🏗</div><h3>系统架构</h3><p>分层架构 · 数据流 · Function Calling 循环 · 多 Agent 协作 · 上下文注入链</p><span class="more">查看</span></a>
           <a href="permissions.html" class="card tilt"><div class="card-icon ic-purple">🔐</div><h3>权限与通道</h3><p>三层权限模型 · 工具权限矩阵 · 好感度门槛 · 高危代码拦截</p><span class="more">查看</span></a>
           <a href="skills.html" class="card tilt"><div class="card-icon ic-magenta">🧠</div><h3>技能系统</h3><p>内置技能库 · 三方技能 · 技能包 · 技能蒸馏 · 路径路由</p><span class="more">查看</span></a>
-          <a href="memory.html" class="card tilt"><div class="card-icon ic-amber">💾</div><h3>记忆系统</h3><p>六库存储 · 人格印象 · 纠正记录 · 记忆生命周期</p><span class="more">查看</span></a>
-          <a href="commands.html" class="card tilt"><div class="card-icon ic-green">📋</div><h3>命令参考</h3><p>57 个用户命令 · 71 个 FC 工具 · 部署三步</p><span class="more">查看</span></a>
-          <a href="classes.html" class="card tilt"><div class="card-icon ic-blue">📦</div><h3>类结构</h3><p>92 个 Java 类 · 9 个包 · 核心类职责</p><span class="more">查看</span></a>
+          <a href="memory.html" class="card tilt"><div class="card-icon ic-amber">💾</div><h3>记忆系统</h3><p>八库存储 · 人格印象 · 纠正记录 · 记忆生命周期</p><span class="more">查看</span></a>
+          <a href="commands.html" class="card tilt"><div class="card-icon ic-green">📋</div><h3>命令参考</h3><p>58 个用户命令 · 74 个 FC 工具 · 部署三步</p><span class="more">查看</span></a>
+          <a href="classes.html" class="card tilt"><div class="card-icon ic-blue">📦</div><h3>类结构</h3><p>93 个 Java 类 · 9 个包 · 核心类职责</p><span class="more">查看</span></a>
           <a href="patterns.html" class="card tilt"><div class="card-icon ic-cyan">🎨</div><h3>设计模式</h3><p>策略 · 观察者 · 单例 · 桥接 · 模板方法 · 注册表</p><span class="more">查看</span></a>
-          <a href="changelog.html" class="card tilt"><div class="card-icon ic-amber">📜</div><h3>更新日志</h3><p>V1.0 → V3.8 版本演进 · 功能里程碑</p><span class="more">查看</span></a>
+          <a href="changelog.html" class="card tilt"><div class="card-icon ic-amber">📜</div><h3>更新日志</h3><p>V1.0 → V3.9 版本演进 · 功能里程碑</p><span class="more">查看</span></a>
         </div>
       </section>
 
@@ -110,8 +110,8 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.8 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
-        <p style="margin-top:6px">原生 Function Calling · 多智能体协作 · 三层权限模型 · 技能自进化 · 三方技能代码段 · 技能包 · 四层记忆 · 人格印象 · 情绪陪伴 · 好感度六级权限 · 跨群记忆检索 · 拟人化监听态 · 好友申请/群邀请 AI 决策 · 多模态识别 · AES-GCM · SSRF 防护 · Redis 缓存 · Cron 定时 · 系统闹钟</p>
+        <p><span class="brand">AiAgent</span> v3.9 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
+        <p style="margin-top:6px">原生 Function Calling · 多智能体协作 · 三层权限模型 · 技能自进化 · 三方技能代码段 · 技能包 · 八库记忆 · 人格印象 · 情绪陪伴 · 好感度六级权限 · 跨群记忆检索 · 拟人化监听态 · 好友申请/群邀请 AI 决策 · 多模态识别 · AES-GCM · SSRF 防护 · Redis 缓存 · Cron 定时 · 系统闹钟 · 工具遥测 · ai/status</p>
       </div>
     </footer>
   </main>

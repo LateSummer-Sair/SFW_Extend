@@ -386,6 +386,11 @@ public class InternalAgents {
                lower.contains("骚");
     }
     
+    /** 供群管 Agent 复用的敏感词检测入口。 */
+    public boolean hasSensitiveWord(String content) {
+        return containsSensitiveWords(content);
+    }
+
     /**
      * 添加敏感词
      */
@@ -419,6 +424,9 @@ public class InternalAgents {
         }
     }
     
+    /** 自定义规则存储（规则名 → 触发动作）。 */
+    private final Map<String, Runnable> customRules = new ConcurrentHashMap<>();
+
     /**
      * 添加自定义规则（由主人定义）
      * @param ruleName 规则名称
@@ -426,8 +434,36 @@ public class InternalAgents {
      * @param action 触发动作
      */
     public void addCustomRule(String ruleName, String ruleDescription, Runnable action) {
-        // TODO: 实现规则存储和执行
+        if (ruleName == null || ruleName.trim().isEmpty() || action == null) return;
+        customRules.put(ruleName.trim(), action);
         AiAgentActivity.debugLog("[RuleAgent] 添加自定义规则: " + ruleName + " | 描述: " + ruleDescription);
+    }
+
+    /** 按名称执行自定义规则；不存在返回 false。 */
+    public boolean runCustomRule(String ruleName) {
+        Runnable action = ruleName == null ? null : customRules.get(ruleName.trim());
+        if (action == null) return false;
+        try {
+            action.run();
+            return true;
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[RuleAgent] 自定义规则执行失败: " + ruleName + " -> " + e.toString());
+            return false;
+        }
+    }
+
+    /** 按消息内容匹配自定义规则名（规则名作为触发关键词），命中则执行。 */
+    public boolean runCustomRulesMatching(String content) {
+        if (content == null || content.trim().isEmpty() || customRules.isEmpty()) return false;
+        String c = content.toLowerCase();
+        boolean ran = false;
+        for (Map.Entry<String, Runnable> e : customRules.entrySet()) {
+            if (e.getKey() != null && c.contains(e.getKey().toLowerCase())) {
+                try { e.getValue().run(); ran = true; }
+                catch (Exception ex) { AiAgentActivity.debugLog("[RuleAgent] 自定义规则执行失败: " + e.getKey()); }
+            }
+        }
+        return ran;
     }
     
     // ==================== 统计和日志 ====================

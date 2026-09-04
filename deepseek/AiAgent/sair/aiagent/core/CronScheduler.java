@@ -2,7 +2,8 @@ package sair.aiagent.core;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Executors;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -42,14 +43,11 @@ public class CronScheduler {
         }
     }
 
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "AiAgent-Cron");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ScheduledExecutorService scheduler =
+            ThreadManager.getInstance().newNamedScheduled("AiAgent-Cron", 1);
 
     private final PersistenceManager persistence;
-    private final List<ScheduledFuture<?>> futures = new ArrayList<>();
+    private final Map<Integer, ScheduledFuture<?>> futures = new ConcurrentHashMap<>();
     private volatile Runnable taskCallback;
 
     public CronScheduler(PersistenceManager persistence) {
@@ -72,13 +70,12 @@ public class CronScheduler {
         AiAgentActivity.debugLog("[CronScheduler] 已加载 " + tasks.size() + " 个任务，启用 " + futures.size() + " 个");
     }
 
-    /** 停止所有定时任务 */
+    /** 停止所有定时任务（不关闭共享调度线程池）。 */
     public void stop() {
-        for (ScheduledFuture<?> f : futures) {
+        for (ScheduledFuture<?> f : futures.values()) {
             f.cancel(false);
         }
         futures.clear();
-        scheduler.shutdown();
     }
 
     /** 添加任务 */
@@ -115,6 +112,8 @@ public class CronScheduler {
     /** 移除任务 */
     public String removeTask(int id) {
         if (persistence.removeCronTask(id)) {
+            ScheduledFuture<?> f = futures.remove(id);
+            if (f != null) f.cancel(false);
             return "[schedule] 任务 #" + id + " 已移除";
         }
         return "[schedule] 任务 #" + id + " 不存在";
@@ -140,12 +139,18 @@ public class CronScheduler {
 
         persistence.setCronTaskEnabled(id, false);
         task.enabled = false;
+        ScheduledFuture<?> f = futures.remove(id);
+        if (f != null) f.cancel(false);
         return "[schedule] 任务 #" + id + " 已禁用: " + task.cronExpr;
     }
 
     private void scheduleTask(CronTask task) {
         long[] period = parseCronToPeriod(task.cronExpr);
         if (period == null) return;
+
+        // 取消旧调度，避免重复执行
+        ScheduledFuture<?> old = futures.remove(task.id);
+        if (old != null) old.cancel(false);
 
         long initialDelay = period[0];
         long repeatPeriod = period[1];
@@ -165,7 +170,7 @@ public class CronScheduler {
             }
         }, initialDelay, repeatPeriod, TimeUnit.MILLISECONDS);
 
-        futures.add(future);
+        futures.put(task.id, future);
     }
 
     /**

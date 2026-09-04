@@ -106,6 +106,11 @@ public class AiConfig {
 
     /** 消息触发词列表（多个用 ; 分隔，用于群聊中提到任一触发词时触发回复；第一个作为主名字展示） */
     private String botName = "";
+    /** 触发词拆分结果缓存（botName 变更时失效），避免每条消息重复 split。 */
+    private volatile List<String> cachedTriggerWords;
+
+    /** QQ 通道文件访问根目录（分号分隔；留空=不限制）。 */
+    private String qqFileAccessRoots = "";
 
     /** 文件下载目录（接收主人发送的文件存储位置） */
     private String fileDownloadPath = "";
@@ -191,6 +196,9 @@ public class AiConfig {
             redisPassword = p.getProperty("redisPassword", "");
             // AI机器人名字
             botName = p.getProperty("botName", "");
+            cachedTriggerWords = null;
+            // QQ 通道文件访问根目录（分号分隔，留空=不限制）
+            qqFileAccessRoots = p.getProperty("qqFileAccessRoots", "");
             // 文件下载目录
             fileDownloadPath = p.getProperty("fileDownloadPath", "");
             // 文件中转服务对外访问地址（空=自动探测局域网 IP）
@@ -207,9 +215,74 @@ public class AiConfig {
             try { frequencyPenalty = Double.parseDouble(p.getProperty("frequencyPenalty", "-1")); } catch (NumberFormatException ignored) {}
             try { presencePenalty = Double.parseDouble(p.getProperty("presencePenalty", "-1")); } catch (NumberFormatException ignored) {}
             strictMode = "true".equalsIgnoreCase(p.getProperty("strictMode", "false"));
-        } catch (Exception ignored) {
-            // 读取失败则使用默认值
+        } catch (Exception e) {
+            // 读取失败则使用默认值，并记录原因便于排查
+            try {
+                sair.aiagent.AiAgentActivity.debugLog("[AiConfig] 配置读取失败，使用默认值: " + e.toString());
+            } catch (Exception ignored) {}
         }
+        validateAndLog();
+    }
+
+    /** 加载后校验关键配置，非法值回退默认并输出日志。 */
+    private void validateAndLog() {
+        List<String> warnings = new ArrayList<>();
+        if (apiUrl == null || apiUrl.trim().isEmpty()
+                || (!apiUrl.startsWith("http://") && !apiUrl.startsWith("https://"))) {
+            warnings.add("apiUrl 非法，回退默认");
+            apiUrl = DEFAULT_API_URL;
+        }
+        if (model == null || model.trim().isEmpty()) {
+            warnings.add("model 为空，回退 auto");
+            model = DEFAULT_MODEL;
+        }
+        if (onebotPort < 1 || onebotPort > 65535) {
+            warnings.add("onebotPort 非法，回退 5800");
+            onebotPort = 5800;
+        }
+        if (onebotSelfId < 0) {
+            warnings.add("onebotSelfId 非法，回退 0");
+            onebotSelfId = 0;
+        }
+        if (redisPort < 1 || redisPort > 65535) {
+            warnings.add("redisPort 非法，回退 6379");
+            redisPort = 6379;
+        }
+        if (redisDb < 0 || redisDb > 15) {
+            warnings.add("redisDb 非法，回退 1");
+            redisDb = 1;
+        }
+        if (fileServerPort < 1 || fileServerPort > 65535) {
+            warnings.add("fileServerPort 非法，回退 2671");
+            fileServerPort = 2671;
+        }
+        if (temperature != -1 && (temperature < 0 || temperature > 2.0)) {
+            warnings.add("temperature 越界，回退 -1");
+            temperature = -1;
+        }
+        if (topP != -1 && (topP < 0 || topP > 1.0)) {
+            warnings.add("topP 越界，回退 -1");
+            topP = -1;
+        }
+        if (maxOutputTokens < 0) {
+            warnings.add("maxOutputTokens 非法，回退 0");
+            maxOutputTokens = 0;
+        }
+        if (frequencyPenalty != -1 && (frequencyPenalty < -2.0 || frequencyPenalty > 2.0)) {
+            warnings.add("frequencyPenalty 越界，回退 -1");
+            frequencyPenalty = -1;
+        }
+        if (presencePenalty != -1 && (presencePenalty < -2.0 || presencePenalty > 2.0)) {
+            warnings.add("presencePenalty 越界，回退 -1");
+            presencePenalty = -1;
+        }
+        try {
+            if (warnings.isEmpty()) {
+                sair.aiagent.AiAgentActivity.debugLog("[AiConfig] 配置校验通过: " + configFile.getAbsolutePath());
+            } else {
+                sair.aiagent.AiAgentActivity.debugLog("[AiConfig] 配置校验: " + String.join("; ", warnings));
+            }
+        } catch (Exception ignored) {}
     }
 
     /**
@@ -254,6 +327,7 @@ public class AiConfig {
             p.setProperty("redisPassword", redisPassword);
             // AI机器人名字
             p.setProperty("botName", botName);
+            p.setProperty("qqFileAccessRoots", qqFileAccessRoots);
             p.setProperty("fileDownloadPath", fileDownloadPath);
             p.setProperty("fileServerHost", fileServerHost);
             p.setProperty("fileServerPort", String.valueOf(fileServerPort));
@@ -364,6 +438,28 @@ public class AiConfig {
     
     /** 设置文件下载目录 */
     public void setFileDownloadPath(String path) { this.fileDownloadPath = (path != null) ? path.trim() : ""; }
+
+    /** QQ 通道文件访问根目录（分号分隔；留空=不限制）。 */
+    public String getQqFileAccessRoots() { return qqFileAccessRoots; }
+    public void setQqFileAccessRoots(String roots) { this.qqFileAccessRoots = (roots != null) ? roots.trim() : ""; }
+
+    /** 判断 QQ 通道是否允许访问指定路径；未配置根目录时默认放行。 */
+    public boolean isQqFileAccessAllowed(String path) {
+        if (qqFileAccessRoots == null || qqFileAccessRoots.trim().isEmpty()) return true;
+        if (path == null || path.trim().isEmpty()) return false;
+        java.io.File target = new java.io.File(path.trim());
+        String abs;
+        try { abs = target.getCanonicalPath(); } catch (Exception e) { abs = target.getAbsolutePath(); }
+        for (String root : qqFileAccessRoots.split(";")) {
+            String r = root.trim();
+            if (r.isEmpty()) continue;
+            try {
+                String canonRoot = new java.io.File(r).getCanonicalPath();
+                if (abs.equals(canonRoot) || abs.startsWith(canonRoot + java.io.File.separator)) return true;
+            } catch (Exception ignored) {}
+        }
+        return false;
+    }
 
     /** 获取文件中转服务对外访问地址（空=自动探测局域网 IP） */
     public String getFileServerHost() { return fileServerHost; }
@@ -528,14 +624,18 @@ public class AiConfig {
         return botName != null ? botName.trim() : "";
     }
 
-    /** 获取所有触发词（按 ; 拆分，去空白去空项） */
+    /** 获取所有触发词（按 ; 拆分，去空白去空项；结果缓存，botName 变更时失效） */
     public List<String> getTriggerWords() {
+        List<String> cached = cachedTriggerWords;
+        if (cached != null) return cached;
         List<String> words = new ArrayList<>();
-        if (botName == null || botName.trim().isEmpty()) return words;
-        for (String w : botName.split(";")) {
-            String t = w.trim();
-            if (!t.isEmpty()) words.add(t);
+        if (botName != null && !botName.trim().isEmpty()) {
+            for (String w : botName.split(";")) {
+                String t = w.trim();
+                if (!t.isEmpty()) words.add(t);
+            }
         }
+        cachedTriggerWords = words;
         return words;
     }
 
@@ -552,13 +652,14 @@ public class AiConfig {
 
     /** 设置触发词（多个用 ; 分隔，自动去空白、去空项、去重后重新拼接存储） */
     public void setBotName(String name) {
-        if (name == null) { this.botName = ""; return; }
+        if (name == null) { this.botName = ""; cachedTriggerWords = null; return; }
         LinkedHashSet<String> seen = new LinkedHashSet<>();
         for (String w : name.split(";")) {
             String t = w.trim();
             if (!t.isEmpty()) seen.add(t);
         }
         this.botName = String.join(";", seen);
+        cachedTriggerWords = null;
     }
 
     // === DeepSeek API 高级参数 Getters/Setters ===

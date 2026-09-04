@@ -4,7 +4,9 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import sair.sys.IRLabel;
 import sair.sys.IRRunnable;
@@ -64,8 +66,19 @@ public class IREHelper {
 		}
 	}
 
+	/** /TO: 递归跳转的最大深度（防止死循环之外的超深链） */
+	private static final int MAX_IR_DEPTH = 256;
+
 	/** 递归执行一行 ir 命令，处理 /TO: 标签跳转 */
 	private static void runLine(IRRunnable irr, String line) {
+		runLine0(irr, line, new HashSet<String>(), 0);
+	}
+
+	private static void runLine0(IRRunnable irr, String line, Set<String> active, int depth) {
+		if (depth > MAX_IR_DEPTH) {
+			SairCons.println("ire: /TO: 跳转层级过深或被阻断 [" + depth + "]");
+			return;
+		}
 		if (line == null)
 			return;
 		line = line.replaceAll("^\\s+", "");
@@ -75,15 +88,22 @@ public class IREHelper {
 			String name = line.substring(TO.length()).trim();
 			if (name.isEmpty())
 				return;
+			if (!active.add(name)) {
+				// 标签在当前跳转链上重复出现，说明存在循环，终止以避免栈溢出
+				SairCons.println("ire: ir 标签循环跳转被终止 [" + name + "]");
+				return;
+			}
 			IRLabel label = irr.getLabel(name);
 			if (label == null) {
 				SairCons.println("ire: ir label not found [" + name + "]");
+				active.remove(name);
 				return;
 			}
 			List<String> lines = label.getLines();
 			if (lines != null)
 				for (String l : lines)
-					runLine(irr, l);
+					runLine0(irr, l, active, depth + 1);
+			active.remove(name);
 		} else {
 			SairCons.runner(false, line);
 		}

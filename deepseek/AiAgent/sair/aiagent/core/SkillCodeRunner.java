@@ -6,8 +6,11 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import sair.aiagent.model.ThirdPartySkill;
 
@@ -69,15 +72,37 @@ public class SkillCodeRunner {
         if (argsJson == null || argsJson.trim().isEmpty()) argsJson = "null";  // 空参规范化为 JSON null，避免 JSON.parse("") 报错
 
         // 语言优先级：java > js > nodejs > python（原生优先，外部运行时靠后）
+        final String aj = argsJson;
         String javaCode = blocks.get("java");
-        if (javaCode != null && !javaCode.isEmpty()) return invokeJava(skill.getName(), javaCode, argsJson);
+        if (javaCode != null && !javaCode.isEmpty()) {
+            final String jc = javaCode;
+            return timed(() -> invokeJava(skill.getName(), jc, aj));
+        }
         String jsCode = blocks.get("js");
-        if (jsCode != null && !jsCode.isEmpty()) return invokeJs(jsCode, argsJson);
+        if (jsCode != null && !jsCode.isEmpty()) {
+            final String jsc = jsCode;
+            return timed(() -> invokeJs(jsc, aj));
+        }
         String nodeCode = blocks.get("nodejs");
         if (nodeCode != null && !nodeCode.isEmpty()) return invokeExternal("node", ".js", nodeCode, argsJson, "nodejs");
         String pyCode = blocks.get("python");
         if (pyCode != null && !pyCode.isEmpty()) return invokeExternal("python", ".py", pyCode, argsJson, "python");
         return "[callskill] 无可用代码段";
+    }
+
+    /** 对原生执行（Java/JS）加超时保护，防止死循环拖垮线程。 */
+    private String timed(Callable<String> callable) {
+        Future<String> f = ThreadManager.getInstance()
+                .newNamedFixed("SkillCodeRun", 2)
+                .submit(callable);
+        try {
+            return f.get(EXEC_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException te) {
+            f.cancel(true);
+            return "[callskill] 代码执行超时（" + EXEC_TIMEOUT_SECONDS + " 秒）";
+        } catch (Exception e) {
+            return "[callskill] 代码执行失败: " + e.toString();
+        }
     }
 
     // ==================== Java ====================
@@ -161,6 +186,9 @@ public class SkillCodeRunner {
             if (!p.waitFor(EXEC_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
                 return "[callskill] " + cmd + " 执行超时（" + EXEC_TIMEOUT_SECONDS + " 秒）";
+            }
+            if (outFile.length() > 64 * 1024) {
+                return "[callskill] " + cmd + " 输出超过 64KB 上限，已拒绝";
             }
             String out = new String(Files.readAllBytes(outFile.toPath()), StandardCharsets.UTF_8);
             int exit = p.exitValue();

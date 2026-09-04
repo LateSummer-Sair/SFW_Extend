@@ -2,6 +2,8 @@ package sair.aiagent.onebot;
 
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import sair.aiagent.AiAgentActivity;
 import sair.aiagent.core.AgentExecutor;
@@ -16,6 +18,9 @@ class QQAgentBridge {
 
     /** execq 随机配表情包的概率（0.0~1.0），命中时才从库存随机挑一个追加 */
     private static final double STICKER_RANDOM_PROBABILITY = 0.4;
+
+    /** 群聊拟人化回复的默认最大长度，超过后优先拆成短消息。 */
+    private static final int GROUP_HUMAN_MAX_LEN = 180;
 
     /** 单条 QQ 消息最大长度（极端兜底上限，正常由 AI 用 <split> 语义分段，程序仅在超长时兜底切割）。 */
     private static final int MAX_MSG_LEN = 1000;
@@ -137,6 +142,10 @@ class QQAgentBridge {
 
     // ==================== 消息发送 ====================
 
+    private static final Pattern QUOTE_PATTERN = Pattern.compile(
+            "<quote\\s+id\\s*=\\s*[\"']?(\\d+)[\"']?\\s*>(.*?)</quote>",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
     void sendReply(QQMessage msg, String text) {
         if (server == null || text == null || text.trim().isEmpty()) return;
         if (msg.isGroupMessage()) {
@@ -146,14 +155,113 @@ class QQAgentBridge {
         }
     }
 
+    void sendReplyWithQuote(QQMessage msg, long quoteMessageId, String text) {
+        if (server == null || text == null || text.trim().isEmpty()) return;
+        if (!msg.isGroupMessage() || quoteMessageId <= 0 || !isQuoteAllowed(msg, quoteMessageId)) {
+            sendReply(msg, text);
+            return;
+        }
+        String payload = "[CQ:reply,id=" + quoteMessageId + "]" + text;
+        server.sendGroupMsg(msg.getGroupId(), payload);
+    }
+
+    /** 只允许引用当前群聊候选消息，避免模型输出错误 ID 后发送无效引用。 */
+    private boolean isQuoteAllowed(QQMessage msg, long quoteMessageId) {
+        if (unifiedMemory == null || !msg.isGroupMessage() || quoteMessageId <= 0) return false;
+        try {
+            List<String[]> history = unifiedMemory.getRecentGroupChatHistoryWithMessageId(msg.getGroupId(), 25);
+            if (history == null) return false;
+            for (String[] h : history) {
+                if (h != null && h.length > 4 && String.valueOf(quoteMessageId).equals(h[4])) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {
+            // 校验失败时降级为普通回复
+        }
+        return false;
+    }
+
+    /** 解析最终回复中的引用标记，返回 [quoteMessageId, cleanText]；无引用时 quoteMessageId 为 0。 */
+    private String[] extractQuoteReply(String text) {
+        if (text == null) return new String[]{"0", text};
+        Matcher m = QUOTE_PATTERN.matcher(text);
+        if (!m.find()) return new String[]{"0", text};
+        long id;
+        try {
+            id = Long.parseLong(m.group(1));
+        } catch (NumberFormatException e) {
+            return new String[]{"0", text};
+        }
+        String body = m.group(2).trim();
+        String clean = text.substring(0, m.start()) + body + text.substring(m.end());
+        return new String[]{String.valueOf(id), clean.trim()};
+    }
+
     void sendMultipleReplies(QQMessage msg, List<String> texts) {
+        sendMultipleReplies(msg, texts, true);
+    }
+
+    void sendMultipleReplies(QQMessage msg, List<String> texts, boolean humanizedDelay) {
         if (texts == null || texts.isEmpty()) return;
+        int index = 0;
         for (String text : texts) {
-            if (text != null && !text.trim().isEmpty()) {
-                sendReply(msg, text);
-                try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+            if (text == null || text.trim().isEmpty()) continue;
+            sendReply(msg, text);
+            index++;
+            if (humanizedDelay && index < texts.size()) {
+                try { Thread.sleep(humanDelayMs()); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
             }
         }
+    }
+
+    /** 拟人化发送：群聊短句优先，长文本拆条，引用只用于第一条。 */
+    private void sendHumanizedReplies(QQMessage msg, List<String> messages, long quoteMessageId, boolean bareMention) {
+        if (messages == null || messages.isEmpty()) return;
+        List<String> out = new ArrayList<>();
+        for (String m : messages) {
+            String cleaned = postProcessReplyText(m, msg.isGroupMessage());
+            if (cleaned == null || cleaned.trim().isEmpty()) continue;
+            if (msg.isGroupMessage() && cleaned.length() > GROUP_HUMAN_MAX_LEN) {
+                out.addAll(splitIntoMessages(cleaned, GROUP_HUMAN_MAX_LEN));
+            } else {
+                out.add(cleaned);
+            }
+        }
+        if (out.isEmpty()) return;
+        if (bareMention && msg.isGroupMessage()) {
+            out.set(0, "[CQ:at,qq=" + msg.getUserId() + "] " + out.get(0));
+        }
+        AiAgentActivity.qqLog("[Humanize] 群=" + (msg.isGroupMessage() ? msg.getGroupId() : "private")
+                + " 条数=" + out.size()
+                + " 引用=" + quoteMessageId
+                + " 首条长度=" + out.get(0).length());
+        if (quoteMessageId > 0 && msg.isGroupMessage()) {
+            sendReplyWithQuote(msg, quoteMessageId, out.get(0));
+            if (out.size() > 1) {
+                sendMultipleReplies(msg, out.subList(1, out.size()), true);
+            }
+        } else {
+            sendMultipleReplies(msg, out, true);
+        }
+    }
+
+    /** 去掉明显 AI 味，并压缩群聊回复。 */
+    private String postProcessReplyText(String text, boolean group) {
+        if (text == null) return null;
+        String t = text.trim();
+        t = t.replaceAll("(?i)^(作为\\s*AI|作为人工智能|根据我的理解|希望以上信息对你有帮助)[，。:：\\s]*", "");
+        t = t.replaceAll("(?i)(希望以上信息对你有帮助|如果还有问题可以继续问我|有其他问题随时问我)[。！!\\s]*$", "");
+        t = t.replaceAll("\\n{3,}", "\n\n").trim();
+        if (group && t.length() > GROUP_HUMAN_MAX_LEN * 2) {
+            t = t.substring(0, GROUP_HUMAN_MAX_LEN * 2).trim();
+        }
+        return t;
+    }
+
+    private long humanDelayMs() {
+        return 800L + (long) (Math.random() * 1700L);
     }
 
     // ==================== 任务描述 ====================
@@ -275,31 +383,35 @@ class QQAgentBridge {
     // ==================== 消息分割 ====================
 
     List<String> splitIntoMessages(String text) {
+        return splitIntoMessages(text, MAX_MSG_LEN);
+    }
+
+    List<String> splitIntoMessages(String text, int maxLen) {
         List<String> messages = new ArrayList<>();
         if (text == null || text.isEmpty()) return messages;
         String t = text.trim();
-        if (t.length() <= MAX_MSG_LEN) {
+        if (t.length() <= maxLen) {
             messages.add(t);
             return messages;
         }
         // 1. 先切分成「语义单元」：``` 代码块作为不可分割的原子单元，其余按空行段落切分
         List<String> units = splitSemanticUnits(t);
-        // 2. 按 MAX_MSG_LEN 合并语义单元，尽量不在单元内部切割
+        // 2. 按 maxLen 合并语义单元，尽量不在单元内部切割
         StringBuilder current = new StringBuilder();
         for (String unit : units) {
-            if (unit.length() > MAX_MSG_LEN) {
+            if (unit.length() > maxLen) {
                 // 单元本身超长（如超长代码块/段落）：先 flush 当前缓冲，再单独切分
                 if (current.length() > 0) {
                     messages.add(current.toString().trim());
                     current.setLength(0);
                 }
-                for (String piece : splitLongParagraph(unit)) {
+                for (String piece : splitLongParagraph(unit, maxLen)) {
                     messages.add(piece);
                 }
                 continue;
             }
             int mergedLen = current.length() + (current.length() > 0 ? 2 : 0) + unit.length();
-            if (mergedLen > MAX_MSG_LEN && current.length() > 0) {
+            if (mergedLen > maxLen && current.length() > 0) {
                 messages.add(current.toString().trim());
                 current.setLength(0);
             }
@@ -349,19 +461,19 @@ class QQAgentBridge {
         }
     }
 
-    /** 把超长段落切成 ≤MAX_MSG_LEN 的片段，优先在换行/句末标点处切。 */
-    private List<String> splitLongParagraph(String para) {
+    /** 把超长段落切成 ≤maxLen 的片段，优先在换行/句末标点处切。 */
+    private List<String> splitLongParagraph(String para, int maxLen) {
         List<String> pieces = new ArrayList<>();
         int pos = 0;
         int n = para.length();
         while (pos < n) {
-            int end = Math.min(pos + MAX_MSG_LEN, n);
+            int end = Math.min(pos + maxLen, n);
             if (end < n) {
                 int nl = para.lastIndexOf('\n', end - 1);
                 if (nl > pos) {
                     end = nl;
                 } else {
-                    for (int i = end - 1; i > pos + MAX_MSG_LEN / 2; i--) {
+                    for (int i = end - 1; i > pos + maxLen / 2; i--) {
                         char ch = para.charAt(i);
                         if (ch == '。' || ch == '！' || ch == '？' || ch == '!' || ch == '?' || ch == '；' || ch == ';') {
                             end = i + 1;
@@ -398,6 +510,7 @@ class QQAgentBridge {
             return;
         }
 
+        boolean typingOn = false;
         try {
             // 语音消息：若异步转文字尚未完成，直接告知用户，无需等待（异步转文字完成后会自动注入聊天记录）
             if (msg.hasRecord() && (msg.getVoiceText() == null || msg.getVoiceText().isEmpty())) {
@@ -433,6 +546,10 @@ class QQAgentBridge {
             toolCtx.pendingRequestPool = pendingRequestPool;
             toolCtx.emotionManager = emotionManager;
 
+            // 私聊显示“正在输入”，回复前取消，提升交互感
+            typingOn = !msg.isGroupMessage();
+            if (typingOn) setTyping(msg, true);
+
             String aiResponse;
             if (useExecs) {
                 AiAgentActivity.qqLog("[QQMsg] 主人execs消息，执行完整execs链路（Function Calling 全工具）");
@@ -458,20 +575,32 @@ class QQAgentBridge {
             if (aiResponse != null && !aiResponse.trim().isEmpty()) {
                 AiAgentActivity.qqLog("[QQMsg] AI返回文本: 长度=" + aiResponse.length()
                         + ", 前100字=" + (aiResponse.length() > 100 ? aiResponse.substring(0, 100) + "..." : aiResponse));
+                String[] quote = extractQuoteReply(aiResponse);
+                long quoteMessageId = Long.parseLong(quote[0]);
+                String quoteClean = quote[1] != null ? quote[1] : aiResponse;
+                String cleanResponse = quoteClean.replaceAll("<[^>]+>", "").trim();
+
+                // 记忆落库：存储去标签后的干净文本，避免 <quote>/<split> 等标记污染聊天记录浪费 token
+                String memoryContent = cleanResponse.isEmpty() ? aiResponse : cleanResponse;
                 if (msg.isGroupMessage()) {
-                    unifiedMemory.addConversation("assistant", aiResponse, "group",
+                    unifiedMemory.addConversation("assistant", memoryContent, "group",
                         msg.getGroupId(), selfId, null);
+                    // 引用回复语义回填：标记被引用消息"已被回复"，供后续 prompt 展示 〖已处理〗
+                    if (quoteMessageId > 0) {
+                        unifiedMemory.setGroupMessageMarkById(msg.getGroupId(), quoteMessageId, "已回复");
+                    }
+                    // 标记当前被回复的消息"已回复"，避免历史里已回答的问题被重复回答（答非所问）
+                    unifiedMemory.setGroupMessageMarkById(msg.getGroupId(), msg.getMessageId(), "已回复");
                 } else {
-                    unifiedMemory.addConversation("assistant", aiResponse, "private",
+                    unifiedMemory.addConversation("assistant", memoryContent, "private",
                         msg.getUserId(), selfId, null);
                 }
-
-                String cleanResponse = aiResponse.replaceAll("<[^>]+>", "").trim();
                 AiAgentActivity.qqLog("[QQMsg] cleanResponse=" + (cleanResponse.isEmpty() ? "空" : ("非空(长度" + cleanResponse.length() + ")"))
-                        + ", server=" + (server != null) + ", 是否群聊=" + msg.isGroupMessage());
+                        + ", server=" + (server != null) + ", 是否群聊=" + msg.isGroupMessage()
+                        + ", quoteMessageId=" + quoteMessageId);
                 if (!cleanResponse.isEmpty()) {
                     List<String> messages;
-                    String[] splitParts = aiResponse.split("<split>");
+                    String[] splitParts = quoteClean.split("<split>");
                     if (splitParts.length > 1) {
                         messages = new ArrayList<>();
                         for (String part : splitParts) {
@@ -509,12 +638,8 @@ class QQAgentBridge {
                         }
                     }
 
-                    // 群聊纯@回复加@前缀，明确指向@自己的那个人
-                    if (bareMention && msg.isGroupMessage() && !messages.isEmpty()) {
-                        messages.set(0, "[CQ:at,qq=" + msg.getUserId() + "] " + messages.get(0));
-                    }
                     AiAgentActivity.qqLog("[QQMsg] 准备发送 " + messages.size() + " 条回复");
-                    sendMultipleReplies(msg, messages);
+                    sendHumanizedReplies(msg, messages, quoteMessageId, bareMention);
                 } else {
                     // 兜底：AI 只输出了标签没有纯文本，发送确认提示
                     AiAgentActivity.qqLog("[QQMsg] 仅标签无文本，发送兜底");
@@ -528,7 +653,17 @@ class QQAgentBridge {
         } catch (Exception e) {
             AiAgentActivity.qqLog("[QQMsg] Agent执行失败: " + e.toString());
             sendReply(msg, "处理失败: " + e.getMessage());
+        } finally {
+            if (typingOn) setTyping(msg, false);
         }
+    }
+
+    /** 设置/取消输入中状态（仅私聊）。 */
+    private void setTyping(QQMessage msg, boolean typing) {
+        if (napcatApi == null || msg == null || msg.isGroupMessage()) return;
+        try {
+            napcatApi.setInputStatus(msg.getUserId(), typing ? 1 : 0);
+        } catch (Exception ignored) {}
     }
 
     // NapCatApi引用（由QQMessageHandler注入，用于群管回调）

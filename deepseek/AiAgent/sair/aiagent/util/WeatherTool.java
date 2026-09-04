@@ -200,31 +200,49 @@ public class WeatherTool {
     // ==================== HTTP 工具 ====================
 
     private static String httpGet(String urlStr) throws Exception {
-        URL url = new URL(urlStr);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("GET");
-        conn.setConnectTimeout(CONNECT_TIMEOUT);
-        conn.setReadTimeout(READ_TIMEOUT);
-        conn.setRequestProperty("User-Agent", "AiAgent/2.8 WeatherTool");
-        conn.setRequestProperty("Accept", "application/json");
+        Exception last = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            HttpURLConnection conn = null;
+            try {
+                URL url = new URL(urlStr);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(CONNECT_TIMEOUT);
+                conn.setReadTimeout(READ_TIMEOUT);
+                conn.setRequestProperty("User-Agent", "AiAgent/2.8 WeatherTool");
+                conn.setRequestProperty("Accept", "application/json");
 
-        int status = conn.getResponseCode();
-        if (status != 200) {
-            conn.disconnect();
-            return null;
-        }
+                int status = conn.getResponseCode();
+                if (status != 200) {
+                    if (status >= 500 && attempt < 2) {
+                        sleepBackoff(attempt);
+                        continue;
+                    }
+                    return null;
+                }
 
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line);
+                    }
+                    return sb.toString();
+                }
+            } catch (Exception e) {
+                last = e;
+                if (attempt < 2) sleepBackoff(attempt);
+            } finally {
+                if (conn != null) conn.disconnect();
             }
-            return sb.toString();
-        } finally {
-            conn.disconnect();
         }
+        throw last != null ? last : new java.io.IOException("weather http failed");
+    }
+
+    private static void sleepBackoff(int attempt) {
+        try { Thread.sleep(500L * (attempt + 1)); }
+        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
     }
 
     // ==================== 简易 JSON 解析（无第三方依赖） ====================

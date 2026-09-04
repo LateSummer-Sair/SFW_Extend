@@ -135,6 +135,7 @@ public class ThirdPartySkillStore {
             return "[thirdskill] 写入失败: " + e.toString();
         }
         skills.put(safeName, new ThirdPartySkill(safeName, description, content, f.getAbsolutePath()));
+        ToolDispatcher.invalidateToolSetCache();
         return "[thirdskill] 已新增三方技能: " + safeName;
     }
 
@@ -148,6 +149,7 @@ public class ThirdPartySkillStore {
             File f = new File(s.getSourceFile());
             if (f.exists()) f.delete();
             skills.remove(s.getName());
+            ToolDispatcher.invalidateToolSetCache();
             return "[thirdskill] 已删除三方技能: " + s.getName();
         } catch (Exception e) {
             return "[thirdskill] 删除失败: " + e.toString();
@@ -161,8 +163,7 @@ public class ThirdPartySkillStore {
         try {
             watchService = FileSystems.getDefault().newWatchService();
             running = true;
-            watchThread = new Thread(this::watchLoop, "ThirdPartySkill-Watcher");
-            watchThread.setDaemon(true);
+            watchThread = ThreadManager.getInstance().newDaemonThread("ThirdPartySkill-Watcher", this::watchLoop);
             watchThread.start();
         } catch (Exception e) {
             AiAgentActivity.debugLog("[ThirdPartySkill] 文件监听启动失败: " + e.toString());
@@ -246,6 +247,7 @@ public class ThirdPartySkillStore {
         skills.clear();
         skills.putAll(fresh);
         lastNames = new TreeSet<>(fresh.keySet());
+        ToolDispatcher.invalidateToolSetCache();
 
         if (!newNames.isEmpty()) {
             AiAgentActivity.debugLog("[ThirdPartySkill] +" + newNames.size()

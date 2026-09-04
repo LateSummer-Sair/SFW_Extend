@@ -200,8 +200,7 @@ public class AgentSkillStore {
         try {
             watchService = FileSystems.getDefault().newWatchService();
             running = true;
-            watchThread = new Thread(this::watchLoop, "AgentSkill-Watcher");
-            watchThread.setDaemon(true);
+            watchThread = ThreadManager.getInstance().newDaemonThread("AgentSkill-Watcher", this::watchLoop);
             watchThread.start();
         } catch (Exception e) {
             AiAgentActivity.debugLog("[AgentSkill] 文件监听启动失败: " + e.toString());

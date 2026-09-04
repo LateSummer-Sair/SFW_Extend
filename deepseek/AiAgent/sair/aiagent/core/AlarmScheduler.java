@@ -59,11 +59,7 @@ public class AlarmScheduler {
         this.persistence = persistence;
         this.agent = agent;
         this.bridge = bridge;
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "AiAgent-Alarm");
-            t.setDaemon(true);
-            return t;
-        });
+        this.scheduler = ThreadManager.getInstance().newNamedScheduled("AiAgent-Alarm", 1);
     }
 
     /** 启动调度循环（每 20 秒检查一次到点任务）。 */
@@ -74,10 +70,9 @@ public class AlarmScheduler {
         AiAgentActivity.debugLog("[Alarm] 调度器已启动（检查间隔 " + CHECK_INTERVAL_SECONDS + "s）");
     }
 
-    /** 停止调度。 */
+    /** 停止调度（不关闭共享调度线程池）。 */
     public synchronized void stop() {
         running = false;
-        scheduler.shutdownNow();
         AiAgentActivity.debugLog("[Alarm] 调度器已停止");
     }
 
@@ -92,8 +87,7 @@ public class AlarmScheduler {
         if (!running) return;
         try {
             long now = System.currentTimeMillis();
-            for (AlarmEntry alarm : persistence.listAlarms()) {
-                if (!alarm.isEnabled()) continue;
+            for (AlarmEntry alarm : persistence.listAlarms(true)) {
                 long trigger = computeNextTrigger(alarm, now);
                 if (trigger < 0) continue;                 // 无法解析
                 if (now >= trigger && alarm.getLastRun() < trigger) {
@@ -138,13 +132,13 @@ public class AlarmScheduler {
                 bridge.sendReply(alarm, "⏰ 提醒：" + alarm.getTask());
             } else if ("EXECQ".equalsIgnoreCase(scope)) {
                 final AlarmEntry a = alarm;
-                ThreadManager.getInstance().newNamedCached("Alarm-Exec").submit(() -> {
+                ThreadManager.getInstance().newNamedFixed("Alarm-Exec", 2).submit(() -> {
                     String result = runAgent(a, false);
                     bridge.sendReply(a, result);
                 });
             } else if ("EXECS".equalsIgnoreCase(scope)) {
                 final AlarmEntry a = alarm;
-                ThreadManager.getInstance().newNamedCached("Alarm-Exec").submit(() -> {
+                ThreadManager.getInstance().newNamedFixed("Alarm-Exec", 2).submit(() -> {
                     String result = runAgent(a, true);
                     bridge.sendReply(a, result);
                 });

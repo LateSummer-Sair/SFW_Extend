@@ -29,6 +29,7 @@ public class ImpressionEntry implements Serializable {
     private String speakingStyle;     // 说话风格描述
     private String honesty;           // 务实/吹牛程度描述
     private String imageHabit;        // 图片偏好描述
+    private int impressionLevel;      // 印象好坏 -100~100（正=好，负=差）
     private int messageCount;         // 累计消息条数
     private long firstSeen;           // 首次遇见时间戳
     private long lastSeen;            // 最后遇见时间戳
@@ -44,6 +45,7 @@ public class ImpressionEntry implements Serializable {
         this.speakingStyle = "";
         this.honesty = "";
         this.imageHabit = "";
+        this.impressionLevel = 0;
         this.messageCount = 0;
         long now = System.currentTimeMillis();
         this.firstSeen = now;
@@ -54,7 +56,7 @@ public class ImpressionEntry implements Serializable {
     /** DB 加载构造 */
     public ImpressionEntry(long qq, String nickname, String emotionStability,
             String interests, String speakingStyle, String honesty,
-            String imageHabit, int messageCount, long firstSeen,
+            String imageHabit, int impressionLevel, int messageCount, long firstSeen,
             long lastSeen, long updatedAt) {
         this.qq = qq;
         this.nickname = nickname;
@@ -63,6 +65,7 @@ public class ImpressionEntry implements Serializable {
         this.speakingStyle = toStr(speakingStyle);
         this.honesty = toStr(honesty);
         this.imageHabit = toStr(imageHabit);
+        this.impressionLevel = impressionLevel;
         this.messageCount = messageCount;
         this.firstSeen = firstSeen;
         this.lastSeen = lastSeen;
@@ -79,6 +82,7 @@ public class ImpressionEntry implements Serializable {
     public String getSpeakingStyle()  { return speakingStyle; }
     public String getHonesty()        { return honesty; }
     public String getImageHabit()     { return imageHabit; }
+    public int getImpressionLevel()   { return impressionLevel; }
     public int getMessageCount()      { return messageCount; }
     public long getFirstSeen()       { return firstSeen; }
     public long getLastSeen()        { return lastSeen; }
@@ -92,6 +96,7 @@ public class ImpressionEntry implements Serializable {
     public void setSpeakingStyle(String v)       { this.speakingStyle = toStr(v); }
     public void setHonesty(String v)             { this.honesty = toStr(v); }
     public void setImageHabit(String v)          { this.imageHabit = toStr(v); }
+    public void setImpressionLevel(int v)        { this.impressionLevel = Math.max(-100, Math.min(100, v)); }
     public void setMessageCount(int c)           { this.messageCount = c; }
     public void setFirstSeen(long t)             { this.firstSeen = t; }
     public void setLastSeen(long t)              { this.lastSeen = t; }
@@ -107,7 +112,12 @@ public class ImpressionEntry implements Serializable {
     public boolean hasContent() {
         return !emotionStability.isEmpty() || !interests.isEmpty()
             || !speakingStyle.isEmpty() || !honesty.isEmpty()
-            || !imageHabit.isEmpty();
+            || !imageHabit.isEmpty() || impressionLevel != 0;
+    }
+
+    /** 印象是否差（用于偏好设定门禁）。 */
+    public boolean isBad() {
+        return impressionLevel < 0;
     }
 
     /** 构建注入系统提示词的印象上下文 */
@@ -128,6 +138,8 @@ public class ImpressionEntry implements Serializable {
             sb.append("- 虚实态度: ").append(honesty).append("\n");
         if (!imageHabit.isEmpty())
             sb.append("- 图片习惯: ").append(imageHabit).append("\n");
+        if (impressionLevel != 0)
+            sb.append("- 印象好坏: ").append(impressionLevel > 0 ? "好(" + impressionLevel + ")" : "差(" + impressionLevel + ")").append("\n");
         return sb.toString().trim();
     }
 

@@ -21,6 +21,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import javax.script.ScriptEngineFactory;
@@ -47,11 +48,11 @@ public class IRE extends Activity {
 	private static final String t = "\t\t\t\t\t";
 
 	public static void main(String[] args) {
-
+		// 仅用于独立开发调试（如 javaw -cp IRE.jar sair.ire.IRE）：注册一个名为 iret 的组件并启动 SFW。
+		// 插件化部署时不会走这里，而是由 Exection 按 jar 文件名（ire.jar）注册为 ire 组件。
 		IRE ire = new IRE();
 		Libraries.activities.put("iret", ire);
 		Main.main(args);
-
 	}
 
 	private String JSEN = "JavaScript";
@@ -62,14 +63,23 @@ public class IRE extends Activity {
 	private final SEMod semod = new SEMod();
 	private final JCPMod jcmod = new JCPMod();
 
-	/** 已自动扫描过同父目录的目录集合，避免递归重复扫描 */
-	private final LinkedHashSet<String> scannedSiblingDirs = new LinkedHashSet<String>();
-
 	/** 热更新监控：规范化路径 -> 监控条目 */
 	private final LinkedHashMap<String, MonitoredEntry> monitored = new LinkedHashMap<String, MonitoredEntry>();
 	private final HashSet<String> watchedDirs = new HashSet<String>();
 	private WatchService watcher;
 	private Thread watchThread;
+
+	/** 最近一次 run 的原始参数，用于热更新自动重载 */
+	private String lastRunArgs;
+	/** 是否正在执行 run（重入保护） */
+	private volatile boolean running;
+	/** 文件变更时是否自动重载（默认开启） */
+	private volatile boolean hotReload = true;
+
+	/** 源码哈希缓存：最近一次 run 的签名与编译产物（#15） */
+	private String lastSignature;
+	private String lastMainClassName;
+	private Set<String> lastCompiledClasses = new HashSet<String>();
 
 	/** 热更新监控条目 */
 	private static class MonitoredEntry {
@@ -156,6 +166,12 @@ public class IRE extends Activity {
 		case "monlist":
 			return monlist();
 
+		case "monreload":
+			return monreload(args);
+
+		case "rmclass":
+			return rmclass(args);
+
 		}
 
 		return false;
@@ -176,7 +192,16 @@ public class IRE extends Activity {
 		return mod;
 	}
 
-	private Object run(String args) {
+	private synchronized Object run(String args) {
+		running = true;
+		try {
+			return run0(args);
+		} finally {
+			running = false;
+		}
+	}
+
+	private Object run0(String args) {
 		if (args == null || args.trim().isEmpty()) {
 			SairCons.println(FCM.Error_Color, "usage: ire/run [path] [args...]");
 			return false;
@@ -192,14 +217,14 @@ public class IRE extends Activity {
 			return false;
 		}
 		String mainPath = mainFile.getAbsolutePath();
+		lastRunArgs = args;
 
-		scannedSiblingDirs.clear();
-
-		// 1. 收集阶段：递归收集 ire 文件、ir 文件与 jar 路径
+		// 1. 收集阶段：递归收集 ire 文件、ir 文件与 jar 路径（扫描集合局部化，避免重入冲突）
+		LinkedHashSet<String> scannedSiblingDirs = new LinkedHashSet<String>();
 		LinkedHashMap<String, String> irPaths = new LinkedHashMap<String, String>();
 		List<String> jarPaths = new ArrayList<String>();
 		LinkedHashSet<String> ireFiles = new LinkedHashSet<String>();
-		collectImports(mainPath, irPaths, jarPaths, ireFiles);
+		collectImports(mainPath, irPaths, jarPaths, ireFiles, scannedSiblingDirs);
 
 		// 注册热更新监控（主文件 + 所有 import 的 ire 文件）
 		ensureWatchService();
@@ -215,47 +240,91 @@ public class IRE extends Activity {
 			}
 		}
 
-		// 3. 转译阶段：统一转译所有 ire 文件（带完整 ir 路径映射）
-		LinkedHashMap<String, String> sources = new LinkedHashMap<String, String>();
-		String mainClassName = null;
-		for (String irePath : ireFiles) {
-			String src = readFile(irePath);
-			if (src == null) {
-				SairCons.println(FCM.Error_Color, "read file failed: " + irePath);
-				return false;
-			}
-			IRETranslator tr = new IRETranslator(src, irPaths);
-			if (!tr.translate()) {
-				SairCons.println(FCM.Error_Color, "translate failed: " + irePath + " " + tr.getError());
-				return false;
-			}
-			String cls = tr.getFullClassName();
-			if (sources.containsKey(cls)) {
-				SairCons.println(FCM.Error_Color, "duplicate group name: " + cls + " (" + irePath + ")");
-				return false;
-			}
-			sources.put(cls, tr.getJavaSource());
-			if (irePath.equals(mainPath))
-				mainClassName = cls;
-		}
+		// 3. 计算本次运行签名（源码哈希缓存：未变化时跳过转译与编译）
+		String signature = signatureOf(ireFiles);
+		String mainClassName;
+		LinkedHashMap<String, String> sources;
 
-		if (mainClassName == null) {
-			SairCons.println(FCM.Error_Color, "main group not found");
-			return false;
-		}
+		if (signature != null && signature.equals(lastSignature) && lastMainClassName != null
+				&& UDFParse.hasClass(lastMainClassName)) {
+			// 缓存命中：复用上次编译字节码
+			mainClassName = lastMainClassName;
+			sources = null;
+		} else {
+			// 转译阶段：统一转译所有 ire 文件（带完整 ir 路径映射）
+			sources = new LinkedHashMap<String, String>();
+			mainClassName = null;
 
-		// 4. 批量编译 + 5. 反射调用（finally 清理本次编译产生的字节码缓存）
-		Set<String> compiledBefore = new HashSet<String>(UDFParse.compiledClassNames());
-		try {
+			// 3a. 预扫描：收集所有 group 的函数签名与字段类型，构建跨 group 的全局表（供 var 推断）
+			Map<String, String> globalTypes = new HashMap<String, String>();
+			Map<String, String> globalFields = new HashMap<String, String>();
+			for (String irePath : ireFiles) {
+				String src = readFile(irePath);
+				if (src == null)
+					continue;
+				IRETranslator sig = new IRETranslator(src, irPaths);
+				String gname = sig.extractSignatures();
+				if (gname != null) {
+					for (Map.Entry<String, String> e : sig.getFunctionReturnTypes().entrySet())
+						globalTypes.put(gname + "." + e.getKey(), e.getValue());
+					for (Map.Entry<String, String> e : sig.getFieldTypes().entrySet())
+						globalFields.put(gname + "." + e.getKey(), e.getValue());
+				}
+			}
+
+			// 3b. 转译
+			for (String irePath : ireFiles) {
+				String src = readFile(irePath);
+				if (src == null) {
+					SairCons.println(FCM.Error_Color, "read file failed: " + irePath);
+					return false;
+				}
+				IRETranslator tr = new IRETranslator(src, irPaths, globalTypes, globalFields);
+				if (!tr.translate()) {
+					SairCons.println(FCM.Error_Color, "translate failed: " + irePath + " " + tr.getError());
+					return false;
+				}
+				String cls = tr.getFullClassName();
+				if (sources.containsKey(cls)) {
+					SairCons.println(FCM.Error_Color, "duplicate group name: " + cls + " (" + irePath + ")");
+					return false;
+				}
+				sources.put(cls, tr.getJavaSource());
+				if (irePath.equals(mainPath))
+					mainClassName = cls;
+			}
+
+			if (mainClassName == null) {
+				SairCons.println(FCM.Error_Color, "main group not found");
+				return false;
+			}
+
 			String err = UDFParse.compileBatch(sources, jarPaths);
 			if (err != null) {
 				SairCons.println(FCM.Error_Color, "compile failed:\r\n" + err);
+				dumpSources(sources);
 				return false;
 			}
 
+			// 更新缓存；清理上一次运行遗留的脚本字节码（同名类已被覆盖，不重复删除）
+			Set<String> stale = lastCompiledClasses;
+			lastCompiledClasses = new HashSet<String>(sources.keySet());
+			lastSignature = signature;
+			lastMainClassName = mainClassName;
+			if (!stale.isEmpty()) {
+				stale.removeAll(lastCompiledClasses);
+				if (!stale.isEmpty())
+					UDFParse.removeClasses(stale);
+			}
+		}
+
+		// 4. 反射调用（main 是实例方法：先实例化再调用；fc 不默认 public，故用 getDeclaredMethod + setAccessible）
+		try {
 			Class<?> clazz = UDFParse.loadClass(mainClassName);
-			Method main = clazz.getMethod("main", String.class);
-			return main.invoke(null, runArgs);
+			Object instance = clazz.newInstance();
+			Method main = clazz.getDeclaredMethod("main", String.class);
+			main.setAccessible(true);
+			return main.invoke(instance, runArgs);
 		} catch (NoSuchMethodException e) {
 			SairCons.println(FCM.Error_Color, "main(String) method not found: " + e.getMessage());
 		} catch (Exception e) {
@@ -270,14 +339,32 @@ public class IRE extends Activity {
 				for (StackTraceElement st : e.getStackTrace())
 					SairCons.println(FCM.Error_Color, "  at " + st.toString());
 			}
-		} finally {
-			UDFParse.removeCompiled(compiledBefore);
 		}
 		return null;
 	}
 
+	/** 编译失败时把生成的 Java 源码转储到 data/debug 目录，便于排查（#6） */
+	private void dumpSources(LinkedHashMap<String, String> sources) {
+		try {
+			File dir = new File(getDataDir(), "debug");
+			if (!dir.exists())
+				dir.mkdirs();
+			for (String cls : sources.keySet()) {
+				String simple = cls;
+				int dot = simple.lastIndexOf('.');
+				if (dot > 0)
+					simple = simple.substring(dot + 1);
+				File f = new File(dir, simple + ".java");
+				Files.write(f.toPath(), sources.get(cls).getBytes(StandardCharsets.UTF_8));
+			}
+			SairCons.println(FCM.EXECTION_help_Color, "ire: 已转储生成源码到 " + dir.getAbsolutePath());
+		} catch (Exception ex) {
+			SairCons.println(FCM.Error_Color, "ire: 转储生成源码失败 " + ex);
+		}
+	}
+
 	/** 列出被热更新监控的 ire 文件及其状态 */
-	private Object monlist() {
+	private synchronized Object monlist() {
 		ensureWatchService();
 		SairCons.println(FCM.split_Color, Pathes.printSplit);
 		SairCons.println(FCM.EXECTION_help_Color, "Monitored ire files (" + monitored.size() + ")");
@@ -288,6 +375,39 @@ public class IRE extends Activity {
 		if (monitored.isEmpty())
 			SairCons.println(FCM.EXECTION_help_Color, "(空)");
 		return monitored.keySet();
+	}
+
+	/** 切换/查询热更新自动重载开关 */
+	private Object monreload(String args) {
+		if (args == null || args.trim().isEmpty())
+			return hotReload ? "on" : "off";
+		String a = args.trim().toLowerCase();
+		if ("on".equals(a) || "1".equals(a) || "true".equals(a))
+			hotReload = true;
+		else if ("off".equals(a) || "0".equals(a) || "false".equals(a))
+			hotReload = false;
+		SairCons.println(FCM.EXECTION_help_Color, "ire: 热更新自动重载 = " + (hotReload ? "on" : "off"));
+		return hotReload;
+	}
+
+	/** 手动卸载一个已编译类（清理 cpjavafile/newobject 产生的缓存，缓解 #13） */
+	private Object rmclass(String args) {
+		if (args == null || args.trim().isEmpty())
+			return false;
+		String cls = args.trim();
+		UDFParse.removeClass(cls);
+		SairCons.println(FCM.EXECTION_help_Color, "ire: removed class [" + cls + "]");
+		return true;
+	}
+
+	/** 打印异常及其 cause 链（#11） */
+	private void logError(String msg, Exception e) {
+		SairCons.println(FCM.Error_Color, msg + ": " + e.toString());
+		Throwable c = e.getCause();
+		while (c != null) {
+			SairCons.println(FCM.Error_Color, "  caused by: " + c.toString());
+			c = c.getCause();
+		}
 	}
 
 	/** 启动 WatchService 后台监控线程（懒启动） */
@@ -305,7 +425,7 @@ public class IRE extends Activity {
 	}
 
 	/** 把 ire 文件加入热更新监控 */
-	private void registerMonitor(String path) {
+	private synchronized void registerMonitor(String path) {
 		path = new File(path).getAbsolutePath();
 		if (monitored.containsKey(path))
 			return;
@@ -316,7 +436,7 @@ public class IRE extends Activity {
 	}
 
 	/** 注册文件所在目录到 WatchService（去重） */
-	private void registerWatchDir(File dir) {
+	private synchronized void registerWatchDir(File dir) {
 		if (watcher == null || dir == null || !dir.isDirectory())
 			return;
 		if (!watchedDirs.add(dir.getAbsolutePath()))
@@ -365,10 +485,8 @@ public class IRE extends Activity {
 		}
 	}
 
-	/** 哈希比对：只有内容真正变化才标记（二次去噪） */
-	private void checkChanged(MonitoredEntry entry) {
-		if (entry.changed)
-			return;
+	/** 哈希比对：只有内容真正变化才标记并触发自动重载 */
+	private synchronized void checkChanged(MonitoredEntry entry) {
 		String newHash = fileHash(entry.path);
 		if (newHash == null || newHash.equals(entry.hash))
 			return;
@@ -376,6 +494,32 @@ public class IRE extends Activity {
 		entry.changed = true;
 		entry.changedAt = System.currentTimeMillis();
 		SairCons.println(FCM.Error_Color, "ire: 文件已变更 [" + entry.path + "]");
+		maybeAutoReload(entry);
+	}
+
+	/** 文件变更后，若开启自动重载且当前无运行中的脚本，则用最近一次参数重新执行 */
+	private void maybeAutoReload(MonitoredEntry entry) {
+		if (!hotReload || running || lastRunArgs == null)
+			return;
+		entry.changed = false;
+		SairCons.println(FCM.EXECTION_help_Color, "ire: 自动重载执行 [" + lastRunArgs + "]");
+		try {
+			run(lastRunArgs);
+		} catch (Exception e) {
+			SairCons.println(FCM.Error_Color, "ire: 自动重载失败 " + e);
+		}
+	}
+
+	/** 计算所有 ire 文件内容的组合签名（路径=MD5），任一文件读取失败返回 null */
+	private String signatureOf(Set<String> ireFiles) {
+		StringBuilder sb = new StringBuilder();
+		for (String p : ireFiles) {
+			String h = fileHash(p);
+			if (h == null)
+				return null;
+			sb.append(p).append('=').append(h).append(';');
+		}
+		return sb.toString();
 	}
 
 	/** 计算文件 MD5（读取失败返回 null） */
@@ -394,7 +538,7 @@ public class IRE extends Activity {
 
 	/** 递归收集 import 的 ire 文件、ir 文件与 jar 路径，建立 ir 逻辑名映射 */
 	private void collectImports(String irePath, LinkedHashMap<String, String> irPaths, List<String> jarPaths,
-			LinkedHashSet<String> ireFiles) {
+			LinkedHashSet<String> ireFiles, Set<String> scannedSiblingDirs) {
 		irePath = new File(irePath).getAbsolutePath();
 		if (!ireFiles.add(irePath))
 			return;
@@ -409,7 +553,7 @@ public class IRE extends Activity {
 		String baseDir = new File(irePath).getParent();
 
 		// 同父目录下无需 import：自动扫描当前文件所在目录的一级 .ire/.ir
-		scanSiblings(baseDir, irPaths, jarPaths, ireFiles);
+		scanSiblings(baseDir, irPaths, jarPaths, ireFiles, scannedSiblingDirs);
 
 		for (String jar : tr.getJarPaths()) {
 			String abs = resolvePath(baseDir, jar);
@@ -445,12 +589,12 @@ public class IRE extends Activity {
 						if (ff.isFile()) {
 							String n = ff.getName().toLowerCase();
 							if (n.endsWith(".ire"))
-								collectImports(ff.getAbsolutePath(), irPaths, jarPaths, ireFiles);
+								collectImports(ff.getAbsolutePath(), irPaths, jarPaths, ireFiles, scannedSiblingDirs);
 							else if (n.endsWith(".ir"))
 								putIrPath(ff, irPaths);
 						}
 			} else if (f.isFile() && f.getName().toLowerCase().endsWith(".ire")) {
-				collectImports(f.getAbsolutePath(), irPaths, jarPaths, ireFiles);
+				collectImports(f.getAbsolutePath(), irPaths, jarPaths, ireFiles, scannedSiblingDirs);
 			}
 		}
 	}
@@ -466,7 +610,7 @@ public class IRE extends Activity {
 
 	/** 扫描某目录一级下的 .ire/.ir（同父目录免 import 规则），每个目录只扫描一次 */
 	private void scanSiblings(String dir, LinkedHashMap<String, String> irPaths, List<String> jarPaths,
-			LinkedHashSet<String> ireFiles) {
+			LinkedHashSet<String> ireFiles, Set<String> scannedSiblingDirs) {
 		if (dir == null || !scannedSiblingDirs.add(dir))
 			return;
 		File d = new File(dir);
@@ -478,7 +622,7 @@ public class IRE extends Activity {
 				continue;
 			String n = f.getName().toLowerCase();
 			if (n.endsWith(".ire"))
-				collectImports(f.getAbsolutePath(), irPaths, jarPaths, ireFiles);
+				collectImports(f.getAbsolutePath(), irPaths, jarPaths, ireFiles, scannedSiblingDirs);
 			else if (n.endsWith(".ir"))
 				putIrPath(f, irPaths);
 		}
@@ -606,7 +750,7 @@ public class IRE extends Activity {
 		try {
 			return jcmod.loadLib(args);
 		} catch (MalformedURLException e) {
-			SairCons.println(FCM.Error_Color, e.getMessage());
+			logError("loadlibmod failed", e);
 		}
 		return true;
 	}
@@ -616,7 +760,7 @@ public class IRE extends Activity {
 			return jcmod.loadBoot(args);
 		} catch (NoSuchMethodException | SecurityException | ClassNotFoundException | IllegalAccessException
 				| IllegalArgumentException | InvocationTargetException | MalformedURLException e) {
-			SairCons.println(FCM.Error_Color, e.getMessage());
+			logError("loadbootmod failed", e);
 		}
 		return true;
 	}
@@ -626,7 +770,7 @@ public class IRE extends Activity {
 		try {
 			return jcmod.newInstance(splits[0], splits[1]);
 		} catch (Exception e) {
-			SairCons.println(FCM.Error_Color, e.getMessage());
+			logError("newobject failed", e);
 		}
 		return null;
 	}
@@ -646,7 +790,7 @@ public class IRE extends Activity {
 				return jcmod.invokeMethod(oName, methodName, argss_arr);
 		} catch (NoSuchMethodException | SecurityException | IllegalAccessException | IllegalArgumentException
 				| InvocationTargetException e) {
-			SairCons.println(FCM.Error_Color, e.getMessage());
+			logError("invokmeth failed", e);
 		}
 		return true;
 	}
@@ -656,7 +800,7 @@ public class IRE extends Activity {
 			String[] sp = args.split(" ");
 			return jcmod.cpJavaFile(sp[1], sp[0]);
 		} catch (Exception e) {
-			SairCons.println(FCM.Error_Color, "Error!!!");
+			logError("cpjavafile failed", e);
 		}
 		return null;
 	}
@@ -744,20 +888,23 @@ public class IRE extends Activity {
 				"Coder : Sair", //
 				"========== IRE 脚本语言语法 ==========", //
 				"ire/run [path] [args...] : 执行 .ire 脚本，[args...] 拼接为单个字符串传入 main(String args)", //
+				"  （相对路径 ./ 相对于 SFW.jar 所在目录解析；编译失败时生成源码转储到 data/sair.ire.IRE/debug/）", //
 				"", //
-				"【文件结构】一个 .ire 文件对应一个 group（转译为一个 Java 类）", //
-				"  group 组名 {", //
-				"    fc main(String args) { ... }   // 入口函数", //
+				"【定位】IRE 是 Java 的语法拓展层：完全兼容 Java 所有关键字，其余代码原样透传", //
+				"", //
+				"【文件结构】一个 .ire 文件只能有一个 group（唯一 public class），可另有非 public 的 class/interface/enum", //
+				"  group 组名 [extends 父类] [implements 接口] {", //
+				"    fc main(String args) { ... }   // 入口函数（非 static 实例方法，区别于 Java 的 main）", //
 				"  }", //
+				"  class Foo { ... }   // 非 public 类，原样透传", //
 				"", //
-				"【基础类型】Bool/Int/Double/String/Long/LLong/Char/var(Object)", //
-				"  基础类型统一转译为封装类型：Int→Integer、Long→Long、Double→Double、Bool→Boolean、Char→Character（可作泛型实参）", //
-				"  数组类型支持：Int[] arr、String[][] matrix 等", //
+				"【类型别名】Int→Integer、Bool→Boolean、Char→Character、LLong→java.math.BigInteger", //
+				"  （Long/Double/String 与 Java 同名，恒等；别名按词边界替换，字符串/注释内不替换）", //
+				"【var 推断】var x = 表达式 时自动推断类型（字面量/运算/三元/方法调用/数组访问等）；for(var x : list) 推断元素类型", //
 				"", //
-				"【函数 fc】fc [返回类型] 函数名(参数) { ... }", //
-				"  fc 统一编译为 public static；无 return 时统一返回 null", //
-				"", //
-				"【字段】group 内可直接声明：Int count = 0;", //
+				"【函数 fc】[修饰符] fc [返回类型] 函数名(参数) { ... }", //
+				"  fc 强制返回：与 void 冲突；无显式返回类型时从函数体推断（写 return 推断返回值类型，没写 return 返回 null→Object）", //
+				"  fc 不默认 public 也不默认 static（与 Java 一致，需修饰符显式指定）", //
 				"", //
 				"【import 导入】", //
 				"  import { java:java.util.List;  ../MyLib.ire;  Sair\\MyLib2.ir;  Sair }", //
@@ -767,9 +914,9 @@ public class IRE extends Activity {
 				"", //
 				"【调用】ire 调用：MyLib.func1(args);  ir 调用：MyLib2.LabelName; 或 MyLib2;", //
 				"", //
-				"【控制流/表达式】if/else、switch/case、for、while、do-while、三目、数学/位移运算、(Int)x 强转 全部透传 Java", //
-				"", //
-				"【泛型/Java类型】声明支持 List<Int>、java.util.List<String>、Map<String,Integer> 等", //
+				"【Java 兼容】class/interface/enum/extends/implements/泛型/注解/lambda/所有语句与表达式 全部原样透传", //
+				"【批量修饰符作用域】private static : { ... } 把修饰符批量应用到块内字段与 fc 方法；static : { ... } 同理", //
+				"【继承/实现糖】class A+B → class A extends B；class A:B → class A implements B（原关键字仍支持）", //
 				"(别问我为什么不加一个热卸载bootLib的功能，因为这真的不安全，你要加自己加，反正我不加)", //
 				"(还有就是，编译java文件的能力由java8的JDK提供，如果你是JRE，那么出门左拐，不要用这玩意儿比较好)", "",
 				this.getName() + "/evalfunc [funcName] [funcARGS...] : 执行已经加载的函数，[funcName]为函数名，[funcARGS...]为函数的参数", //
@@ -794,6 +941,8 @@ public class IRE extends Activity {
 				this.getName() + "/loadall [code] : 加载编译" + this.getDataDir() + "下面所有的java文件", //
 				this.getName() + "/classlist : 遍历显示已加载的所有Class", //
 				this.getName() + "/monlist : 列出被热更新监控的 ire 文件及其状态", //
+				this.getName() + "/monreload [on|off] : 切换文件变更后是否自动重载（默认 on）", //
+				this.getName() + "/rmclass [className] : 卸载一个已编译类（清理 cpjavafile/newobject 缓存）", //
 		};
 	}
 

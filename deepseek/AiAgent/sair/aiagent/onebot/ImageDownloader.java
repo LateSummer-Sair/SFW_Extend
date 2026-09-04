@@ -5,6 +5,7 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -57,13 +58,11 @@ public final class ImageDownloader {
         ByteArrayOutputStream baos = null;
         InputStream is = null;
         try {
-            conn = (HttpURLConnection) new URL(imageUrl).openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(15000);
-            conn.setRequestProperty("User-Agent",
-                    "Mozilla/5.0 (compatible; AiAgent-SFW/1.5)");
-            conn.setInstanceFollowRedirects(true);
+            conn = openWithSafeRedirect(imageUrl);
+            if (conn == null) {
+                AiAgentActivity.debugLog("[QQMsg] 图片下载被拒绝（内网/重定向超限）: " + imageUrl);
+                return null;
+            }
 
             int code = conn.getResponseCode();
             if (code < 200 || code >= 400) {
@@ -139,12 +138,11 @@ public final class ImageDownloader {
         ByteArrayOutputStream baos = null;
         InputStream is = null;
         try {
-            conn = (HttpURLConnection) new URL(imageUrl).openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(15000);
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; AiAgent-SFW/1.5)");
-            conn.setInstanceFollowRedirects(true);
+            conn = openWithSafeRedirect(imageUrl);
+            if (conn == null) {
+                AiAgentActivity.debugLog("[QQMsg] 图片下载被拒绝（内网/重定向超限）: " + imageUrl);
+                return null;
+            }
 
             int code = conn.getResponseCode();
             if (code < 200 || code >= 400) {
@@ -270,6 +268,61 @@ public final class ImageDownloader {
 
         // 公网 URL 本地下载失败：无法判断大小，返回原始 URL 让 DeepSeek 直接访问
         return imageUrl;
+    }
+
+    /** 手动跟随重定向并复检目标 host，防止重定向 SSRF。 */
+    private static HttpURLConnection openWithSafeRedirect(String imageUrl) throws IOException {
+        String current = imageUrl;
+        for (int hop = 0; hop <= 5; hop++) {
+            String host = new java.net.URL(current).getHost();
+            if (isBlockedHost(host)) return null;
+            HttpURLConnection conn = (HttpURLConnection) new java.net.URL(current).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(15000);
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; AiAgent-SFW/1.5)");
+            conn.setInstanceFollowRedirects(false);
+            int code = conn.getResponseCode();
+            if (code >= 300 && code < 400) {
+                String loc = conn.getHeaderField("Location");
+                conn.disconnect();
+                if (loc == null || loc.trim().isEmpty()) return null;
+                current = new java.net.URL(new java.net.URL(current), loc.trim()).toString();
+                continue;
+            }
+            // 最终地址复检，缩小 DNS Rebinding 窗口
+            String finalHost = conn.getURL().getHost();
+            if (isBlockedHost(finalHost)) {
+                conn.disconnect();
+                return null;
+            }
+            return conn;
+        }
+        return null;
+    }
+
+    private static boolean isBlockedHost(String host) {
+        if (host == null || host.isEmpty()) return true;
+        String lower = host.toLowerCase();
+        if (lower.equals("localhost")) return true;
+        try {
+            java.net.InetAddress addr = java.net.InetAddress.getByName(host);
+            String ip = addr.getHostAddress();
+            if (ip == null) return true;
+            if (ip.equals("127.0.0.1") || ip.equals("0.0.0.0") || ip.equals("::1")) return true;
+            if (ip.startsWith("10.") || ip.startsWith("192.168.") || ip.startsWith("169.254.")) return true;
+            if (ip.startsWith("172.")) {
+                int di = ip.indexOf('.', 4);
+                if (di > 0) {
+                    try { int s = Integer.parseInt(ip.substring(4, di)); if (s >= 16 && s <= 31) return true; }
+                    catch (NumberFormatException ignored) {}
+                }
+            }
+            if (ip.startsWith("fe80:") || ip.startsWith("fc") || ip.startsWith("fd")) return true;
+        } catch (Exception ignored) {
+            return true;
+        }
+        return false;
     }
 
     /** 从 URL 后缀猜测图片 MIME 类型（默认 jpeg）。 */
