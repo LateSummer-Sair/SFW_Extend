@@ -15,17 +15,17 @@
 	<classpathentry kind="src" path="deepseek/AiAgent"/>
 	<classpathentry kind="src" path="deepseek/SFW_WEB"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-1.8"/>
-	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/jpdt_res.jar"/>
-	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/bootlib/commons-net-3.3.jar"/>
-	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/bootlib/gson-2.8.6.jar"/>
-	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/bootlib/layer.jar"/>
-	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/中文代码组件支持包.jar"/>
-	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/zxing-core-3.5.3.jar"/>
-	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/zxing-javase-3.5.3.jar"/>
-	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/bootlib/commons-compress-1.28.0.jar"/>
-	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/bootlib/sqlite-jdbc-3.42.0.0.jar"/>
-	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/SaComS.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/commons-compress-1.28.0.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/commons-net-3.11.1.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/gson-2.10.1.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/jpdt_res.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/jsoup-1.18.3.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/layer.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/SaComS.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/sqlite-jdbc-3.42.0.0.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/zxing-core-3.5.3.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/zxing-javase-3.5.3.jar"/>
+	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/中文代码组件支持包.jar"/>
 	<classpathentry kind="lib" path="E:/SairFrameWork/SFW.jar"/>
-	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/modlib/jsoup-1.18.3.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
