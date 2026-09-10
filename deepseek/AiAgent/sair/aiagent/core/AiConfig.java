@@ -132,7 +132,45 @@ public class AiConfig {
      */
     public void init(String dataDir) {
         this.configFile = new File(dataDir, "config.properties");
+        // 迁移：旧 config.properties 里的 systemPrompt/execqPrompt 迁移到独立 md 文件
+        migratePromptsToMd(dataDir);
         load();
+    }
+
+    /** 将旧 config.properties 里的提示词迁移为独立 md 文件（systemPrompt.md / execqPrompt.md），并从 properties 移除。 */
+    private static void migratePromptsToMd(String dataDir) {
+        File propFile = new File(dataDir, "config.properties");
+        if (!propFile.exists()) return;
+        try {
+            Properties p = new Properties();
+            try (FileInputStream fis = new FileInputStream(propFile)) {
+                p.load(new InputStreamReader(fis, StandardCharsets.UTF_8));
+            }
+            boolean changed = false;
+            String sp = p.getProperty("systemPrompt", "");
+            if (sp != null && !sp.trim().isEmpty()) {
+                writePromptFile(new File(dataDir, "systemPrompt.md"), sp.trim());
+                p.remove("systemPrompt");
+                changed = true;
+            }
+            String eqp = p.getProperty("execqPrompt", "");
+            if (eqp != null && !eqp.trim().isEmpty()) {
+                writePromptFile(new File(dataDir, "execqPrompt.md"), eqp.trim());
+                p.remove("execqPrompt");
+                changed = true;
+            }
+            if (changed) {
+                try (FileOutputStream fos = new FileOutputStream(propFile)) {
+                    p.store(new OutputStreamWriter(fos, StandardCharsets.UTF_8), "AiAgent Configuration");
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private static void writePromptFile(File f, String content) {
+        try {
+            java.nio.file.Files.write(f.toPath(), content.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception ignored) {}
     }
 
     // ==================== 持久化 ====================
@@ -148,15 +186,7 @@ public class AiConfig {
             apiKey = decrypt(p.getProperty("apiKey", ""));
             apiUrl       = p.getProperty("apiUrl", apiUrl);
             model        = p.getProperty("model", model);
-            // 提示词从 config.properties 追加到 PromptManager（不替换默认值）
-            String sp = p.getProperty("systemPrompt", "");
-            if (!sp.isEmpty()) {
-                PromptManager.getInstance().appendSystemPrompt(sp);
-            }
-            String eqp = p.getProperty("execqPrompt", "");
-            if (!eqp.isEmpty()) {
-                PromptManager.getInstance().appendExecqPrompt(eqp);
-            }
+            // 提示词已独立为 systemPrompt.md / execqPrompt.md，由 PromptManager.init 读取，不再走 config.properties
             // OneBot 配置
             onebotEnabled = "true".equalsIgnoreCase(p.getProperty("onebotEnabled", "false"));
             try { onebotPort = Integer.parseInt(p.getProperty("onebotPort", "5800")); } catch (NumberFormatException ignored) {}
@@ -296,13 +326,11 @@ public class AiConfig {
             p.setProperty("apiKey", encrypt(apiKey));
             p.setProperty("apiUrl",       apiUrl);
             p.setProperty("model",        model);
-            p.setProperty("systemPrompt", PromptManager.getInstance().getSystemPromptExtra());
             // OneBot 配置
             p.setProperty("onebotEnabled", String.valueOf(onebotEnabled));
             p.setProperty("onebotPort",    String.valueOf(onebotPort));
             p.setProperty("onebotToken",   onebotToken);
             p.setProperty("onebotSelfId",  String.valueOf(onebotSelfId));
-            p.setProperty("execqPrompt",   PromptManager.getInstance().getExecqPromptExtra());
             // 主动查看配置
             p.setProperty("proactiveCheckEnabled", String.valueOf(proactiveCheckEnabled));
             p.setProperty("listenStateEnabled", String.valueOf(listenStateEnabled));

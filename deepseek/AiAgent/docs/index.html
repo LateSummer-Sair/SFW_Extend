@@ -28,7 +28,7 @@
         </p>
         <div class="stat-grid">
           <div class="stat-card reveal"><div class="tint tint-cyan"></div><div class="num" data-target="93">0</div><div class="label">Java 源文件</div></div>
-          <div class="stat-card reveal" data-delay="1"><div class="tint tint-purple"></div><div class="num" data-target="37211">0</div><div class="label">代码行数</div></div>
+          <div class="stat-card reveal" data-delay="1"><div class="tint tint-purple"></div><div class="num" data-target="37597">0</div><div class="label">代码行数</div></div>
           <div class="stat-card reveal" data-delay="2"><div class="tint tint-magenta"></div><div class="num" data-target="58">0</div><div class="label">用户命令</div></div>
           <div class="stat-card reveal" data-delay="3"><div class="tint tint-amber"></div><div class="num" data-target="74">0</div><div class="label">FC 工具</div></div>
         </div>
@@ -55,11 +55,12 @@
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">人格印象系统</div><div class="f-desc">ImpressionExtractor 蒸馏每个 QQ 用户 5 维人格画像，回复时自动注入印象上下文实现个性化交互</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">动态代码注入与执行</div><div class="f-desc">Nashorn JS 即时执行 + JavaCompiler 编译注入，编译→加载→执行→丢弃。execq 通道 eval/evaljs/sys 受高危代码模式拦截</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">联网搜索 + 文件下载 + 天气</div><div class="f-desc">HTTP GET（SSRF 内网黑名单 + DNS Rebinding 检测），必应搜索、文件下载、实时天气（Redis 旁路缓存）</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">情绪陪伴 + 好感度六级权限</div><div class="f-desc">情绪状态机（被夸开心/被骂难过/连续失败撒娇暂停），好感度 0~1000 六级权限：100 加好友 / 200 改马甲 / 300 入新群 / 400 挚友关注 / 800 恋人 5% 监听 / 1000 提至 10%，捐赠按 1元=1分</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">情绪陪伴 + 好感度六级权限</div><div class="f-desc">情绪状态机（被夸开心/被骂难过/连续失败撒娇暂停），好感度 0~1000 六级权限：100 加好友 / 200 改马甲 / 300 入新群·发文件·发语音 / 400 挚友关注 / 800 恋人 5% 监听 / 1000 提至 10%，捐赠按 1元=1分</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">好感度查询 / 调整 / 复位 / 排行</div><div class="f-desc">queryaffection 查单个/群成员/随机抽取，setaffection 主人调整任意用户，affectionrank 本群 Top10（全局仅主人），resetaffection 一键复位；群成员关系表 + 内存缓存双层结构</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">跨群记忆检索</div><div class="f-desc">群聊完整历史 FTS5 全文索引 + 中文 N-gram 兜底，群与群之间共享记忆（如「隔壁群谁喊妈妈」可跨群命中）</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">拟人化监听态</div><div class="f-desc">消息并发处理（execPool 3 线程），每个监听群独立进入 8~20 秒监听窗口，AI 判定相关性自动续期，同群 8 次边界暂停，挚友/恋人概率主动关注</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">好友申请 / 群邀请 AI 决策</div><div class="f-desc">好友申请与群邀请不再自动处理，进入待处理请求池，AI 通过 pendingrequests/approvefriend/acceptgroupinvite 等工具按好感度决策；捐赠由主人私聊告知，AI 用 recorddonation 工具记录</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">好友申请 / 群邀请 AI 决策</div><div class="f-desc">好友申请与群邀请不再自动处理，进入待处理请求池，AI 通过 pendingrequests/approvefriend/acceptgroupinvite 等工具按好感度决策；卡片消息（群邀请/好友申请）解析提取内容并注入系统拦截结果告知 AI，不再误答「空消息」；捐赠由主人私聊告知，AI 用 recorddonation 工具记录</div></div></li>
+          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">表情包存图多智能体协作</div><div class="f-desc">存图由主 Agent 打包段落（仅好感度&gt;6、排除 Bot 自己、无图不分发）→ 段落 Agent 找图 → 视觉 Agent 识图 → 判断收藏 → collectsticker → markmessage；TTL 被动/主动双通道（保底 15 / 阈值 30 / 上限 60，3 天 TTL）</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">Cron 定时 + 自动清屏</div><div class="f-desc">标准 cron 表达式持久化定时任务，重启恢复；AutoClear 守护线程每 3 分钟防日志 OOM</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">系统闹钟（AI Alarm）</div><div class="f-desc">alarm 工具创建到点唤醒 AI 的闹钟：语义解析 once/daily/weekly 三种 schedule，上下文快照持久化，到点重建上下文走 Agent 链路执行任务；普通用户到点仅提醒、主人走受限链路、execs/本地走全权限</div></div></li>
           <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">配置持久化 + AES 加密 + 校验日志</div><div class="f-desc">API Key AES-GCM 加密存储（兼容旧 ECB 回退），DeepSeek 高级参数（reasoning/温度/频率惩罚）自动保存，加载后校验关键配置并记录回退日志</div></div></li>
@@ -84,7 +85,7 @@
           <a href="commands.html" class="card tilt"><div class="card-icon ic-green">📋</div><h3>命令参考</h3><p>58 个用户命令 · 74 个 FC 工具 · 部署三步</p><span class="more">查看</span></a>
           <a href="classes.html" class="card tilt"><div class="card-icon ic-blue">📦</div><h3>类结构</h3><p>93 个 Java 类 · 9 个包 · 核心类职责</p><span class="more">查看</span></a>
           <a href="patterns.html" class="card tilt"><div class="card-icon ic-cyan">🎨</div><h3>设计模式</h3><p>策略 · 观察者 · 单例 · 桥接 · 模板方法 · 注册表</p><span class="more">查看</span></a>
-          <a href="changelog.html" class="card tilt"><div class="card-icon ic-amber">📜</div><h3>更新日志</h3><p>V1.0 → V3.9 版本演进 · 功能里程碑</p><span class="more">查看</span></a>
+          <a href="changelog.html" class="card tilt"><div class="card-icon ic-amber">📜</div><h3>更新日志</h3><p>V1.0 → V3.10 版本演进 · 功能里程碑</p><span class="more">查看</span></a>
         </div>
       </section>
 
@@ -110,7 +111,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.9 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
+        <p><span class="brand">AiAgent</span> v3.10 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
         <p style="margin-top:6px">原生 Function Calling · 多智能体协作 · 三层权限模型 · 技能自进化 · 三方技能代码段 · 技能包 · 八库记忆 · 人格印象 · 情绪陪伴 · 好感度六级权限 · 跨群记忆检索 · 拟人化监听态 · 好友申请/群邀请 AI 决策 · 多模态识别 · AES-GCM · SSRF 防护 · Redis 缓存 · Cron 定时 · 系统闹钟 · 工具遥测 · ai/status</p>
       </div>
     </footer>

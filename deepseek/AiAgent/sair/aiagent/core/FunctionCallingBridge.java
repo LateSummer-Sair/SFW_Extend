@@ -28,6 +28,12 @@ public class FunctionCallingBridge {
     /** 接近硬上限时，注入一次「尽快总结收尾」提示的触发阈值。 */
     public static final int WARN_TOOL_CALLS = 45;
 
+    /** 工具结果累积长度上限：批量读大文件时工具结果会持续累积，超过该值后压缩后续结果，避免请求体超长触发 API 400。 */
+    public static final int MAX_ACCUMULATED_TOOL_RESULT_CHARS = 20000;
+
+    /** 上下文溢出后，单个工具结果被压缩到的保留长度。 */
+    public static final int TOOL_RESULT_TRIM_CHARS = 1000;
+
     private final DeepSeekClient client;
 
     /** 本次循环的工具调用硬上限，可由调用方（子 Agent）覆盖。 */
@@ -143,6 +149,8 @@ public class FunctionCallingBridge {
         int fcRound = 0;               // 主模型调用轮次（诊断用）
         int criticRetries = 0;         // 审查者阻断后重新生成次数
         int totalToolCalls = 0;        // 工具调用总次数（尝试次数）
+        int accumulatedToolResultChars = 0;  // 工具结果累积字符数（上下文溢出控制）
+        boolean contextOverflowed = false;   // 工具结果累积是否已超阈值
         String lastFailure = null;     // 最后一次失败信息
         boolean fallbackHinted = false;          // 是否已注入动态注入兜底提示
         boolean wrapUpHinted = false;            // 是否已注入「尽快总结收尾」提示
@@ -188,12 +196,6 @@ public class FunctionCallingBridge {
                 // 携带 tools 参数的请求后续轮次必须完整回传 reasoning_content，否则思考模式下 API 返回 400
                 messages.add(ChatMessage.createAssistantWithToolCalls(r.content, r.reasoningContent, r.toolCalls));
                 totalToolCalls += r.toolCalls.size();
-                // 接近硬上限：注入一次收尾提示，引导 AI 基于已有信息尽快输出最终结果
-                int warnThreshold = Math.max(1, maxToolCalls * 3 / 4);
-                if (!wrapUpHinted && totalToolCalls >= warnThreshold) {
-                    wrapUpHinted = true;
-                    messages.add(new ChatMessage("user", buildWrapUpPrompt(totalToolCalls)));
-                }
                 // 硬上限：强制终止，返回已执行进度说明，避免永久不回复
                 if (totalToolCalls >= maxToolCalls) {
                     traceSuccess = false;
@@ -206,6 +208,24 @@ public class FunctionCallingBridge {
                     boolean failed = isFailureResult(tc.getName(), result);
                     // 注意：不能按「连续调用同一工具」判空转——递归翻找文件会正常地连续调用 readdir/readfile。
                     // 无进展的识别由 isFailureResult 依据工具返回内容（失败/空结果）完成，见下方。
+                    // 工具结果累积长度控制：批量读大文件时结果持续累积会撑爆请求体(API 400)，超阈值后压缩后续结果。
+                    if (result != null) {
+                        if (contextOverflowed) {
+                            if (result.length() > TOOL_RESULT_TRIM_CHARS) {
+                                result = result.substring(0, TOOL_RESULT_TRIM_CHARS)
+                                        + "\n...[上下文过长，工具结果已压缩；请基于已有信息总结，避免继续读取大文件]";
+                            }
+                        } else {
+                            accumulatedToolResultChars += result.length();
+                            if (accumulatedToolResultChars > MAX_ACCUMULATED_TOOL_RESULT_CHARS) {
+                                contextOverflowed = true;
+                                if (result.length() > TOOL_RESULT_TRIM_CHARS) {
+                                    result = result.substring(0, TOOL_RESULT_TRIM_CHARS)
+                                            + "\n...[上下文过长，工具结果已压缩；请基于已有信息总结，避免继续读取大文件]";
+                                }
+                            }
+                        }
+                    }
                     messages.add(ChatMessage.createToolResult(tc.getId(), tc.getName(), result));
                     if (failed) {
                         consecutiveFailures++;
@@ -220,9 +240,19 @@ public class FunctionCallingBridge {
                         return buildFailureStopMessage(totalToolCalls, consecutiveFailures, lastFailure);
                     }
                 }
+                // 接近硬上限：注入一次收尾提示（必须放在所有 tool 结果之后，否则打断 tool_calls 配对导致 API 400）
+                int warnThreshold = Math.max(1, maxToolCalls * 3 / 4);
+                if (!wrapUpHinted && totalToolCalls >= warnThreshold) {
+                    wrapUpHinted = true;
+                    messages.add(new ChatMessage("user", buildWrapUpPrompt(totalToolCalls)));
+                }
             }
         } catch (Exception e) {
             traceSuccess = false;
+            // 打印完整堆栈，便于定位 IllegalArgumentException 等异常的确切来源
+            java.io.StringWriter sw = new java.io.StringWriter();
+            e.printStackTrace(new java.io.PrintWriter(sw));
+            sair.aiagent.AiAgentActivity.debugLog("[FC] 主循环异常(完整堆栈):\n" + sw.toString());
             return "[Function Calling 调用失败] " + e.toString();
         } finally {
             recordTrace(task, ctx, totalToolCalls, traceSuccess, traceStart, traceVerdict);
@@ -370,6 +400,7 @@ public class FunctionCallingBridge {
                     + "只做客观识别与转写，不要分析、不要下结论。";
             if (visionImages.size() == 1) {
                 String cacheKey = sair.aiagent.onebot.ImageRecognizer.visionCacheKey(visionImages.get(0));
+                if (cacheKey != null) cacheKey = "recognize:" + cacheKey; // 前缀隔离，避免与 vision 工具/审查缓存串扰
                 String cached = sair.aiagent.onebot.ImageRecognizer.getCachedVisionResult(cacheKey);
                 if (cached != null) {
                     sair.aiagent.AiAgentActivity.qqLog("[FC] 视觉模型识别缓存命中: " + cacheKey);

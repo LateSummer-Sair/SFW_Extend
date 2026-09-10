@@ -41,6 +41,15 @@ public final class FileUtils {
      * Read file content (auto-detect type).
      */
     public static String readFile(String path) {
+        return readFile(path, 0, -1);
+    }
+
+    /**
+     * Read file content with optional chunking (offset/limit) for large text files.
+     * @param offset 起始字符偏移（0=从头读）
+     * @param limit  最多读取的字符数（-1 或 0=读全部）
+     */
+    public static String readFile(String path, int offset, int limit) {
         if (path == null || path.trim().isEmpty()) {
             return "Path is empty.";
         }
@@ -54,7 +63,17 @@ public final class FileUtils {
             return readImageInfo(file);
         }
 
-        return readTextFile(file);
+        String content = readTextFile(file);
+        if (content == null || content.startsWith("File too large") || content.startsWith("Read file error")) {
+            return content;
+        }
+        if (offset > 0 || limit > 0) {
+            int start = Math.min(Math.max(offset, 0), content.length());
+            int end = (limit > 0) ? Math.min(start + limit, content.length()) : content.length();
+            if (start >= end) return content.substring(start);
+            return content.substring(start, end);
+        }
+        return content;
     }
 
     /**

@@ -30,14 +30,17 @@ import java.util.Collections;
  */
 public class StickerManager {
 
-    /** 最多保留表情包数量 */
-    private static final int MAX_STICKERS = 15;
+    /** 最多保留表情包数量（超过不再添加，但依然有过期删除） */
+    private static final int MAX_STICKERS = 60;
+
+    /** 表情包保底数量（过期删除不删到该值以下，避免删光没得用） */
+    private static final int MIN_STICKERS = 15;
+
+    /** 过期删除阈值：表情数不超过该值时，不开启过期删除机制 */
+    private static final int STICKER_THRESHOLD = 30;
 
     /** 表情包有效期（3天），超期自动清除 */
     private static final long STICKER_TTL_MS = 3 * 24 * 3600_000L;
-
-    /** 存图冷却时间（2分钟）：冷却中拒绝存图，减少视觉模型调用 */
-    private static final long COLLECT_COOLDOWN_MS = 2 * 60 * 1000L;
 
     /** 语境匹配最低得分阈值（0.0~1.0），低于此分不发送 */
     private static final double MATCH_THRESHOLD = 0.4;
@@ -51,8 +54,6 @@ public class StickerManager {
     private volatile NapCatApi napcatApi;
     /** 自动清理守护线程 */
     private volatile Thread cleanupThread;
-    /** 上次存图触发时间戳（2分钟冷却） */
-    private volatile long lastCollectTime = 0;
     /** 图片视觉分析内容描述缓存（原始URL → 内容描述），供识图复用，避免同一张图重复调视觉模型 */
     private static final java.util.concurrent.ConcurrentHashMap<String, String> VISION_DESC_CACHE =
             new java.util.concurrent.ConcurrentHashMap<>();
@@ -106,16 +107,7 @@ public class StickerManager {
     public synchronized StickerEntry collect(String imageUrl, String context) {
         if (pm == null || imageUrl == null || imageUrl.trim().isEmpty()) return null;
 
-        // 0. 冷却检查（2分钟）：冷却中拒绝存图，且不调用视觉模型
-        long now = System.currentTimeMillis();
-        if (now - lastCollectTime < COLLECT_COOLDOWN_MS) {
-            AiAgentActivity.debugLog("[Sticker] collect skipped (cooldown)");
-            return null;
-        }
-        // 1. 先清理过期表情包（3天TTL），腾出空位
-        cleanupExpired();
-
-        // 2. 达到上限则不存储、也不调视觉模型审查（减少视觉模型调用）
+        // 1. 达到上限则不存储、也不调视觉模型审查（减少视觉模型调用）
         if (pm.stickerCount() >= MAX_STICKERS) {
             AiAgentActivity.debugLog("[Sticker] collect skipped (full " + MAX_STICKERS + "/" + MAX_STICKERS + ", waiting for expired cleanup)");
             return null;
@@ -143,6 +135,8 @@ public class StickerManager {
         if (entry != null) {
             AiAgentActivity.debugLog("[Sticker] collected #" + entry.getId()
                     + " keywords=" + (keywords.length() > 40 ? keywords.substring(0, 40) + "..." : keywords));
+            // 2. 被动 TTL：每次添加一张后，挑最老的一张检查是否超时（X≤15 不启用）
+            passiveTtlCheck();
         }
 
         return entry;
@@ -479,8 +473,6 @@ public class StickerManager {
      */
     private boolean reviewSafe(String imageUrl) {
         if (client == null) return true; // 未注入审查能力则放行
-        // 触发视觉审查：更新冷却时间（视觉模型调用或缓存命中后都进入冷却，减少调用频率）
-        lastCollectTime = System.currentTimeMillis();
         try {
             // 0. 缓存短路：同一张图只调一次视觉模型，命中则复用判定结果
             ReviewResult cached = REVIEW_CACHE.get(imageUrl);
@@ -498,7 +490,9 @@ public class StickerManager {
                 AiAgentActivity.debugLog("[Sticker] review: image resolve failed, treat as unsafe");
                 return false;
             }
+            // 缓存 key 加 "sticker-review:" 前缀，避免与 vision 工具/识图预处理的缓存串扰（不同 prompt 结果不能混用）
             String cacheKey = sair.aiagent.onebot.ImageRecognizer.visionCacheKey(visionImage);
+            if (cacheKey != null) cacheKey = "sticker-review:" + cacheKey;
             String cachedVision = sair.aiagent.onebot.ImageRecognizer.getCachedVisionResult(cacheKey);
             String result = cachedVision;
             if (result == null) {
@@ -528,7 +522,7 @@ public class StickerManager {
         }
     }
 
-    /** 依据视觉审查四段结果判定是否可存储：仅一张脸 + 文字≤15字 + 无违规。 */
+    /** 依据视觉审查四段结果判定是否可存储：仅一张脸 + 文字≤20字 + 无违规。 */
     private boolean evaluateReview(ReviewResult rr, String imageUrl) {
         String face = rr.face;
         String text = rr.text;
@@ -546,10 +540,10 @@ public class StickerManager {
             return false;
         }
 
-        // 2. 文字不超过 15 字才存
+        // 2. 图中文字不超过 20 字才存（超过 20 字拒绝收藏）
         if (text != null && !text.trim().isEmpty() && !"无".equals(text.trim())) {
-            if (countChars(text) > 15) {
-                AiAgentActivity.debugLog("[Sticker] review: too much text -> skip");
+            if (countChars(text) > 20) {
+                AiAgentActivity.debugLog("[Sticker] review: too much text(" + countChars(text) + "字) -> skip");
                 return false;
             }
         }
@@ -571,19 +565,50 @@ public class StickerManager {
     }
 
     /**
+     * 被动 TTL：每次添加一张后调用，挑最老的一张检查是否超时，超时则删（X≤15 不启用）。
+     */
+    private synchronized void passiveTtlCheck() {
+        if (pm == null) return;
+        int count = pm.stickerCount();
+        if (count <= MIN_STICKERS) return; // X ≤ 15 不启用 TTL
+        List<StickerEntry> all = pm.listAllStickers(); // 降序（最新在前）
+        if (all.isEmpty()) return;
+        StickerEntry oldest = all.get(all.size() - 1); // 最老的一张
+        if (System.currentTimeMillis() - oldest.getTimestamp() > STICKER_TTL_MS) {
+            pm.removeSticker(oldest.getId());
+            deleteLocalFile(oldest.getFilePath());
+            AiAgentActivity.debugLog("[Sticker] 被动TTL 删除最老超时表情 #" + oldest.getId());
+        }
+    }
+
+    /**
      * 清理过期表情包（超过 STICKER_TTL_MS=3天），返回清理数量。
      */
     public synchronized int cleanupExpired() {
         if (pm == null) return 0;
         List<StickerEntry> all = pm.listAllStickers();
+        int total = all.size();
+        // 阈值：不超过 30 张不开启过期删除机制
+        if (total <= STICKER_THRESHOLD) return 0;
+        // listAllStickers 按时间降序（最新在前），反转为升序（最老在前），保证「删最老」
+        java.util.Collections.reverse(all);
         long now = System.currentTimeMillis();
         int removed = 0;
+        int remaining = total;
         for (StickerEntry s : all) {
+            // 删到 30 以内即停止（主动 TTL 目标）
+            if (remaining <= STICKER_THRESHOLD) break;
+            // 保底：不删到 15 张以下
+            if (remaining <= MIN_STICKERS) break;
             if (now - s.getTimestamp() > STICKER_TTL_MS) {
                 pm.removeSticker(s.getId());
                 deleteLocalFile(s.getFilePath());
                 removed++;
-                AiAgentActivity.debugLog("[Sticker] expired removed #" + s.getId());
+                remaining--;
+                AiAgentActivity.debugLog("[Sticker] 主动TTL 删除最老超时表情 #" + s.getId());
+            } else {
+                // 最老的没超时，后面更新的更不会超时，停止
+                break;
             }
         }
         return removed;
@@ -609,8 +634,11 @@ public class StickerManager {
                 while (true) {
                     try { Thread.sleep(60 * 60 * 1000L); } catch (InterruptedException e) { break; }
                     try {
-                        int removed = cleanupExpired();
-                        if (removed > 0) AiAgentActivity.debugLog("[Sticker] auto cleanup removed " + removed + " expired");
+                        // 主动 TTL：仅当 X ≥ 60 时才主动删超时的，直到 ≤30（降到30以内后降级被动）
+                        if (pm != null && pm.stickerCount() >= MAX_STICKERS) {
+                            int removed = cleanupExpired();
+                            if (removed > 0) AiAgentActivity.debugLog("[Sticker] 主动TTL auto cleanup removed " + removed + " expired");
+                        }
                     } catch (Exception ignored) {}
                 }
             }

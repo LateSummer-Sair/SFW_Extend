@@ -162,7 +162,7 @@
         </div>
         <div class="flow-box reveal">
           <div class="flow">
-            <div class="flow-node start"><span class="fn-title">系统提示词</span><span class="fn-sub">PromptManager（基础人设 + 约束）</span></div>
+            <div class="flow-node start"><span class="fn-title">系统提示词</span><span class="fn-sub">PromptManager（硬编码约束 + md 文件角色设定）</span></div>
             <div class="flow-edge"></div>
             <div class="flow-node data"><span class="fn-title">记忆上下文</span><span class="fn-sub">memories FTS5 全文检索 + 重要性加权</span></div>
             <div class="flow-edge"></div>
@@ -190,7 +190,7 @@
             <div class="flow-edge"></div>
             <div class="flow-node core"><span class="fn-title">OneBotServer 解析</span><span class="fn-sub">RFC 6455 帧解析 → JSON 事件</span></div>
             <div class="flow-edge"></div>
-            <div class="flow-node core"><span class="fn-title">QQMessageHandler 过滤</span><span class="fn-sub">@机器人 / 提到名字 / 引用回复 / 好感度决策</span></div>
+            <div class="flow-node core"><span class="fn-title">QQMessageHandler 过滤</span><span class="fn-sub">@机器人 / 提到名字 / 引用回复 / 卡片消息提取 / 好感度决策</span></div>
             <div class="flow-edge"></div>
             <div class="flow-node data"><span class="fn-title">QQPromptBuilder 构建提示词</span><span class="fn-sub">群聊/私聊历史 + 印象 + 技能（execq 仅 NapCat）</span></div>
             <div class="flow-edge"></div>
@@ -207,7 +207,7 @@
         <div class="section-head reveal">
           <div class="section-tag">Structure</div>
           <h2>目录结构</h2>
-          <p class="desc">9 个包，93 个 Java 源文件，共 37,211 行代码。</p>
+          <p class="desc">9 个包，93 个 Java 源文件，共 37,597 行代码。</p>
         </div>
         <div class="table-wrap reveal">
           <table>
@@ -229,7 +229,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.9 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
+        <p><span class="brand">AiAgent</span> v3.10 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
         <p style="margin-top:6px">分层架构 · Function Calling 循环 · 多智能体协作 · 上下文注入链 · 拟人化监听态 · OneBot QQ 模块 · 目录结构</p>
       </div>
     </footer>

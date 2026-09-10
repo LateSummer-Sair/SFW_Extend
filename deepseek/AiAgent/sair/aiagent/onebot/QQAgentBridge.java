@@ -254,9 +254,7 @@ class QQAgentBridge {
         t = t.replaceAll("(?i)^(作为\\s*AI|作为人工智能|根据我的理解|希望以上信息对你有帮助)[，。:：\\s]*", "");
         t = t.replaceAll("(?i)(希望以上信息对你有帮助|如果还有问题可以继续问我|有其他问题随时问我)[。！!\\s]*$", "");
         t = t.replaceAll("\\n{3,}", "\n\n").trim();
-        if (group && t.length() > GROUP_HUMAN_MAX_LEN * 2) {
-            t = t.substring(0, GROUP_HUMAN_MAX_LEN * 2).trim();
-        }
+        // 不再硬截断超长回复：分段发送（splitIntoMessages）负责完整拆条，确保「有多少输出多少」
         return t;
     }
 
@@ -268,6 +266,10 @@ class QQAgentBridge {
 
     String buildTaskDescription(QQMessage msg) {
         StringBuilder sb = new StringBuilder();
+        // 系统拦截说明置顶：好友申请/群邀请卡片已被系统接管处理时，告知 AI 处理结果，禁止误答「空消息」
+        if (msg.getInterceptNote() != null && !msg.getInterceptNote().isEmpty()) {
+            sb.append("【系统提示】").append(msg.getInterceptNote()).append("\n");
+        }
         sb.append(msg.getDisplayName());
         sb.append("(QQ:").append(msg.getUserId()).append(")");
         sb.append(msg.isGroupMessage() ? " 群聊: " : " 私聊: ");

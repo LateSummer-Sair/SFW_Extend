@@ -95,7 +95,6 @@ public class HarnessConfig {
     private void applyDefaults() {
         // === 权限矩阵默认值（镜像当前硬编码语义） ===
         // 仅主人（MASTER）
-        permissionMatrix.put("sendfile",      LEVEL_MASTER);
         permissionMatrix.put("block",         LEVEL_MASTER);
         permissionMatrix.put("unblock",       LEVEL_MASTER);
         permissionMatrix.put("delfriend",     LEVEL_MASTER);
@@ -116,14 +115,15 @@ public class HarnessConfig {
         permissionMatrix.put("leavegroup",    LEVEL_GROUP_MASTER);
         // 主人或好感度>600（MEDIA）
         permissionMatrix.put("sendimage",     LEVEL_MEDIA);
-        permissionMatrix.put("sendrecord",    LEVEL_MEDIA);
         permissionMatrix.put("sendlike",      LEVEL_MEDIA);
         permissionMatrix.put("relay",         LEVEL_MEDIA);
-        permissionMatrix.put("sendfileto",    LEVEL_MEDIA);
         // 好感度门槛（AFFECTION:N）
         permissionMatrix.put("setcard",          "AFFECTION:200");
         permissionMatrix.put("approvefriend",    "AFFECTION:100");
         permissionMatrix.put("acceptgroupinvite","AFFECTION:300");
+        permissionMatrix.put("sendfile",         "AFFECTION:300");
+        permissionMatrix.put("sendfileto",       "AFFECTION:300");
+        permissionMatrix.put("sendrecord",       "AFFECTION:300");
 
         // === 高危代码模式（确定性拦截，仅 execq 非主人通道强制） ===
         forbiddenCodePatterns.clear();
@@ -303,7 +303,11 @@ public class HarnessConfig {
 
     /** 按工具类型收紧结果长度，避免 readfile/web/search 等大文本占用过多 token。 */
     public int getMaxResultLengthForTool(String toolName) {
-        if ("readfile".equals(toolName) || "web".equals(toolName) || "search".equals(toolName)) {
+        if ("readfile".equals(toolName)) {
+            // readfile 读文件允许更大（代码/文档文件常见几万字符），超大文件配合 offset/limit 分块读取
+            return Math.min(maxResultLength, 20000);
+        }
+        if ("web".equals(toolName) || "search".equals(toolName)) {
             return Math.min(maxResultLength, 6000);
         }
         if ("readdir".equals(toolName) || "findfile".equals(toolName) || "searchglobal".equals(toolName)) {

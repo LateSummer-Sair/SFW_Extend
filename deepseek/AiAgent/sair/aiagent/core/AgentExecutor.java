@@ -333,13 +333,16 @@ public class AgentExecutor {
 
     /** 段落 Agent 系统提示词。 */
     private static final String PASSAGE_AGENT_PROMPT =
-        "你是段落分析 Agent，负责概括折叠消息（合并转发的多条消息）。\n"
+        "你是段落分析 Agent，负责概括折叠消息 + 分析段落中的图片并决定是否收藏为表情包。\n"
       + "工作方式：\n"
-      + "1. 阅读折叠消息内容，提炼对话主题、各方观点、与当前对话相关的重点。\n"
-      + "2. 当你不确定某句话是谁说的、或某个信息归属不明确时，用 ask_agent 向 main 发问。\n"
-      + "3. 如果折叠消息里包含图片需要理解，用 call_agent 唤起 vision 分析图片。\n"
-      + "4. 可用 searchglobal/searchnote 查询相关记忆线索。\n"
-      + "5. 最终返回结构化概述（主题背景、各方核心观点、相关重点）。";
+      + "1. 阅读段落内容，提炼对话主题、各方观点、与当前对话相关的重点。\n"
+      + "2. 找出段落中出现的图片（带 [图片URL:...] 标记，或段落里明确给出的图片 URL）。\n"
+      + "3. 对每张【未处理】的图片（段落里没有 〖已处理〗 标记的），用 call_agent 唤起 vision 识别图片内容；传给 vision 的 url 必须是完整的 https:// 开头的 URL，若只拿到 fileid（不含 https://），先用 searchglobal 查完整 URL 再识图。\n"
+      + "4. 根据 vision 返回的信息判断能否收藏为表情包：仅【单张人脸/表情】+【图中文字≤20字】+【无违规内容】才收藏。\n"
+      + "5. 能收藏的图片用 collectsticker 工具收藏（content 参数 = imageUrl|context 格式，context 写该图所在的对话语境）。\n"
+      + "6. 处理完的图片用 markmessage 工具打 Mark（action=set，mark 写「已收藏」或「跳过+原因」），防止重复处理。\n"
+      + "7. 最终返回：你收藏了哪些图、跳过了哪些图（含原因）、以及给哪些消息打了 Mark（方便主 Agent 维护全局记录）。\n"
+      + "8. 若段落里没有图片，或图片都已处理过，直接返回「无新图片需要处理」即可。";
 
     /** 视觉 Agent 工具集。 */
     private static List<ToolDefinition> buildVisionAgentTools() {
@@ -364,6 +367,12 @@ public class AgentExecutor {
                 .addString("query", "检索关键词"));
         tools.add(new ToolDefinition("vision", "视觉分析图片：调用视觉模型分析并返回图片特征")
                 .addString("url", "图片 URL（http/https）或 file_id"));
+        tools.add(new ToolDefinition("collectsticker", "收藏表情包（imageUrl|context）")
+                .addString("content", "imageUrl|context 格式"));
+        tools.add(new ToolDefinition("markmessage", "给消息打 Mark 备注（AI 自用内部标记，用户看不到）。action=set 标记某条消息的处理结果")
+                .addString("action", "set/get/list")
+                .addOptionalString("message", "要标记的消息内容")
+                .addOptionalString("mark", "备注内容（如「已收藏」「跳过+原因」）"));
         return tools;
     }
 
@@ -734,11 +743,5 @@ public class AgentExecutor {
             if (m.getReasoningContent() != null) total += m.getReasoningContent().length();
         }
         return total / 2 + total / 100; // rough: chars/2 + overhead
-    }
-
-    /** Called by QQMessageHandler when image appears in chat */
-    public void collectStickerFromQQ(String imageUrl, String context) {
-        if (stickerManager == null) return;
-        stickerManager.collect(imageUrl, context);
     }
 }

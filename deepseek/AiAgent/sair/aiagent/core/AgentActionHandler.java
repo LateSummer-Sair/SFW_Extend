@@ -124,9 +124,17 @@ public class AgentActionHandler {
     }
 
     String executeReadFile(String path) {
+        return executeReadFile(path, 0, -1);
+    }
+
+    String executeReadFile(String path, int offset, int limit) {
         if (!gate.await("readfile", "读取文件: " + path)) return "读取文件被拒绝。";
-        EdtUtils.println(C_TOOL, "\n  > 读取: " + path);
-        return "文件 [" + path + "]:\n" + FileUtils.readFile(path);
+        EdtUtils.println(C_TOOL, "\n  > 读取: " + path + (offset > 0 || limit > 0 ? " (offset=" + offset + ", limit=" + limit + ")" : ""));
+        String content = FileUtils.readFile(path, offset, limit);
+        String rangeInfo = (offset > 0 || limit > 0)
+                ? " [分块读取: offset=" + offset + ", limit=" + (limit > 0 ? limit : "全部") + "]"
+                : "";
+        return "文件 [" + path + "]" + rangeInfo + ":\n" + content;
     }
 
     String executeReadDir(String path) {
@@ -339,7 +347,7 @@ public class AgentActionHandler {
         String prompt = newPrompt.trim();
         if (prompt.length() < 30) return "提示词太短（" + prompt.length() + " 字符），需要至少 30 字符。";
         EdtUtils.println(new Color(200, 180, 255), "\n  [修改提示词] 长度: " + prompt.length() + " 字符");
-        try { AiConfig.getInstance().setSystemPrompt(prompt); AiConfig.getInstance().save();
+        try { AiConfig.getInstance().setSystemPrompt(prompt); // setSystemPrompt 内部已写 systemPrompt.md
             return "系统提示词已更新（" + prompt.length() + " 字符）。新个性已生效。";
         } catch (Exception e) { return "提示词更新失败: " + e.getMessage(); }
     }

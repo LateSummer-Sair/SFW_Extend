@@ -21,7 +21,7 @@
         <div class="crumb"><a href="index.html">Home</a> / 类结构</div>
         <h1>类结构<span class="gradient-text">详解</span></h1>
         <p class="lead">
-          93 个 Java 源文件，81 个 public 类型，总计 37,211 行代码，按职责划分为 9 个包。
+          93 个 Java 源文件，81 个 public 类型，总计 37,597 行代码，按职责划分为 9 个包。
           采用「路由与命令实现分离 + Function Calling 统一执行 + 多智能体递归协作」的架构。
         </p>
       </div>
@@ -39,7 +39,7 @@
           <div class="card"><div class="card-icon ic-cyan">🎬</div><h3>AiAgentActivity</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent</p><p>SFW 插件入口。main() 路由命令，初始化全部核心组件 + AutoDistill 自主蒸馏守护线程 + MemoryLifecycleManager + HistoryCompressor + OneBot QQ + AutoClear 守护线程。</p></div>
           <div class="card"><div class="card-icon ic-green">🗄️</div><h3>PersistenceManager</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>SQLite 统一持久化核心（aiagent.db，WAL + FTS5）。多表：memories/journal/conversations/stickers/cron_tasks/notes/skills/impressions/corrections/group_impressions/image_remarks/harness_traces/tool_call_traces/alarms。ensureColumn 幂等迁移。</p></div>
           <div class="card"><div class="card-icon ic-amber">⚙️</div><h3>AiConfig</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>单例配置管理器。API Key AES-GCM 加密存储（兼容旧 ECB）。DeepSeek 高级参数 + Redis。模型智能路由：getAgentModel()/getExecqModel()/getVisionModel()。加载后校验关键配置并记录回退日志。</p></div>
-          <div class="card"><div class="card-icon ic-amber">📝</div><h3>PromptManager</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>集中式提示词管理器（单例）。systemPrompt / execqPrompt / agentStaticPrompt 三段统一入口。</p></div>
+          <div class="card"><div class="card-icon ic-amber">📝</div><h3>PromptManager</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>集中式提示词管理器（单例）。硬编码默认 + systemPrompt.md / execqPrompt.md 文件后置拼接，getSystemPrompt()/getExecqPrompt() 统一入口，角色设定（身份/性格/说话习惯）由 md 文件定义。</p></div>
           <div class="card"><div class="card-icon ic-cyan">🤖</div><h3>AgentExecutor</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>FC 执行入口。executeFcLocal / executeFcExecq / executeFcExecs / executeOrchestrated 四通道。buildSystemPrompt() 融合上下文，轨迹收集用于技能蒸馏，registerAgents() 注册多智能体。</p></div>
           <div class="card"><div class="card-icon ic-green">🔄</div><h3>FunctionCallingBridge</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>原生 Function Calling 多轮循环引擎。runWithDispatcher() 驱动 tools/tool_calls 循环（无轮次上限，连续失败/无进展自动终止，失败 5 次切 eval 兜底）。</p></div>
           <div class="card"><div class="card-icon ic-green">🎯</div><h3>ToolDispatcher</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>工具分发器。buildAllTools / buildExecqTools / buildExecsTools 三套注册表 + execute() 统一执行 + execq 权限门禁。</p></div>
@@ -58,7 +58,7 @@
           <div class="card"><div class="card-icon ic-cyan">🧩</div><h3>SkillBank</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>技能库中枢（单例）。scope 四分类，buildCompactIndex() 按通道注入，addBuiltinSkill() contentHash 去重，getBestRoute() 路径路由。</p></div>
           <div class="card"><div class="card-icon ic-cyan">🧪</div><h3>SkillExtractor</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>LLM 轨迹蒸馏引擎。成功提取决策模式 + 失败合成反事实约束，extractImmediate 绕过限频。</p></div>
           <div class="card"><div class="card-icon ic-cyan">📚</div><h3>SystemSkillLib</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>系统内置通用技能库（scope=general，30 条）。工具说明、八库记忆架构、动态注入、三方技能、技能包、callskill、系统闹钟、捐赠记录等。</p></div>
-          <div class="card"><div class="card-icon ic-green">🖼️</div><h3>StickerManager</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>表情包管理器。MAX_STICKERS=15 + 3 天 TTL + 视觉审查 + 过期清理，collectSticker() 自动收集 + randomSticker() 随机发送。</p></div>
+          <div class="card"><div class="card-icon ic-green">🖼️</div><h3>StickerManager</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>表情包管理器。保底 15 / 阈值 30 / 上限 60 + 3 天 TTL 被动/主动双通道治理（X≤15 不启用、X&gt;30 删超时到 ≤30、X≥60 主动清理）+ 视觉审查（单张脸 + 文字≤20 + 无违规），collectSticker() 收集 + randomSticker() 随机发送。</p></div>
           <div class="card"><div class="card-icon ic-green">🖨️</div><h3>StreamPrinter</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>单例流式输出核心。LinkedBlockingQueue FIFO + 行输出/字符打字机双通道。</p></div>
           <div class="card"><div class="card-icon ic-amber">⌨️</div><h3>SysConsoleExecutor</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>跨平台系统命令执行器。ProcessBuilder + cmd/sh 自动切换 + 30s 超时 + UTF-8。</p></div>
           <div class="card"><div class="card-icon ic-green">⏰</div><h3>CronScheduler</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.core</p><p>定时任务调度引擎。简单 cron 表达式（分钟/小时/天）+ cron_tasks 表持久化 + 重启恢复。</p></div>
@@ -95,7 +95,7 @@
         </div>
         <div class="card-grid cols-2 reveal">
           <div class="card"><div class="card-icon ic-cyan">🔌</div><h3>OneBotServer</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>OneBot v11 反向 WebSocket 服务器，RFC 6455 协议手动实现。握手/帧解析/鉴权 + sendApiCall() Gson 序列化。</p></div>
-          <div class="card"><div class="card-icon ic-cyan">📨</div><h3>QQMessageHandler</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>QQ 消息处理核心。消息解析/过滤/路由 + 好友/群邀请好感度决策 + 折叠消息展开 + 图片下载 + execs 合并转发 + 表情包收集。</p></div>
+          <div class="card"><div class="card-icon ic-cyan">📨</div><h3>QQMessageHandler</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>QQ 消息处理核心。消息解析/过滤/路由 + 好友/群邀请决策 + 折叠消息展开 + 图片下载 + execs 合并转发 + 表情包收集 + 卡片消息（json/xml/markdown）内容提取 + 系统拦截结果注入（好友申请/群邀请已被拦截时告知 AI 处理结果与原因）。</p></div>
           <div class="card"><div class="card-icon ic-cyan">🧾</div><h3>QQPromptBuilder</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>QQ 提示词构建器。群聊/私聊历史 + 印象记忆 + 会话日志 + 笔记 + 情绪 + 违规处罚 + 技能索引（execq 仅 NapCat）。</p></div>
           <div class="card"><div class="card-icon ic-cyan">🌉</div><h3>QQAgentBridge</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>QQ Agent 桥接器。执行 execq 任务 + 识别 execs: 权限提升 + 合并转发思考卡片 + 结果清理与发送兜底。</p></div>
           <div class="card"><div class="card-icon ic-cyan">🔀</div><h3>ForwardMessageExpander</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>转发/折叠消息展开工具。递归解析 JSON 提取嵌套 forward_id 消息内容 + 引用图片 URL + 引用发送者。</p></div>
@@ -104,7 +104,7 @@
           <div class="card"><div class="card-icon ic-cyan">📤</div><h3>ExecsForwardHandler</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>execs 合并转发处理器。executeRealExecs() 异步执行 + sendThinkingAsForward() 按轮次拆分 forward nodes。</p></div>
           <div class="card"><div class="card-icon ic-cyan">📁</div><h3>FileServer</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>文件中转 Web 服务。JDK 内置 HttpServer 把本地文件以 HTTP URL 暴露给 NapCat 下载（注册表模式仅暴露显式注册文件，零第三方依赖）。</p></div>
           <div class="card"><div class="card-icon ic-cyan">🗂️</div><h3>UnifiedQQMemoryManager</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>统一记忆库管理器（qq_unified_memory.db）。source_type/source_id 标记来源 + FTS5 全文索引 + 记忆联通 + searchConversations 跨用户检索。</p></div>
-          <div class="card"><div class="card-icon ic-green">📬</div><h3>QQMessage</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot.model</p><p>OneBot v11 消息模型 POJO。MessageSegment（mface/sticker 判定）+ stickerUrls 专用列表 + quotedSender/quotedImageFiles + getPlainText()/isAtBot()/extractImageUrls()。</p></div>
+          <div class="card"><div class="card-icon ic-green">📬</div><h3>QQMessage</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot.model</p><p>OneBot v11 消息模型 POJO。MessageSegment（mface/sticker/卡片判定）+ stickerUrls 专用列表 + cardSummary/interceptNote + quotedSender/quotedImageFiles + getPlainText()/isAtBot()/extractImageUrls()。</p></div>
           <div class="card"><div class="card-icon ic-purple">🐱</div><h3>NapCatApi</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>NapCat QQ 框架 HTTP API 封装层。群管理/消息/信息/好友管理完整 API。</p></div>
           <div class="card"><div class="card-icon ic-cyan">📖</div><h3>NapCatSkillLib</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>NapCat 技能库（scope=execq，15 条）。消息发送/群管操作/好友管理/好友申请/群邀请等底层 API 技能，内容详细。</p></div>
           <div class="card"><div class="card-icon ic-amber">🤝</div><h3>InternalAgents</h3><p class="p-class" style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">sair.aiagent.onebot</p><p>内部 Agent 管理器。好感度追踪 + 黑名单管理 + 背叛者/主人识别。</p></div>
@@ -164,7 +164,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.9 · 93 文件 · 81 类型 · 9 包 · 37,211 行 · 分层架构</p>
+        <p><span class="brand">AiAgent</span> v3.10 · 93 文件 · 81 类型 · 9 包 · 37,597 行 · 分层架构</p>
       </div>
     </footer>
   </main>

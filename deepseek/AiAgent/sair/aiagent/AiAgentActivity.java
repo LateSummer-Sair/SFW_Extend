@@ -35,7 +35,7 @@ import sair.user.Activity;
 import sair.user.PrintRunnable;
 
 /**
- * AiAgent V3.9 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
+ * AiAgent V3.10 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码注入 · 流式输出 · OneBot QQ
  *
  * <h3>架构</h3>
  * 路由与命令实现分离 —— {@code main()} 仅做初始化 + 委托 {@link ActivityActions#route}，
@@ -119,6 +119,7 @@ public class AiAgentActivity extends Activity {
             debugLog("首次调用 - 初始化中...");
             String dataDir = getDataDir();
             config.init(dataDir);
+            sair.aiagent.core.PromptManager.getInstance().init(new File(dataDir)); // 提示词独立 md 文件（systemPrompt.md / execqPrompt.md）
             HarnessConfig.getInstance().init(dataDir); // Harness 确定性约束配置中心
 
             // === Redis 旁路缓存初始化（未运行则静默降级，不影响主流程） ===
@@ -337,7 +338,7 @@ public class AiAgentActivity extends Activity {
         String n = getName();
         return new String[] {
             Pathes.printSplit,
-            "AiAgent V3.9 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出 · OneBot QQ",
+            "AiAgent V3.10 - AI智能助手 | 反射 · 系统终端 · 记忆 · 动态代码 · 流式输出 · OneBot QQ",
             "DeepSeek API, 流式打字机效果, Agent自主操作, 持久化记忆, JS/Java动态注入",
             "配置:",
             "\t" + n + "/setkey [密钥]        设置API密钥",

@@ -58,10 +58,10 @@
           <table>
             <thead><tr><th>权限级别</th><th>语义</th><th>工具</th></tr></thead>
             <tbody>
-              <tr><td><span class="badge b-red">MASTER</span></td><td>仅主人（任何通道）</td><td>sendfile、block、unblock、delfriend、forwardmsg、sendgroupmsg、setaffection、recorddonation、resetdonation、setname、setsignature、settrigger</td></tr>
+              <tr><td><span class="badge b-red">MASTER</span></td><td>仅主人（任何通道）</td><td>block、unblock、delfriend、forwardmsg、sendgroupmsg、setaffection、recorddonation、resetdonation、setname、setsignature、settrigger</td></tr>
               <tr><td><span class="badge b-amber">GROUP_MASTER</span></td><td>仅群内主人（群聊上下文）</td><td>ban、kick、muteall、setadmin、setgroupname、leavegroup</td></tr>
-              <tr><td><span class="badge b-purple">MEDIA</span></td><td>主人或好感度 &gt; 600</td><td>sendimage、sendrecord、sendlike、relay、sendfileto</td></tr>
-              <tr><td><span class="badge b-green">AFFECTION:N</span></td><td>主人或好感度 ≥ N</td><td>setcard(200)、approvefriend(100)、acceptgroupinvite(300)</td></tr>
+              <tr><td><span class="badge b-purple">MEDIA</span></td><td>主人或好感度 &gt; 600</td><td>sendimage、sendlike、relay</td></tr>
+              <tr><td><span class="badge b-green">AFFECTION:N</span></td><td>主人或好感度 ≥ N</td><td>setcard(200)、approvefriend(100)、acceptgroupinvite(300)、sendfile(300)、sendfileto(300)、sendrecord(300)</td></tr>
               <tr><td><span class="badge b-cyan">ANY</span></td><td>无限制</td><td>其余所有工具（web/search/weather/time/remember/correct/note/searchnote/balance/poke/grouplist/groupmembers/friendlist/pendingrequests 等）</td></tr>
             </tbody>
           </table>
@@ -109,7 +109,7 @@
               <tr><td rowspan="4">媒体 / 图片</td><td class="cmd-name">vision</td><td>✓</td><td>✓</td><td>✓</td><td>多模态识图</td></tr>
               <tr><td class="cmd-name">setimageremark</td><td>✓</td><td>✓</td><td>✓</td><td>图片注释 MD5 绑定</td></tr>
               <tr><td class="cmd-name">sendimage</td><td>✓</td><td>✓</td><td>△</td><td>execq 主人或好感度 &gt; 600</td></tr>
-              <tr><td class="cmd-name">sendrecord / sendfile</td><td>✓</td><td>✓</td><td>△</td><td>execq 仅主人（sendfile）</td></tr>
+              <tr><td class="cmd-name">sendrecord / sendfile</td><td>✓</td><td>✓</td><td>△</td><td>execq 主人或好感度 ≥ 300</td></tr>
 
               <tr><td rowspan="4">表情包 / 互动</td><td class="cmd-name">sendsticker</td><td>✗</td><td>✓</td><td>✓</td><td>QQ 专属</td></tr>
               <tr><td class="cmd-name">collectsticker / clearsticker</td><td>✗</td><td>✓</td><td>✓</td><td>QQ 专属</td></tr>
@@ -127,9 +127,10 @@
               <tr><td class="cmd-name">setaffection</td><td>✗</td><td>✓</td><td>△</td><td>仅主人</td></tr>
               <tr><td class="cmd-name">affectionrank</td><td>✗</td><td>✓</td><td>△</td><td>本群 Top10，global 仅主人</td></tr>
 
-              <tr><td rowspan="3">跨群操作</td><td class="cmd-name">grouplist / groupmembers / friendlist</td><td>✗</td><td>✓</td><td>✓</td><td>跨群/好友查询</td></tr>
+              <tr><td rowspan="4">跨群操作</td><td class="cmd-name">grouplist / groupmembers / friendlist</td><td>✗</td><td>✓</td><td>✓</td><td>跨群/好友查询</td></tr>
               <tr><td class="cmd-name">sendgroupmsg</td><td>✗</td><td>✓</td><td>△</td><td>仅主人</td></tr>
-              <tr><td class="cmd-name">relay / sendfileto</td><td>✗</td><td>✓</td><td>△</td><td>主人或好感度 &gt; 600</td></tr>
+              <tr><td class="cmd-name">relay</td><td>✗</td><td>✓</td><td>△</td><td>主人或好感度 &gt; 600</td></tr>
+              <tr><td class="cmd-name">sendfileto</td><td>✗</td><td>✓</td><td>△</td><td>主人或好感度 ≥ 300</td></tr>
 
               <tr><td rowspan="2">多智能体</td><td class="cmd-name">call_agent / ask_agent</td><td>✓</td><td>✓</td><td>✓</td><td>AgentBus 递归唤起</td></tr>
               <tr><td class="cmd-name">tp_* 动态</td><td>✓</td><td>✓</td><td>△</td><td>三方技能代码段，受 setthirdpartycode 控制</td></tr>
@@ -151,7 +152,7 @@
               <tr><td>L0</td><td>&lt;100</td><td>仅聊天</td><td>只能正常对话</td></tr>
               <tr><td>L1</td><td>≥100</td><td>可加好友</td><td>approvefriend 同意好友申请</td></tr>
               <tr><td>L2</td><td>≥200</td><td>可改群马甲</td><td>setcard 修改群名片</td></tr>
-              <tr><td>L3</td><td>≥300</td><td>可入新群</td><td>acceptgroupinvite 同意群邀请</td></tr>
+              <tr><td>L3</td><td>≥300</td><td>可入新群 / 发文件 / 发语音</td><td>acceptgroupinvite 同意群邀请 · sendfile/sendfileto 发文件 · sendrecord 发语音</td></tr>
               <tr><td>L4</td><td>≥400</td><td>挚友关注</td><td>监听态 2% 概率主动关注</td></tr>
               <tr><td>L5</td><td>≥800</td><td>恋人 5% 监听</td><td>监听态 5% 概率主动响应</td></tr>
               <tr><td>L6</td><td>≥1000</td><td>灵魂伴侣 10%</td><td>监听态 10% 概率主动响应</td></tr>
@@ -240,7 +241,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.9 · 三层通道权限模型 · 工具权限矩阵 · 好感度六级权限 · 越权拦截 · 高危代码拦截</p>
+        <p><span class="brand">AiAgent</span> v3.10 · 三层通道权限模型 · 工具权限矩阵 · 好感度六级权限 · 越权拦截 · 高危代码拦截</p>
       </div>
     </footer>
   </main>

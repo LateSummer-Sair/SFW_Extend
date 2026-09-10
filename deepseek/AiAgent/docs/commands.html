@@ -22,7 +22,7 @@
         <h1>命令<span class="gradient-text">参考</span></h1>
         <p class="lead">
           所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 58 个用户命令 + 74 个 FC 工具（另有动态注册的 tp_* 工具）。
-          v3.9 特性：热路径提速（getPlainText 单次提取、KV 前缀缓存命中、群资料/偏好/日志短 TTL 缓存）、token 去重、群成员写库去重治理、有界 LRU 缓存、FC 请求体序列化缓存、遥测落库异步化。
+          v3.10 特性：存图多智能体协作、表情包 TTL 治理、提示词 md 化（systemPrompt.md/execqPrompt.md）、卡片消息识别 + 拦截结果注入、发文件/发语音权限 AFFECTION:300。
         </p>
       </div>
     </header>
@@ -43,8 +43,8 @@
               <tr><td class="cmd-name">ai/seturl</td><td>[URL]</td><td><span class="badge b-purple">配置</span></td><td>设置 API 地址，默认 https://api.deepseek.com</td></tr>
               <tr><td class="cmd-name">ai/setmodel</td><td>[模型名]</td><td><span class="badge b-purple">配置</span></td><td>设置模型，默认 auto。auto 下本地 execs 走 deepseek-v4-pro、QQ execq 走 deepseek-v4-flash（智能路由）</td></tr>
               <tr><td class="cmd-name">ai/setthirdpartycode</td><td>on|off</td><td><span class="badge b-purple">配置</span></td><td>三方技能代码段权限：on=放权（含 QQ）；off=仅 execs/本地</td></tr>
-              <tr><td class="cmd-name">ai/setprompt</td><td>[提示词]</td><td><span class="badge b-purple">配置</span></td><td>设置系统提示词（持久化），AI 也可通过 editprompt 工具修改</td></tr>
-              <tr><td class="cmd-name">ai/showprompt</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看当前系统提示词全文</td></tr>
+              <tr><td class="cmd-name">ai/setprompt</td><td>[提示词]</td><td><span class="badge b-purple">配置</span></td><td>设置系统提示词（写入 systemPrompt.md 持久化），AI 也可通过 editprompt 工具修改</td></tr>
+              <tr><td class="cmd-name">ai/showprompt</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看当前系统提示词全文（硬编码 + systemPrompt.md 角色设定）</td></tr>
               <tr><td class="cmd-name">ai/config</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看配置摘要（含思考模式/温度/top_p）+ 对话统计 + 记忆条数 + 数据目录</td></tr>
               <tr><td class="cmd-name">ai/status</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看运行时状态：OneBot、Redis、FileServer、线程池、最近 Harness/工具轨迹、技能与记忆计数</td></tr>
               <tr><td class="cmd-name">ai/setconfig</td><td>[key] [value]</td><td><span class="badge b-purple">配置</span></td><td>统一配置开关：思考模式/温度/top_p/最大输出/惩罚项/strict/botname 等，持久化 config.properties</td></tr>
@@ -87,8 +87,8 @@
               <tr><td class="cmd-name">ai/onebotsetport</td><td>[端口]</td><td><span class="badge b-purple">配置</span></td><td>设置 WebSocket 监听端口，默认 5800</td></tr>
               <tr><td class="cmd-name">ai/onebotsettoken</td><td>[Token]</td><td><span class="badge b-purple">配置</span></td><td>设置 Access Token 鉴权</td></tr>
               <tr><td class="cmd-name">ai/onebotsetselfid</td><td>[QQ号]</td><td><span class="badge b-purple">配置</span></td><td>设置机器人自身 QQ 号</td></tr>
-              <tr><td class="cmd-name">ai/onebotsetprompt</td><td>[提示词]</td><td><span class="badge b-purple">配置</span></td><td>设置 execq 通道独立系统提示词</td></tr>
-              <tr><td class="cmd-name">ai/onebotshowprompt</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>显示当前 execq 提示词</td></tr>
+              <tr><td class="cmd-name">ai/onebotsetprompt</td><td>[提示词]</td><td><span class="badge b-purple">配置</span></td><td>设置 execq 通道提示词（写入 execqPrompt.md 持久化）</td></tr>
+              <tr><td class="cmd-name">ai/onebotshowprompt</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>显示当前 execq 提示词（硬编码 + execqPrompt.md 角色设定）</td></tr>
               <tr><td class="cmd-name">ai/onebotenableproactive</td><td>—</td><td><span class="badge b-green">功能</span></td><td>启用主动查看（每 5 分钟检查群聊）</td></tr>
               <tr><td class="cmd-name">ai/onebotdisableproactive</td><td>—</td><td><span class="badge b-green">功能</span></td><td>禁用主动查看</td></tr>
               <tr><td class="cmd-name">ai/onebotenablelisten</td><td>—</td><td><span class="badge b-green">功能</span></td><td>启用拟人化监听态（仅对监听群生效）</td></tr>
@@ -184,7 +184,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.9 · 58 命令 · 74 FC 工具 · 部署三步骤</p>
+        <p><span class="brand">AiAgent</span> v3.10 · 58 命令 · 74 FC 工具 · 部署三步骤</p>
       </div>
     </footer>
   </main>

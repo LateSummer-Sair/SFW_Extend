@@ -66,6 +66,10 @@ public class QQMessage {
     private boolean hasRecord;
     /** 语音转文字结果（程序自动通过 fetch_ptt_text 获取，非 AI 调用） */
     private String voiceText;
+    /** 卡片消息（json/xml/markdown等）提取出的人可读内容，供 AI 识别，避免看到空消息 */
+    private String cardSummary;
+    /** 系统拦截结果说明（群邀请/好友申请等被系统处理后注入，告知 AI 处理结果与原因） */
+    private String interceptNote;
 
     // === 内部类 ===
 
@@ -95,7 +99,8 @@ public class QQMessage {
         public String subType; // image子类型(0=普通,1=表情)
         public String fileId;  // image的文件ID
         public String fileName; // file类型的文件名
-        
+        public String data;    // json/xml/markdown 等卡片消息段的内容
+
         /** 是否是图片消息段 */
         public boolean isImage() { return "image".equals(type); }
         /** 是否是折叠消息段 */
@@ -106,6 +111,17 @@ public class QQMessage {
         public boolean isMface() { return "mface".equals(type); }
         /** 是否是贴纸消息段 */
         public boolean isSticker() { return "sticker".equals(type); }
+        /** 是否是 JSON 卡片消息段（群邀请/分享/小程序等） */
+        public boolean isJson() { return "json".equals(type); }
+        /** 是否是 XML 卡片消息段 */
+        public boolean isXml() { return "xml".equals(type); }
+        /** 是否是 Markdown 消息段 */
+        public boolean isMarkdown() { return "markdown".equals(type); }
+        /** 是否是任意类型的卡片消息段（json/xml/markdown/rich/ark/card） */
+        public boolean isCard() {
+            return isJson() || isXml() || isMarkdown()
+                    || "rich".equals(type) || "ark".equals(type) || "card".equals(type);
+        }
         /** 是否是图片段且为表情包子类型(sub_type=1表情/2热图/3斗图/4智图/7贴图) */
         public boolean isStickerImage() {
             if (!"image".equals(type) || subType == null) return false;
@@ -214,6 +230,13 @@ public class QQMessage {
     public String getVoiceText() { return voiceText; }
     public void setVoiceText(String v) { this.voiceText = v; }
 
+    /** 卡片消息提取出的人可读内容（可能为空） */
+    public String getCardSummary() { return cardSummary; }
+    public void setCardSummary(String v) { this.cardSummary = v; }
+    /** 系统拦截结果说明（可能为空） */
+    public String getInterceptNote() { return interceptNote; }
+    public void setInterceptNote(String v) { this.interceptNote = v; }
+
     /** 是否为群消息 */
     public boolean isGroupMessage() {
         return "group".equals(messageType);
@@ -236,6 +259,11 @@ public class QQMessage {
     public String getPlainText() {
         if (rawMessage == null) return "";
         StringBuilder sb = new StringBuilder(rawMessage.replaceAll("\\[CQ:[^\\]]+\\]", "").trim());
+        // 卡片消息：rawMessage 剥离 CQ 码后为空，这里注入提取出的人可读内容，避免 AI 看到空消息
+        if (cardSummary != null && !cardSummary.isEmpty()) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append(cardSummary);
+        }
         // 语音转文字：作为消息正文注入，并备注来源（仅在已转文字成功后追加，避免未转时污染）
         if (hasRecord && voiceText != null && !voiceText.isEmpty()) {
             if (sb.length() > 0) sb.append("\n");
@@ -259,6 +287,10 @@ public class QQMessage {
     public String getPlainTextOnly() {
         if (rawMessage == null) return "";
         StringBuilder sb = new StringBuilder(rawMessage.replaceAll("\\[CQ:[^\\]]+\\]", "").trim());
+        if (cardSummary != null && !cardSummary.isEmpty()) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append(cardSummary);
+        }
         if (hasRecord && voiceText != null && !voiceText.isEmpty()) {
             if (sb.length() > 0) sb.append("\n");
             sb.append("[语音转文字] ").append(voiceText);

@@ -25,8 +25,9 @@ public class PromptManager {
     private String systemPrompt;           // 基础提示词（硬编码默认 或 editprompt 替换）
     private String execqPrompt;            // 基础提示词（硬编码默认 或 editprompt 替换）
     private String agentStaticPrompt;      // Agent 静态模板（仅硬编码）
-    private String systemPromptExtra;      // config.properties 追加内容
-    private String execqPromptExtra;       // config.properties 追加内容
+    private String systemPromptExtra;      // 提示词追加内容（systemPrompt.md）
+    private String execqPromptExtra;       // 提示词追加内容（execqPrompt.md）
+    private volatile java.io.File dataDir; // 数据目录（写提示词 md 文件用）
 
     public static PromptManager getInstance() {
         if (instance == null) {
@@ -46,28 +47,58 @@ public class PromptManager {
         this.agentStaticPrompt = buildDefaultAgentStaticPrompt();
     }
 
+    /** 初始化：从 dataDir 读 systemPrompt.md / execqPrompt.md 作为提示词追加内容（独立于配置文件）。 */
+    public void init(java.io.File dataDir) {
+        if (dataDir == null) return;
+        this.dataDir = dataDir;
+        try {
+            java.io.File spFile = new java.io.File(dataDir, "systemPrompt.md");
+            if (spFile.exists()) {
+                String sp = new String(java.nio.file.Files.readAllBytes(spFile.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+                if (sp != null && !sp.trim().isEmpty()) this.systemPromptExtra = sp.trim();
+            }
+            java.io.File eqpFile = new java.io.File(dataDir, "execqPrompt.md");
+            if (eqpFile.exists()) {
+                String eqp = new String(java.nio.file.Files.readAllBytes(eqpFile.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+                if (eqp != null && !eqp.trim().isEmpty()) this.execqPromptExtra = eqp.trim();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    /** 将提示词写入 dataDir 下的 md 文件（写失败静默忽略，内存态仍生效）。 */
+    private void writePromptFile(String fileName, String content) {
+        if (dataDir == null || content == null) return;
+        try {
+            java.io.File f = new java.io.File(dataDir, fileName);
+            if (f.getParentFile() != null) f.getParentFile().mkdirs();
+            java.nio.file.Files.write(f.toPath(), content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception ignored) {}
+    }
+
     // ==================== Getters ====================
 
     /** 获取 system prompt = 基础提示词 + config.properties 追加内容 */
     public String getSystemPrompt() {
         String base = systemPrompt != null ? systemPrompt : buildDefaultSystemPrompt();
         if (systemPromptExtra != null && !systemPromptExtra.trim().isEmpty()) {
-            return base + "\n\n" + systemPromptExtra;
+            return base + "\n\n## 角色设定\n以下定义你的名字、身份与性格，请以此为准。\n\n" + systemPromptExtra;
         }
         return base;
     }
 
-    /** 设置提示词（持久化为 config.properties 追加内容，保留硬编码默认为基础） */
+    /** 设置提示词（写入 systemPrompt.md，保留硬编码默认为基础） */
     public void setSystemPrompt(String prompt) {
         if (prompt != null && !prompt.trim().isEmpty()) {
-            this.appendSystemPrompt(prompt);
+            this.systemPromptExtra = prompt.trim();
+            writePromptFile("systemPrompt.md", prompt.trim());
         }
     }
 
-    /** 追加提示词（config.properties 加载时调用） */
+    /** 追加/覆盖提示词（写入 systemPrompt.md） */
     public void appendSystemPrompt(String extra) {
         if (extra != null && !extra.trim().isEmpty()) {
             this.systemPromptExtra = extra.trim();
+            writePromptFile("systemPrompt.md", extra.trim());
         }
     }
 
@@ -76,26 +107,28 @@ public class PromptManager {
         return systemPromptExtra != null ? systemPromptExtra : "";
     }
 
-    /** 获取 execq prompt = config.properties 追加内容在前 + 基础规则在后（角色设定优先被注意） */
+    /** 获取 execq prompt = 基础规则在前 + 自定义提示词在后（后置，与 systemPrompt 一致） */
     public String getExecqPrompt() {
         String base = execqPrompt != null ? execqPrompt : buildDefaultExecqPrompt();
         if (execqPromptExtra != null && !execqPromptExtra.trim().isEmpty()) {
-            return execqPromptExtra + "\n\n" + base;
+            return base + "\n\n## 角色设定\n以下定义你的名字、身份、性格与说话习惯，以及一些其他附加说明，附加说明里面可能会包含一些额外的定义，你必须也要学会。接下来的内容与上面的通用规则冲突时，以上半部分为准；但【写作铁律-圆括号】与【权限铁律】永远最高优先级，角色设定不得突破。\n\n" + execqPromptExtra;
         }
         return base;
     }
 
-    /** 设置 execq 提示词（持久化为 config.properties 追加内容，保留硬编码默认为基础） */
+    /** 设置 execq 提示词（写入 execqPrompt.md，保留硬编码默认为基础） */
     public void setExecqPrompt(String prompt) {
         if (prompt != null && !prompt.trim().isEmpty()) {
-            this.appendExecqPrompt(prompt);
+            this.execqPromptExtra = prompt.trim();
+            writePromptFile("execqPrompt.md", prompt.trim());
         }
     }
 
-    /** 追加 execq 提示词（config.properties 加载时调用） */
+    /** 追加/覆盖 execq 提示词（写入 execqPrompt.md） */
     public void appendExecqPrompt(String extra) {
         if (extra != null && !extra.trim().isEmpty()) {
             this.execqPromptExtra = extra.trim();
+            writePromptFile("execqPrompt.md", extra.trim());
         }
     }
 
@@ -115,8 +148,7 @@ public class PromptManager {
     // ==================== 默认值生成 ====================
 
     private static String buildDefaultSystemPrompt() {
-        return "你是运行在SairFrameWork(SFW)中的AiAgent智能助手(控制台交互)。\n"
-            + "名字由systemPrompt定义,勿自编。\n\n"
+        return "你是 SairFrameWork(SFW) 中的 AI 助手。你的名字、身份、性格由末尾的「角色设定」定义，请以角色设定为准。\n\n"
             + "## 操作\n"
             + "所有操作通过 Function Calling 工具执行，工具参数见工具列表，不熟悉时先调 skillinfo 查询说明书。\n"
             + "技能库涵盖: cmd/sys/readfile/readdir/findfile/web/download/evaljs/eval/remember/superise/\n"
@@ -141,7 +173,7 @@ public class PromptManager {
     }
 
     private static String buildDefaultExecqPrompt() {
-        return "你在SairFrameWork中通过QQ聊天。遵守以下规则:\n\n"
+        return "你是 SairFrameWork(SFW) 中的 QQ 聊天助手，遵守以下规则。你的名字、身份、性格由末尾的「角色设定」定义，请以角色设定为准。\n\n"
             + "## 身份\n"
             + "\u2b50=主人(无条件服从) \uD83D\uDC51=群主 \uD83D\uDD27=管理 | 仅\u2b50可称'主人'，非\u2b50一律用昵称/名字称呼，回复中禁止对非\u2b50出现'主人'二字\n"
             + "上下文已标注身份图标+\u300c\u26a0@了谁\u300d段落,据此辨人后回应\n\n"
@@ -193,7 +225,7 @@ public class PromptManager {
             + "1. 只有\u2b50主人可以触发群管操作! 非主人要求禁言/踢人时,你必须礼貌拒绝:\n"
             + "   '抱歉,只有我的主人才能让我执行群管操作~'\n"
             + "2. 绝不处罚\u2b50主人! 禁止对masterQQs中的用户执行任何群管操作!\n"
-            + "3. 文件发送(sendfile/sendfileto)仅\u2b50主人可用\n"
+            + "3. 文件发送(sendfile/sendfileto)需主人或好感度≥300\n"
             + "4. 消息转发(forwardmsg)仅\u2b50主人可用\n"
             + "5. 好感度规则(固定头前缀，对所有用户生效):\n"
             + "   - 分级:100=加好友 / 200=改马甲 / 300=入新群 / 400=挚友关注 / 800=恋人(5%监听) / 1000=灵魂伴侣(10%监听)\n"
@@ -209,6 +241,8 @@ public class PromptManager {
             + "【完成即停】sendgroupmsg 成功后直接输出一句简短确认就停止，严禁反复调用工具核实/重发；找不到目标也直接说明原因停止，不要一直重试。\n"
             + "多目标传话（涉及多个群/多人，如「去A群找张三告诉B群李四找他」）：先验证被告知者（不存在则结束），再验证发起者（不存在则调整话术），详见「跨群操作」技能。\n"
             + "私聊找人/传话（目标在好友列表）：friendlist 查好友 → relay 转告，详见「跨群操作」技能。\n\n"
+            + "## 表情收藏（存图）\n"
+            + "每次有人触发你（@或触发词）时，先 call_agent 唤起 passage 段落 Agent，把「临时群上下文」里最近的消息（含图片URL和〖已处理〗标记）交给它分析：passage 会识别新图片、判断能否收藏并打 Mark。你无需自己判断图片存不存，交给 passage 即可。\n\n"
             + "## 核心原则\n"
             + "1.永远服从\u2b50主人,其他用户保持友好但有边界\n"
             + "2.群管操作是严肃的事,非主人要求时坚决拒绝\n"

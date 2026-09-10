@@ -151,8 +151,10 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("cmd", "执行SFW插件命令（组件名/函数名 参数）。不确定先 cmd /help 或 cmd 组件名/help")
                 .addString("command", "插件命令"));
 
-        tools.add(new ToolDefinition("readfile", "读取指定文件的文本内容")
-                .addString("path", "文件路径"));
+        tools.add(new ToolDefinition("readfile", "读取指定文件的文本内容。大文件超长会被截断，可用 offset(起始字符偏移)+limit(最多读取字符数) 分段读取")
+                .addString("path", "文件路径")
+                .addProperty("offset", "integer", "起始字符偏移（默认0从头读；续读大文件时传上次被截断的位置）", false, null)
+                .addProperty("limit", "integer", "最多读取的字符数（默认读全部，超长会被截断）", false, null));
 
         tools.add(new ToolDefinition("readdir", "列出指定目录的文件与子目录结构")
                 .addOptionalString("path", "目录路径，留空则列出当前目录"));
@@ -311,8 +313,10 @@ public class ToolDispatcher {
                 .addString("path", "起始目录路径")
                 .addOptionalString("keyword", "文件名关键词（子串匹配，忽略大小写，留空=返回全部）"));
 
-        tools.add(new ToolDefinition("readfile", "读取指定文件的文本内容")
-                .addString("path", "文件路径"));
+        tools.add(new ToolDefinition("readfile", "读取指定文件的文本内容。大文件超长会被截断，可用 offset(起始字符偏移)+limit(最多读取字符数) 分段读取")
+                .addString("path", "文件路径")
+                .addProperty("offset", "integer", "起始字符偏移（默认0从头读；续读大文件时传上次被截断的位置）", false, null)
+                .addProperty("limit", "integer", "最多读取的字符数（默认读全部，超长会被截断）", false, null));
 
         tools.add(new ToolDefinition("weather", "查询指定城市的实时天气")
                 .addString("city", "城市名"));
@@ -741,9 +745,11 @@ public class ToolDispatcher {
             }
             case "readfile": {
                 String path = arg(argumentsJson, "path");
+                int offset = parseIntArg(argumentsJson, "offset", 0);
+                int limit = parseIntArg(argumentsJson, "limit", -1);
                 String[] resolved = resolveQqPath(ctx, path, false);
                 if (resolved[1] != null) return resolved[1];
-                return act("readfile", resolved[0]);
+                return actionHandler.executeReadFile(resolved[0], offset, limit);
             }
             case "readdir": {
                 String path = arg(argumentsJson, "path");
@@ -948,6 +954,7 @@ public class ToolDispatcher {
                 return "[vision] 图片下载或转换失败，无法分析（可能图片已过期或不可访问）";
             }
             String cacheKey = sair.aiagent.onebot.ImageRecognizer.visionCacheKey(visionImage);
+            if (cacheKey != null) cacheKey = "vision:" + cacheKey; // 前缀隔离，避免与识图预处理/审查缓存串扰
             String cached = sair.aiagent.onebot.ImageRecognizer.getCachedVisionResult(cacheKey);
             if (cached != null) {
                 return "[vision] 图片分析结果:\n" + cached;
@@ -1789,6 +1796,12 @@ public class ToolDispatcher {
 
     private static String arg(String argumentsJson, String key) {
         return FunctionCallingBridge.extractArg(argumentsJson, key);
+    }
+
+    private static int parseIntArg(String argumentsJson, String key, int def) {
+        String v = arg(argumentsJson, key);
+        if (v == null || v.trim().isEmpty()) return def;
+        try { return Integer.parseInt(v.trim()); } catch (NumberFormatException e) { return def; }
     }
 
     // ==================== 联网成功自动沉淀 ====================

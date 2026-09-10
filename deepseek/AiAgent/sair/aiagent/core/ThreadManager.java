@@ -103,6 +103,9 @@ public class ThreadManager {
             int current = tpe.getMaximumPoolSize();
             int want = Math.max(1, nThreads);
             if (current != want) {
+                // 顺序关键：先扩 max 到 max(current,want) → 设 core=want → 缩 max=want。
+                // 直接「先 core 后 max」在扩容时（want>current）会因 max<core 抛 IllegalArgumentException。
+                tpe.setMaximumPoolSize(Math.max(current, want));
                 tpe.setCorePoolSize(want);
                 tpe.setMaximumPoolSize(want);
             }

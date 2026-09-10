@@ -124,6 +124,28 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
     /** 待处理请求池（好友申请/群邀请交由 AI 决策） */
     private final PendingRequestPool pendingRequestPool = new PendingRequestPool();
 
+    /**
+     * 最近被系统拦截处理的好友申请/群邀请结果（inviter userId -> 结果说明）。
+     * <p>当同一用户随后把邀请卡片以消息形式发来（json/xml 卡片），Bot 会看到空消息；
+     * 这里记录的拦截结果会注入到该卡片消息，告知 AI「此消息已被系统拦截，处理结果XXX，原因XXX」。</p>
+     */
+    private static final long INTERCEPT_RECORD_TTL_MS = 10 * 60 * 1000L; // 10 分钟
+    private static final class InterceptRecord {
+        final String note;
+        final long timestamp;
+        InterceptRecord(String note) { this.note = note; this.timestamp = System.currentTimeMillis(); }
+    }
+    private final Map<Long, InterceptRecord> interceptRecords = new ConcurrentHashMap<>();
+
+    /** 记录/更新拦截结果前清理过期记录（防止 map 无限增长）。 */
+    private void putInterceptRecord(long userId, String note) {
+        if (interceptRecords.size() > 200) {
+            long now = System.currentTimeMillis();
+            interceptRecords.entrySet().removeIf(e -> (now - e.getValue().timestamp) > INTERCEPT_RECORD_TTL_MS);
+        }
+        interceptRecords.put(userId, new InterceptRecord(note));
+    }
+
     /** execs转发处理器 */
     private ExecsForwardHandler execsForwardHandler;
     /** 提示词构建器 */
@@ -133,7 +155,10 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
 
     // ==================== 配置 ====================
 
-    public void setSelfId(long selfId) { this.selfId = selfId; }
+    public void setSelfId(long selfId) {
+        this.selfId = selfId;
+        if (promptBuilder != null) promptBuilder.setSelfId(selfId); // 存图候选排除 Bot 自己的消息
+    }
     public long getSelfId() { return selfId; }
 
     public void setServer(OneBotServer server) { 
@@ -231,6 +256,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
             promptBuilder = new QQPromptBuilder(unifiedMemory, napcatApi, execPool);
             promptBuilder.setEmotionManager(emotionManager);
             promptBuilder.setAgentExecutor(agentExecutor);
+            promptBuilder.setSelfId(selfId); // 存图候选排除 Bot 自己的消息
         }
         if (agentBridge == null && agentExecutor != null && unifiedMemory != null) {
             agentBridge = new QQAgentBridge(agentExecutor, unifiedMemory);
@@ -612,6 +638,19 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                     seg.fileName = extractString(dataObj, "name");
                     seg.url = extractString(dataObj, "url");
                 }
+            } else if ("json".equals(seg.type) || "xml".equals(seg.type) || "markdown".equals(seg.type)
+                    || "rich".equals(seg.type) || "ark".equals(seg.type) || "card".equals(seg.type)) {
+                // 卡片消息段：数据在 data.data（字符串）或 data 对象本身
+                String dataObj = extractObject(item, "data");
+                if (dataObj != null) {
+                    seg.data = extractString(dataObj, "data");
+                    if (seg.data == null || seg.data.isEmpty()) {
+                        seg.data = extractString(dataObj, "content");
+                    }
+                    if (seg.data == null || seg.data.isEmpty()) {
+                        seg.data = dataObj;
+                    }
+                }
             }
             segments.add(seg);
         }
@@ -785,6 +824,42 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                     // 标准OneBot v11：只有forward_id，需异步API获取
                     msg.setForwardId(seg.forwardId);
                     AiAgentActivity.qqLog("[QQMsg] 检测到折叠消息，forward_id=" + seg.forwardId + "，将异步获取内容");
+                }
+            }
+            if (seg.isCard() && seg.data != null && !seg.data.isEmpty()) {
+                // 卡片消息：提取人可读内容，供 AI 识别（否则 raw_message 剥离 CQ 码后为空）
+                String summary = extractCardSummary(seg.type, seg.data);
+                if (summary != null && !summary.isEmpty()) {
+                    String exist = msg.getCardSummary();
+                    if (exist == null || exist.isEmpty()) {
+                        msg.setCardSummary(summary);
+                    } else {
+                        msg.setCardSummary(exist + "\n" + summary);
+                    }
+                    AiAgentActivity.qqLog("[QQMsg] 检测到卡片消息(" + seg.type + "): " +
+                        (summary.length() > 80 ? summary.substring(0, 80) + "..." : summary));
+                }
+                // 若该卡片发送者的好友申请/群邀请刚被系统拦截处理，注入拦截结果，避免 AI 误答「空消息」
+                // 仅当卡片内容疑似邀请/申请卡片时才注入，避免把普通分享卡片误判为拦截结果
+                boolean looksLikeInviteCard = looksLikeInviteCard(seg.data);
+                if (looksLikeInviteCard && (msg.getInterceptNote() == null || msg.getInterceptNote().isEmpty())) {
+                    InterceptRecord rec = interceptRecords.get(msg.getUserId());
+                    if (rec != null && (System.currentTimeMillis() - rec.timestamp) <= INTERCEPT_RECORD_TTL_MS) {
+                        msg.setInterceptNote(rec.note);
+                        AiAgentActivity.qqLog("[QQMsg] 卡片消息注入拦截结果: " + rec.note);
+                    } else {
+                        // 兜底：卡片先于 request 事件到达时，直接查待处理请求池匹配同一用户
+                        for (PendingRequestPool.PendingRequest r : pendingRequestPool.list()) {
+                            if (r != null && r.userId == msg.getUserId()) {
+                                String note = "group".equals(r.type)
+                                    ? "此消息已被系统拦截，处理结果：已登记为待处理群邀请（群号 " + r.groupId + "），原因：邀请者非主人，需通过 pendingrequests 查看并用 acceptgroupinvite/rejectgroupinvite 决策（同意需主人或好感度≥300）。"
+                                    : "此消息已被系统拦截，处理结果：已登记为待处理好友申请，原因：好友申请由系统统一接管，需通过 pendingrequests 查看并用 approvefriend/rejectfriend 决策。";
+                                msg.setInterceptNote(note);
+                                AiAgentActivity.qqLog("[QQMsg] 卡片消息从请求池兜底注入拦截结果: " + note);
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1239,44 +1314,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 }
             }
 
-            // === 自动收集图片为表情包（所有图片 + 引用图片，仅好感度≥200的图主触发，2分钟冷却在 StickerManager 内控制） ===
-            if (msg.isGroupMessage() && agentExecutor != null && agentExecutor.getStickerManager() != null) {
-                String ctx = msg.getPlainText();
-                java.util.Set<String> seen = new java.util.HashSet<>();
-
-                // 当前消息图片：好感度判断当前发送者
-                if (emotionManager != null && emotionManager.getAffection(msg.getUserId()) >= 200) {
-                    for (String imgUrl : msg.getImageUrls()) {
-                        if (imgUrl == null || imgUrl.isEmpty() || !seen.add(imgUrl)) continue;
-                        try {
-                            agentExecutor.collectStickerFromQQ(imgUrl, ctx);
-                        } catch (Exception ex) {
-                            AiAgentActivity.qqLog("[QQMsg] Sticker collect fail: " + ex.toString());
-                        }
-                    }
-                    for (String imgUrl : msg.getStickerUrls()) {
-                        if (imgUrl == null || imgUrl.isEmpty() || !seen.add(imgUrl)) continue;
-                        try {
-                            agentExecutor.collectStickerFromQQ(imgUrl, ctx);
-                        } catch (Exception ex) {
-                            AiAgentActivity.qqLog("[QQMsg] Sticker collect fail: " + ex.toString());
-                        }
-                    }
-                }
-
-                // 引用消息图片：好感度判断被引用消息的原发送者（图主）
-                long quotedOwnerQQ = msg.getQuotedSenderQQ() > 0 ? msg.getQuotedSenderQQ() : msg.getUserId();
-                if (emotionManager != null && emotionManager.getAffection(quotedOwnerQQ) >= 200) {
-                    for (String imgUrl : msg.getQuotedImageUrls()) {
-                        if (imgUrl == null || imgUrl.isEmpty() || !seen.add(imgUrl)) continue;
-                        try {
-                            agentExecutor.collectStickerFromQQ(imgUrl, ctx);
-                        } catch (Exception ex) {
-                            AiAgentActivity.qqLog("[QQMsg] Sticker collect fail: " + ex.toString());
-                        }
-                    }
-                }
-            }
+            // === 存图已改由主 Agent 打包段落筛选好感度>6 的图，交给段落 Agent 分析（见 QQPromptBuilder） ===
 
             // 构建稳定 system 前缀与动态上下文（缓存优化：稳定前缀作 system，动态上下文下沉 user）
             String stableSystem = buildStableSystemPrompt();
@@ -1412,6 +1450,9 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
         pendingRequestPool.add(new PendingRequestPool.PendingRequest(
             "friend", flag, userId, 0, comment));
         AiAgentActivity.qqLog("[QQMsg] 好友申请已入池，待AI决策: userId=" + userId);
+        // 记录拦截结果，供后续该用户发来的好友申请卡片消息注入「系统已拦截」说明
+        putInterceptRecord(userId,
+            "此消息已被系统拦截，处理结果：已登记为待处理好友申请（等待主人/AI 决策），原因：好友申请由系统统一接管，需通过 pendingrequests 查看并用 approvefriend/rejectfriend 决策。");
         notifyMasters("[Bot] 收到新的好友申请：QQ " + userId
                 + (comment != null && !comment.isEmpty() ? "，留言：" + comment : "") + "。可用 pendingrequests 查看并决策。");
     }
@@ -1446,6 +1487,9 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
         if (isMaster) {
             AiAgentActivity.qqLog("[QQMsg] 主人邀请加群，无条件同意");
             napcatApi.handleGroupInvite(flag, true, null);
+            // 记录拦截结果，供后续该用户发来的群邀请卡片消息注入「系统已拦截」说明
+            putInterceptRecord(userId,
+                "此消息已被系统拦截，处理结果：已自动同意加群（群号 " + groupId + "），原因：邀请者是主人，主人邀请无条件同意。");
             if (server != null) server.sendPrivateMsg(userId, "[Bot] 主人邀请，已自动同意加群~");
             return;
         }
@@ -1454,6 +1498,9 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
         pendingRequestPool.add(new PendingRequestPool.PendingRequest(
             "group", flag, userId, groupId, null));
         AiAgentActivity.qqLog("[QQMsg] 群邀请已入池，待AI决策: userId=" + userId + " groupId=" + groupId);
+        // 记录拦截结果，供后续该用户发来的群邀请卡片消息注入「系统已拦截」说明
+        putInterceptRecord(userId,
+            "此消息已被系统拦截，处理结果：已登记为待处理群邀请（群号 " + groupId + "），原因：邀请者非主人，需通过 pendingrequests 查看并用 acceptgroupinvite/rejectgroupinvite 决策（同意需主人或好感度≥300）。");
         notifyMasters("[Bot] 收到新的群邀请：邀请者 QQ " + userId + "，群号 " + groupId + "。可用 pendingrequests 查看并决策。");
     }
 
@@ -1548,6 +1595,107 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
     /** 简单拆分JSON数组中的对象 */
     static List<String> splitJsonArray(String arrayStr) {
         return JsonUtil.splitJsonArray(arrayStr);
+    }
+
+    /**
+     * 从卡片消息段（json/xml/markdown等）提取人可读内容。
+     * <p>群邀请/分享/小程序等卡片消息的 raw_message 剥离 CQ 码后为空，导致 AI 看到空消息。
+     * 这里解析 data 字段，提取 app/prompt/desc/title/summary/content 等可读信息。</p>
+     */
+    static String extractCardSummary(String type, String data) {
+        if (data == null || data.trim().isEmpty()) return null;
+        String d = data.trim();
+        if ("json".equals(type)) {
+            StringBuilder sb = new StringBuilder();
+            // 常见字段：prompt(标题/摘要)、desc(描述)、title、summary、content、app(应用类型)
+            String prompt = JsonUtil.extractString(d, "prompt");
+            String desc = JsonUtil.extractString(d, "desc");
+            String title = JsonUtil.extractString(d, "title");
+            String summary = JsonUtil.extractString(d, "summary");
+            String content = JsonUtil.extractString(d, "content");
+            String app = JsonUtil.extractString(d, "app");
+            if (app != null && !app.isEmpty()) {
+                // app 字段可能是一段嵌套 JSON（含 prompt/desc），也可能就是应用名
+                String appPrompt = JsonUtil.extractString(app, "prompt");
+                String appDesc = JsonUtil.extractString(app, "desc");
+                if (appPrompt != null && !appPrompt.isEmpty()) {
+                    sb.append("[应用]").append(appPrompt);
+                } else if (!app.startsWith("{") && !app.startsWith("[")) {
+                    sb.append("[应用]").append(app);
+                }
+                if (appDesc != null && !appDesc.isEmpty() && !appDesc.equals(appPrompt)) {
+                    sb.append(" ").append(appDesc);
+                }
+            }
+            if (prompt != null && !prompt.isEmpty() && sb.indexOf(prompt) < 0) {
+                if (sb.length() > 0) sb.append("\n");
+                sb.append(prompt);
+            }
+            if (title != null && !title.isEmpty() && sb.indexOf(title) < 0) {
+                if (sb.length() > 0) sb.append("\n");
+                sb.append(title);
+            }
+            if (desc != null && !desc.isEmpty() && sb.indexOf(desc) < 0) {
+                if (sb.length() > 0) sb.append("\n");
+                sb.append(desc);
+            }
+            if (summary != null && !summary.isEmpty() && sb.indexOf(summary) < 0) {
+                if (sb.length() > 0) sb.append("\n");
+                sb.append(summary);
+            }
+            if (content != null && !content.isEmpty() && sb.indexOf(content) < 0) {
+                if (sb.length() > 0) sb.append("\n");
+                sb.append(content);
+            }
+            // 全部字段都提取不到时，直接截断展示原始 JSON（避免完全空）
+            if (sb.length() == 0) {
+                sb.append("[卡片JSON]").append(d.length() > 300 ? d.substring(0, 300) + "..." : d);
+            }
+            return sb.toString().trim();
+        }
+        if ("xml".equals(type)) {
+            // XML 卡片：剥离标签取文本，优先 title/summary/brief
+            String title = extractXmlTag(d, "title");
+            String summary = extractXmlTag(d, "summary");
+            String brief = extractXmlTag(d, "brief");
+            StringBuilder sb = new StringBuilder();
+            if (title != null && !title.isEmpty()) sb.append(title);
+            if (summary != null && !summary.isEmpty()) { if (sb.length() > 0) sb.append("\n"); sb.append(summary); }
+            if (brief != null && !brief.isEmpty()) { if (sb.length() > 0) sb.append("\n"); sb.append(brief); }
+            if (sb.length() == 0) {
+                String stripped = d.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim();
+                sb.append("[卡片XML]").append(stripped.length() > 300 ? stripped.substring(0, 300) + "..." : stripped);
+            }
+            return sb.toString().trim();
+        }
+        // markdown / rich / ark / card：直接取原文（markdown 本身可读）
+        return "[卡片" + type + "]" + (d.length() > 500 ? d.substring(0, 500) + "..." : d);
+    }
+
+    /** 判断卡片消息数据是否疑似群邀请/好友申请卡片（用于决定是否注入系统拦截结果）。 */
+    private static boolean looksLikeInviteCard(String data) {
+        if (data == null || data.isEmpty()) return false;
+        String d = data.toLowerCase();
+        // 群邀请卡片：app 常为 com.tencent.qun.invite / group_invite，正文含「邀请你加入群聊」「加群」等
+        return d.contains("invite") || d.contains("group")
+                || d.contains("邀请") || d.contains("加群") || d.contains("群聊")
+                || d.contains("好友申请") || d.contains("friend");
+    }
+
+    /** 从 XML 字符串中提取指定标签内的文本（无命名空间前缀的简单匹配）。 */
+    private static String extractXmlTag(String xml, String tag) {
+        try {
+            java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                "<(?:[\\w-]+:)?\\s*" + tag + "[^>]*>(.*?)</(?:[\\w-]+:)?\\s*" + tag + ">",
+                java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+            java.util.regex.Matcher m = p.matcher(xml);
+            if (m.find()) {
+                String v = m.group(1);
+                v = v.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim();
+                return v;
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
     // ==================== 转发请求预处理器 ====================

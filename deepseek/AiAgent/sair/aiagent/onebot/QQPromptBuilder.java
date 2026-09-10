@@ -16,6 +16,7 @@ class QQPromptBuilder {
     private final ExecutorService execPool;
     private volatile EmotionStateManager emotionManager;
     private volatile AgentExecutor agentExecutor;
+    private volatile long selfId; // Bot 自己的 QQ 号，存图候选排除自己的消息
 
     QQPromptBuilder(UnifiedQQMemoryManager unifiedMemory, NapCatApi napcatApi,
                     ExecutorService execPool) {
@@ -26,6 +27,7 @@ class QQPromptBuilder {
 
     void setEmotionManager(EmotionStateManager em) { this.emotionManager = em; }
     void setAgentExecutor(AgentExecutor ae) { this.agentExecutor = ae; }
+    void setSelfId(long selfId) { this.selfId = selfId; }
 
     String buildStableSystemPrompt() {
         String corePrompt = AiConfig.getInstance().getExecqPrompt();
@@ -330,13 +332,25 @@ class QQPromptBuilder {
     private void appendGroupChatHistory(StringBuilder sb, QQMessage msg, Set<Long> masterQQSet,
                                          Set<Long> ownerSet, Set<Long> adminSet, boolean needsGlobalChat,
                                          boolean needsCrossContext) {
-        List<String[]> groupHistory = unifiedMemory.getRecentGroupChatHistoryWithMessageId(msg.getGroupId(), 12);
+        List<String[]> groupHistory = unifiedMemory.getRecentGroupChatHistoryWithMessageId(msg.getGroupId(), 15);
         if (!groupHistory.isEmpty()) {
-            sb.append("## 临时群上下文(近12条,⭐主人👑群主🔧管理,其余=群昵称;带〖已处理〗标记的说明你处理过该消息,不要重复执行)\n");
+            sb.append("## 临时群上下文(近15条,⭐主人👑群主🔧管理,其余=群昵称;带〖已处理〗标记的说明你处理过该消息,不要重复执行)\n");
             for (String[] h : groupHistory) {
+                // 排除当前正在处理的消息（避免与 task 重复，导致模型回复附带用户原话）
+                if (h.length > 4 && h[4] != null && h[4].equals(String.valueOf(msg.getMessageId()))) {
+                    continue;
+                }
                 long hUid = Long.parseLong(h[0]);
                 String hName = h[1]; String content = h[2];
+                // 图片 URL 部分单独保留，不被 200 字符截断（供段落 Agent 识图判断存图）
+                String imagePart = "";
+                int imgIdx = content.indexOf("[包含图片:");
+                if (imgIdx >= 0) {
+                    imagePart = content.substring(imgIdx);
+                    content = content.substring(0, imgIdx);
+                }
                 if (content.length() > 200) content = content.substring(0, 200) + "...";
+                if (!imagePart.isEmpty()) content = content + "\n" + imagePart;
                 StringBuilder prefix = new StringBuilder();
                 if (masterQQSet.contains(hUid)) prefix.append("⭐");
                 if (ownerSet.contains(hUid)) prefix.append("👑");
@@ -357,6 +371,27 @@ class QQPromptBuilder {
             sb.append("只能引用上面带 [msg_id=...] 的当前群聊消息，不能引用跨群、私聊或不存在的消息。\n");
             sb.append("需要引用时，最终回复必须使用格式：<quote id=\"消息ID\">回复正文</quote>。\n");
             sb.append("不需要引用时，正常输出文本，不要输出 quote 标签。\n\n");
+
+            // 存图候选：筛选好感度>6 且含图的最近消息，非空才注入（交给段落 Agent 分析，无图则不注入=不分发）
+            if (emotionManager != null) {
+                StringBuilder stickerCandidates = new StringBuilder();
+                for (String[] h : groupHistory) {
+                    long hUid = Long.parseLong(h[0]);
+                    String hContent = h[2];
+                    if (hContent != null && hContent.contains("[包含图片:") && hUid != selfId && emotionManager.getAffection(hUid) > 6) {
+                        stickerCandidates.append(h[1]).append("(QQ:").append(h[0]).append("): ").append(hContent);
+                        if (h.length > 3 && h[3] != null && !h[3].isEmpty()) {
+                            stickerCandidates.append(" 〖已处理:").append(h[3]).append("〗");
+                        }
+                        stickerCandidates.append("\n");
+                    }
+                }
+                if (stickerCandidates.length() > 0) {
+                    sb.append("## 待存图候选(好感度>6的图,带〖已处理〗=已处理过)\n");
+                    sb.append(stickerCandidates);
+                    sb.append("对上面【未处理(无〖已处理〗标记)】的图，call_agent 唤起 passage 分析是否收藏。task 里必须【原样完整复制】图片URL（https:// 开头的完整地址），严禁只写 fileid 或截断 URL。\n\n");
+                }
+            }
         }
         // 跨群续聊：仅在跨群/找人/传话 或 续聊关键词 时注入最近其他群聊话题，普通聊天不再浪费 token
         if (needsGlobalChat) {
@@ -389,7 +424,15 @@ class QQPromptBuilder {
         List<String[]> convs = unifiedMemory.getPrivateConversations(msg.getUserId(), 12);
         if (!convs.isEmpty()) {
             sb.append("## 与该用户的历史\n");
+            final String currentText = msg.getPlainText();
+            boolean currentSkipped = false;
             for (String[] c : convs) {
+                // 排除当前正在处理的消息（避免与 task 重复，导致模型回复附带用户原话）
+                if (!currentSkipped && "user".equals(c[0]) && c[1] != null
+                        && currentText != null && currentText.trim().equals(c[1].trim())) {
+                    currentSkipped = true;
+                    continue;
+                }
                 String roleLabel = "user".equals(c[0]) ? "User" : "Assistant";
                 String content = c[1];
                 if (content.length() > 300) content = content.substring(0, 300) + "...";
