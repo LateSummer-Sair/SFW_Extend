@@ -116,7 +116,7 @@ public class SkillExtractor {
             String prompt = buildExtractionPrompt(trajectory, null);
             List<ChatMessage> msgs = new ArrayList<>();
             msgs.add(new ChatMessage("user", prompt));
-            String response = client.chatSync(msgs, "deepseek-v4-flash");
+            String response = client.chatSync(msgs, sair.aiagent.core.AiConfig.getInstance().getExecqModel());
 
             if (response != null && !response.trim().isEmpty()) {
                 List<CandidateSkill> candidates = parseResponse(response);
@@ -161,7 +161,7 @@ public class SkillExtractor {
             String prompt = buildExtractionPrompt(trajectory, focusDescription);
             List<ChatMessage> msgs = new ArrayList<>();
             msgs.add(new ChatMessage("user", prompt));
-            String response = client.chatSync(msgs, "deepseek-v4-flash");
+            String response = client.chatSync(msgs, sair.aiagent.core.AiConfig.getInstance().getExecqModel());
 
             if (response != null && !response.trim().isEmpty()) {
                 List<CandidateSkill> candidates = parseResponse(response);
@@ -209,7 +209,7 @@ public class SkillExtractor {
 
             List<ChatMessage> msgs = new ArrayList<>();
             msgs.add(new ChatMessage("user", prompt));
-            String response = client.chatSync(msgs, "deepseek-v4-flash");
+            String response = client.chatSync(msgs, sair.aiagent.core.AiConfig.getInstance().getExecqModel());
 
             if (response != null && !response.trim().isEmpty()) {
                 List<CandidateSkill> candidates = parseResponse(response);
@@ -258,7 +258,7 @@ public class SkillExtractor {
 
             List<ChatMessage> msgs = new ArrayList<>();
             msgs.add(new ChatMessage("user", sb.toString()));
-            String response = client.chatSync(msgs, "deepseek-v4-flash");
+            String response = client.chatSync(msgs, sair.aiagent.core.AiConfig.getInstance().getExecqModel());
 
             if (response != null && !response.trim().isEmpty()) {
                 List<CandidateSkill> candidates = parseResponse(response);

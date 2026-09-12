@@ -152,7 +152,7 @@ public class ImpressionExtractor {
             String prompt = buildDistillPrompt(qq, conversationContext, existing);
             List<ChatMessage> msgs = new ArrayList<>();
             msgs.add(new ChatMessage("user", prompt));
-            String response = client.chatSync(msgs, "deepseek-v4-flash");
+            String response = client.chatSync(msgs, sair.aiagent.core.AiConfig.getInstance().getExecqModel());
 
             if (response == null || response.trim().isEmpty()) return null;
 

@@ -46,14 +46,23 @@ public class QQMessage {
     private final List<String> imageFilePaths = new ArrayList<>();
     /** 表情包图片URL列表（仅 sub_type=1/3/7 的 image 段 + mface/sticker 段，用于自动收藏） */
     private final List<String> stickerUrls = new ArrayList<>();
-    /** 引用消息中的图片URL列表（用于OCR识别，不参与自动收藏） */
-    private final List<String> quotedImageUrls = new ArrayList<>();
-    /** 引用消息中的图片 file（md5）列表，与 quotedImageUrls 一一对应，用于 NapCat get_image 兜底下载 */
-    private final List<String> quotedImageFiles = new ArrayList<>();
+    /**
+     * 引用消息中的图片：每项 {@code [url, file(md5)]}，<b>成对存储</b>。
+     * <p>
+     * 旧实现用两个独立 List（{@code quotedImageUrls} / {@code quotedImageFiles}）并各自
+     * 跳过空值，一旦某张图只有 file 没有 url（或反之），两个列表就会错位一格：
+     * NapCat 兜底下载会取到<b>另一张图</b>的 md5，图注绑定与按 md5 去重全部张冠李戴。
+     * 改成成对存储后，索引永远对齐。</p>
+     */
+    private final List<String[]> quotedImages = new ArrayList<>();
     /** 是否包含折叠/转发消息 */
     private boolean hasForward;
     /** 折叠消息中提取的文本内容 */
     private String forwardContent;
+    /** 折叠消息的原始 JSON（get_forward_msg 响应 / 内嵌 content 数组），供结构化递归展开与图片 URL 提取 */
+    private String forwardRaw;
+    /** 折叠消息（含各嵌套层）中收集到的图片 URL */
+    private final List<String> forwardImageUrls = new ArrayList<>();
     /** 引用消息的原始内容(通过get_msg API获取) */
     private String quotedMessageContent;
     /** 被引用消息的发送者昵称/群名片(通过get_msg API获取) */
@@ -65,7 +74,12 @@ public class QQMessage {
     /** 是否包含语音消息段 */
     private boolean hasRecord;
     /** 语音转文字结果（程序自动通过 fetch_ptt_text 获取，非 AI 调用） */
-    private String voiceText;
+    /**
+     * 语音转文字结果。由 {@code OneBot-VoiceTranscribe} 异步线程写入、由消息处理线程读取，
+     * 因此必须是 volatile：否则处理线程可能永远看不到转写结果（旧的 null 被缓存在寄存器里），
+     * 表现为「语音消息时好时坏、转写已成功却没进上下文」。
+     */
+    private volatile String voiceText;
     /** 卡片消息（json/xml/markdown等）提取出的人可读内容，供 AI 识别，避免看到空消息 */
     private String cardSummary;
     /** 系统拦截结果说明（群邀请/好友申请等被系统处理后注入，告知 AI 处理结果与原因） */
@@ -195,19 +209,47 @@ public class QQMessage {
     /** 是否存在可自动收藏的表情包图片 */
     public boolean hasStickerImages() { return !stickerUrls.isEmpty(); }
     
-    /** 获取引用消息中的图片URL列表（用于OCR识别） */
-    public List<String> getQuotedImageUrls() { return quotedImageUrls; }
-    public void addQuotedImageUrl(String url) { if (url != null && !url.isEmpty()) this.quotedImageUrls.add(url); }
+    /** 获取引用消息中的图片URL列表（用于OCR识别；已过滤空项，仅用于计数/提示） */
+    public List<String> getQuotedImageUrls() {
+        List<String> urls = new ArrayList<>(quotedImages.size());
+        for (String[] pair : quotedImages) {
+            if (pair[0] != null && !pair[0].isEmpty()) urls.add(pair[0]);
+        }
+        return urls;
+    }
 
-    /** 获取引用消息中的图片 file（md5）列表（与 quotedImageUrls 一一对应，用于 NapCat get_image 兜底） */
-    public List<String> getQuotedImageFiles() { return quotedImageFiles; }
-    public void addQuotedImageFile(String file) { if (file != null && !file.isEmpty()) this.quotedImageFiles.add(file); }
+    /** 获取引用消息图片的成对数据 {@code [url, file(md5)]}（索引永远对齐，供视觉处理使用） */
+    public List<String[]> getQuotedImages() { return quotedImages; }
+
+    /**
+     * 追加一张引用消息图片（成对写入，保持索引对齐）。
+     * url 与 file 都为空时不记录。
+     */
+    public void addQuotedImage(String url, String file) {
+        String u = (url == null) ? "" : url;
+        String f = (file == null) ? "" : file;
+        if (u.isEmpty() && f.isEmpty()) return;
+        quotedImages.add(new String[]{u, f});
+    }
+
+    /** 是否存在引用图片 */
+    public boolean hasQuotedImages() { return !quotedImages.isEmpty(); }
     
     public boolean hasForward() { return hasForward; }
     public void setHasForward(boolean v) { this.hasForward = v; }
     
     public String getForwardContent() { return forwardContent; }
     public void setForwardContent(String v) { this.forwardContent = v; }
+
+    /** 折叠消息原始 JSON（可为空；为空时上层退回按 forwardContent 文本处理） */
+    public String getForwardRaw() { return forwardRaw; }
+    public void setForwardRaw(String v) { this.forwardRaw = v; }
+
+    /** 折叠消息（含嵌套层）中的图片 URL 列表 */
+    public List<String> getForwardImageUrls() { return forwardImageUrls; }
+    public void addForwardImageUrl(String url) {
+        if (url != null && !url.isEmpty() && !forwardImageUrls.contains(url)) forwardImageUrls.add(url);
+    }
     
     public String getQuotedMessageContent() { return quotedMessageContent; }
     public void setQuotedMessageContent(String v) { this.quotedMessageContent = v; }
@@ -255,10 +297,92 @@ public class QQMessage {
         return String.valueOf(userId);
     }
 
+    /**
+     * 剥离 CQ 码，但<b>为语义保留占位符</b>。
+     * <p>
+     * 旧实现直接 {@code replaceAll("\\[CQ:[^\\]]+\\]", "")}，把所有 CQ 码无声删除：
+     * 用户发的 {@code [CQ:face,id=178]}（微笑）、{@code [CQ:dice]}、{@code [CQ:location]}、
+     * {@code [CQ:file]}、{@code [CQ:reply]} 全部消失，AI 看到的是一个意思完全不同的句子
+     * （例如「哈哈哈哈[微笑]」变成「哈哈哈哈」）。而这段文本同时是<b>记忆入库</b>的内容，
+     * 丢失即永久丢失。
+     * </p>
+     * <p>
+     * 图片/语音/折叠/卡片四类已有各自的专用注入通道（imageUrls / voiceText /
+     * forwardContent / cardSummary），这里保持剥离以免重复；其余类型统一降级为
+     * 人类可读占位符，保证「没有任何内容被静默丢弃」。
+     * </p>
+     */
+    static String stripCqCodes(String raw) {
+        if (raw == null || raw.isEmpty()) return "";
+        java.util.regex.Matcher m = CQ_PATTERN.matcher(raw);
+        if (!m.find()) return raw;
+        StringBuilder out = new StringBuilder(raw.length());
+        int last = 0;
+        do {
+            out.append(raw, last, m.start());
+            out.append(cqPlaceholder(m.group()));
+            last = m.end();
+        } while (m.find());
+        out.append(raw, last, raw.length());
+        return out.toString();
+    }
+
+    private static final java.util.regex.Pattern CQ_PATTERN =
+            java.util.regex.Pattern.compile("\\[CQ:([a-zA-Z_]+)((?:,[^\\]]*)?)\\]");
+
+    /** CQ 码 → 占位符（返回空串表示该类型已有专用注入通道）。 */
+    private static String cqPlaceholder(String cqCode) {
+        java.util.regex.Matcher m = CQ_PATTERN.matcher(cqCode);
+        if (!m.matches()) return "";
+        String type = m.group(1).toLowerCase();
+        switch (type) {
+            // 已有专用注入通道，避免重复
+            case "image":
+            case "record":
+            case "forward":
+            case "json":
+            case "xml":
+                return "";
+            case "face":
+            case "mface":
+            case "sface":
+                return "[表情]";
+            case "at":
+                return "[提及]";
+            case "reply":
+                return "[引用]";
+            case "video":
+                return "[视频]";
+            case "file":
+                return "[文件]";
+            case "poke":
+                return "[戳一戳]";
+            case "dice":
+                return "[骰子]";
+            case "rps":
+                return "[猜拳]";
+            case "location":
+                return "[位置]";
+            case "music":
+                return "[音乐]";
+            case "contact":
+                return "[名片]";
+            case "share":
+                return "[分享]";
+            case "markdown":
+                return "[卡片]";
+            case "tts":
+                return "[语音]";
+            default:
+                // 未知类型：保留类型名，去掉参数，避免完全静默丢失
+                return "[CQ:" + type + "]";
+        }
+    }
+
     /** 提取纯文本内容（去除CQ码，含图片/折叠/语音转文字占位） */
     public String getPlainText() {
         if (rawMessage == null) return "";
-        StringBuilder sb = new StringBuilder(rawMessage.replaceAll("\\[CQ:[^\\]]+\\]", "").trim());
+        StringBuilder sb = new StringBuilder(stripCqCodes(rawMessage).trim());
         // 卡片消息：rawMessage 剥离 CQ 码后为空，这里注入提取出的人可读内容，避免 AI 看到空消息
         if (cardSummary != null && !cardSummary.isEmpty()) {
             if (sb.length() > 0) sb.append("\n");
@@ -286,7 +410,7 @@ public class QQMessage {
     /** 提取纯文本内容（仅文本，不含图片/折叠信息，含语音转文字） */
     public String getPlainTextOnly() {
         if (rawMessage == null) return "";
-        StringBuilder sb = new StringBuilder(rawMessage.replaceAll("\\[CQ:[^\\]]+\\]", "").trim());
+        StringBuilder sb = new StringBuilder(stripCqCodes(rawMessage).trim());
         if (cardSummary != null && !cardSummary.isEmpty()) {
             if (sb.length() > 0) sb.append("\n");
             sb.append(cardSummary);

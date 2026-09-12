@@ -22,7 +22,7 @@
         <h1>技能<span class="gradient-text">系统</span></h1>
         <p class="lead">
           AI 执行轨迹自动蒸馏为可复用技能，分层技能库（general/execq/task/persona）。
-          支持内置技能、三方技能（含代码段）、agentskills.io 技能包、路径权重路由。
+          支持内置技能、三方技能（一技能一文件夹：md 文档 + Java 源码）、路径权重路由。
         </p>
       </div>
     </header>
@@ -39,36 +39,36 @@
           <div class="card"><div class="card-icon ic-cyan">🌐</div><h3>general</h3><p>通用技能，本地 execs 注入</p></div>
           <div class="card"><div class="card-icon ic-magenta">⚡</div><h3>execq</h3><p>NapCat QQ 专属，execq 注入</p></div>
           <div class="card"><div class="card-icon ic-amber">🎯</div><h3>task</h3><p>任务型技能，Top-K 检索</p></div>
-          <div class="card"><div class="card-icon ic-purple">👤</div><h3>persona</h3><p>人格技能，个性化注入</p></div>
+          <div class="card"><div class="card-icon ic-purple">⚙️</div><h3>技能文件夹（md + Java）</h3><p>工具技能 = <code>data/skills/&lt;名&gt;/</code>：<code>&lt;名&gt;.md</code>（元数据 + 说明）+ <code>*.java</code>（实现，可多个文件，辅助类一起编译）。<b>代码只支持 Java</b>，md 里的 <code>&lt;java start&gt;</code> 内嵌代码段已废弃。入口方法固定叫 <code>airun</code>，多个类都有 airun 时用 <code>entry:</code> 指定；<code>airun.params</code> 支持 <code>default</code>/<code>enum</code>/<code>example</code>/<code>items</code> 声明式入参，<code>returns</code> 写明返还内容，<code>context: true</code> 注入只读上下文（通道/群号/QQ号/是否主人/好感度），<code>timeout</code> 与 <code>state</code> 控制执行。<b>加载即编译注册</b>（改 md 或 .java 都新替旧，调用期不再动态编译，编译失败在控制台点名）。声明后自动注册为 FC 工具 tp_&lt;name&gt;（或 <code>tool:</code> 顶替内置工具），工具名自动规范化为 ^[a-zA-Z0-9_-]+$。</p></div>
         </div>
       </section>
 
       <section class="section" id="builtin">
         <div class="section-head reveal">
           <div class="section-tag">Builtin</div>
-          <h2>内置技能库</h2>
-          <p class="desc">SystemSkillLib（scope=general，30 条）+ NapCatSkillLib（scope=execq，15 条）。</p>
+          <h2>内置技能库（已整体迁出）</h2>
+          <p class="desc">硬编码技能文档已全部迁出到 <code>data/skills/*.md</code>：SystemSkillLib（31 条系统技能）与 NapCatSkillLib（52 条 NapCat API 技能）的正文都不再以 Java 字符串常量存在。</p>
         </div>
         <div class="card-grid cols-2 reveal">
-          <div class="card"><div class="card-icon ic-cyan">🧰</div><h3>SystemSkillLib</h3><p>通用工具使用说明、八库记忆架构、时效性信息查询、Java 动态注入、三方技能库管理、agentskills.io 技能包、callskill、系统闹钟（alarm）、捐赠记录等 30 条系统技能。</p></div>
-          <div class="card"><div class="card-icon ic-magenta">🐱</div><h3>NapCatSkillLib</h3><p>NapCat API 技能（scope=execq），含消息发送（私聊/群/转发）、群管操作（禁言/踢出/全员禁言/设管/名片/群名/退群）、好友管理（拉黑/删好友/好友申请/群邀请）等 15 条底层 API 技能。</p></div>
+          <div class="card"><div class="card-icon ic-cyan">🧰</div><h3>SystemSkillLib</h3><p>只剩两件事：<code>RETIRED_BUILTINS</code> 名单（功能已整体移除的技能，无条件下线）与 <code>retireSupersededBuiltins()</code>（库里存在同名 .md 就把旧内置记录 <code>deprecateSkill()</code> 下线）。技能内容一律来自 <code>data/skills/</code>，改文案不用改代码、不用重打包、不用重启。</p></div>
+          <div class="card"><div class="card-icon ic-magenta">🐱</div><h3>NapCatSkillLib</h3><p>同样只保留退役名单；52 条 NapCat API 技能文档（消息发送 / 群管操作 / 好友管理…）已迁出为单文件 .md，其中的工具类能力（发图 / 群管 / 跨群 / 打标）仍由 Java 侧的 onebot 包实现，只是说明书搬到了文件里。</p></div>
         </div>
-        <div class="callout reveal"><div class="co-icon">💡</div><div>内置技能通过 <code>addBuiltinSkill()</code> 写入，使用 contentHash 去重，同 hash 合并跳过，避免重复注入。</div></div>
+        <div class="callout reveal"><div class="co-icon">💡</div><div>旧库里的 <code>builtin</code> 记录靠<b>条件式退役</b>下线：<b>只有同名 .md 真的存在时</b>才下线，所以「先拷 .md 再上线」不会出现文档空窗；内容保留可查（<code>skillinfo</code> 按 id 查回），只是不再进索引与检索。</div></div>
       </section>
 
       <section class="section" id="thirdparty">
         <div class="section-head reveal">
           <div class="section-tag">Third Party</div>
-          <h2>三方技能（含代码段执行）</h2>
-          <p class="desc">data/skills/ 目录单文件 .md 技能，WatchService 文件监听。</p>
+          <h2>三方技能（一技能一文件夹 + Java 实现）</h2>
+          <p class="desc">data/skills/ 下「一技能一文件夹」（md 文档 + Java 源码），WatchService 监听根目录与各技能文件夹。</p>
         </div>
         <div class="flow-box reveal">
           <div class="flow">
-            <div class="flow-node start"><span class="fn-title">放入 .md 文件</span><span class="fn-sub">data/skills/*.md，front matter 声明 name/description</span></div>
+            <div class="flow-node start"><span class="fn-title">放入技能文件夹 / .md 文件</span><span class="fn-sub">data/skills/&lt;名&gt;/（md + Java）或纯文档 data/skills/*.md</span></div>
             <div class="flow-edge"></div>
-            <div class="flow-node core"><span class="fn-title">ThirdPartySkillStore 扫描</span><span class="fn-sub">parseMarkdown 提取元数据 + 四种代码段</span></div>
+            <div class="flow-node core"><span class="fn-title">ThirdPartySkillStore 扫描</span><span class="fn-sub">parseMarkdown 提取元数据 + 文件夹里的 Java 源码（只认 .java）</span></div>
             <div class="flow-edge"></div>
-            <div class="flow-node data"><span class="fn-title">环境依赖检测</span><span class="fn-sub">java/js 原生 · nodejs/python 需命令行</span></div>
+            <div class="flow-node data"><span class="fn-title">加载期编译注册</span><span class="fn-sub">Java 源码一次编译进注册表 · 改文件新替旧 · 调用期不再编译</span></div>
             <div class="flow-edge"></div>
             <div class="flow-node core"><span class="fn-title">动态注册工具</span><span class="fn-sub">airun 签名 → tp_技能名，Function Calling 直接调用</span></div>
             <div class="flow-edge"></div>
@@ -77,18 +77,6 @@
           <div class="flow-caption">三方技能代码段执行链路</div>
         </div>
         <div class="callout warn reveal"><div class="co-icon">⚠️</div><div>代码段权限受 <code>/setthirdpartycode</code> 控制：on=放权（所有通道含 QQ）；off=仅 execs/本地可用。</div></div>
-      </section>
-
-      <section class="section" id="package">
-        <div class="section-head reveal">
-          <div class="section-tag">Package</div>
-          <h2>agentskills.io 技能包</h2>
-          <p class="desc">AgentSkillStore 负责技能包存储 + 监听 + zip 自动解压。</p>
-        </div>
-        <div class="card-grid cols-2 reveal">
-          <div class="card"><div class="card-icon ic-amber">📦</div><h3>技能包加载</h3><p>将符合 agentskills.io 标准的技能包（含 SKILL.md）放入 data/skillpackages/ 目录即自动加载；zip 技能包放入后自动解压导入并删除原 zip。</p></div>
-          <div class="card"><div class="card-icon ic-purple">🔍</div><h3>环境依赖审查</h3><p>加载时探测 skillhub/jq/curl 等依赖，缺失时用 SFW 红字输出提示用户自行安装。渐进式披露：索引只放元数据，正文按需读取。</p></div>
-        </div>
       </section>
 
       <section class="section" id="distill">
@@ -157,7 +145,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.10 · 技能自进化 · scope 四分类 · 三方技能代码段 · 技能包 · 路径路由</p>
+        <p><span class="brand">AiAgent</span> v4.0 · 技能自进化 · scope 四分类 · 三方技能文件夹（md + Java） · 加载期编译注册 · 路径路由</p>
       </div>
     </footer>
   </main>

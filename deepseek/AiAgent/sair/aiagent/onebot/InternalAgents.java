@@ -76,6 +76,95 @@ public class InternalAgents {
         }
         
         AiAgentActivity.debugLog("[InternalAgents] 已从持久化层加载: 黑名单=" + blocked.size() + ", 警告用户=" + allWarnings.size());
+        loadSensitiveWords();
+    }
+
+    // ==================== RuleAgent: 敏感词库 ====================
+
+    /**
+     * 内置默认敏感词（<b>只收明确无歧义的辱骂/色情词</b>）。
+     * <p>
+     * 之所以必须有默认值：{@code sensitiveWords} 此前<b>从来没有被任何代码填充过</b>
+     * （没有加载器、没有配置项、{@code addSensitiveWord} 也没有调用方），
+     * 于是 {@code containsSensitiveWords} 恒为 false —— 整个敏感词/辱骂/开黄腔
+     * 检测、警告、拉黑、情绪惩罚链路<b>全部是死代码</b>，Bot 挨骂既不生气也不处理。
+     * </p>
+     * <p>
+     * 词表刻意保守：像「傻瓜」「滚」这类在熟人之间也会用的词一律不收，避免误伤正常聊天。
+     * 主人可通过数据目录下的 {@code sensitive_words.txt}（每行一个词，# 开头为注释）
+     * <b>整体替换</b>默认词表，或用 addsensitiveword 逐步追加（追加会被持久化）。
+     * </p>
+     */
+    private static final String[] DEFAULT_SENSITIVE_WORDS = {
+        // 辱骂
+        "傻逼", "煞笔", "沙比", "傻B", "脑残", "智障", "弱智", "白痴", "废物点心",
+        "去死", "死全家", "死妈", "你妈死", "尼玛", "草泥马", "操你", "草你", "日你", "干你妈",
+        "婊子", "贱人", "杂种", "狗东西", "畜生", "王八蛋", "滚出去", "神经病吧",
+        // 色情
+        "操逼", "做爱", "约炮", "一夜情", "裸聊", "发骚", "淫荡", "色情", "黄图",
+        "打飞机", "自慰", "口交", "性交", "卖淫", "嫖娼", "舔我", "硬了想"
+    };
+
+    /** 敏感词持久化键（app_state）。 */
+    private static final String SENSITIVE_WORDS_STATE_KEY = "ruleagent.sensitive_words";
+
+    /**
+     * 加载敏感词：默认词表 → 数据目录 sensitive_words.txt 覆盖 → 持久化追加词。
+     */
+    private void loadSensitiveWords() {
+        for (String w : DEFAULT_SENSITIVE_WORDS) sensitiveWords.add(w.toLowerCase());
+        // 1) 数据目录下的可编辑词表（存在则整体替换默认词表）
+        try {
+            String dataDir = (handler != null) ? handler.getDataDirPath() : null;
+            if (dataDir != null && !dataDir.isEmpty()) {
+                java.io.File f = new java.io.File(dataDir, "sensitive_words.txt");
+                if (f.isFile()) {
+                    List<String> lines = java.nio.file.Files.readAllLines(f.toPath(),
+                            java.nio.charset.StandardCharsets.UTF_8);
+                    Set<String> custom = new LinkedHashSet<>();
+                    for (String line : lines) {
+                        String w = line.trim();
+                        if (w.isEmpty() || w.startsWith("#")) continue;
+                        custom.add(w.toLowerCase());
+                    }
+                    if (!custom.isEmpty()) {
+                        sensitiveWords.clear();
+                        sensitiveWords.addAll(custom);
+                        AiAgentActivity.debugLog("[RuleAgent] 已用 sensitive_words.txt 覆盖敏感词表: "
+                                + custom.size() + " 个");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[RuleAgent] 读取 sensitive_words.txt 失败（保留默认词表）: " + e);
+        }
+        // 2) 持久化追加词（addSensitiveWord 写入过的话）
+        try {
+            sair.aiagent.core.PersistenceManager pm = sair.aiagent.core.PersistenceManager.getInstance();
+            String stored = (pm != null) ? pm.getState(SENSITIVE_WORDS_STATE_KEY) : null;
+            if (stored != null && !stored.isEmpty()) {
+                int n = 0;
+                for (String w : stored.split("\n")) {
+                    String t = w.trim();
+                    if (!t.isEmpty() && sensitiveWords.add(t.toLowerCase())) n++;
+                }
+                if (n > 0) AiAgentActivity.debugLog("[RuleAgent] 已恢复持久化敏感词 " + n + " 个");
+            }
+        } catch (Exception ignored) {}
+        AiAgentActivity.debugLog("[RuleAgent] 敏感词库已加载: " + sensitiveWords.size() + " 个");
+    }
+
+    /** 把当前「非默认词」持久化，保证 addSensitiveWord 的效果能跨重启保留。 */
+    private void persistSensitiveWords() {
+        try {
+            StringBuilder sb = new StringBuilder();
+            for (String w : sensitiveWords) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append(w);
+            }
+            sair.aiagent.core.PersistenceManager pm = sair.aiagent.core.PersistenceManager.getInstance();
+            if (pm != null) pm.setState(SENSITIVE_WORDS_STATE_KEY, sb.toString());
+        } catch (Exception ignored) {}
     }
     
     // ==================== BlockAgent: 拉黑/屏蔽 ====================
@@ -374,17 +463,25 @@ public class InternalAgents {
     }
     
     /**
-     * 检查是否为色情内容
+     * 检查是否为色情内容。
+     * <p>旧实现只要正文出现「色/黄/裸/性/骚」任意一个字就判为开黄腔 —— 而「性格」「属性」
+     * 「个性」「感性」「黄色」（颜色）全都命中，于是一句普通辱骂经常被升级成开黄腔处理
+     * （怒气 +25 而非 +15、好感 −30 而非 −20、控制台失败信号 ×2）。这里改为具体词组匹配。</p>
      */
     private boolean isSexualContent(String content) {
         if (content == null) return false;
         String lower = content.toLowerCase();
-        return lower.contains("色") || 
-               lower.contains("黄") ||
-               lower.contains("裸") ||
-               lower.contains("性") ||
-               lower.contains("骚");
+        for (String w : SEXUAL_WORDS) {
+            if (lower.contains(w)) return true;
+        }
+        return false;
     }
+
+    /** 明确的色情词（用于把「辱骂」与「开黄腔」分流，见 {@link #isSexualContent}）。 */
+    private static final String[] SEXUAL_WORDS = {
+        "操逼", "做爱", "约炮", "一夜情", "裸聊", "发骚", "淫荡", "色情", "黄图",
+        "打飞机", "自慰", "口交", "性交", "卖淫", "嫖娼", "脱衣", "舔我", "开黄腔"
+    };
     
     /** 供群管 Agent 复用的敏感词检测入口。 */
     public boolean hasSensitiveWord(String content) {
@@ -392,19 +489,28 @@ public class InternalAgents {
     }
 
     /**
-     * 添加敏感词
+     * 添加敏感词（持久化，重启后仍生效）
      */
     public void addSensitiveWord(String word) {
-        sensitiveWords.add(word);
+        if (word == null || word.trim().isEmpty()) return;
+        sensitiveWords.add(word.trim().toLowerCase());
+        persistSensitiveWords();
         AiAgentActivity.debugLog("[RuleAgent] 已添加敏感词: " + word);
     }
     
     /**
-     * 移除敏感词
+     * 移除敏感词（持久化）
      */
     public void removeSensitiveWord(String word) {
-        sensitiveWords.remove(word);
+        if (word == null || word.trim().isEmpty()) return;
+        sensitiveWords.remove(word.trim().toLowerCase());
+        persistSensitiveWords();
         AiAgentActivity.debugLog("[RuleAgent] 已移除敏感词: " + word);
+    }
+
+    /** 当前敏感词数量（供 ai/status 等观测）。 */
+    public int getSensitiveWordCount() {
+        return sensitiveWords.size();
     }
     
     /**

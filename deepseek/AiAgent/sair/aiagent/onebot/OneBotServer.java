@@ -36,7 +36,10 @@ public class OneBotServer {
 
     // === 配置 ===
     private static final int DEFAULT_PORT = 5800;
-    private static final int MAX_FRAME_SIZE = 256 * 1024; // 256KB
+    /** 单个 WebSocket 帧上限（超限走「读完丢弃」，不再断连）。 */
+    private static final int MAX_FRAME_SIZE = 2 * 1024 * 1024; // 2MB
+    /** 分片消息累计上限（防止分片洪峰把 ByteArrayOutputStream 撑爆内存）。 */
+    private static final int MAX_MESSAGE_SIZE = 8 * 1024 * 1024; // 8MB
     private static final String WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
     // === 状态 ===
@@ -500,9 +503,14 @@ public class OneBotServer {
                 }
 
                 // 读取payload
-                if (payloadLen > MAX_FRAME_SIZE || payloadLen > Integer.MAX_VALUE) {
-                    AiAgentActivity.qqLog("[OneBot] 帧过大: " + payloadLen);
-                    break;
+                if (payloadLen > MAX_FRAME_SIZE) {
+                    // 关键：这里绝不能 break。break 会让整个读取循环退出 → 连接断开，
+                    // 该连接上的所有后续消息全部丢失（OneBot 若不自动重连，Bot 直接变聋）。
+                    // 正确做法：把这段 payload 读完并丢弃（保持 WebSocket 帧边界同步），继续处理后面的消息。
+                    AiAgentActivity.qqLog("[OneBot] 帧过大(" + payloadLen + " 字节)，丢弃该帧但保持连接");
+                    drain(in, payloadLen);
+                    messageBuf.reset();
+                    continue;
                 }
 
                 byte[] payload = new byte[(int) payloadLen];
@@ -523,7 +531,7 @@ public class OneBotServer {
                 // 处理帧
                 switch (opcode) {
                     case 0x01: // 文本帧
-                        messageBuf.write(payload);
+                        if (!appendFragment(messageBuf, payload)) break;
                         if (fin) {
                             String text = new String(messageBuf.toByteArray(), StandardCharsets.UTF_8);
                             messageBuf.reset();
@@ -539,7 +547,7 @@ public class OneBotServer {
                     case 0x0A: // Pong (ignore)
                         break;
                     case 0x00: // 延续帧
-                        messageBuf.write(payload);
+                        if (!appendFragment(messageBuf, payload)) break;
                         if (fin) {
                             String text = new String(messageBuf.toByteArray(), StandardCharsets.UTF_8);
                             messageBuf.reset();
@@ -550,6 +558,35 @@ public class OneBotServer {
                         AiAgentActivity.qqLog("[OneBot] 未知操作码: " + opcode);
                         break;
                 }
+            }
+        }
+
+        /**
+         * 追加分片内容；累计超过 {@link #MAX_MESSAGE_SIZE} 时丢弃整条消息并返回 false。
+         * 旧实现无上限，分片洪峰可把 ByteArrayOutputStream 撑到 OOM。
+         */
+        private boolean appendFragment(ByteArrayOutputStream messageBuf, byte[] payload) {
+            if (messageBuf.size() + payload.length > MAX_MESSAGE_SIZE) {
+                AiAgentActivity.qqLog("[OneBot] 分片消息累计超过 " + MAX_MESSAGE_SIZE + " 字节，丢弃该条消息");
+                messageBuf.reset();
+                return false;
+            }
+            messageBuf.write(payload, 0, payload.length);
+            return true;
+        }
+
+        /** 从输入流丢弃 n 字节（保持 WebSocket 帧边界同步）。 */
+        private void drain(java.io.InputStream in, long n) {
+            byte[] tmp = new byte[8192];
+            long left = n;
+            try {
+                while (left > 0) {
+                    int r = in.read(tmp, 0, (int) Math.min(tmp.length, left));
+                    if (r == -1) return;
+                    left -= r;
+                }
+            } catch (IOException e) {
+                AiAgentActivity.qqLog("[OneBot] 丢弃超大帧时连接不可用: " + e.getMessage());
             }
         }
 
@@ -611,18 +648,14 @@ public class OneBotServer {
                     // 检查是否戳的是机器人自己
                     if (targetId == currentSelfId && messageHandler != null) {
                         AiAgentActivity.qqLog("[OneBot] 检测到戳一戳: user=" + userId + ", group=" + groupId);
-                                
-                        // 即时回复：AI分析上下文动态生成
-                        String pokeReply = getPokeReply(userId, groupId, messageHandler);
-                        if (pokeReply != null && !pokeReply.isEmpty()) {
-                            if (groupId > 0) {
-                                // 群聊中明确@戳自己的那个人
-                                OneBotServer.this.sendGroupMsg(groupId, "[CQ:at,qq=" + userId + "] " + pokeReply);
-                            } else {
-                                OneBotServer.this.sendPrivateMsg(userId, pokeReply);
-                            }
-                            AiAgentActivity.qqLog("[OneBot] 戳一戳回复: " + pokeReply);
+
+                        // 戳一戳不走 AI 思考：系统直接拦截，@ 戳的人发一个问号
+                        if (groupId > 0) {
+                            OneBotServer.this.sendGroupMsg(groupId, "[CQ:at,qq=" + userId + "] ？");
+                        } else {
+                            OneBotServer.this.sendPrivateMsg(userId, "？");
                         }
+                        AiAgentActivity.qqLog("[OneBot] 戳一戳已由系统拦截回复（@" + userId + " ？）");
                     }
                 }
             } catch (Exception e) {
@@ -630,170 +663,6 @@ public class OneBotServer {
             }
         }
 
-        /** AI驱动的戳一戳回复：分析上下文动态生成 */
-    private String getPokeReply(long userId, long groupId, sair.aiagent.onebot.QQMessageHandler handler) {
-        sair.aiagent.onebot.EmotionStateManager em = handler.getEmotionManager();
-        int affection = (em != null) ? em.getAffection(userId) : 0;
-        if (em != null) {
-            if (em.isBetrayer(userId)) return null;
-            if (em.isInRomance() && em.getRomancePartnerId() == userId) return "啊~你又戳我！\uD83D\uDC95";
-        }
-
-        // 最近对话上下文
-        sair.aiagent.onebot.UnifiedQQMemoryManager mem = handler.getUnifiedMemory();
-        String context = buildPokeContext(userId, groupId, mem, handler);
-        String selfName = handler.getSelfName();
-
-        // 优先：有该用户最近的非空消息 → AI 结合上下文自然回应（不要只回「空消息」）
-        String recentUserMsg = findUserRecentMessage(userId, groupId, mem);
-        if (recentUserMsg != null && !recentUserMsg.isEmpty()) {
-            String aiReply = aiGeneratePokeReply(selfName, context, recentUserMsg, userId, groupId, handler);
-            if (aiReply != null && !aiReply.isEmpty()) return aiReply;
-        }
-
-        // 其次：名字出现在上下文中 → AI 自然续聊
-        boolean nameInContext = selfName != null && !selfName.isEmpty()
-                && context != null && context.contains(selfName);
-        if (nameInContext) {
-            String aiReply = aiGeneratePokeReply(selfName, context, null, userId, groupId, handler);
-            if (aiReply != null && !aiReply.isEmpty()) return aiReply;
-        }
-
-        // 兜底：随机困惑/温暖回复
-        String[] confused = {"何意味？", "啊？", "嘟嘟？", "啊呀？", "唉？"};
-        if (affection >= 500) {
-            String[] warm = {"哎呀，别戳了啦~", "咔，戳我干嘛～", "戳戳怪哦！"};
-            return warm[new java.util.Random().nextInt(warm.length)];
-        }
-        return confused[new java.util.Random().nextInt(confused.length)];
-    }
-
-    /** 查找该用户最近一条非空消息（群聊查群历史，私聊查会话记录），找不到返回 null。 */
-    private String findUserRecentMessage(long userId, long groupId,
-            sair.aiagent.onebot.UnifiedQQMemoryManager mem) {
-        if (mem == null) return null;
-        try {
-            if (groupId > 0) {
-                java.util.List<String[]> history = mem.getRecentGroupChatHistory(groupId, 30);
-                if (history != null) {
-                    String uid = String.valueOf(userId);
-                    for (int i = history.size() - 1; i >= 0; i--) {
-                        String[] m = history.get(i);
-                        if (m != null && m.length > 2 && uid.equals(m[0])) {
-                            String c = m[2];
-                            if (c != null && !c.trim().isEmpty()) return c.trim();
-                        }
-                    }
-                }
-            } else {
-                java.util.List<String[]> conv = mem.getPrivateConversations(userId, 30);
-                if (conv != null) {
-                    for (String[] m : conv) {
-                        if (m != null && m.length > 1 && "user".equals(m[0])) {
-                            String c = m[1];
-                            if (c != null && !c.trim().isEmpty()) return c.trim();
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
-        return null;
-    }
-
-    /** Build recent conversation context from unified memory */
-    private String buildPokeContext(long userId, long groupId,
-            sair.aiagent.onebot.UnifiedQQMemoryManager mem,
-            sair.aiagent.onebot.QQMessageHandler handler) {
-        if (mem == null) return "";
-        StringBuilder sb = new StringBuilder();
-        java.util.List<String[]> msgs;
-        if (groupId > 0) {
-            msgs = mem.getGroupConversations(groupId, 10);
-        } else {
-            msgs = mem.getPrivateConversations(userId, 10);
-        }
-        if (msgs == null || msgs.isEmpty()) return "";
-        for (String[] m : msgs) {
-            String name = (m.length > 5 && m[5] != null && !m[5].isEmpty()) ? m[5]
-                    : (m.length > 4 && m[4] != null ? m[4] : "unknown");
-            String content = m.length > 1 ? m[1] : "";
-            if (content.length() > 200) content = content.substring(0, 200) + "...";
-            sb.append(name).append(": ").append(content).append("\n");
-        }
-        return sb.toString();
-    }
-
-    /** Use AI to generate a context-aware poke reply */
-    private String aiGeneratePokeReply(String selfName, String context, String recentUserMsg,
-            long pokerUserId, long groupId, sair.aiagent.onebot.QQMessageHandler handler) {
-        try {
-            sair.aiagent.core.DeepSeekClient client = handler.getDeepSeekClient();
-            if (client == null) return null;
-            String pokerName = resolvePokerName(pokerUserId, groupId, handler);
-            String pokerRole = resolvePokerRole(pokerUserId, groupId, handler);
-            String prompt = "Someone just poked you in a chat. Reply naturally.\n\n"
-                    + "Your name is: " + selfName + "\n"
-                    + "The person who poked you: " + pokerName + " (QQ:" + pokerUserId + ") [身份: " + pokerRole + "]\n"
-                    + "Recent chat context:\n" + context + "\n";
-            if (recentUserMsg != null && !recentUserMsg.isEmpty()) {
-                prompt += "\nThe person who poked you recently said: \"" + recentUserMsg + "\"\n"
-                        + "Respond to what they said instead of just acting confused.\n";
-            }
-            prompt += "\nRules:\n"
-                    + "- If there is a recent message from this person, respond to it naturally\n"
-                    + "- Do NOT say things like \"empty message\" or \"no content\"\n"
-                    + "- Keep reply short and friendly (under 30 chars if possible)\n"
-                    + "- IMPORTANT: 只有身份是【⭐主人】的人才能称为'主人'，其他人一律用昵称称呼，绝不喊'主人'\n"
-                    + "- Output ONLY the reply text, nothing else";
-            java.util.List<sair.aiagent.model.ChatMessage> msgs = new java.util.ArrayList<>();
-            msgs.add(new sair.aiagent.model.ChatMessage("user", prompt));
-            String reply = client.chatSync(msgs, sair.aiagent.core.AiConfig.getInstance().getExecqModel());
-            if (reply != null) {
-                reply = reply.trim().replaceAll("^[\"']+|[\"']+$", "");
-                if (reply.length() > 80) reply = reply.substring(0, 80);
-                if (!reply.isEmpty()) return reply;
-            }
-        } catch (Exception e) {
-            AiAgentActivity.qqLog("[OneBot] AI poke reply failed: " + e.getMessage());
-        }
-        return null;
-    }
-
-    /** 解析戳一戳者的显示名称（群昵称优先，否则回退 QQ 号） */
-    private String resolvePokerName(long userId, long groupId,
-            sair.aiagent.onebot.QQMessageHandler handler) {
-        try {
-            sair.aiagent.onebot.UnifiedQQMemoryManager mem = handler.getUnifiedMemory();
-            if (mem != null && groupId > 0) {
-                java.util.Map<String, Long> nickMap = mem.getGroupNicknameMap(groupId);
-                if (nickMap != null) {
-                    for (java.util.Map.Entry<String, Long> e : nickMap.entrySet()) {
-                        if (e.getValue() == userId) return e.getKey();
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
-        return "QQ:" + userId;
-    }
-
-    /** 解析戳一戳者的身份：⭐主人 / 👑群主 / 🔧管理员 / 普通成员 */
-    private String resolvePokerRole(long userId, long groupId,
-            sair.aiagent.onebot.QQMessageHandler handler) {
-        if (sair.aiagent.core.AiConfig.getInstance().isMasterQQ(userId)) return "⭐主人";
-        try {
-            sair.aiagent.onebot.UnifiedQQMemoryManager mem = handler.getUnifiedMemory();
-            if (mem != null && groupId > 0) {
-                java.util.List<String[]> admins = mem.getGroupAdmins(groupId);
-                for (String[] a : admins) {
-                    if (a.length > 0 && String.valueOf(userId).equals(a[0])) {
-                        if (a.length > 2 && "owner".equals(a[2])) return "👑群主";
-                        return "🔧管理员";
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
-        return "普通成员";
-    }
 
     /** 处理request事件（群邀请、好友请求等） */
         private void handleRequestEvent(String text) {

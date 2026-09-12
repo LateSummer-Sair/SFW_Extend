@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import sair.aiagent.AiAgentActivity;
+
 /**
  * 待处理请求池 —— 保存好友申请与群邀请，交由 AI/主人通过 FC 工具决策。
  * <p>
@@ -43,10 +45,38 @@ public class PendingRequestPool {
     /** flag -> 请求 */
     private final Map<String, PendingRequest> requests = new ConcurrentHashMap<>();
 
-    /** 登记一个待处理请求 */
+    /**
+     * 池容量上限。防止被好友申请/群邀请洪峰撑爆内存，
+     * 也防止 pendingrequests 工具把上百条过期请求灌进提示词。
+     */
+    private static final int MAX_REQUESTS = 200;
+    /** 请求存活时间：OneBot 侧 flag 本身有时效，过期的 flag 调用会直接失败，留着只会误导 AI。 */
+    private static final long TTL_MS = 7L * 24 * 3600_000L;
+
+    /** 登记一个待处理请求（带容量上限与 TTL 淘汰） */
     public void add(PendingRequest req) {
         if (req == null || req.flag == null || req.flag.isEmpty()) return;
+        prune();
+        if (requests.size() >= MAX_REQUESTS) {
+            // 淘汰最旧的一条
+            PendingRequest oldest = null;
+            for (PendingRequest r : requests.values()) {
+                if (oldest == null || r.timestamp < oldest.timestamp) oldest = r;
+            }
+            if (oldest != null) {
+                requests.remove(oldest.flag);
+                AiAgentActivity.debugLog("[PendingRequest] 池已满(" + MAX_REQUESTS
+                        + ")，淘汰最旧请求: " + oldest.type + " flag=" + oldest.flag);
+            }
+        }
         requests.put(req.flag, req);
+    }
+
+    /** 清理超过 TTL 的请求。 */
+    private void prune() {
+        if (requests.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        requests.values().removeIf(r -> now - r.timestamp > TTL_MS);
     }
 
     /** 按 flag 获取请求 */
@@ -59,8 +89,9 @@ public class PendingRequestPool {
         return flag == null ? null : requests.remove(flag);
     }
 
-    /** 列出所有待处理请求 */
+    /** 列出所有待处理请求（顺带清理过期项） */
     public List<PendingRequest> list() {
+        prune();
         return new ArrayList<>(requests.values());
     }
 

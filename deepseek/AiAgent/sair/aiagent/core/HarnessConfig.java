@@ -46,11 +46,27 @@ import sair.aiagent.AiAgentActivity;
 public class HarnessConfig {
 
     // ==================== 权限级别常量 ====================
+    /**
+     * ROOT —— <b>主人 = 系统 root</b>：任何工具、任何通道、任何门槛（好感度 / 群内限制 /
+     * 群里与否 / 代码安全黑名单）一律无条件放行。
+     * <p>这是「主人」权限的正式定义：主人不是「比其他人高一级的角色」，而是像 Linux root 一样
+     * 不受闸门约束。矩阵里写 {@code MASTER} 与 {@code ROOT} 等价（后者语义更清楚，推荐新配置使用）。
+     * 放行仍然<b>留审计日志</b>（root 操作也要可追溯），且只在 QQ 通道记录，避免本地通道刷屏。</p>
+     */
+    public static final String LEVEL_ROOT         = "ROOT";
+    /** 主人专属级别（{@link #LEVEL_ROOT} 的向后兼容别名）。 */
     public static final String LEVEL_MASTER       = "MASTER";
     public static final String LEVEL_GROUP_MASTER = "GROUP_MASTER";
     public static final String LEVEL_MEDIA        = "MEDIA";
     public static final String LEVEL_ANY          = "ANY";
     public static final String AFFECTION_PREFIX   = "AFFECTION:";
+    /**
+     * 三方技能（{@code tp_*}）动态工具的默认权限位：好感度 ≥300（与发文件/发语音同级）。
+     * <p>这些工具会执行 .md 里内嵌的 Java/JS/node/python 代码，以前不在权限矩阵里 →
+     * 落到 {@code LEVEL_ANY}，等于任何群成员都能让宿主执行任意代码。单个技能可用
+     * front matter 的 {@code airun.permission} 覆盖。</p>
+     */
+    public static final String LEVEL_TP_DEFAULT   = AFFECTION_PREFIX + "300";
 
     // ==================== 单例 ====================
     private static volatile HarnessConfig instance;
@@ -224,16 +240,56 @@ public class HarnessConfig {
     // ==================== 权限校验（确定性第一道闸门） ====================
 
     /**
-     * 校验工具调用权限。仅在 QQ 上下文（{@code napcatApi != null}）强制，
-     * console 本地通道视为全信任直接放行。返回 null 表示放行，否则返回阻断信息。
+     * 校验工具调用权限。返回 null 表示放行，否则返回阻断信息。
+     * <p>判定顺序：</p>
+     * <ol>
+     *   <li><b>ROOT</b>：调用者是主人 → 无条件放行（所有闸门短路，等价 Linux root）；</li>
+     *   <li>本地 console 通道（{@code napcatApi == null}）→ 全信任放行；</li>
+     *   <li>否则按权限位判定：ROOT/MASTER=仅主人、GROUP_MASTER=群内主人、
+     *       MEDIA=主人或好感度&gt;600、AFFECTION:N=主人或好感度≥N、ANY=不限；</li>
+     *   <li>{@code tp_*} 动态工具未在矩阵里 → 默认 {@link #LEVEL_TP_DEFAULT}（好感度≥300），
+     *       可由技能 front matter 的 {@code airun.permission} 覆盖。</li>
+     * </ol>
      */
     public String checkPermission(String toolName, ToolContext ctx) {
+        return checkPermission(toolName, ctx, null);
+    }
+
+    /**
+     * 校验工具调用权限（可指定权限位覆盖，供 {@code tp_*} 动态工具使用）。
+     *
+     * @param declaredLevel 技能自己在 front matter 里声明的权限位；为空则查矩阵/默认值
+     */
+    public String checkPermission(String toolName, ToolContext ctx, String declaredLevel) {
         if (toolName == null) return null;
+        // ROOT：主人不受任何闸门约束（Linux root 语义）。仍然留审计。
+        if (ctx != null && ctx.isMaster) {
+            if (ctx.isExecq()) {
+                AiAgentActivity.debugLog("[ROOT] 主人调用 " + toolName + " —— 权限闸门全部放行（ROOT 语义）");
+            }
+            return null;
+        }
         if (ctx == null || ctx.napcatApi == null) return null; // 本地通道全信任
-        String level = permissionMatrix.getOrDefault(toolName, LEVEL_ANY);
+        // ★ 内置工具名（权限矩阵里有明确条目）以矩阵为准，技能声明的 permission 不能放宽它 ——
+        //   否则「加一个 tool: settrigger 的 .md 并写 permission: ANY」就能绕掉仅主人的门禁。
+        //   技能自己新造的 tp_* 名字才由它自己声明权限位。
+        String level;
+        if (permissionMatrix.containsKey(toolName)) {
+            level = permissionMatrix.get(toolName);
+            if (declaredLevel != null && !declaredLevel.trim().isEmpty()
+                    && !level.equals(declaredLevel.trim())) {
+                AiAgentActivity.debugLog("[harness] " + toolName + " 的权限以矩阵为准（"
+                        + level + "），忽略技能声明的 " + declaredLevel.trim());
+            }
+        } else {
+            level = (declaredLevel != null && !declaredLevel.trim().isEmpty())
+                    ? declaredLevel.trim()
+                    : defaultLevelFor(toolName);
+        }
         if (LEVEL_ANY.equals(level)) return null;
 
         switch (level) {
+            case LEVEL_ROOT:
             case LEVEL_MASTER:
                 if (!ctx.isMaster) return "[harness] 权限阻断：" + toolName + " 仅主人可用";
                 return null;
@@ -258,6 +314,12 @@ public class HarnessConfig {
                 }
                 return null;
         }
+    }
+
+    /** 未在矩阵中登记的工具的默认权限位（三方技能默认要好感度，其他工具仍为不限制）。 */
+    private static String defaultLevelFor(String toolName) {
+        if (toolName != null && toolName.startsWith("tp_")) return LEVEL_TP_DEFAULT;
+        return LEVEL_ANY;
     }
 
     // ==================== 代码安全（确定性约束） ====================
@@ -295,6 +357,7 @@ public class HarnessConfig {
         }
         int limit = getMaxResultLengthForTool(toolName);
         if (result.length() > limit) {
+            ContextStats.count(ContextStats.C_RESULT_TRUNCATED);
             return result.substring(0, limit)
                     + "\n...[harness] 结果过长已截断(" + result.length() + " → " + limit + ")";
         }

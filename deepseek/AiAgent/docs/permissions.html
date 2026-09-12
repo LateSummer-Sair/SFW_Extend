@@ -133,7 +133,7 @@
               <tr><td class="cmd-name">sendfileto</td><td>✗</td><td>✓</td><td>△</td><td>主人或好感度 ≥ 300</td></tr>
 
               <tr><td rowspan="2">多智能体</td><td class="cmd-name">call_agent / ask_agent</td><td>✓</td><td>✓</td><td>✓</td><td>AgentBus 递归唤起</td></tr>
-              <tr><td class="cmd-name">tp_* 动态</td><td>✓</td><td>✓</td><td>△</td><td>三方技能代码段，受 setthirdpartycode 控制</td></tr>
+              <tr><td class="cmd-name">tp_* 动态</td><td>✓</td><td>✓</td><td>△</td><td>三方技能（技能文件夹里的 Java 实现）：未声明 permission 时默认 <code>AFFECTION:300</code>（主人=ROOT 不受限），另受 setthirdpartycode 通道开关控制，并按技能 <code>channels</code> 声明过滤</td></tr>
             </tbody>
           </table>
         </div>
@@ -241,7 +241,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.10 · 三层通道权限模型 · 工具权限矩阵 · 好感度六级权限 · 越权拦截 · 高危代码拦截</p>
+        <p><span class="brand">AiAgent</span> v4.0 · 三层通道权限模型 · 工具权限矩阵 · 好感度六级权限 · 越权拦截 · 高危代码拦截</p>
       </div>
     </footer>
   </main>

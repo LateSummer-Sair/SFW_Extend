@@ -46,6 +46,24 @@ public class SkillEntry implements Serializable {
     private int parentSkillId;
     private String status;
     private String scope;   // general (always inject) or task (top-K semantic)
+    /**
+     * 适用通道（逗号分隔，如 {@code "execq,execs"} / {@code "console"}）。
+     * <p>
+     * <b>空值 = 未声明 = 全通道可见</b>。这条规则是刻意的：
+     * 「学到的经验」是 AI 自己的知识，不该有通道边界，一律留空；
+     * 只有「内置工具说明书」才需要声明通道 —— 而声明它的唯一理由是
+     * <b>该文档描述的工具在这个通道里到底存不存在</b>（索引头写的是「可用工具索引」，
+     * 列出不存在的工具就是在骗模型）。通道归属从此与 {@link #scope} 解耦。
+     * </p>
+     */
+    private String channels;
+
+    /**
+     * 近似重复被抑制的次数：新学到的经验被判定为「这条的另一种改写」时 +1。
+     * <p>重复次数本身就是「这条经验很重要」的强信号（反复被独立学到），
+     * 比从未被回写的成功率更能反映价值。</p>
+     */
+    private int dupHitCount;
     private double weight = 0.5;  // 0.0-1.0, adaptive routing weight
     private String source;
     private long createdAt;
@@ -57,6 +75,14 @@ public class SkillEntry implements Serializable {
     /** 新建技能构造 */
     public SkillEntry(String name, String category, String description, String content, String source) {
         this(name, category, description, content, source, "task");
+    }
+
+    /** 合法 scope 集合：general / persona / execq / task。 */
+    private static String normalizeScope(String scope) {
+        if (scope == null) return "task";
+        String s = scope.trim();
+        if ("general".equals(s) || "persona".equals(s) || "execq".equals(s) || "task".equals(s)) return s;
+        return "task";
     }
 
     /** 新建技能构造（带 scope） */
@@ -72,7 +98,10 @@ public class SkillEntry implements Serializable {
         this.lastUsed = 0;
         this.parentSkillId = 0;
         this.status = "active";
-        this.scope = (scope != null && ("general".equals(scope) || "persona".equals(scope))) ? scope : "task";
+        // 注意：旧实现只认 general/persona，其余（含 execq）一律被强制改成 task，
+        // 于是「QQ 通道专属技能」永远落成 task，而 execq 通道的工具索引只显示 scope=execq
+        // —— 从 execq 通道学到的 NapCat 技能永远不会再出现在 execq 索引里（自学成果自锁死）。
+        this.scope = normalizeScope(scope);
         this.source = (source != null) ? source : "extracted";
         long now = System.currentTimeMillis();
         this.createdAt = now;
@@ -106,7 +135,9 @@ public class SkillEntry implements Serializable {
         this.parentSkillId = parentSkillId;
         this.status = status;
         this.source = source;
-        this.scope = (scope != null) ? scope : "task";
+        // DB 加载路径同样归一化：库里已存在的 execq 技能必须原样保留（旧代码此处会用原值，
+        // 但写入路径已把它改成 task，这里统一走 normalizeScope 保证读写一致）。
+        this.scope = normalizeScope(scope);
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -127,6 +158,41 @@ public class SkillEntry implements Serializable {
     public String getStatus()     { return status; }
     public String getScope()      { return scope; }
     public String getSource()     { return source; }
+    public String getChannels()   { return channels; }
+    /** 适用通道（逗号分隔）；空 = 全通道可见。 */
+    public void setChannels(String channels) { this.channels = (channels == null) ? "" : channels; }
+    public int getDupHitCount()   { return dupHitCount; }
+    public void setDupHitCount(int c) { this.dupHitCount = c; }
+
+    /** 浅拷贝（用于缓存增量替换：只改少数字段，不必重读整表）。 */
+    public SkillEntry copy() {
+        SkillEntry c = new SkillEntry(id, name, category, description, content, version,
+                successCount, failureCount, lastUsed, parentSkillId, status, source, scope,
+                contentHash, createdAt, updatedAt);
+        c.channels = this.channels;
+        c.dupHitCount = this.dupHitCount;
+        c.weight = this.weight;
+        return c;
+    }
+
+    /** 浅拷贝并替换内容相关字段（名称/描述/正文/版本/时间/哈希）。 */
+    public SkillEntry withContent(String name, String description, String content,
+                                  int version, long updatedAt, String contentHash) {
+        SkillEntry c = copy();
+        c.name = (name != null) ? name : c.name;
+        c.description = (description != null) ? description : "";
+        c.content = (content != null) ? content : "";
+        c.version = version;
+        c.updatedAt = updatedAt;
+        c.contentHash = contentHash;
+        return c;
+    }
+    /** 该技能是否适用于指定通道（空 channels = 全通道）。 */
+    public boolean appliesToChannel(String channel) {
+        if (channel == null || channel.isEmpty()) return true;
+        if (channels == null || channels.isEmpty()) return true;
+        return ("," + channels.replace(" ", "") + ",").contains("," + channel + ",");
+    }
     public long getCreatedAt()    { return createdAt; }
     public long getUpdatedAt()    { return updatedAt; }
 
@@ -144,7 +210,7 @@ public class SkillEntry implements Serializable {
     public void setLastUsed(long ts)           { this.lastUsed = ts; }
     public void setParentSkillId(int pid)      { this.parentSkillId = pid; }
     public void setStatus(String status)       { this.status = status; }
-    public void setScope(String scope)       { this.scope = (scope != null) ? scope : "task"; }
+    public void setScope(String scope)       { this.scope = normalizeScope(scope); }
     public void setSource(String source)       { this.source = source; }
     public void setCreatedAt(long ts)          { this.createdAt = ts; }
     public void setUpdatedAt(long ts)          { this.updatedAt = ts; }

@@ -9,7 +9,9 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import javax.script.ScriptEngine;
@@ -27,6 +29,7 @@ import javax.tools.StandardJavaFileManager;
 import javax.tools.ToolProvider;
 
 import sair.LoaderManager;
+import sair.aiagent.AiAgentActivity;
 
 /**
  * 动态代码引擎 —— JS 脚本执行 + Java 一次性动态注入。
@@ -255,9 +258,117 @@ public class DynamicCodeEngine {
         }
     }
 
+    /**
+     * <b>多源码文件一起编译</b>并加载出全部类（技能文件夹模型：一个技能 = 一个目录里的若干 .java）。
+     *
+     * <p>与 {@link #compileAndCache} 的区别：那份实现只保留「最后一个」class 字节
+     * （{@code lastCompiledObject} 会被逐个覆盖），所以顶层辅助类会加载失败、
+     * 静态内部类会在<b>调用时</b>才炸 {@code NoClassDefFoundError}。这里把每个输出 class
+     * 全部收进一张表，再由同一个类加载器定义，辅助类/内部类都能正常工作。</p>
+     *
+     * @param sources   文件名 → 源码（键仅用于错误定位与类名兜底，如 {@code AirunSkill.java}）
+     * @param logName   日志用的标识（技能名）
+     * @return 编译产物句柄（含全部已加载类）；编译失败返回 {@code null}，原因见 {@link #getLastCompilerMessage()}
+     */
+    public synchronized CompiledUnit compileAll(Map<String, String> sources, String logName) {
+        if (compiler == null) {
+            lastCompilerMessage = "Java 编译器不可用：当前运行在 JRE 环境，需要 JDK。";
+            return null;
+        }
+        if (sources == null || sources.isEmpty()) {
+            lastCompilerMessage = "没有可编译的源码文件。";
+            return null;
+        }
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        StandardJavaFileManager stdMgr = compiler.getStandardFileManager(diagnostics, null, null);
+        MultiClassFileManager fileMgr = new MultiClassFileManager(stdMgr);
+
+        List<JavaFileObject> sourceObjs = new java.util.ArrayList<>();
+        for (Map.Entry<String, String> e : sources.entrySet()) {
+            String fileName = e.getKey();
+            String className = fileName.toLowerCase().endsWith(".java")
+                    ? fileName.substring(0, fileName.length() - 5) : fileName;
+            sourceObjs.add(new StringJavaFileObject(className, e.getValue()));
+        }
+
+        // 编译（不做 -Werror：技能作者写个未使用变量不该导致技能不可用）
+        JavaCompiler.CompilationTask task = compiler.getTask(null, fileMgr, diagnostics,
+                buildCompilerOptions(), null, sourceObjs);
+        boolean success = task.call();
+
+        StringBuilder msg = new StringBuilder();
+        if (!success) {
+            msg.append("编译失败:\n");
+            for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+                if (d.getKind() == Diagnostic.Kind.ERROR) {
+                    msg.append("  ").append(d.toString()).append("\n");
+                }
+            }
+            // 环境类问题（例如编译 classpath 里没有插件本体）一眼可见
+            msg.append("  [编译 classpath] ").append(classpathSummary()).append("\n");
+            lastCompilerMessage = msg.toString();
+            return null;
+        }
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.WARNING || d.getKind() == Diagnostic.Kind.MANDATORY_WARNING) {
+                msg.append("\n  ⚠ ").append(d.toString());
+            }
+        }
+
+        Map<String, byte[]> bytes = fileMgr.getClassBytes();
+        if (bytes.isEmpty()) {
+            lastCompilerMessage = "编译成功但没有产出任何 class 文件（源码里没有类声明？）";
+            return null;
+        }
+        MultiClassLoader loader = new MultiClassLoader(bytes);
+        Map<String, Class<?>> classes = new java.util.LinkedHashMap<>();
+        for (String cn : bytes.keySet()) {
+            try {
+                classes.put(cn, Class.forName(cn, true, loader));
+            } catch (Throwable t) {
+                msg.append("\n  ⚠ 类 ").append(cn).append(" 加载失败: ").append(t);
+            }
+        }
+        if (classes.isEmpty()) {
+            lastCompilerMessage = "编译成功但所有类都加载失败:" + msg;
+            return null;
+        }
+        lastCompilerMessage = "技能 [" + logName + "] 编译成功，类: " + classes.keySet() + msg;
+        return new CompiledUnit(classes, loader, lastCompilerMessage);
+    }
+
+    /** 一次多文件编译的产物：全部已加载类 + 它们的类加载器。 */
+    public static final class CompiledUnit {
+        private final Map<String, Class<?>> classes;
+        private final ClassLoader loader;
+        private final String message;
+
+        CompiledUnit(Map<String, Class<?>> classes, ClassLoader loader, String message) {
+            this.classes = java.util.Collections.unmodifiableMap(classes);
+            this.loader = loader;
+            this.message = message;
+        }
+
+        /** 类名 → 已加载的类（含辅助类与内部类）。 */
+        public Map<String, Class<?>> getClasses() { return classes; }
+        public ClassLoader getClassLoader() { return loader; }
+        public String getMessage() { return message; }
+
+        /** 按简单名或全名取类（{@code Helper} / {@code pkg.Helper} 都能查到）。 */
+        public Class<?> find(String name) {
+            if (name == null) return null;
+            Class<?> c = classes.get(name);
+            if (c != null) return c;
+            for (Map.Entry<String, Class<?>> e : classes.entrySet()) {
+                if (e.getKey().endsWith("." + name)) return e.getValue();
+            }
+            return null;
+        }
+    }
+
     /** 获取最后一次编译的消息 */
     public String getLastCompilerMessage() { return lastCompilerMessage; }
-
     /** 判断 JDK 编译器是否可用 */
     public boolean isCompilerAvailable() { return compiler != null; }
 
@@ -295,6 +406,7 @@ public class DynamicCodeEngine {
             for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
                 sb.append("  ").append(d.toString()).append("\n");
             }
+            sb.append("  [编译 classpath] ").append(classpathSummary()).append("\n");
             lastCompilerMessage = sb.toString();
             return null;
         }
@@ -328,7 +440,16 @@ public class DynamicCodeEngine {
         options.add("-encoding");
         options.add("UTF-8");
 
-        Set<String> cpSet = new HashSet<>();
+        // 用 LinkedHashSet 保序：**"插件本体"排最前**，避免同名旧包先被 javac 命中
+        Set<String> cpSet = new LinkedHashSet<>();
+
+        // 0. ★ 最可靠的一条：问类加载器"本类到底从哪加载的"
+        //    它同时**与 jar 文件名无关、与 jar 放在哪也无关** —— 插件叫 ai.jar / bot.jar /
+        //    插件名.jar 都一样；放在 plugins/exection、plugins、甚至自定目录也一样。
+        //    （部署实测：CodeSource 的位置是 null、插件 jar 不在 java.class.path、
+        //      加载器也不是 URLClassLoader，只有这条路能拿到真实路径。）
+        String own = resolveOwnCodeLocation();
+        if (own != null) cpSet.add(own);
 
         // 1. 系统 classpath
         String sysCp = System.getProperty("java.class.path");
@@ -353,17 +474,23 @@ public class DynamicCodeEngine {
             }
         } catch (Exception ignored) {}
 
-        // ★ 确保 ai.jar 自身在编译 classpath 中
-        //   ProtectionDomain.getCodeSource() 无论何种类加载器都能准确定位
+        // 3. CodeSource（有就用；部署环境下常常拿不到）
         try {
             java.security.CodeSource cs = DynamicCodeEngine.class.getProtectionDomain().getCodeSource();
             if (cs != null) {
                 URL loc = cs.getLocation();
-                cpSet.add(new File(loc.toURI()).getAbsolutePath());
+                addClasspathEntry(cpSet, new File(loc.toURI()).getAbsolutePath());
             }
         } catch (Exception ignored) {}
 
-        // 3. SFW modlib jars (LoaderManager.loader = SairLoader)
+        // 4. SFW 插件 jar / 库 jar 路径集合（按路径收集，与 jar 叫什么名字无关）：
+        //    LoaderManager.execJarPathSet = 启动时加载的插件 jar；libJarPathSet = plugins/lib/*.jar
+        try {
+            for (String p : sair.LoaderManager.execJarPathSet) addClasspathEntry(cpSet, p);
+            for (String p : sair.LoaderManager.libJarPathSet) addClasspathEntry(cpSet, p);
+        } catch (Throwable ignored) {}
+
+        // 5. SFW modlib jars (LoaderManager.loader = SairLoader)
         try {
             Object modLibLoader = LoaderManager.loader;
             if (modLibLoader != null) {
@@ -372,10 +499,24 @@ public class DynamicCodeEngine {
                 java.util.Collection<File> jars =
                         (java.util.Collection<File>) getAllJar.invoke(modLibLoader);
                 if (jars != null) {
-                    for (File f : jars) cpSet.add(f.getAbsolutePath());
+                    for (File f : jars) addClasspathEntry(cpSet, f.getAbsolutePath());
                 }
             }
         } catch (Exception ignored) {}
+
+        // 6. 兜底：扫 SFW 的插件/库/模组目录（**只按 .jar 后缀收，不认任何文件名**）
+        try {
+            addJarsUnder(cpSet, sair.Pathes.execDir);
+            addJarsUnder(cpSet, sair.Pathes.pluginsDir);
+            addJarsUnder(cpSet, sair.Pathes.libDir);
+            addJarsUnder(cpSet, sair.Pathes.modDir);
+            addJarsUnder(cpSet, sair.Pathes.bootDir);
+        } catch (Throwable ignored) {}
+
+        warnIfMultiplePluginCopies(cpSet);
+
+        // 记下这次编译用的 classpath（编译失败时回显，便于诊断"环境缺 jar"类问题）
+        lastClasspath = cpSet;
 
         if (!cpSet.isEmpty()) {
             StringBuilder sb = new StringBuilder();
@@ -388,6 +529,198 @@ public class DynamicCodeEngine {
         }
 
         return options;
+    }
+
+    /** 本次编译使用的 classpath 条目（诊断用）。 */
+    private volatile Set<String> lastClasspath = new LinkedHashSet<>();
+
+    /** 本插件自己是从哪个 jar / 目录加载的（缓存一次；进程内不会变）。 */
+    private static volatile String ownCodeLocation;
+    private static volatile boolean ownLocationResolved = false;
+
+    /**
+     * 解析「本类实际是从哪里加载的」——编译 classpath 里最该排第一的那一条。
+     *
+     * <p><b>不依赖文件名，也不依赖目录</b>：向类加载器要本类自己的资源 URL，
+     * 从形如 {@code jar:file:/x/bot.jar!/sair/aiagent/core/DynamicCodeEngine.class} 的 URL 里
+     * 反推出 jar 路径（目录形态则是 classes 根目录）。插件叫 {@code ai.jar}、{@code bot.jar}、
+     * 中文名，放在 {@code plugins/exection}、{@code plugins} 或任意自定目录，都能定位到。</p>
+     *
+     * <p>顺序：① 类加载器资源（最可靠）→ ② {@code Class.getResource} → ③ CodeSource。
+     * 全都拿不到时返回 null，由调用方的其它来源兜底。</p>
+     */
+    static String resolveOwnCodeLocation() {
+        if (ownLocationResolved) return ownCodeLocation;
+        String found = null;
+        String res = "sair/aiagent/core/DynamicCodeEngine.class";
+
+        // ① 向上遍历加载器链，谁先给出这个资源就用谁（就是实际加载本类的那个加载器）
+        try {
+            ClassLoader cl = DynamicCodeEngine.class.getClassLoader();
+            while (cl != null && found == null) {
+                URL url = cl.getResource(res);
+                if (url != null) found = locationFromResourceUrl(url.toString(), res);
+                cl = cl.getParent();
+            }
+        } catch (Throwable ignored) {}
+
+        // ② 类相对资源（等价写法，某些加载器只实现这一个）
+        if (found == null) {
+            try {
+                URL url = DynamicCodeEngine.class.getResource("DynamicCodeEngine.class");
+                if (url != null) found = locationFromResourceUrl(url.toString(), res);
+            } catch (Throwable ignored) {}
+        }
+
+        // ③ CodeSource（有就用）
+        if (found == null) {
+            try {
+                java.security.CodeSource cs = DynamicCodeEngine.class.getProtectionDomain().getCodeSource();
+                if (cs != null && cs.getLocation() != null) {
+                    String p = new File(cs.getLocation().toURI()).getAbsolutePath();
+                    if (new File(p).exists()) found = p;
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        ownCodeLocation = found;
+        ownLocationResolved = true;
+        return found;
+    }
+
+    /**
+     * 从资源 URL 反推「根路径」。
+     *
+     * @param urlStr  形如 {@code jar:file:/a/b.jar!/pkg/C.class} 或 {@code file:/a/classes/pkg/C.class}
+     * @param resource 资源相对路径（用来在目录形态下剥掉尾部）
+     * @return jar 绝对路径或 classes 根目录；解析不出返回 null
+     */
+    static String locationFromResourceUrl(String urlStr, String resource) {
+        if (urlStr == null) return null;
+        try {
+            if (urlStr.startsWith("jar:")) {
+                int bang = urlStr.indexOf("!/");
+                String inner = (bang > 0) ? urlStr.substring(4, bang) : urlStr.substring(4);
+                return urlToFile(inner);
+            }
+            if (urlStr.startsWith("file:")) {
+                String f = urlToFile(urlStr);
+                if (f == null) return null;
+                // 目录形态：把 <root>/sair/aiagent/core/DynamicCodeEngine.class 的尾部剥掉
+                String suffix = resource.replace('/', File.separatorChar);
+                if (f.endsWith(suffix)) return f.substring(0, f.length() - suffix.length());
+                int idx = f.lastIndexOf(File.separatorChar);
+                return (idx > 0) ? f.substring(0, idx) : null;
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    /** URL → 本地绝对路径（处理 %20 等转义与 Windows 盘符）。 */
+    private static String urlToFile(String urlStr) {
+        try {
+            String u = urlStr;
+            if (u.startsWith("file:")) {
+                try {
+                    return new File(new java.net.URI(u)).getAbsolutePath();
+                } catch (Exception ignored) {
+                    // 退化为手工解码
+                }
+                u = u.substring(5);
+                if (u.startsWith("//")) u = u.substring(2);          // UNC 或 /C:/...
+                u = java.net.URLDecoder.decode(u, "UTF-8");
+                if (u.length() > 2 && u.charAt(0) == '/' && u.charAt(2) == ':') u = u.substring(1);
+                File f = new File(u);
+                return f.exists() ? f.getAbsolutePath() : null;
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    /** 一次性检查：classpath 里是否有多个 jar 都含本插件的类（放了旧副本时"改了不生效"的常见原因）。 */
+    private static volatile boolean dupWarned = false;
+
+    private static void warnIfMultiplePluginCopies(Set<String> cpSet) {
+        if (dupWarned) return;
+        dupWarned = true;
+        try {
+            List<String> hits = new ArrayList<>();
+            for (String p : cpSet) {
+                if (!p.toLowerCase().endsWith(".jar")) continue;
+                try (java.util.jar.JarFile jf = new java.util.jar.JarFile(p)) {
+                    if (jf.getEntry("sair/aiagent/core/DynamicCodeEngine.class") != null) hits.add(p);
+                } catch (Throwable ignored) {}
+            }
+            if (hits.size() > 1) {
+                AiAgentActivity.debugLog("[DynamicCodeEngine] ⚠ 发现 " + hits.size()
+                        + " 个 jar 都含本插件类，编译 classpath 只认第一个（已把实际加载的那个排在最前）："
+                        + hits + " —— 若出现「改了代码不生效」，请删掉多余副本");
+            }
+        } catch (Throwable ignored) {}
+    }
+
+
+    /** 加入一条 classpath：去重、补全相对路径、只收真实存在的路径（javac 对不存在的条目会忽略，但没必要塞）。 */
+    private static void addClasspathEntry(Set<String> cpSet, String path) {
+        if (path == null || path.trim().isEmpty()) return;
+        try {
+            String p = path.trim();
+            File f = new File(p);
+            if (!f.isAbsolute()) {
+                try {
+                    p = LoaderManager.canonicalPath(p);
+                    f = new File(p);
+                } catch (Throwable ignored) {
+                    f = f.getAbsoluteFile();
+                    p = f.getPath();
+                }
+            }
+            if (f.exists()) cpSet.add(f.getAbsolutePath());
+        } catch (Throwable ignored) {}
+    }
+
+    /** 把一个目录下（含一层子目录）的所有 jar 加入 classpath。 */
+    private static void addJarsUnder(Set<String> cpSet, String dirPath) {
+        if (dirPath == null || dirPath.trim().isEmpty()) return;
+        try {
+            File dir = new File(dirPath);
+            if (!dir.isAbsolute()) dir = new File(LoaderManager.canonicalPath(dirPath));
+            if (!dir.isDirectory()) return;
+            File[] files = dir.listFiles();
+            if (files == null) return;
+            for (File f : files) {
+                if (f.isFile() && f.getName().toLowerCase().endsWith(".jar")) {
+                    cpSet.add(f.getAbsolutePath());
+                } else if (f.isDirectory() && !f.getName().startsWith(".")) {
+                    File[] inner = f.listFiles();
+                    if (inner == null) continue;
+                    for (File g : inner) {
+                        if (g.isFile() && g.getName().toLowerCase().endsWith(".jar")) {
+                            cpSet.add(g.getAbsolutePath());
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * 编译 classpath 健康摘要（技能编译失败时一并回显，便于一眼看出是不是环境缺 jar）。
+     *
+     * @return 形如 {@code 42 个条目；插件本体=C:\...\bot.jar ✓在列}
+     */
+    public String classpathSummary() {
+        Set<String> cp = lastClasspath;
+        // 用「本类实际从哪里加载」判定，而不是 CodeSource —— 部署环境下后者常常为 null
+        String self = resolveOwnCodeLocation();
+        boolean inList = false;
+        if (self != null) {
+            for (String p : cp) {
+                if (p.equals(self)) { inList = true; break; }
+            }
+        }
+        return cp.size() + " 个条目；插件本体=" + (self == null ? "(未解析出来)" : self)
+                + (inList ? " ✓在列" : " ✗不在列");
     }
 
     // ==================== 内部: 类名提取 ====================
@@ -462,8 +795,81 @@ public class DynamicCodeEngine {
         }
     }
 
-    // ==================== 内部类: InMemoryClassLoader ====================
+    // ==================== 内部类: 多文件编译（技能文件夹模型） ====================
 
+    /** 收集全部输出 class 的文件管理器（与只留最后一个 class 的旧实现相对）。 */
+    private class MultiClassFileManager extends ForwardingJavaFileManager<JavaFileManager> {
+        private final Map<String, ByteJavaFileObject> outputs = new java.util.LinkedHashMap<>();
+
+        MultiClassFileManager(JavaFileManager fileManager) {
+            super(fileManager);
+        }
+
+        @Override
+        public JavaFileObject getJavaFileForOutput(Location location, String className,
+                                                   JavaFileObject.Kind kind, FileObject sibling) {
+            ByteJavaFileObject obj = new ByteJavaFileObject(className, kind);
+            outputs.put(className, obj);
+            return obj;
+        }
+
+        Map<String, byte[]> getClassBytes() {
+            Map<String, byte[]> out = new java.util.LinkedHashMap<>();
+            for (Map.Entry<String, ByteJavaFileObject> e : outputs.entrySet()) {
+                byte[] b = e.getValue().getBytes();
+                if (b != null && b.length > 0) out.put(e.getKey(), b);
+            }
+            return out;
+        }
+    }
+
+    /**
+     * 由「类名 → 字节码」直接定义类的加载器；父加载器 = 插件加载器（技能因此能调 ai.jar 里的类）。
+     *
+     * <p><b>自身优先（self-first）</b>：技能类名几乎都叫 {@code AirunSkill}，而父加载器（插件 classpath）
+     * 上如果有任何同名类，标准委派会让父类"赢"，于是技能静默跑成别人的实现。
+     * 因此这里先在自己这张表里找，找到了就自己 define，找不到再交给父加载器。</p>
+     */
+    private static class MultiClassLoader extends ClassLoader {
+        private final Map<String, byte[]> classes;
+
+        MultiClassLoader(Map<String, byte[]> classes) {
+            super(DynamicCodeEngine.class.getClassLoader() != null
+                    ? DynamicCodeEngine.class.getClassLoader()
+                    : ClassLoader.getSystemClassLoader());
+            this.classes = classes;
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            synchronized (getClassLoadingLock(name)) {
+                Class<?> loaded = findLoadedClass(name);
+                if (loaded == null && classes.containsKey(name)) {
+                    loaded = findClass(name);   // 自己的类，先定义（不委派给父加载器）
+                    if (resolve) resolveClass(loaded);
+                    return loaded;
+                }
+                return super.loadClass(name, resolve);
+            }
+        }
+
+        @Override
+        protected Class<?> findClass(String name) throws ClassNotFoundException {
+            byte[] bytes = classes.get(name);
+            if (bytes != null) {
+                return defineClass(name, bytes, 0, bytes.length);
+            }
+            try {
+                ClassLoader modLibLoader = (ClassLoader) LoaderManager.loader;
+                if (modLibLoader != null) return modLibLoader.loadClass(name);
+            } catch (Exception ignored) {
+                // 落到父加载器
+            }
+            return super.findClass(name);
+        }
+    }
+
+    // ==================== 内部类: InMemoryClassLoader ====================
     private class InMemoryClassLoader extends ClassLoader {
         private final ByteJavaFileObject compiledObject;
 

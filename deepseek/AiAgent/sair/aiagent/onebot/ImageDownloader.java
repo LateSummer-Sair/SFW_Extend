@@ -210,7 +210,25 @@ public final class ImageDownloader {
      * @return Vision API 可用的图片 URL 或 base64 data URI，失败返回 null
      */
     public static String resolveImageForVision(String imageUrl, String file, NapCatApi napcatApi) {
-        if (imageUrl == null || imageUrl.isEmpty()) return null;
+        boolean hasUrl = imageUrl != null && !imageUrl.isEmpty();
+        boolean hasFile = file != null && !file.isEmpty();
+
+        // 只有 file(md5) 没有 URL：NapCat 的 get_image 可以直接按 md5 取图。
+        // 旧实现直接返回 null，这类图片会被静默跳过（AI 看不到图却以为没有图）。
+        if (!hasUrl) {
+            if (hasFile && napcatApi != null) {
+                String via = downloadImageViaNapCat(null, file, napcatApi);
+                if (via != null) {
+                    byte[] dec = decodeDataUri(via);
+                    if (dec != null && dec.length > MAX_VISION_IMAGE_BYTES) {
+                        return uploadAsFile(dec, "image/jpeg");
+                    }
+                    AiAgentActivity.debugLog("[QQMsg] 仅 md5 的引用图经 NapCat get_image 取回: " + file);
+                    return via;
+                }
+            }
+            return null;
+        }
 
         // 已经是 base64 data URI：解码检查大小，超过 3M 走 File API
         if (imageUrl.startsWith("data:")) {
@@ -572,16 +590,19 @@ public final class ImageDownloader {
      * @return base64 data URI，失败返回 null
      */
     private static String downloadImageViaNapCat(String imageUrl, String file, NapCatApi napcatApi) {
-        if (napcatApi == null || imageUrl == null) return null;
+        if (napcatApi == null) return null;
+        boolean hasUrl = imageUrl != null && !imageUrl.isEmpty();
+        boolean hasFile = file != null && !file.isEmpty();
+        if (!hasUrl && !hasFile) return null;
         try {
             // 1. 优先用 file（消息段 file 字段：旧版 md5 / 新版 fileid）
-            String fileId = (file != null && !file.isEmpty()) ? file : null;
+            String fileId = hasFile ? file : null;
             // 2. 从 URL 提取 fileid 参数（新版 multimedia.nt.qq.com.cn/download?fileid=...）
-            if (fileId == null || fileId.isEmpty()) {
+            if ((fileId == null || fileId.isEmpty()) && hasUrl) {
                 fileId = extractUrlParam(imageUrl, "fileid");
             }
             // 3. 最后回退：从 URL 路径提取文件名（旧版 qpic.cn 格式）
-            if (fileId == null || fileId.isEmpty()) {
+            if ((fileId == null || fileId.isEmpty()) && hasUrl) {
                 fileId = extractFileNameFromUrl(imageUrl);
             }
             if (fileId == null || fileId.isEmpty()) {

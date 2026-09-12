@@ -130,9 +130,21 @@ public class EmotionStateManager {
     private volatile float sadness = 0.0f;
     private volatile long lastEmotionUpdate = System.currentTimeMillis();
     private final Object emotionLock = new Object();
+
+    /** 群印象联动节流：groupId → 上次联动时间（防止群氛围把全局怒气钉死）。 */
+    private static final long UNFRIENDLY_NOTE_COOLDOWN_MS = 10 * 60_000L;
+    /** 群氛围最多能把怒气/悲伤推到多少（暴怒只能由真实辱骂触发）。 */
+    private static final float UNFRIENDLY_ANGER_CAP = 40.0f;
+    private static final float UNFRIENDLY_SADNESS_CAP = 30.0f;
+    private final Map<Long, Long> unfriendlyNoteTime = new ConcurrentHashMap<>();
     
-    /** 最近一条消息检测到的即时情绪标签（开心/难过/生气/调侃/撒娇/疲惫/感激/安慰/友善/平静） */
-    private volatile String lastEmotion = null;
+    /**
+     * 最近一条消息检测到的即时情绪标签，<b>按用户隔离</b>
+     * （开心/难过/生气/调侃/撒娇/疲惫/感激/安慰/友善/平静）。
+     * <p>旧实现是单个全局字段：A 群某人说了句难过的话，下一个在 B 群/私聊被处理的用户
+     * 也会在 prompt 里看到「刚刚检测到用户表达了『难过』的情绪」，属于跨上下文串味。</p>
+     */
+    private final Map<Long, String> lastEmotionByUser = new ConcurrentHashMap<>();
     
     // ==================== 好感度系统 ====================
     
@@ -330,14 +342,19 @@ public class EmotionStateManager {
     
     /** 每日互动好感度：每天首次交流 +2~3（随机），同一天内不重复 */
     private void addDailyAffection(long userId) {
-        long now = System.currentTimeMillis();
-        Long last = lastInteractionTime.get(userId);
-        if (last != null && isSameDay(last, now)) {
+        final long now = System.currentTimeMillis();
+        // 原子「当天首次」判定：并发处理同一用户的两条消息时，只有一个线程能拿到"首次"，
+        // 旧实现 get→判断→put 会让两条消息同时判定为首次、重复加分。
+        final long[] prev = new long[1];
+        lastInteractionTime.compute(userId, (k, last) -> {
+            prev[0] = (last == null) ? 0L : last;
+            return (last != null && isSameDay(last, now)) ? last : now;
+        });
+        if (prev[0] != 0L && isSameDay(prev[0], now)) {
             return; // 同一天已加过
         }
-        int gain = 2 + new java.util.Random().nextInt(2); // 2 或 3
+        int gain = 2 + java.util.concurrent.ThreadLocalRandom.current().nextInt(2); // 2 或 3
         modifyAffection(userId, gain);
-        lastInteractionTime.put(userId, now);
         AiAgentActivity.debugLog("[Emotion] 每日互动好感度: userId=" + userId + " +" + gain);
     }
     
@@ -439,7 +456,12 @@ public class EmotionStateManager {
      */
     public String processMessageEmotion(String message, long userId) {
         String emotion = detectMessageEmotion(message);
-        this.lastEmotion = emotion;
+        lastEmotionByUser.put(userId, emotion == null ? "平静" : emotion);
+        if (lastEmotionByUser.size() > 4096) {
+            // 简单收敛，避免长期运行的 map 无界增长
+            lastEmotionByUser.clear();
+            lastEmotionByUser.put(userId, emotion == null ? "平静" : emotion);
+        }
         if (emotion == null) {
             onNormalInteraction(userId, true);
             return "平静";
@@ -485,19 +507,33 @@ public class EmotionStateManager {
         if (coreEmotionManager != null) coreEmotionManager.onSuccess();
     }
     
-    /** 获取最近一条消息的即时情绪标签 */
-    public String getLastEmotion() {
-        return lastEmotion;
+    /** 获取指定用户最近一条消息的即时情绪标签（无记录返回 null） */
+    public String getLastEmotion(long userId) {
+        return lastEmotionByUser.get(userId);
     }
 
     /**
      * 群印象反向联动：当某个群印象差（友好度过低）时，让 AI 全局情绪略微变差。
      * 这是「情绪↔印象双向联动」的反向——群氛围不好会影响 AI 的情绪状态。
+     * <p>
+     * 旧实现每收到一条该群消息就 +2 怒 / +1 悲，而情绪衰减只有 −2/分钟：
+     * 只要该群每分钟有 2 条消息，全局怒气就被顶到 100 并<b>永久钉死</b>，
+     * 于是 AI 在<b>所有群和私聊</b>里都变成暴躁状态（跨上下文污染）。
+     * 现在加了「每群 10 分钟最多联动一次」+「此来源最多把怒气推到 40」两道闸门：
+     * 群氛围可以影响情绪，但永远无法把 AI 推到暴怒（暴怒只能由真实的辱骂触发）。
      */
-    public void noteUnfriendlyGroup() {
+    public void noteUnfriendlyGroup(long groupId) {
+        long now = System.currentTimeMillis();
+        Long last = unfriendlyNoteTime.get(groupId);
+        if (last != null && now - last < UNFRIENDLY_NOTE_COOLDOWN_MS) return;
+        unfriendlyNoteTime.put(groupId, now);
+        // 清理过期条目，避免群数量增长导致 map 无界膨胀
+        if (unfriendlyNoteTime.size() > 512) {
+            unfriendlyNoteTime.entrySet().removeIf(e -> now - e.getValue() > UNFRIENDLY_NOTE_COOLDOWN_MS * 6);
+        }
         synchronized (emotionLock) {
-            anger = Math.min(MAX_EMOTION, anger + 2);
-            sadness = Math.min(MAX_EMOTION, sadness + 1);
+            if (anger < UNFRIENDLY_ANGER_CAP) anger = Math.min(UNFRIENDLY_ANGER_CAP, anger + 2);
+            if (sadness < UNFRIENDLY_SADNESS_CAP) sadness = Math.min(UNFRIENDLY_SADNESS_CAP, sadness + 1);
         }
         if (coreEmotionManager != null) coreEmotionManager.onFailure();
     }
@@ -505,15 +541,25 @@ public class EmotionStateManager {
     // ==================== 好感度管理 ====================
     
     private void modifyAffection(long userId, int delta) {
-        int current = userAffections.getOrDefault(userId, 0);
-        int newValue = Math.max(MIN_AFFECTION, Math.min(MAX_AFFECTION, current + delta));
-        userAffections.put(userId, newValue);
-        
+        // 原子读改写：多线程并发处理同一用户的消息时，getOrDefault→put 会丢更新
+        // （例如同时 +1 和 -20，最终可能只剩其中一个结果）。
+        final int[] newValueHolder = new int[1];
+        final int[] oldValueHolder = new int[1];
+        userAffections.compute(userId, (k, current) -> {
+            int cur = (current == null) ? 0 : current;
+            int nv = Math.max(MIN_AFFECTION, Math.min(MAX_AFFECTION, cur + delta));
+            oldValueHolder[0] = cur;
+            newValueHolder[0] = nv;
+            return nv;
+        });
+        int current = oldValueHolder[0];
+        int newValue = newValueHolder[0];
+
         if (persistence != null) {
             long lastTime = lastInteractionTime.getOrDefault(userId, System.currentTimeMillis());
             persistence.saveAffection(userId, newValue, lastTime);
         }
-        
+
         if (Math.abs(delta) >= 10) {
             AiAgentActivity.debugLog("[Emotion] 好感度变化: userId=" + userId + ", " + current + " -> " + newValue + " (Δ" + delta + ")");
         }
@@ -772,7 +818,8 @@ public class EmotionStateManager {
         }
         sb.append("\n");
         
-        // 用户当前这句话的情绪（即时感知）
+        // 用户当前这句话的情绪（即时感知，按用户隔离，避免别的群/别人的情绪串味）
+        String lastEmotion = lastEmotionByUser.get(userId);
         if (lastEmotion != null && !lastEmotion.isEmpty() && !"平静".equals(lastEmotion)) {
             sb.append("### 用户当前这句话的情绪\n");
             sb.append("- 刚刚检测到用户表达了「").append(lastEmotion).append("」的情绪。\n");
@@ -813,12 +860,17 @@ public class EmotionStateManager {
         }
         sb.append("\n");
         
-        // 近期情绪事件
-        if (!emotionalMemories.isEmpty()) {
-            int showCount = Math.min(5, emotionalMemories.size());
+        // 近期情绪事件（在同步块内做快照：写线程会同时 add 与 removeFirst，
+        // 直接按索引读 ArrayList 可能抛 IndexOutOfBounds 且存在可见性问题）
+        List<String> memSnapshot;
+        synchronized (this) {
+            memSnapshot = new ArrayList<>(emotionalMemories);
+        }
+        if (!memSnapshot.isEmpty()) {
+            int showCount = Math.min(5, memSnapshot.size());
             sb.append("### 近期情绪记忆\n");
-            for (int i = emotionalMemories.size() - showCount; i < emotionalMemories.size(); i++) {
-                sb.append("- ").append(emotionalMemories.get(i)).append("\n");
+            for (int i = memSnapshot.size() - showCount; i < memSnapshot.size(); i++) {
+                sb.append("- ").append(memSnapshot.get(i)).append("\n");
             }
             sb.append("\n");
         }

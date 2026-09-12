@@ -112,13 +112,13 @@
 
         <div class="flow-box reveal">
           <div class="flow">
-            <div class="flow-node start"><span class="fn-title">AgentBus 注册表</span><span class="fn-sub">main / vision / passage 三个 Agent</span></div>
+            <div class="flow-node start"><span class="fn-title">AgentBus 注册表</span><span class="fn-sub">main / passage（跟随通道模型）+ vision（仅无原生视觉时启用）</span></div>
             <div class="flow-edge label"><span class="el">call_agent / ask_agent 工具</span></div>
-            <div class="flow-node core"><span class="fn-title">main 主模型</span><span class="fn-sub">主管全局上下文与资源调度</span></div>
-            <div class="flow-edge label"><span class="el">唤起 vision</span></div>
-            <div class="flow-node data"><span class="fn-title">vision 视觉模型</span><span class="fn-sub">分析图像，用 vision 工具</span></div>
+            <div class="flow-node core"><span class="fn-title">main 主 Agent</span><span class="fn-sub">全局上下文与调度；折叠消息交 passage 分析后自己 markmessage 标记已分析</span></div>
+            <div class="flow-edge label"><span class="el">仅当通道模型无原生视觉时（如 Pro）</span></div>
+            <div class="flow-node data"><span class="fn-title">vision 视觉兜底 Agent</span><span class="fn-sub">执行模型写死 deepseek-flash；Flash 通道自动不启用；Pro 通道必备</span></div>
             <div class="flow-edge label"><span class="el">唤起 passage</span></div>
-            <div class="flow-node core"><span class="fn-title">passage 段落模型</span><span class="fn-sub">概括折叠消息，可反向 ask_agent main</span></div>
+            <div class="flow-node core"><span class="fn-title">passage 段落 Agent</span><span class="fn-sub">折叠消息分析（不论是否引用）+ 段落图片 + 存图判断；跟随通道模型故同样能看图</span></div>
             <div class="flow-edge"></div>
             <div class="flow-node end"><span class="fn-title">递归返回结果</span><span class="fn-sub">MAX_DEPTH=6 防死循环</span></div>
           </div>
@@ -192,7 +192,7 @@
             <div class="flow-edge"></div>
             <div class="flow-node core"><span class="fn-title">QQMessageHandler 过滤</span><span class="fn-sub">@机器人 / 提到名字 / 引用回复 / 卡片消息提取 / 好感度决策</span></div>
             <div class="flow-edge"></div>
-            <div class="flow-node data"><span class="fn-title">QQPromptBuilder 构建提示词</span><span class="fn-sub">群聊/私聊历史 + 印象 + 技能（execq 仅 NapCat）</span></div>
+            <div class="flow-node data"><span class="fn-title">QQPromptBuilder 构建提示词</span><span class="fn-sub">群聊/私聊历史 + 印象 + 技能（execq 仅 NapCat）+ 图片按需多模态附加</span></div>
             <div class="flow-edge"></div>
             <div class="flow-node core"><span class="fn-title">QQAgentBridge 执行</span><span class="fn-sub">execq 受限 / execs: 全权限提升</span></div>
             <div class="flow-edge"></div>
@@ -200,7 +200,7 @@
           </div>
           <div class="flow-caption">QQ 通道完整链路</div>
         </div>
-        <div class="callout reveal"><div class="co-icon">💬</div><div>引用回复由 QQAgentBridge 解析最终回复中的 <code>&lt;quote id="消息ID"&gt;回复正文&lt;/quote&gt;</code> 标记，再转换为 OneBot <code>[CQ:reply,id=消息ID]</code> 前缀发送；无引用标记时正常输出文本。</div></div>
+        <div class="callout reveal"><div class="co-icon">💬</div><div><b>已取消 Bot 主动引用回复</b>（引用错乱根因是引用 ID 与消息归属不匹配，会出现「A 提问却回复到 B」）：群聊回复由 QQAgentBridge 自动在首条前置 <code>[CQ:at,qq=提问者]</code>，并在动态上下文中明确「本次回复对象」，减少识别难度。用户发来的引用消息仍会正常解析（读取被引用内容供 AI 参考）。</div></div>
       </section>
 
       <section class="section" id="structure">
@@ -229,7 +229,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.10 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4 Vision API</span></p>
+        <p><span class="brand">AiAgent</span> v4.0 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4.1 Flash API</span></p>
         <p style="margin-top:6px">分层架构 · Function Calling 循环 · 多智能体协作 · 上下文注入链 · 拟人化监听态 · OneBot QQ 模块 · 目录结构</p>
       </div>
     </footer>

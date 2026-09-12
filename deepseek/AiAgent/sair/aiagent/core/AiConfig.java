@@ -500,62 +500,114 @@ public class AiConfig {
     public void setFileServerPort(int port) { this.fileServerPort = (port > 0 && port <= 65535) ? port : 2671; }
 
     // ==================== 模型智能路由 (v2.4) ====================
-    
-    /** 默认 execq/chat 模型（轻量快速） */
-    private static final String DEFAULT_EXECQ_MODEL = "deepseek-v4-flash";
-    /** 默认 agent 模型（深度推理） */
+    //
+    // 语义约定（唯一规则）：
+    //   model = auto        → 启用自动路由，各通道按下方 DEFAULT_* 选择模型；
+    //   model = 具体模型名   → 严格按配置的模型名调用，所有通道一律使用该名称，不做任何替换。
+    // 因此不应在业务代码里硬编码模型名，一律通过本节的 getter 取模型。
+
+    /** auto 路由下 execq/chat 通道默认模型（轻量快速，V4.1 Flash 原生多模态） */
+    private static final String DEFAULT_EXECQ_MODEL = "deepseek-flash";
+    /**
+     * auto 路由下 agent 通道（本地 execs / QQ execs）默认模型。
+     * <p>auto 下 execs 必须使用 Pro（用户明确要求），除非配置文件中直接写了 flash。
+     * V4 Pro 不具备视觉能力，该通道的识图由视觉 Agent 兜底（见 {@link #hasNativeVision}）。
+     * 待 V4.1 Pro 上线后再重新评估此处与视觉能力判定。</p>
+     */
     private static final String DEFAULT_AGENT_MODEL = "deepseek-v4-pro";
-    /** 默认 vision 模型（多模态图像理解，替代已移除的在线 OCR） */
-    private static final String DEFAULT_VISION_MODEL = "deepseek-v4-flash-vision-exp";
     /** auto 模式标记 */
     private static final String AUTO_MODEL = "auto";
-    
+
+    /**
+     * 视觉能力模型（写死）：当前只有 Flash 具备原生视觉理解能力。
+     * <p>官方文档：图像理解仅 {@code deepseek-flash} 支持，{@code deepseek-v4-pro} 不支持。
+     * 因此凡是必须「真正看到图片」的调用（视觉兜底、视觉工具、表情包审查）一律走该模型，
+     * 不随用户的 model 配置变化。待 V4.1 Pro 上线具备视觉后再重新评估。</p>
+     */
+    public static final String VISION_CAPABLE_MODEL = "deepseek-flash";
+
+    /** 是否为 auto 自动路由模式 */
+    public boolean isAutoModel() {
+        return AUTO_MODEL.equalsIgnoreCase(model);
+    }
+
+    /**
+     * 统一判定某个模型名是否具备原生视觉（多模态图像理解）能力。
+     * <p>判定依据为模型名（官方口径）：
+     * <ul>
+     *   <li>{@code deepseek-flash} —— V4.1 Flash，原生多模态视觉，<b>支持</b></li>
+     *   <li>{@code deepseek-v4-flash} / {@code deepseek-v4-flash-vision-exp} —— 旧名，
+     *       服务端已路由到 V4.1 Flash，<b>支持</b></li>
+     *   <li>{@code deepseek-v4-pro} —— 官方标记「图像理解：不支持」，<b>不支持</b>（需视觉 Agent 兜底）</li>
+     *   <li>其他未知模型名 —— <b>保守判定为不支持</b>（宁可多一次兜底调用，也不赌它能看图导致 API 报错）</li>
+     * </ul>
+     *
+     * @param modelName 模型名（可为 null / auto / 空）
+     * @return true 表示该模型自己能看图，无需视觉兜底
+     */
+    public static boolean hasNativeVision(String modelName) {
+        if (modelName == null) return false;
+        String m = modelName.trim().toLowerCase();
+        if (m.isEmpty() || AUTO_MODEL.equals(m)) return false; // auto 不是模型名，无法判定
+        switch (m) {
+            case "deepseek-flash":
+            case "deepseek-v4-flash":
+            case "deepseek-v4-flash-vision-exp":
+                return true;
+            default:
+                // deepseek-v4-pro / deepseek-reasoner / 未知模型：保守判定为无原生视觉
+                return false;
+        }
+    }
+
+    /**
+     * 统一的模型解析：auto 时按通道默认，否则严格使用配置的模型名。
+     * @param channel    通道名（仅用于 auto 路由日志）
+     * @param autoDefault auto 模式下该通道的默认模型
+     */
+    private String resolveModel(String channel, String autoDefault) {
+        if (isAutoModel()) {
+            logModelRoute(channel, autoDefault);
+            return autoDefault;
+        }
+        if (model == null || model.trim().isEmpty()) {
+            return autoDefault;
+        }
+        return model;
+    }
+
     /**
      * 获取 execq/Chat 通道应使用的模型。
-     * <p>model=auto 时返回 flash（轻量快速），否则严格遵守配置值。</p>
+     * <p>model=auto 时按 auto 路由返回默认模型；配置了具体模型名时严格使用该名称。</p>
      */
     public String getExecqModel() {
-        if (AUTO_MODEL.equalsIgnoreCase(model)) {
-            logModelRoute("Chat/Execq", DEFAULT_EXECQ_MODEL);
-            return DEFAULT_EXECQ_MODEL;
-        }
-        logModelRoute("Chat/Execq", model);
-        return model;
+        return resolveModel("Chat/Execq", DEFAULT_EXECQ_MODEL);
     }
-    
+
     /**
      * 获取 Chat（本地对话）通道应使用的模型。
-     * <p>model=auto 时返回 flash（轻量快速），否则严格遵守配置值。</p>
+     * <p>model=auto 时按 auto 路由返回默认模型；配置了具体模型名时严格使用该名称。</p>
      */
     public String getChatModel() {
-        if (AUTO_MODEL.equalsIgnoreCase(model)) {
-            logModelRoute("Chat（本地）", DEFAULT_EXECQ_MODEL);
-            return DEFAULT_EXECQ_MODEL;
-        }
-        logModelRoute("Chat（本地）", model);
-        return model;
+        return resolveModel("Chat（本地）", DEFAULT_EXECQ_MODEL);
     }
 
     /**
-     * 获取 Agent(exec/execs) 通道应使用的模型。
-     * <p>model=auto 时返回 pro（深度推理），否则严格遵守配置值。</p>
+     * 获取 Agent(本地 execs / QQ execs) 通道应使用的模型。
+     * <p>model=auto 时返回 {@code deepseek-v4-pro}（execs 必须用 Pro，除非配置里写了 flash）；
+     * 配置了具体模型名时严格使用该名称。</p>
      */
     public String getAgentModel() {
-        if (AUTO_MODEL.equalsIgnoreCase(model)) {
-            logModelRoute("Agent", DEFAULT_AGENT_MODEL);
-            return DEFAULT_AGENT_MODEL;
-        }
-        logModelRoute("Agent", model);
-        return model;
+        return resolveModel("Agent", DEFAULT_AGENT_MODEL);
     }
 
     /**
-     * 获取 Vision（多模态图像理解）模型名。
-     * <p>按需识图：仅当用户「引用图片」或明确「看图指令」时才调用该模型分析图像内容。
-     * 识别结果由 {@code FunctionCallingBridge} 以 [图片内容识别结果] 注入主模型上下文。</p>
+     * 获取视觉能力模型名（写死 {@code deepseek-flash}）。
+     * <p>只有 Flash 具备原生视觉；该值<b>不随 model 配置变化</b>——因为 Pro 无法看图，
+     * 若用户把 model 配成 Pro，识图仍必须由具备视觉的模型完成（即视觉 Agent 兜底）。</p>
      */
     public String getVisionModel() {
-        return DEFAULT_VISION_MODEL;
+        return VISION_CAPABLE_MODEL;
     }
 
     /** 模型路由日志（仅在 model=auto 时输出提示） */
@@ -566,7 +618,7 @@ public class AiConfig {
             try { sair.aiagent.AiAgentActivity.debugLog(msg); } catch (Exception ignored) {}
         }
     }
-    
+
     /** 获取主人QQ号列表 */
     public Set<Long> getMasterQQs()             { return Collections.unmodifiableSet(masterQQs); }
     

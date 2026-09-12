@@ -85,6 +85,8 @@ public class ActivityActions {
         commands.put("config", a -> handleConfig());
         commands.put("setconfig", this::handleSetConfig);
         commands.put("status", a -> handleStatus());
+        commands.put("ctx", a -> handleCtx());
+        commands.put("dedup", this::handleDedup);
         commands.put("reset", a -> handleReset());
         commands.put("stop", a -> handleStop());
         commands.put("mood", a -> handleMood());
@@ -217,6 +219,146 @@ public class ActivityActions {
         return true;
     }
 
+    /**
+     * ai/ctx —— 上下文与截断观测。
+     * <p>展示提示词各段字符数、最近一次提示词总量（估算 token），以及累计的
+     * 「结果被截断 / 图片被丢弃 / 上下文溢出」计数。用于定位「AI 为什么没看到内容」。</p>
+     */
+    public Object handleCtx() {
+        println(C_SYS, "== AiAgent Context Diagnostics ==");
+        for (String line : sair.aiagent.core.ContextStats.report().split("\n")) {
+            println(C_INFO, line);
+        }
+        return true;
+    }
+
+    /**
+     * ai/dedup —— 技能库 / 知识库笔记 手动去重。
+     * <p>
+     * 用法：
+     * <ul>
+     *   <li>{@code ai/dedup}                     —— 只扫描技能并报告（默认阈值 0.85），不改库</li>
+     *   <li>{@code ai/dedup apply}               —— 扫描技能并执行合并</li>
+     *   <li>{@code ai/dedup notes}               —— 扫描知识库笔记</li>
+     *   <li>{@code ai/dedup notes apply}         —— 合并重复笔记</li>
+     *   <li>{@code ai/dedup all apply}           —— 技能 + 笔记一起处理</li>
+     *   <li>{@code ai/dedup 0.7} / {@code ai/dedup notes 0.8 apply} —— 指定阈值（更低=更激进）</li>
+     * </ul>
+     * 合并方式：技能标记 {@code merged} 并指向代表条目、笔记标记 {@code merged_into}，
+     * <b>两者都不删除内容</b>（随时可在库里查回，只是不再出现在索引/检索/注入里）。
+     * </p>
+     */
+    public Object handleDedup(String args) {
+        boolean apply = false;
+        boolean doSkills = false, doNotes = false;
+        double ratio = sair.aiagent.core.SkillBank.DEDUP_DEFAULT_RATIO;
+        if (args != null) {
+            for (String tok : args.trim().split("\\s+")) {
+                if (tok.isEmpty()) continue;
+                String low = tok.toLowerCase();
+                if ("apply".equals(low) || "yes".equals(low) || "执行".equals(tok)) { apply = true; continue; }
+                if ("notes".equals(low) || "note".equals(low) || "笔记".equals(tok)) { doNotes = true; continue; }
+                if ("skills".equals(low) || "skill".equals(low) || "技能".equals(tok)) { doSkills = true; continue; }
+                if ("all".equals(low) || "全部".equals(tok)) { doSkills = true; doNotes = true; continue; }
+                try {
+                    double v = Double.parseDouble(tok);
+                    if (v > 0.1 && v <= 1.0) ratio = v;
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        if (!doSkills && !doNotes) doSkills = true;   // 默认技能库（与既有用法兼容）
+
+        sair.aiagent.core.SkillBank bank = sair.aiagent.core.SkillBank.getInstance();
+        if (bank == null || bank.getPersistenceManager() == null) {
+            println(C_ERR, "[dedup] 技能系统未初始化（需要先配置 DeepSeek API 并初始化数据库）");
+            return false;
+        }
+        println(C_SYS, "== 去重（阈值 " + String.format("%.2f", ratio) + "，"
+                + (apply ? "执行模式" : "预演模式（不改库）") + "）==");
+        long t0 = System.currentTimeMillis();
+        if (doSkills) dedupSkills(bank, ratio, apply);
+        if (doNotes) dedupNotes(bank, ratio, apply);
+        println(C_SYS, "  总耗时 " + (System.currentTimeMillis() - t0) + "ms");
+        if (!apply) {
+            println(C_SYS, "  以上为预演。确认无误后加 apply 执行（如 ai/dedup apply / ai/dedup notes apply）");
+        }
+        return true;
+    }
+
+    /** 技能库去重（打印统计 → 扫描 → 预览 → 可选执行）。 */
+    private void dedupSkills(sair.aiagent.core.SkillBank bank, double ratio, boolean apply) {
+        println(C_INFO, "  [技能库] " + bank.dedupStats());
+        java.util.List<sair.aiagent.core.SkillBank.DupGroup> groups;
+        long t0 = System.currentTimeMillis();
+        try {
+            groups = bank.planDedup(ratio, 5000);
+        } catch (Exception e) {
+            println(C_ERR, "  [技能库] 扫描失败: " + e);
+            return;
+        }
+        long ms = System.currentTimeMillis() - t0;
+        if (groups.isEmpty()) {
+            println(C_INFO, "    没有发现近似重复的经验（扫描 " + ms + "ms）");
+            return;
+        }
+        int dup = 0;
+        for (sair.aiagent.core.SkillBank.DupGroup g : groups) dup += g.duplicates.size();
+        println(C_INFO, "    发现 " + groups.size() + " 组近似重复，可合并 " + dup + " 条（扫描 " + ms + "ms）");
+        int shown = 0;
+        for (sair.aiagent.core.SkillBank.DupGroup g : groups) {
+            if (shown++ >= 10) { println(C_INFO, "    ...（其余 " + (groups.size() - 10) + " 组略）"); break; }
+            println(C_INFO, "    保留 #" + g.keeper.getId() + " " + brief(g.keeper.getName()));
+            for (sair.aiagent.model.SkillEntry d : g.duplicates) {
+                println(C_INFO, "        并入 #" + d.getId() + " " + brief(d.getName()));
+            }
+        }
+        if (apply) {
+            int merged = bank.applyDedup(groups);
+            println(C_SYS, "    已合并 " + merged + " 条重复经验（标记 merged 并指向代表条目，内容未删除）");
+            println(C_INFO, "    去重后: " + bank.dedupStats());
+        }
+    }
+
+    /** 知识库笔记去重（同一问题的不同问法）。 */
+    private void dedupNotes(sair.aiagent.core.SkillBank bank, double ratio, boolean apply) {
+        if (bank.getPersistenceManager() == null) return;
+        println(C_INFO, "  [知识库笔记] " + bank.getPersistenceManager().notesStats());
+        sair.aiagent.core.SkillBank.DupPlan plan;
+        long t0 = System.currentTimeMillis();
+        try {
+            plan = bank.planNoteDedup(ratio, 5000);
+        } catch (Exception e) {
+            println(C_ERR, "  [知识库笔记] 扫描失败: " + e);
+            return;
+        }
+        long ms = System.currentTimeMillis() - t0;
+        if (plan.groups.isEmpty()) {
+            println(C_INFO, "    没有发现近似重复的笔记（扫描 " + ms + "ms）");
+            return;
+        }
+        println(C_INFO, "    发现 " + plan.groups.size() + " 组近似重复，可合并 " + plan.duplicateCount()
+                + " 条（共 " + plan.total + " 条，扫描 " + ms + "ms）");
+        int shown = 0;
+        for (sair.aiagent.core.SkillBank.DupGroup2 g : plan.groups) {
+            if (shown++ >= 10) { println(C_INFO, "    ...（其余 " + (plan.groups.size() - 10) + " 组略）"); break; }
+            println(C_INFO, "    保留 #" + g.keeper.id + " " + brief(g.keeper.label));
+            for (sair.aiagent.core.SkillBank.DupItem d : g.duplicates) {
+                println(C_INFO, "        并入 #" + d.id + " " + brief(d.label));
+            }
+        }
+        if (apply) {
+            int merged = bank.applyNoteDedup(plan);
+            println(C_SYS, "    已合并 " + merged + " 条重复笔记（标记 merged_into，内容未删除）");
+            println(C_INFO, "    去重后: " + bank.getPersistenceManager().notesStats());
+        }
+    }
+
+    /** 命令输出用的短名。 */
+    private static String brief(String s) {
+        if (s == null) return "(无名)";
+        return s.length() > 60 ? s.substring(0, 60) + "..." : s;
+    }
+
     /** 运行时状态总览：OneBot / Redis / FileServer / 线程池 / 轨迹 / 技能与记忆计数。 */
     public Object handleStatus() {
         println(C_SYS, "== AiAgent Runtime Status ==");
@@ -260,7 +402,6 @@ public class ActivityActions {
         int coreMemories = act.getMemory().size();
         int skills = sair.aiagent.core.SkillBank.getInstance().listAll().size();
         int thirdPartySkills = act.getThirdPartySkillStore() != null ? act.getThirdPartySkillStore().size() : 0;
-        int skillPackages = act.getAgentSkillStore() != null ? act.getAgentSkillStore().size() : 0;
         int cronTasks = pm != null ? pm.listCronTasks().size() : 0;
         int alarms = pm != null ? pm.listAlarms().size() : 0;
         int harnessTraces = pm != null ? pm.harnessTraceCount() : 0;
@@ -271,7 +412,6 @@ public class ActivityActions {
         println(C_INFO, "Counts    : memories=" + coreMemories
                 + ", skills=" + skills
                 + ", thirdPartySkills=" + thirdPartySkills
-                + ", skillPackages=" + skillPackages
                 + ", cronTasks=" + cronTasks
                 + ", alarms=" + alarms
                 + ", harnessTraces=" + harnessTraces

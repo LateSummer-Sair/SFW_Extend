@@ -89,8 +89,57 @@ public class AgentExecutor {
         this.actionHandler.setParent(this);
     }
 
+    /**
+     * 单次请求的私有状态。
+     * <p>execPool 会<b>并发</b>执行多个请求，而停止标志/当前任务原先挂在单例字段上，导致：
+     * <ul>
+     *   <li>A 请求执行中被 /stop，随后到达的 B 请求把 {@code stopped=false} 重置，
+     *       A 的循环继续跑 —— 停止指令实际失效（不闭锁）；</li>
+     *   <li>A 的任务描述被 B 覆盖，A 的路由提示/记忆检索会按 B 的任务取（串味）。</li>
+     * </ul>
+     * 现在每个请求持有自己的闭锁停止标志与任务描述。
+     */
+    private static final class RequestState {
+        final String task;
+        final java.util.concurrent.atomic.AtomicBoolean stopFlag =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        RequestState(String task) { this.task = task; }
+    }
+
+    private final ThreadLocal<RequestState> currentRequest = new ThreadLocal<>();
+    private final java.util.Set<RequestState> activeRequests =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** 开始一次请求：注册到活跃集合，并绑定到当前线程（供 currentTask() 读取）。 */
+    private RequestState beginRequest(String task) {
+        RequestState st = new RequestState(task);
+        currentRequest.set(st);
+        activeRequests.add(st);
+        this.currentTask = task;   // 兼容仍直接读字段的旧代码路径
+        return st;
+    }
+
+    /** 结束一次请求：从活跃集合与 ThreadLocal 解绑。 */
+    private void endRequest() {
+        RequestState st = currentRequest.get();
+        if (st != null) activeRequests.remove(st);
+        currentRequest.remove();
+    }
+
+    /** 当前线程所属请求的任务描述（无请求上下文时回退到共享字段）。 */
+    private String currentTask() {
+        RequestState st = currentRequest.get();
+        return st != null ? st.task : currentTask;
+    }
+
     public void markStopped() {
         this.stopped = true;
+        // 闭锁所有在跑请求：置位后不再被后续请求重置，且立刻从活跃集合移除，
+        // 避免残留的 false 状态被后来者"复活"。
+        for (RequestState st : activeRequests) {
+            st.stopFlag.set(true);
+        }
+        activeRequests.clear();
     }
 
     public void setMemoryContext(String memoryContext) {
@@ -303,7 +352,7 @@ public class AgentExecutor {
         return toolDispatcher;
     }
 
-    /** 注册三个协作 Agent：main（主模型）、vision（视觉）、passage（段落）。 */
+    /** 注册三个协作 Agent：main（主模型）、passage（段落）、vision（视觉兜底）。 */
     private void registerAgents(AgentBus bus) {
         String execqModel = AiConfig.getInstance().getExecqModel();
         bus.register(new AgentBus.AgentDef("main",
@@ -312,37 +361,57 @@ public class AgentExecutor {
                 ctx -> (ctx != null && ctx.execsMode) ? ToolDispatcher.buildExecsTools()
                         : (ctx != null && ctx.isExecq()) ? ToolDispatcher.buildExecqTools()
                         : ToolDispatcher.buildAllTools()));
+        // 视觉兜底 Agent：仅当当前通道模型不具备原生视觉（如 Pro）时才启用。
+        // 其执行模型固定为具备视觉能力的模型（AiConfig.getVisionModel()，当前写死 Flash），
+        // 由 AgentBus 按 ctx.model 的视觉能力自动门控（Flash 通道下不启用）。
         bus.register(new AgentBus.AgentDef("vision",
                 VISION_AGENT_PROMPT,
-                execqModel,
-                ctx -> buildVisionAgentTools()));
+                AiConfig.getInstance().getVisionModel(),
+                ctx -> buildVisionAgentTools(),
+                true));
+        // 段落 Agent：负责折叠消息分析与段落内图片；跟随当前通道模型。
+        // 参数含义：visionFallback=false, skipPreprocess=false（保留图片预处理 → 有原生视觉时自己看图，
+        // 不再被迫调用 vision 工具多跑一次视觉模型）, skipForwardDelegation=true（防重复委派同一份折叠消息）。
         bus.register(new AgentBus.AgentDef("passage",
                 PASSAGE_AGENT_PROMPT,
                 execqModel,
-                ctx -> buildPassageAgentTools()));
+                ctx -> buildPassageAgentTools(ctx),
+                false, false, true));
     }
 
-    /** 视觉 Agent 系统提示词。 */
+    /** 视觉兜底 Agent 系统提示词（仅当主模型不具备视觉能力时被唤起）。 */
     private static final String VISION_AGENT_PROMPT =
-        "你是视觉分析 Agent，负责客观分析图像内容。\n"
+        "你是视觉兜底 Agent。当前主模型不具备原生视觉能力（例如 Pro 模型），"
+      + "所以凡是要「看懂图片」的活儿都由你来完成，并把客观结论用文字交回给调用方。\n"
       + "工作方式：\n"
-      + "1. 识别图片时调用 vision 工具（传入图片 URL 或 file_id）。\n"
-      + "2. 只做客观识别与转写，不要臆测、不要编造图片里没有的内容。\n"
-      + "3. 当你不确定图片中的某个特征是否符合要求、或需要更多背景线索时，用 ask_agent 向 main 发问，或直接用 web/search/searchglobal 查询线索。\n"
-      + "4. 得到足够信息后，返回结构化的分析结论（图片主体、关键文字、特征判断等）。";
+      + "1. 必须调用 vision 工具识图（传入图片 URL 或 file_id，URL 要原样完整传入，不要截断）。\n"
+      + "2. 只做客观识别与转写：图片主体、关键文字（完整转写）、结构、色调、二维码、是否违规等。\n"
+      + "3. 不要臆测、不要编造图片里没有的内容；不确定就说不确定。\n"
+      + "4. 需要更多背景线索时，可用 web/search/searchglobal 查询，或用 ask_agent 向 main 发问。\n"
+      + "5. 最终用简洁的结构化文字返回识别结论，供调用方直接使用。";
 
-    /** 段落 Agent 系统提示词。 */
+    /** 段落 Agent 系统提示词：折叠消息分析 + 段落图片 + 表情包收藏。 */
     private static final String PASSAGE_AGENT_PROMPT =
-        "你是段落分析 Agent，负责概括折叠消息 + 分析段落中的图片并决定是否收藏为表情包。\n"
+        "你是段落分析 Agent，负责折叠消息分析、段落内图片理解与表情包收藏判断。\n"
+      + "重要前提：你自己就拥有当前通道模型的能力——若当前模型具备原生视觉，"
+      + "段落里的图片会直接作为多模态内容给你，你可以【自己看图】并结合自己的上下文判断，"
+      + "不必调用 vision 工具；只有当你看不到图片（模型无原生视觉）时，才用 vision 工具兜底识图"
+      + "（图片地址在正文里以 [图片:https://…] 形式给出，原样完整传入 URL，不要截断）。\n"
+      + "关于嵌套折叠：正文里可能出现 [内嵌折叠消息 第N层] 段块。若该段块内已给出"
+      + "「[内嵌折叠消息分析结论]」，说明内层已由另一个段落 Agent 分析完毕，直接采用其结论；"
+      + "若只有原文没有结论，说明内层未展开，你按普通内容一并分析即可，不要自行重复索要。\n"
       + "工作方式：\n"
-      + "1. 阅读段落内容，提炼对话主题、各方观点、与当前对话相关的重点。\n"
-      + "2. 找出段落中出现的图片（带 [图片URL:...] 标记，或段落里明确给出的图片 URL）。\n"
-      + "3. 对每张【未处理】的图片（段落里没有 〖已处理〗 标记的），用 call_agent 唤起 vision 识别图片内容；传给 vision 的 url 必须是完整的 https:// 开头的 URL，若只拿到 fileid（不含 https://），先用 searchglobal 查完整 URL 再识图。\n"
-      + "4. 根据 vision 返回的信息判断能否收藏为表情包：仅【单张人脸/表情】+【图中文字≤20字】+【无违规内容】才收藏。\n"
+      + "1. 阅读折叠消息（合并转发的多条消息），提炼：对话主题与背景、各方发言的核心观点与关键信息（注明是谁说的）、"
+      + "与当前对话相关的重点。\n"
+      + "2. 找出其中的图片（[图片:URL] 标记）。\n"
+      + "3. 对每张【未处理】的图片进行理解：自己能看图就直接看；看不到则用 vision 工具识图。\n"
+      + "4. 根据图片内容判断能否收藏为表情包：仅【单张人脸/表情】+【图中文字≤20字】+【无违规内容】才收藏。\n"
       + "5. 能收藏的图片用 collectsticker 工具收藏（content 参数 = imageUrl|context 格式，context 写该图所在的对话语境）。\n"
       + "6. 处理完的图片用 markmessage 工具打 Mark（action=set，mark 写「已收藏」或「跳过+原因」），防止重复处理。\n"
-      + "7. 最终返回：你收藏了哪些图、跳过了哪些图（含原因）、以及给哪些消息打了 Mark（方便主 Agent 维护全局记录）。\n"
-      + "8. 若段落里没有图片，或图片都已处理过，直接返回「无新图片需要处理」即可。";
+      + "7. collectsticker 失败时工具会返回明确原因；若原因说明「不符合收藏条件」，"
+      + "【不要重复尝试收藏同一张图】，直接按原因记录并继续。\n"
+      + "8. 最终返回：折叠消息分析结论 + 你收藏了哪些图、跳过了哪些图（含原因）+ 给哪些消息打了 Mark。\n"
+      + "9. 若段落里没有图片，或图片都已处理过，也要照常返回折叠消息的分析结论。";
 
     /** 视觉 Agent 工具集。 */
     private static List<ToolDefinition> buildVisionAgentTools() {
@@ -358,21 +427,24 @@ public class AgentExecutor {
         return tools;
     }
 
-    /** 段落 Agent 工具集。 */
-    private static List<ToolDefinition> buildPassageAgentTools() {
+    /** 段落 Agent 工具集（始终给 vision 工具：自己能看图时通常不需要，只拿到 URL 时可用它兜底）。 */
+    private static List<ToolDefinition> buildPassageAgentTools(ToolContext ctx) {
         List<ToolDefinition> tools = new ArrayList<>();
         tools.add(new ToolDefinition("searchglobal", "全局记忆检索：跨群/跨用户检索对话历史、群聊记录和长期记忆")
                 .addString("query", "检索关键词"));
         tools.add(new ToolDefinition("searchnote", "在知识库中检索相关笔记")
                 .addString("query", "检索关键词"));
-        tools.add(new ToolDefinition("vision", "视觉分析图片：调用视觉模型分析并返回图片特征")
+        tools.add(new ToolDefinition("vision", "视觉分析图片（传 URL 或 file_id）。"
+                + "你能直接看到图片时不必调用；只有当某张图你只拿到 URL/看不到内容时，用它识图兜底")
                 .addString("url", "图片 URL（http/https）或 file_id"));
         tools.add(new ToolDefinition("collectsticker", "收藏表情包（imageUrl|context）")
                 .addString("content", "imageUrl|context 格式"));
-        tools.add(new ToolDefinition("markmessage", "给消息打 Mark 备注（AI 自用内部标记，用户看不到）。action=set 标记某条消息的处理结果")
+        tools.add(new ToolDefinition("markmessage", "给消息打 Mark 备注（AI 自用内部标记，用户看不到）。action=set 标记某条消息的处理结果；target=quoted 可标记被引用的消息")
                 .addString("action", "set/get/list")
-                .addOptionalString("message", "要标记的消息内容")
-                .addOptionalString("mark", "备注内容（如「已收藏」「跳过+原因」）"));
+                .addOptionalString("mark", "备注内容（如「已收藏」「跳过+原因」）")
+                .addOptionalString("target", "current=当前消息（默认）/ quoted=被引用的消息")
+                .addOptionalString("message", "要标记的消息内容（留空=按 target 自动定位）")
+                .addOptionalString("message_id", "精确指定消息 ID"));
         return tools;
     }
 
@@ -381,8 +453,7 @@ public class AgentExecutor {
      * <p>替代原 exec/execs/chat/execfc 四链路：模型自动决定聊天还是调用工具。</p>
      */
     public String executeFcLocal(String task) {
-        this.currentTask = task;
-        this.stopped = false;
+        RequestState req = beginRequest(task);
         this.trajectorySteps.clear();
         enterBypass();
         try {
@@ -395,9 +466,10 @@ public class AgentExecutor {
             ctx.model = AiConfig.getInstance().getAgentModel();
             return bridge.runWithDispatcher(task, ctx.stableSystemPrompt, ctx.dynamicContext,
                     ToolDispatcher.buildAllTools(), ctx.model,
-                    getToolDispatcher(), ctx, () -> stopped);
+                    getToolDispatcher(), ctx, () -> req.stopFlag.get());
         } finally {
             exitBypass();
+            endRequest();
         }
     }
 
@@ -415,8 +487,7 @@ public class AgentExecutor {
      */
     public String executeFcExecq(String task, String stableSystemPrompt, String dynamicContext,
                                  ToolContext ctx, String model) {
-        this.currentTask = task;
-        this.stopped = false;
+        RequestState req = beginRequest(task);
         this.trajectorySteps.clear();
         enterBypass();
         try {
@@ -429,9 +500,10 @@ public class AgentExecutor {
                 ctx.model = model;
             }
             return bridge.runWithDispatcher(task, stableSystemPrompt, dynamicContext,
-                    ToolDispatcher.buildExecqTools(), model, getToolDispatcher(), ctx, () -> stopped);
+                    ToolDispatcher.buildExecqTools(), model, getToolDispatcher(), ctx, () -> req.stopFlag.get());
         } finally {
             exitBypass();
+            endRequest();
         }
     }
 
@@ -449,8 +521,7 @@ public class AgentExecutor {
      */
     public String executeFcExecs(String task, String stableSystemPrompt, String dynamicContext,
                                  ToolContext ctx, String model) {
-        this.currentTask = task;
-        this.stopped = false;
+        RequestState req = beginRequest(task);
         this.trajectorySteps.clear();
         enterBypass();
         try {
@@ -464,9 +535,10 @@ public class AgentExecutor {
                 ctx.execsMode = true;
             }
             return bridge.runWithDispatcher(task, stableSystemPrompt, dynamicContext,
-                    ToolDispatcher.buildExecsTools(), model, getToolDispatcher(), ctx, () -> stopped);
+                    ToolDispatcher.buildExecsTools(), model, getToolDispatcher(), ctx, () -> req.stopFlag.get());
         } finally {
             exitBypass();
+            endRequest();
         }
     }
 
@@ -478,8 +550,7 @@ public class AgentExecutor {
         if (task == null || task.trim().isEmpty()) return "(任务为空)";
         AgentOrchestrator orch = getOrchestrator();
         AgentOrchestrator.Mode mode = parseMode(modeName);
-        this.currentTask = task;
-        this.stopped = false;
+        RequestState req = beginRequest(task);
         this.trajectorySteps.clear();
         enterBypass();
         try {
@@ -487,9 +558,10 @@ public class AgentExecutor {
                     ? ToolDispatcher.buildExecsTools()
                     : ToolDispatcher.buildAllTools();
             String m = (model != null && !model.isEmpty()) ? model : AiConfig.getInstance().getAgentModel();
-            return orch.orchestrate(task, mode, buildStableSystemPrompt(), tools, m, ctx, () -> stopped);
+            return orch.orchestrate(task, mode, buildStableSystemPrompt(), tools, m, ctx, () -> req.stopFlag.get());
         } finally {
             exitBypass();
+            endRequest();
         }
     }
 
@@ -662,7 +734,7 @@ public class AgentExecutor {
                 sb.append("\n").append(skillsCtx).append("\n");
             }
             // 路由提示
-            String routeHint = skillBank.getBestRoute(currentTask);
+            String routeHint = skillBank.getBestRoute(currentTask());
             if (routeHint != null) sb.append(routeHint).append("\n");
         }
 
@@ -683,10 +755,22 @@ public class AgentExecutor {
         }
 
         // === Memory: inject persistent cross-session memories ===
-        if (memoryManager != null && currentTask != null) {
-            String memCtx = memoryManager.buildContext(currentTask);
+        String reqTask = currentTask();
+        if (memoryManager != null && reqTask != null) {
+            String memCtx = memoryManager.buildContext(reqTask);
             if (memCtx != null) {
                 sb.append("\n").append(memCtx).append("\n");
+            }
+        }
+
+        // === 相关经验技能（动态层）===
+        // 「自生成技能」是各通道的默认能力之一，但库里有 4600+ 条，静态索引装不下
+        // （预算内只能露出 180 条左右）。这里按当前任务检索 Top-3，只给名称+一句话描述，
+        // 与 QQ 通道共用 SkillBank.buildRelevantSkillsHint，控制台不再有这层盲区。
+        if (skillBank != null && reqTask != null) {
+            String skillHint = skillBank.buildRelevantSkillsHint(reqTask, 3);
+            if (skillHint != null) {
+                sb.append("\n").append(skillHint).append("\n");
             }
         }
 

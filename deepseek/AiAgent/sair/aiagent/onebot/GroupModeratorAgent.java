@@ -36,6 +36,48 @@ public class GroupModeratorAgent {
         this.api = api;
         this.internalAgents = internalAgents;
         this.persistence = persistence;
+        loadGroupConfigs();
+    }
+
+    // ==================== 配置持久化 ====================
+
+    /** app_state 中的键前缀：modcfg:<群号> */
+    private static final String CONFIG_KEY_PREFIX = "modcfg:";
+
+    /** 启动时从 app_state 恢复各群管理配置（否则重启后监控开关/白名单/关键词全部丢失）。 */
+    private void loadGroupConfigs() {
+        try {
+            sair.aiagent.core.PersistenceManager pm = sair.aiagent.core.PersistenceManager.getInstance();
+            if (pm == null) return;
+            int loaded = 0;
+            for (String key : pm.listStateKeys(CONFIG_KEY_PREFIX)) {
+                String idPart = key.substring(CONFIG_KEY_PREFIX.length());
+                long gid;
+                try { gid = Long.parseLong(idPart); } catch (NumberFormatException e) { continue; }
+                String raw = pm.getState(key);
+                GroupModerationConfig cfg = GroupModerationConfig.fromStorageString(gid, raw);
+                groupConfigs.put(gid, cfg);
+                if (cfg.isAutoMonitorEnabled()) monitoringGroups.add(gid);
+                loaded++;
+            }
+            if (loaded > 0) {
+                AiAgentActivity.debugLog("[GroupModerator] 已从 app_state 恢复 " + loaded + " 个群的管理配置");
+            }
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[GroupModerator] 恢复群管理配置失败: " + e.toString());
+        }
+    }
+
+    /** 把某个群的配置写回 app_state。所有配置修改入口都必须调用它。 */
+    private void saveGroupConfig(long groupId) {
+        GroupModerationConfig cfg = groupConfigs.get(groupId);
+        if (cfg == null) return;
+        try {
+            sair.aiagent.core.PersistenceManager pm = sair.aiagent.core.PersistenceManager.getInstance();
+            if (pm != null) pm.setState(CONFIG_KEY_PREFIX + groupId, cfg.toStorageString());
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[GroupModerator] 保存群管理配置失败: " + e.toString());
+        }
     }
     
     /**
@@ -55,6 +97,7 @@ public class GroupModeratorAgent {
     public GroupModerationConfig enableAutoMonitor(long groupId) {
         GroupModerationConfig config = groupConfigs.computeIfAbsent(groupId, GroupModerationConfig::new);
         config.setAutoMonitorEnabled(true);
+        saveGroupConfig(groupId);
         
         // 不再启动定时任务，改为被动模式
         monitoringGroups.add(groupId);
@@ -77,7 +120,7 @@ public class GroupModeratorAgent {
         if (config != null) {
             config.setAutoMonitorEnabled(false);
             monitoringGroups.remove(groupId);
-            
+            saveGroupConfig(groupId);
             // 记录日志
             if (persistence != null) {
                 persistence.logAction("disable_monitor", 0, groupId, "禁用被动监控");
@@ -157,6 +200,7 @@ public class GroupModeratorAgent {
     public void setRuleDescription(long groupId, String description) {
         GroupModerationConfig config = groupConfigs.computeIfAbsent(groupId, GroupModerationConfig::new);
         config.setRuleDescription(description);
+        saveGroupConfig(groupId);
         
         AiAgentActivity.debugLog("[GroupModerator] 已设置群 " + groupId + " 的规则描述: " + description);
     }
@@ -169,8 +213,19 @@ public class GroupModeratorAgent {
     public void addViolationKeyword(long groupId, String keyword) {
         GroupModerationConfig config = groupConfigs.computeIfAbsent(groupId, GroupModerationConfig::new);
         config.addCustomViolationKeyword(keyword);
+        saveGroupConfig(groupId);
         
         AiAgentActivity.debugLog("[GroupModerator] 已为群 " + groupId + " 添加违规关键词: " + keyword);
+    }
+    
+    /**
+     * 移除自定义违规关键词
+     */
+    public void removeViolationKeyword(long groupId, String keyword) {
+        GroupModerationConfig config = groupConfigs.get(groupId);
+        if (config == null) return;
+        config.removeCustomViolationKeyword(keyword);
+        saveGroupConfig(groupId);
     }
     
     /**
@@ -181,8 +236,17 @@ public class GroupModeratorAgent {
     public void addToWhitelist(long groupId, long userId) {
         GroupModerationConfig config = groupConfigs.computeIfAbsent(groupId, GroupModerationConfig::new);
         config.addToWhitelist(userId);
+        saveGroupConfig(groupId);
         
         AiAgentActivity.debugLog("[GroupModerator] 已将用户 " + userId + " 加入群 " + groupId + " 的白名单");
+    }
+    
+    /** 从白名单移除用户（并持久化） */
+    public void removeFromWhitelist(long groupId, long userId) {
+        GroupModerationConfig config = groupConfigs.get(groupId);
+        if (config == null) return;
+        config.removeFromWhitelist(userId);
+        saveGroupConfig(groupId);
     }
     
     // ==================== 监控任务 ====================

@@ -26,6 +26,7 @@ import sair.aiagent.AiAgentActivity;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
+import sair.aiagent.util.FtsQuery;
 import sair.aiagent.model.ChatMessage;
 import sair.aiagent.model.MemoryEntry;
 import sair.aiagent.model.SkillEntry;
@@ -60,13 +61,16 @@ public class PersistenceManager {
     private int toolTraceInsertCount = 0;
     private int harnessTraceInsertCount = 0;
 
-    /** Escape FTS5 special characters to prevent syntax errors in MATCH queries */
+    /**
+     * 构造 FTS5 MATCH 表达式（trigram 分词器适配）。
+     * <p>原实现只剔除 {@code * " ( ) - :}，遗漏 {@code [ ] / . = & % $ # @} 等，
+     * 导致含图片 URL / {@code [包含图片:…]} 标记的真实消息频繁抛
+     * {@code fts5: syntax error}（实测占 37%）；现交由 {@link FtsQuery} 整串加引号转义。</p>
+     *
+     * @return MATCH 表达式；查询过短（&lt;3 字，trigram 无法命中）时返回 {@code null}
+     */
     private static String sanitizeFtsQuery(String query) {
-        if (query == null || query.isEmpty()) return query;
-        // Remove FTS5 special chars: *, ", parentheses, -, :
-        return query.replaceAll("[*\"()\\-:]", " ")
-                    .replaceAll("\\s+", " OR ")
-                    .trim();
+        return sair.aiagent.util.FtsQuery.build(query, sair.aiagent.util.FtsQuery.DEFAULT_MAX_TERMS);
     }
 
 
@@ -158,7 +162,8 @@ public class PersistenceManager {
                     "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(" +
                     "  content, category," +
                     "  content='memories'," +
-                    "  content_rowid='id'" +
+                    "  content_rowid='id'," +
+                    "  tokenize='trigram'" +
                     ")"
                 );
 
@@ -296,7 +301,8 @@ public class PersistenceManager {
                     "CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(" +
                     "  title, content, tags," +
                     "  content='notes'," +
-                    "  content_rowid='id'" +
+                    "  content_rowid='id'," +
+                    "  tokenize='trigram'" +
                     ")"
                 );
 
@@ -363,6 +369,22 @@ public class PersistenceManager {
                 );
                 stmt.execute("CREATE INDEX IF NOT EXISTS idx_skill_status ON skills(status)");
                 stmt.execute("CREATE INDEX IF NOT EXISTS idx_skill_category ON skills(category)");
+                // 技能版本快照表：merge/evolve/addBuiltin 都会用新内容**覆盖**skills 里的唯一副本，
+                // 一旦 LLM 合并/进化产出垃圾内容，原始内容就永久消失了。每次更新前先在此留存旧版本。
+                stmt.execute(
+                    "CREATE TABLE IF NOT EXISTS skill_versions (" +
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "  skill_id INTEGER NOT NULL," +
+                    "  version INTEGER NOT NULL," +
+                    "  name TEXT NOT NULL DEFAULT ''," +
+                    "  description TEXT NOT NULL DEFAULT ''," +
+                    "  content TEXT NOT NULL DEFAULT ''," +
+                    "  content_hash TEXT NOT NULL DEFAULT ''," +
+                    "  reason TEXT NOT NULL DEFAULT ''," +
+                    "  snapshot_at INTEGER NOT NULL" +
+                    ")"
+                );
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_skillver_skill ON skill_versions(skill_id, version DESC)");
                 // 人格印象表
                 stmt.execute(
                     "CREATE TABLE IF NOT EXISTS impressions (" +
@@ -416,7 +438,8 @@ public class PersistenceManager {
                     "CREATE VIRTUAL TABLE IF NOT EXISTS skills_fts USING fts5(" +
                     "  name, description, content," +
                     "  content='skills'," +
-                    "  content_rowid='id'" +
+                    "  content_rowid='id'," +
+                    "  tokenize='trigram'" +
                     ")"
                 );
 
@@ -504,6 +527,17 @@ public class PersistenceManager {
                 // === Schema 迁移：老库补列（幂等，避免用户手动重置数据库） ===
                 ensureColumn(stmt, "skills", "scope", "TEXT NOT NULL DEFAULT 'task'");
                 ensureColumn(stmt, "skills", "content_hash", "TEXT NOT NULL DEFAULT ''");
+                // 通道归属独立成列：scope 只表示「注入层级」，不再兼职表示「哪个通道可见」。
+                // 空值 = 未声明（学到的技能一律留空 = 全通道可见，因为知识本身不分通道）。
+                ensureColumn(stmt, "skills", "channels", "TEXT NOT NULL DEFAULT ''");
+                // 近似重复被抑制的次数（新经验被判定为已有经验的改写时 +1）
+                ensureColumn(stmt, "skills", "dup_hit_count", "INTEGER NOT NULL DEFAULT 0");
+                // 笔记治理列：merged_into>0 = 已并入代表条目（内容保留，检索与注入不再返回）；
+                // dup_hit_count = 同一问题被反复问到的次数；hit_count/last_hit = 被显式查阅过。
+                ensureColumn(stmt, "notes", "merged_into", "INTEGER NOT NULL DEFAULT 0");
+                ensureColumn(stmt, "notes", "dup_hit_count", "INTEGER NOT NULL DEFAULT 0");
+                ensureColumn(stmt, "notes", "hit_count", "INTEGER NOT NULL DEFAULT 0");
+                ensureColumn(stmt, "notes", "last_hit", "INTEGER NOT NULL DEFAULT 0");
                 ensureColumn(stmt, "memories", "importance", "INTEGER NOT NULL DEFAULT 0");
                 ensureColumn(stmt, "memories", "category", "TEXT NOT NULL DEFAULT 'general'");
                 ensureColumn(stmt, "stickers", "keywords", "TEXT NOT NULL DEFAULT ''");
@@ -511,6 +545,62 @@ public class PersistenceManager {
                 ensureColumn(stmt, "stickers", "remark", "TEXT NOT NULL DEFAULT ''");
                 ensureColumn(stmt, "impressions", "impression_level", "INTEGER NOT NULL DEFAULT 0");
 
+            }
+            // FTS5 分词器迁移（老库为 unicode61，中文子串召回≈0）→ trigram，后台执行
+            migrateFtsToTrigram();
+        }
+    }
+
+    /**
+     * 把本库三张 FTS5 索引迁移到 trigram 分词器（仅执行一次，后台线程）。
+     * <p>unicode61 会把整段中文当作一个 token，导致中文关键词检索只能命中"整段完全相同"的文档；
+     * trigram 支持任意子串匹配。重建在守护线程执行，期间查询返回空并由调用方回退 LIKE。</p>
+     */
+    private void migrateFtsToTrigram() {
+        final String[][] targets = {
+            {"memories_fts", "memories", "content, category"},
+            {"notes_fts",    "notes",    "title, content, tags"},
+            {"skills_fts",   "skills",   "name, description, content"}
+        };
+        Thread t = new Thread(() -> {
+            for (String[] p : targets) {
+                String fts = p[0], contentTable = p[1], cols = p[2];
+                try {
+                    if (!needsTrigramRebuild(fts)) continue;
+                    AiAgentActivity.debugLog("[Persistence] FTS 迁移: " + fts + " → trigram");
+                    long t0 = System.currentTimeMillis();
+                    synchronized (lock) {
+                        try (Statement st = conn.createStatement()) {
+                            st.execute("DROP TABLE IF EXISTS " + fts);
+                            st.execute("CREATE VIRTUAL TABLE " + fts + " USING fts5(" + cols
+                                     + ", content='" + contentTable + "', content_rowid='id', tokenize='trigram')");
+                            st.execute("INSERT INTO " + fts + "(" + fts + ") VALUES('rebuild')");
+                        }
+                    }
+                    AiAgentActivity.debugLog("[Persistence] FTS 迁移完成: " + fts
+                            + "（" + (System.currentTimeMillis() - t0) + "ms）");
+                } catch (Exception e) {
+                    AiAgentActivity.debugLog("[Persistence] FTS 迁移失败（回退 LIKE）: " + fts + " - " + e);
+                }
+            }
+        }, "Persistence-FtsMigrate");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** 判断某 FTS 表是否需要重建为 trigram。 */
+    private boolean needsTrigramRebuild(String ftsTable) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name=?")) {
+                ps.setString(1, ftsTable);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) return false;
+                    String sql = rs.getString(1);
+                    return sql != null && !sql.toLowerCase().contains("trigram");
+                }
+            } catch (SQLException e) {
+                return false;
             }
         }
     }
@@ -843,40 +933,43 @@ public class PersistenceManager {
         if (query == null || query.trim().isEmpty()) return new ArrayList<>();
         synchronized (lock) {
             List<MemoryEntry> results = new ArrayList<>();
-            // 用 FTS5 匹配表达式
-            String ftsQuery = sanitizeFtsQuery(query);
-            String sql =
-                "SELECT m.id, m.category, m.content, m.importance, m.created_at, m.updated_at " +
-                "FROM memories_fts f JOIN memories m ON f.rowid = m.id " +
-                "WHERE memories_fts MATCH ? " +
-                "ORDER BY rank " +
-                "LIMIT ?";
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, ftsQuery);
-                int limit = maxResults > 0 ? maxResults : FTS_MAX_RESULTS;
-                ps.setInt(2, limit);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        results.add(new MemoryEntry(
-                                rs.getInt(1), rs.getString(3), rs.getString(2),
-                                rs.getInt(4), rs.getLong(5)));
+            int limit = maxResults > 0 ? maxResults : FTS_MAX_RESULTS;
+            // trigram 查询构造（中文子串可命中；任意标点安全）
+            String ftsQuery = FtsQuery.build(query, FtsQuery.DEFAULT_MAX_TERMS);
+            if (ftsQuery != null) {
+                String sql =
+                    "SELECT m.id, m.category, m.content, m.importance, m.created_at, m.updated_at " +
+                    "FROM memories_fts f JOIN memories m ON f.rowid = m.id " +
+                    "WHERE memories_fts MATCH ? " +
+                    "ORDER BY rank " +
+                    "LIMIT ?";
+                try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                    ps.setString(1, ftsQuery);
+                    ps.setInt(2, limit);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            results.add(new MemoryEntry(
+                                    rs.getInt(1), rs.getString(3), rs.getString(2),
+                                    rs.getInt(4), rs.getLong(5)));
+                        }
                     }
+                } catch (SQLException e) {
+                    AiAgentActivity.debugLog("[Persistence] 记忆 FTS 检索失败，回退 LIKE: " + e.getMessage());
                 }
-            } catch (SQLException e) {
-                // FTS5 查询失败（特殊字符等），回退到 LIKE
-                return searchMemoriesFallback(query, maxResults);
             }
+            // 查询过短或 FTS 无命中 → LIKE 兜底
+            if (results.isEmpty()) return searchMemoriesFallback(query, maxResults);
             return results;
         }
     }
 
-    /** LIKE 回退搜索 */
+    /** LIKE 回退搜索（转义通配符，避免用户输入 % _ 被当模式） */
     private List<MemoryEntry> searchMemoriesFallback(String query, int maxResults) {
         List<MemoryEntry> list = new ArrayList<>();
-        String pattern = "%" + query.trim() + "%";
+        String pattern = "%" + FtsQuery.likeEscape(query.trim()) + "%";
         String sql =
             "SELECT id, category, content, importance, created_at, updated_at " +
-            "FROM memories WHERE content LIKE ? OR category LIKE ? " +
+            "FROM memories WHERE content LIKE ? ESCAPE '\\' OR category LIKE ? ESCAPE '\\' " +
             "ORDER BY created_at DESC LIMIT ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, pattern);
@@ -960,7 +1053,9 @@ public class PersistenceManager {
         String cacheKey = "notectx:" + (query == null ? "" : query);
         String cached = temporalStore.get(cacheKey, String.class);
         if (cached != null) return cached;
-        java.util.List<String[]> related = searchNotes(query, 5);
+        // 条数从 5 提到 10：notes 表 1646 条，FTS 命中通常远多于 5 条，
+        // 而字符上限（1500）本身就会兜住长度，多取几条能明显提高「正好命中那条笔记」的概率。
+        java.util.List<String[]> related = searchNotes(query, 10);
         if (related.isEmpty()) return null;
 
         StringBuilder sb = new StringBuilder();
@@ -969,8 +1064,7 @@ public class PersistenceManager {
 
         int chars = 0;
         int limit = maxChars > 0 ? maxChars : 1500;
-        for (String[] r : related) {
-            String line = "- [#" + r[0] + "] " + r[1];
+        for (String[] r : related) {            String line = "- [#" + r[0] + "] " + r[1];
             if (r[2] != null && !r[2].isEmpty()) {
                 line += ": " + r[2];
             }
@@ -1216,6 +1310,25 @@ public class PersistenceManager {
             } catch (SQLException ignored) {}
             return null;
         }
+    }
+
+    /**
+     * 按前缀列出状态键（用于启动时恢复带命名空间的配置，如 modcfg:&lt;群号&gt;）。
+     * <p>前缀经 LIKE 转义，避免 key 中的 % _ 被当成通配符。</p>
+     */
+    public List<String> listStateKeys(String prefix) {
+        List<String> keys = new ArrayList<>();
+        if (prefix == null || prefix.isEmpty()) return keys;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT key FROM app_state WHERE key LIKE ? ESCAPE '\\'")) {
+                ps.setString(1, sair.aiagent.util.FtsQuery.likeEscape(prefix) + "%");
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) keys.add(rs.getString(1));
+                }
+            } catch (SQLException ignored) {}
+        }
+        return keys;
     }
 
     // ==================== 旧数据迁移 ====================
@@ -1587,7 +1700,10 @@ public class PersistenceManager {
         List<String[]> list = new ArrayList<>();
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT pref_key, pref_value, importance FROM user_preferences WHERE scope=? AND target_id=? ORDER BY importance DESC, updated_at DESC")) {
+                    "SELECT pref_key, pref_value, importance FROM user_preferences WHERE scope=? AND target_id=? " +
+                    // 末位再按 pref_key 排序：importance/updated_at 相同时顺序才是确定的，
+                    // 否则同一份偏好每次可能排出不同顺序 → 提示词稳定段字节漂移 → 打断 KV 前缀缓存。
+                    "ORDER BY importance DESC, updated_at DESC, pref_key ASC")) {
                 ps.setString(1, scopeN);
                 ps.setLong(2, targetId);
                 try (ResultSet rs = ps.executeQuery()) {
@@ -1682,9 +1798,9 @@ public class PersistenceManager {
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT id, topic, content, viewpoint, source, qq, created_at, updated_at"
-                    + " FROM corrections WHERE topic LIKE ? OR content LIKE ?"
+                    + " FROM corrections WHERE topic LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\'"
                     + " ORDER BY updated_at DESC LIMIT ?")) {
-                String like = "%" + query.trim().replace("'", "''") + "%";
+                String like = "%" + FtsQuery.likeEscape(query.trim()) + "%";
                 ps.setString(1, like);
                 ps.setString(2, like);
                 ps.setInt(3, limit > 0 ? limit : 10);
@@ -2090,27 +2206,72 @@ public class PersistenceManager {
 
     // ==================== Notes (knowledge base) ====================
 
-    /** add note (带去重：title 精确匹配时新内容替换旧笔记，保持知识最新), returns auto-inc id */
-    public int addNote(String title, String content, String tags) {
+    /** 笔记近似重复阈值：只拦「同一个问题换个说法」。 */
+    private static final double NOTE_DUP_RATIO = 0.85;
+
+    /** addNote 的结果：id + 实际动作（供工具层如实告知模型）。 */
+    public static final int NOTE_INSERTED = 0;
+    public static final int NOTE_TITLE_REPLACED = 1;
+    public static final int NOTE_NEAR_DUP_UPDATED = 2;
+    public static final int NOTE_NEAR_DUP_KEPT = 3;
+
+    /**
+     * add note（两级去重）。
+     * <p><b>第 1 级 · 标题精确匹配</b>：同标题直接用新内容替换（保持知识最新）。</p>
+     * <p><b>第 2 级 · 标题近似匹配</b>（本次新增）：标题是「这条笔记问的是什么」，
+     * 也就是它的身份。同一个问题换个说法（「RTX 5070 Super 参数」/「RTX 5070 Super 参数 规格」）
+     * 以前会各存一条，于是 1,646 条笔记里 1,639 条都是自动沉淀的搜索结果
+     * （1,305 联网搜索 + 334 网页抓取，AI 手写的只有 7 条），大量是同一问题的不同问法。
+     * 判定用<b>标题指纹 + 对称 Jaccard</b>（不能用包含度、也不能把正文算进指纹：
+     * 正文是模板化的搜索结果堆，同主题实体词高度重合，会把「同主题不同问题」判成重复）。</p>
+     * <p>命中近似重复时按「保留更完整」处理：新内容更长就更新，否则保留原有更完整的内容；
+     * 两种情况都在代表条目上累加 {@code dup_hit_count}（反复被问到 = 这个问题很重要）。</p>
+     *
+     * @return {@code int[]{noteId, action}}，action 见 {@code NOTE_*} 常量；失败返回 {@code {-1, -1}}
+     */
+    public int[] addNoteEx(String title, String content, String tags) {
         temporalStore.invalidateByPrefix("notectx:");
         synchronized (lock) {
             String normTitle = title != null ? title.trim() : "";
             String normContent = content != null ? content.trim() : "";
-            // 去重：title 精确匹配时，直接用新内容替换旧笔记（保持知识最新）
+            String normTags = tags != null ? tags.trim() : "";
+            // 第 1 级：标题精确匹配 → 直接用新内容替换旧笔记（保持知识最新）
             if (!normTitle.isEmpty()) {
                 try (java.sql.PreparedStatement ps = conn.prepareStatement(
-                        "SELECT id FROM notes WHERE title = ? ORDER BY updated_at DESC LIMIT 1")) {
+                        "SELECT id FROM notes WHERE title = ? AND merged_into = 0 ORDER BY updated_at DESC LIMIT 1")) {
                     ps.setString(1, normTitle);
                     try (java.sql.ResultSet rs = ps.executeQuery()) {
                         if (rs.next()) {
                             int oldId = rs.getInt(1);
-                            updateNote(oldId, normTitle, normContent, tags);
+                            updateNote(oldId, normTitle, normContent, normTags);
                             AiAgentActivity.debugLog("[Note] 去重替换：相同标题，已用新内容更新 #" + oldId);
-                            return oldId;
+                            return new int[]{oldId, NOTE_TITLE_REPLACED};
                         }
                     }
                 } catch (java.sql.SQLException e) {
                     // 去重查询失败则走正常插入
+                }
+                // 第 2 级：标题近似匹配（同一问题的不同问法）
+                int nearId = findNearDuplicateNoteId(normTitle);
+                if (nearId > 0) {
+                    bumpNoteDupHit(nearId);
+                    String existingContent = null;
+                    try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                            "SELECT content FROM notes WHERE id=?")) {
+                        ps.setInt(1, nearId);
+                        try (java.sql.ResultSet rs = ps.executeQuery()) {
+                            if (rs.next()) existingContent = rs.getString(1);
+                        }
+                    } catch (java.sql.SQLException ignored) {}
+                    boolean newIsBetter = existingContent == null
+                            || normContent.length() > existingContent.length();
+                    if (newIsBetter && !normContent.isEmpty()) {
+                        updateNote(nearId, normTitle, normContent, normTags);
+                        AiAgentActivity.debugLog("[Note] 近似重复：已按「保留更完整」更新 #" + nearId + " ← " + normTitle);
+                        return new int[]{nearId, NOTE_NEAR_DUP_UPDATED};
+                    }
+                    AiAgentActivity.debugLog("[Note] 近似重复：已有更完整的 #" + nearId + "，本次未重复存储: " + normTitle);
+                    return new int[]{nearId, NOTE_NEAR_DUP_KEPT};
                 }
             }
             // 正常插入
@@ -2119,47 +2280,178 @@ public class PersistenceManager {
                 long now = System.currentTimeMillis();
                 ps.setString(1, normTitle);
                 ps.setString(2, normContent);
-                ps.setString(3, tags != null ? tags.trim() : "");
+                ps.setString(3, normTags);
                 ps.setLong(4, now);
                 ps.setLong(5, now);
                 ps.executeUpdate();
                 try (java.sql.ResultSet rs = ps.getGeneratedKeys()) {
-                    if (rs.next()) return rs.getInt(1);
+                    if (rs.next()) return new int[]{rs.getInt(1), NOTE_INSERTED};
                 }
-            } catch (java.sql.SQLException e) { return -1; }
+            } catch (java.sql.SQLException e) { return new int[]{-1, -1}; }
         }
-        return -1;
+        return new int[]{-1, -1};
+    }
+
+    /** add note (带去重), returns auto-inc id（兼容旧签名）。 */
+    public int addNote(String title, String content, String tags) {
+        return addNoteEx(title, content, tags)[0];
+    }
+
+    /**
+     * 找标题近似重复的笔记（同一问题的不同问法）。
+     * <p>先用 FTS 取候选（标题参与索引），再用标题指纹做对称 Jaccard 确认。</p>
+     */
+    private int findNearDuplicateNoteId(String title) {
+        if (title.isEmpty()) return -1;
+        java.util.List<String[]> cands = searchNotesRaw(title, 6);
+        if (cands.isEmpty()) return -1;
+        // 指纹比较「问题本身」：先剥掉 [联网搜索]/[网页抓取] 前缀，否则前缀会稀释相似度
+        // （实测同一条 URL 的笔记只算出 0.77，压制不生效）
+        java.util.Set<String> mine = sair.aiagent.util.TextFingerprint.bigram(
+                sair.aiagent.util.TextFingerprint.normalizeNoteTitle(title));
+        if (mine.isEmpty()) return -1;
+        int bestId = -1;
+        double best = 0;
+        for (String[] cnd : cands) {
+            String t = cnd[1];
+            if (t == null || t.isEmpty()) continue;
+            double r = sair.aiagent.util.TextFingerprint.jaccard(
+                    mine, sair.aiagent.util.TextFingerprint.bigram(
+                            sair.aiagent.util.TextFingerprint.normalizeNoteTitle(t)));
+            if (r > best) { best = r; bestId = Integer.parseInt(cnd[0]); }
+        }
+        return (best >= NOTE_DUP_RATIO) ? bestId : -1;
+    }
+
+    /** 记录一次「近似重复被抑制」（记在被命中的那条笔记上）。 */
+    private void bumpNoteDupHit(int id) {
+        try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                "UPDATE notes SET dup_hit_count = dup_hit_count + 1 WHERE id=?")) {
+            ps.setInt(1, id);
+            ps.executeUpdate();
+        } catch (java.sql.SQLException ignored) {}
+    }
+
+    /** 记录一次笔记被显式查阅（searchnote / note search / note get），用于判断哪些笔记真有价值。 */
+    public void recordNoteHit(java.util.List<String[]> hits) {
+        if (hits == null || hits.isEmpty()) return;
+        synchronized (lock) {
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE notes SET hit_count = hit_count + 1, last_hit = ? WHERE id = ?")) {
+                long now = System.currentTimeMillis();
+                for (String[] h : hits) {
+                    if (h == null || h.length == 0) continue;
+                    try {
+                        ps.setLong(1, now);
+                        ps.setInt(2, Integer.parseInt(h[0]));
+                        ps.addBatch();
+                    } catch (NumberFormatException ignored) {}
+                }
+                ps.executeBatch();
+            } catch (java.sql.SQLException ignored) {}
+        }
+    }
+
+    /** 去重扫描用：列出全部未合并笔记的 [id, title]。 */
+    public java.util.List<String[]> listNotesForDedup() {
+        java.util.List<String[]> list = new java.util.ArrayList<>();
+        synchronized (lock) {
+            try (java.sql.Statement stmt = conn.createStatement();
+                 java.sql.ResultSet rs = stmt.executeQuery(
+                     "SELECT id, title FROM notes WHERE merged_into = 0 ORDER BY id")) {
+                while (rs.next()) {
+                    list.add(new String[]{String.valueOf(rs.getInt(1)), rs.getString(2)});
+                }
+            } catch (java.sql.SQLException ignored) {}
+        }
+        return list;
+    }
+
+    /** 手动去重：把重复笔记标记为已并入代表条目（内容保留，检索与注入不再返回）。 */
+    public boolean markNoteMerged(int id, int intoId) {
+        temporalStore.invalidateByPrefix("notectx:");
+        synchronized (lock) {
+            try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE notes SET merged_into=?, updated_at=? WHERE id=?")) {
+                ps.setInt(1, intoId);
+                ps.setLong(2, System.currentTimeMillis());
+                ps.setInt(3, id);
+                return ps.executeUpdate() > 0;
+            } catch (java.sql.SQLException e) {
+                return false;
+            }
+        }
+    }
+
+    /** 笔记库统计（供 ai/dedup 输出）。 */
+    public String notesStats() {
+        synchronized (lock) {
+            int total = 0, merged = 0, dupHit = 0, hit = 0;
+            try (java.sql.Statement stmt = conn.createStatement();
+                 java.sql.ResultSet rs = stmt.executeQuery(
+                     "SELECT COUNT(*), SUM(CASE WHEN merged_into>0 THEN 1 ELSE 0 END), "
+                   + "SUM(CASE WHEN dup_hit_count>0 THEN 1 ELSE 0 END), "
+                   + "SUM(CASE WHEN hit_count>0 THEN 1 ELSE 0 END) FROM notes")) {
+                if (rs.next()) {
+                    total = rs.getInt(1);
+                    merged = rs.getInt(2);
+                    dupHit = rs.getInt(3);
+                    hit = rs.getInt(4);
+                }
+            } catch (java.sql.SQLException ignored) {}
+            return "笔记 " + total + " 条（已合并 " + merged + " 条）"
+                    + " | 曾被抑制过重复 " + dupHit + " 条 | 被显式查阅过 " + hit + " 条";
+        }
     }
 
     /** search notes by FTS5, returns list of [id, title, snippet] */
     public java.util.List<String[]> searchNotes(String query, int limit) {
+        return searchNotesRaw(query, limit);
+    }
+
+    /** 检索实现（内部用；调用方若需计使用次数请自行调 {@link #recordNoteHit}）。 */
+    public java.util.List<String[]> searchNotesRaw(String query, int limit) {
         java.util.List<String[]> list = new java.util.ArrayList<>();
+        if (query == null || query.trim().isEmpty()) return list;
+        int lim = limit > 0 ? limit : 10;
         synchronized (lock) {
-            try {
-                String sql = "SELECT n.id, n.title, snippet(notes_fts, 2, '<b>', '</b>', '...', 32) as sn " +
-                             "FROM notes_fts f JOIN notes n ON f.rowid = n.id " +
-                             "WHERE notes_fts MATCH ? ORDER BY rank LIMIT ?";
-                java.sql.PreparedStatement ps = conn.prepareStatement(sql);
-                ps.setString(1, sanitizeFtsQuery(query));
-                ps.setInt(2, limit > 0 ? limit : 10);
-                java.sql.ResultSet rs = ps.executeQuery();
-                while (rs.next()) {
-                    list.add(new String[]{String.valueOf(rs.getInt("id")), 
-                                          rs.getString("title"), rs.getString("sn")});
-                }
-                rs.close(); ps.close();
-            } catch (java.sql.SQLException e) {
-                // FTS5 match failure, try LIKE fallback
-                try (java.sql.Statement stmt = conn.createStatement();
-                     java.sql.ResultSet rs = stmt.executeQuery(
-                         "SELECT id, title, substr(content,1,200) FROM notes WHERE title LIKE '%" +
-                         query.replace("'","''") + "%' OR content LIKE '%" + 
-                         query.replace("'","''") + "%' ORDER BY updated_at DESC LIMIT " + limit)) {
-                    while (rs.next()) {
-                        list.add(new String[]{String.valueOf(rs.getInt(1)), 
-                                              rs.getString(2), rs.getString(3)});
+            // trigram 查询构造；查询过短（<3 字）时返回 null → 直接走 LIKE
+            String expr = sanitizeFtsQuery(query);
+            if (expr != null) {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT n.id, n.title, snippet(notes_fts, 2, '<b>', '</b>', '...', 32) as sn "
+                      + "FROM notes_fts f JOIN notes n ON f.rowid = n.id "
+                      + "WHERE notes_fts MATCH ? AND n.merged_into = 0 ORDER BY rank LIMIT ?")) {
+                    ps.setString(1, expr);
+                    ps.setInt(2, lim);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            list.add(new String[]{String.valueOf(rs.getInt("id")),
+                                                  rs.getString("title"), rs.getString("sn")});
+                        }
                     }
-                } catch (java.sql.SQLException ignored) {}
+                } catch (SQLException e) {
+                    AiAgentActivity.debugLog("[Persistence] 笔记 FTS 检索失败，回退 LIKE: " + e.getMessage());
+                }
+            }
+            // FTS 无命中或查询过短 → LIKE 兜底（修正原实现 limit<=0 时拼成 LIMIT 0 返回空的缺陷）
+            if (list.isEmpty()) {
+                String like = "%" + FtsQuery.likeEscape(query.trim()) + "%";
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT id, title, substr(content,1,200) FROM notes "
+                      + "WHERE merged_into = 0 AND (title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' "
+                      + "OR tags LIKE ? ESCAPE '\\') ORDER BY updated_at DESC LIMIT ?")) {
+                    ps.setString(1, like);
+                    ps.setString(2, like);
+                    ps.setString(3, like);
+                    ps.setInt(4, lim);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            list.add(new String[]{String.valueOf(rs.getInt(1)),
+                                                  rs.getString(2), rs.getString(3)});
+                        }
+                    }
+                } catch (SQLException ignored) {}
             }
         }
         return list;
@@ -2171,7 +2463,8 @@ public class PersistenceManager {
         synchronized (lock) {
             try (java.sql.Statement stmt = conn.createStatement();
                  java.sql.ResultSet rs = stmt.executeQuery(
-                     "SELECT id, title, substr(content,1,100), tags FROM notes ORDER BY updated_at DESC LIMIT " + limit)) {
+                     "SELECT id, title, substr(content,1,100), tags FROM notes WHERE merged_into = 0 "
+                   + "ORDER BY updated_at DESC LIMIT " + limit)) {
                 while (rs.next()) {
                     list.add(new String[]{String.valueOf(rs.getInt(1)), rs.getString(2),
                                           rs.getString(3), rs.getString(4)});
@@ -2250,6 +2543,31 @@ public class PersistenceManager {
 
     public List<SkillEntry> listAllSkills() {
         return skillsDb.listAllSkills();
+    }
+
+    /** 列出某技能的历史版本快照（新→旧），用于回溯被 merge/evolve 覆盖的内容。 */
+    public List<String[]> listSkillVersions(int id) {
+        return skillsDb.listSkillVersions(id);
+    }
+
+    /** 技能表结构版本号 —— 供 SkillBank 索引缓存判断是否需要重建。 */
+    public long skillsVersion() {
+        return skillsDb.getVersion();
+    }
+
+    /** 设置某技能的适用通道（如 "execq,execs" / "console" / ""=全通道）。 */
+    public boolean setSkillChannels(int id, String channels) {
+        return skillsDb.setSkillChannels(id, channels);
+    }
+
+    /** 记录一次「近似重复被抑制」（记在被命中的那条已有经验上，重复次数即重要度信号）。 */
+    public void incrementSkillDupHit(int id) {
+        skillsDb.incrementDupHit(id);
+    }
+
+    /** 按 id 取技能（供去重命令读取代表条目）。 */
+    public SkillEntry getSkillById(int id) {
+        return skillsDb.getSkill(id);
     }
 
     public List<SkillEntry> searchSkills(String query, int limit) {

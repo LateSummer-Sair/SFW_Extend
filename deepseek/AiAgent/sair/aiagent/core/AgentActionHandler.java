@@ -71,29 +71,15 @@ public class AgentActionHandler {
         String result;
         switch (type) {
             case "cmd":      result = executeCmd(content); break;
-            case "readfile": result = executeReadFile(content); break;
-            case "readdir":  result = executeReadDir(content); break;
-            case "findfile": result = executeFindFile(content); break;
             case "sys":      result = executeSys(content); break;
             case "evaljs":   result = executeEvalJs(content); break;
             case "eval":     result = executeEval(content); break;
-            case "web":      result = executeWeb(content); break;
-            case "search":   result = executeSearch(content); break;
             case "remember": result = executeRemember(content); break;
-            case "download": result = executeDownload(content); break;
             case "superise": result = executeSurprise(content); break;
-            case "editprompt": result = executeEditPrompt(content); break;
             case "stop":      result = executeStop(); break;
             case "sendimage": result = executeSendImage(content); break;
             case "sendrecord":result = executeSendRecord(content); break;
             case "sendfile":      result = executeSendFile(content); break;
-            case "schedule":      result = tagExecutor.executeSchedule(content); break;
-            case "note":         result = tagExecutor.executeNote(content); break;
-            case "searchnote":   result = tagExecutor.executeSearchNote(content); break;
-            case "batchrename":  result = tagExecutor.executeBatchRename(content); break;
-            case "batchconvert": result = tagExecutor.executeBatchConvert(content); break;
-            case "balance":     result = executeBalance(); break;
-            case "weather":     result = executeWeather(content); break;
             case "skillextract": result = parent != null ? parent.executeSkillExtract(content) : "no parent"; break;
             default:         result = "未知操作: " + type; break;
         }
@@ -121,42 +107,6 @@ public class AgentActionHandler {
         String result = output[0];
         if (result == null || result.isEmpty() || result.equals("(无输出)")) return "命令 [" + command + "] 已执行（无文本输出）";
         return "命令 [" + command + "] 结果:\n" + result;
-    }
-
-    String executeReadFile(String path) {
-        return executeReadFile(path, 0, -1);
-    }
-
-    String executeReadFile(String path, int offset, int limit) {
-        if (!gate.await("readfile", "读取文件: " + path)) return "读取文件被拒绝。";
-        EdtUtils.println(C_TOOL, "\n  > 读取: " + path + (offset > 0 || limit > 0 ? " (offset=" + offset + ", limit=" + limit + ")" : ""));
-        String content = FileUtils.readFile(path, offset, limit);
-        String rangeInfo = (offset > 0 || limit > 0)
-                ? " [分块读取: offset=" + offset + ", limit=" + (limit > 0 ? limit : "全部") + "]"
-                : "";
-        return "文件 [" + path + "]" + rangeInfo + ":\n" + content;
-    }
-
-    String executeReadDir(String path) {
-        if (!gate.await("readdir", "列出目录: " + path)) return "列出目录被拒绝。";
-        EdtUtils.println(C_TOOL, "\n  > 列出目录: " + path);
-        return "目录 [" + path + "]:\n" + FileUtils.readDir(path);
-    }
-
-    String executeFindFile(String content) {
-        // content 格式：path 或 path|keyword
-        String path = content;
-        String keyword = "";
-        if (content != null) {
-            int bar = content.indexOf('|');
-            if (bar >= 0) {
-                path = content.substring(0, bar).trim();
-                keyword = content.substring(bar + 1).trim();
-            }
-        }
-        if (!gate.await("findfile", "查找文件: " + path)) return "查找文件被拒绝。";
-        EdtUtils.println(C_TOOL, "\n  > 查找文件: " + path + (keyword.isEmpty() ? "" : " (关键词:" + keyword + ")"));
-        return FileUtils.findFiles(path, keyword);
     }
 
     String executeSys(String command) {
@@ -212,34 +162,6 @@ public class AgentActionHandler {
         return "========== 动态注入结果 ==========\n【编译】" + (compileInfo != null && !compileInfo.isEmpty() ? compileInfo : "编译通过") + "\n【执行】" + result;
     }
 
-    public String executeWeb(String url) {
-        url = url.trim();
-        if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://" + url;
-        try {
-            java.net.URI uri = new java.net.URI(url);
-            if (isInternalHost(uri.getHost())) {
-                EdtUtils.println(FCM.Error_Color, "\n  [Web] 拒绝内网地址: " + uri.getHost());
-                return "Web GET [" + url + "] 被拒绝: 禁止访问内网地址 (" + uri.getHost() + ")";
-            }
-        } catch (Exception e) { return "Web GET [" + url + "] 错误: URL格式无效 - " + e.getMessage(); }
-        if (!gate.await("web", "联网获取: " + url)) return "Web 请求被拒绝。";
-        EdtUtils.println(new Color(100, 200, 255), "\n  [Web] GET " + url);
-
-        WebFetcher.FetchResult r = WebFetcher.fetch(url);
-        if (r.success) {
-            String text = (r.text == null || r.text.trim().isEmpty()) ? "(空正文)" : r.text;
-            return "Web GET [" + r.finalUrl + "] (HTTP " + r.status + ", 编码 " + r.charset + "):\n" + text;
-        }
-        return "Web GET [" + r.finalUrl + "] 失败: " + (r.error != null ? r.error : "HTTP " + r.status);
-    }
-
-    String executeSearch(String query) {
-        if (query == null || query.trim().isEmpty()) return "[search] 请提供搜索关键词";
-        if (!gate.await("search", "联网搜索: " + query)) return "搜索被拒绝。";
-        EdtUtils.println(new Color(100, 200, 255), "\n  [搜索] " + query);
-        return SearchTool.search(query);
-    }
-
     String executeRemember(String content) {
         if (content == null || content.trim().isEmpty()) return "记忆内容为空，未记录。";
         if (memoryManager == null) return "记忆管理器未初始化，无法记录。";
@@ -251,87 +173,6 @@ public class AgentActionHandler {
         return "记忆记录失败。";
     }
 
-    String executeDownload(String url) {
-        url = url.trim();
-        if (!url.startsWith("http://") && !url.startsWith("https://")) return "下载地址无效: " + url;
-        String current = url;
-        if (!gate.await("download", "下载文件: " + url)) return "下载被拒绝。";
-
-        String fileName = extractFileName(current);
-        String dataDir = selfActivity.getDataDir();
-        File downloadDir = new File(dataDir, "downloads"); downloadDir.mkdirs();
-        File targetFile = new File(downloadDir, fileName);
-        if (targetFile.exists()) {
-            String base = fileName, ext = "";
-            int dotIdx = base.lastIndexOf('.');
-            if (dotIdx > 0) { ext = base.substring(dotIdx); base = base.substring(0, dotIdx); }
-            for (int i = 1; i <= 99; i++) {
-                targetFile = new File(downloadDir, base + "_" + i + ext);
-                if (!targetFile.exists()) { fileName = base + "_" + i + ext; break; }
-            }
-        }
-
-        for (int hop = 0; hop <= 5; hop++) {
-            try {
-                java.net.URI uri = new java.net.URI(current);
-                String host = uri.getHost();
-                if (isInternalHost(host)) {
-                    return "下载被拒绝: 禁止访问内网地址 (" + host + ")";
-                }
-            } catch (Exception e) {
-                return "下载 [" + current + "] 错误: URL格式无效 - " + e.getMessage();
-            }
-
-            EdtUtils.println(new Color(120, 200, 255), "\n  [下载] " + current + " -> " + fileName);
-            java.net.HttpURLConnection conn = null;
-            java.io.BufferedInputStream bis = null;
-            java.io.FileOutputStream fos = null;
-            try {
-                conn = (java.net.HttpURLConnection) new java.net.URL(current).openConnection();
-                conn.setRequestMethod("GET"); conn.setConnectTimeout(15_000); conn.setReadTimeout(120_000);
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; AiAgent-SFW/1.4)");
-                conn.setInstanceFollowRedirects(false);
-                int code = conn.getResponseCode();
-                if (code >= 300 && code < 400) {
-                    String loc = conn.getHeaderField("Location");
-                    if (loc != null && !loc.trim().isEmpty()) {
-                        current = new java.net.URL(new java.net.URL(current), loc.trim()).toString();
-                        continue;
-                    }
-                    return "下载 [" + current + "] 失败: HTTP " + code + " 缺少 Location";
-                }
-                if (code < 200 || code >= 300) {
-                    return "下载 [" + current + "] 失败: HTTP " + code;
-                }
-                bis = new java.io.BufferedInputStream(conn.getInputStream());
-                fos = new java.io.FileOutputStream(targetFile);
-                byte[] buf = new byte[8192]; long downloaded = 0; int n;
-                while ((n = bis.read(buf)) != -1) {
-                    fos.write(buf, 0, n); downloaded += n;
-                    if (downloaded > MAX_DOWNLOAD_BYTES) {
-                        fos.flush(); bis.close(); fos.close(); conn.disconnect();
-                        targetFile.delete();
-                        return "下载 [" + current + "] 失败: 文件超过大小上限 (" + formatSize(MAX_DOWNLOAD_BYTES) + ")";
-                    }
-                }
-                fos.flush(); bis.close(); fos.close(); conn.disconnect();
-                String sizeStr = formatSize(downloaded);
-                String relPath = "downloads/" + fileName;
-                if (memoryManager != null) memoryManager.add("下载文件: " + relPath + " | 来源: " + current + " | 大小: " + sizeStr);
-                return "下载完成: " + relPath + " (" + sizeStr + ")\n绝对路径: " + targetFile.getAbsolutePath();
-            } catch (java.io.FileNotFoundException e) {
-                return "下载 [" + current + "] 失败: 文件不存在 (404)";
-            } catch (Exception e) {
-                return "下载 [" + current + "] 错误: " + e.toString();
-            } finally {
-                try { if (bis != null) bis.close(); } catch (Exception ignored) {}
-                try { if (fos != null) fos.close(); } catch (Exception ignored) {}
-                if (conn != null) conn.disconnect();
-            }
-        }
-        return "下载 [" + url + "] 失败: 重定向次数超限";
-    }
-
     String executeSurprise(String content) {
         if (content == null || content.trim().isEmpty()) return "彩蛋内容为空，跳过。";
         String text = content.trim();
@@ -340,16 +181,6 @@ public class AgentActionHandler {
             try { new SurpriseWindow(text).display(); } catch (Exception e) { EdtUtils.println(FCM.Error_Color, "  [彩蛋] 弹窗失败: " + e.toString()); }
         });
         return "彩蛋已弹出。";
-    }
-
-    String executeEditPrompt(String newPrompt) {
-        if (newPrompt == null || newPrompt.trim().isEmpty()) return "提示词内容为空，未修改。";
-        String prompt = newPrompt.trim();
-        if (prompt.length() < 30) return "提示词太短（" + prompt.length() + " 字符），需要至少 30 字符。";
-        EdtUtils.println(new Color(200, 180, 255), "\n  [修改提示词] 长度: " + prompt.length() + " 字符");
-        try { AiConfig.getInstance().setSystemPrompt(prompt); // setSystemPrompt 内部已写 systemPrompt.md
-            return "系统提示词已更新（" + prompt.length() + " 字符）。新个性已生效。";
-        } catch (Exception e) { return "提示词更新失败: " + e.getMessage(); }
     }
 
     String executeSendImage(String content) {
@@ -410,7 +241,10 @@ public class AgentActionHandler {
         else { imageUrl = content.trim(); ctx = ""; }
         StickerEntry entry = stickerManager.collect(imageUrl, ctx);
         if (entry != null) return "[collectsticker] collected #" + entry.getId();
-        return "[collectsticker] failed";
+        // 回传具体原因：避免模型看到裸 failed 后瞎猜原因、并反复重试同一张图
+        String reason = stickerManager.getLastCollectReason();
+        if (reason == null || reason.isEmpty()) reason = "收藏失败（原因未知）";
+        return "[collectsticker] 收藏失败：" + reason;
     }
 
     String executeClearSticker() {
@@ -423,16 +257,6 @@ public class AgentActionHandler {
         EdtUtils.println(FCM.Error_Color, "\n  [停止] Agent执行已被中断");
         if (parent != null) parent.markStopped();
         return "[STOP] Agent执行已被中断。";
-    }
-
-    public String executeWeather(String city) {
-        if (city == null || city.trim().isEmpty()) return WeatherTool.queryWeather("");
-        return WeatherTool.queryWeather(city.trim());
-    }
-
-    String executeBalance() {
-        if (client == null) return "[balance] DeepSeekClient未初始化";
-        try { return client.queryBalance(); } catch (Exception e) { return "[balance] 查询失败: " + e.toString(); }
     }
 
     static String extractFileName(String url) {

@@ -102,9 +102,19 @@ public class GroupImpression implements Serializable {
         sb.append("[群印象] 群:").append(groupId);
         if (!groupName.isEmpty()) sb.append("(").append(groupName).append(")");
         sb.append(" 友好度:").append(friendliness);
-        sb.append(" 累计").append(messageCount).append("条消息");
+        // 与 ImpressionEntry 同理：精确的 messageCount 每来一条群消息就变，
+        // 而这段位于提示词稳定前缀区，一变就打断 KV 前缀缓存，因此改用活跃度分档。
+        sb.append(" 活跃度:").append(activityLabel(messageCount));
         if (!atmosphere.isEmpty()) sb.append("\n- 群氛围: ").append(atmosphere);
         return sb.toString();
+    }
+
+    /** 粗粒度活跃度标签（分档而非精确条数，见 {@link #toPromptContext()}）。 */
+    private static String activityLabel(int msgs) {
+        if (msgs >= 5000) return "极高";
+        if (msgs >= 500) return "高";
+        if (msgs >= 50) return "中";
+        return "低";
     }
 
     @Override

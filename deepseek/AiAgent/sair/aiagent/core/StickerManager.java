@@ -54,6 +54,9 @@ public class StickerManager {
     private volatile NapCatApi napcatApi;
     /** 自动清理守护线程 */
     private volatile Thread cleanupThread;
+
+    /** 最近一次 collect 失败的具体原因（供 collectsticker 工具回传给模型）。 */
+    private volatile String lastCollectReason = "";
     /** 图片视觉分析内容描述缓存（原始URL → 内容描述），供识图复用，避免同一张图重复调视觉模型 */
     private static final java.util.concurrent.ConcurrentHashMap<String, String> VISION_DESC_CACHE =
             new java.util.concurrent.ConcurrentHashMap<>();
@@ -106,9 +109,11 @@ public class StickerManager {
      */
     public synchronized StickerEntry collect(String imageUrl, String context) {
         if (pm == null || imageUrl == null || imageUrl.trim().isEmpty()) return null;
+        lastCollectReason = "";
 
         // 1. 达到上限则不存储、也不调视觉模型审查（减少视觉模型调用）
         if (pm.stickerCount() >= MAX_STICKERS) {
+            lastCollectReason = "表情包库存已达上限(" + MAX_STICKERS + "张)，需等过期清理后才能再收藏";
             AiAgentActivity.debugLog("[Sticker] collect skipped (full " + MAX_STICKERS + "/" + MAX_STICKERS + ", waiting for expired cleanup)");
             return null;
         }
@@ -116,6 +121,7 @@ public class StickerManager {
         // 3. 下载图片到本地
         String[] dl = downloadToLocalWithRemark(imageUrl);
         if (dl == null) {
+            lastCollectReason = "图片下载失败（URL 可能已过期、需签名或不可访问）";
             AiAgentActivity.debugLog("[Sticker] collect skipped (download failed): " + imageUrl);
             return null;
         }
@@ -123,6 +129,7 @@ public class StickerManager {
 
         // 4. 视觉模型审查违规内容（政治敏感/成人等），违规则不存储
         if (!reviewSafe(imageUrl)) {
+            if (lastCollectReason.isEmpty()) lastCollectReason = "未通过收藏审查";
             AiAgentActivity.debugLog("[Sticker] collect skipped (violating content or review failed): " + imageUrl);
             deleteLocalFile(localPath);
             return null;
@@ -133,13 +140,21 @@ public class StickerManager {
         String remark = dl[1] != null ? dl[1] : "";
         StickerEntry entry = pm.addSticker(imageUrl, localPath, context, keywords, remark);
         if (entry != null) {
+            lastCollectReason = "";
             AiAgentActivity.debugLog("[Sticker] collected #" + entry.getId()
                     + " keywords=" + (keywords.length() > 40 ? keywords.substring(0, 40) + "..." : keywords));
             // 2. 被动 TTL：每次添加一张后，挑最老的一张检查是否超时（X≤15 不启用）
             passiveTtlCheck();
+        } else {
+            lastCollectReason = "写入表情包库失败";
         }
 
         return entry;
+    }
+
+    /** 最近一次 collect 失败的具体原因（供 collectsticker 工具回传，避免模型瞎猜/重复重试）。 */
+    public String getLastCollectReason() {
+        return lastCollectReason != null ? lastCollectReason : "";
     }
 
     // ==================== 匹配 ====================
@@ -536,13 +551,18 @@ public class StickerManager {
 
         // 1. 仅一张脸部表情才存（无 / 多张都拒绝）
         if (face == null || !face.contains("一张")) {
+            String got = (face == null || face.trim().isEmpty()) ? "未知" : face.trim();
+            lastCollectReason = "不符合收藏条件：图片不是「单张人脸/表情」（审查判定表情数量=" + got
+                    + "）。注意：纯文字/图标/梗图不算人脸表情，不要重复尝试收藏这张图";
             AiAgentActivity.debugLog("[Sticker] review: not exactly one face -> skip");
             return false;
         }
 
         // 2. 图中文字不超过 20 字才存（超过 20 字拒绝收藏）
         if (text != null && !text.trim().isEmpty() && !"无".equals(text.trim())) {
-            if (countChars(text) > 20) {
+            int n = countChars(text);
+            if (n > 20) {
+                lastCollectReason = "不符合收藏条件：图中文字 " + n + " 字，超过 20 字上限，不要重复尝试收藏这张图";
                 AiAgentActivity.debugLog("[Sticker] review: too much text(" + countChars(text) + "字) -> skip");
                 return false;
             }
@@ -561,7 +581,11 @@ public class StickerManager {
         }
 
         AiAgentActivity.debugLog("[Sticker] review: " + (violating ? "VIOLATING -> skip" : "SAFE -> store"));
-        return !violating;
+        if (violating) {
+            lastCollectReason = "不符合收藏条件：图片含违规/敏感/游戏截图内容，不可收藏";
+            return false;
+        }
+        return true;
     }
 
     /**

@@ -75,24 +75,25 @@ public class ListeningStateManager {
         TriggerTask ctx = listenTasks.get(gid);
         if (ctx == null) return false;
 
-        // 同群自动续期达到上限 → 暂停监听
-        if (autoEnqueueCount.getOrDefault(gid, 0) >= MAX_AUTO_ENQUEUE) {
-            return false;
-        }
-
-        long now = System.currentTimeMillis();
-        long last = lastAutoEnqueueAt.getOrDefault(gid, 0L);
-        if (now - last < MIN_AUTO_ENQUEUE_INTERVAL_MS) {
-            return false;
-        }
-
         boolean relevant = (handler != null && handler.isRelevant(msg, ctx));
         if (!relevant && !shouldProactiveListen(msg)) {
             return false;
         }
 
+        // 原子「冷却 + 配额」判定：旧实现先 getOrDefault 判断、后面再 merge，
+        // 同群并发到达的两条消息会同时通过检查 → 续期次数突破 8 次上限、并绕过 12 秒冷却。
+        // 放在相关性判定之后，避免不相关的消息白白消耗配额。
+        final long now = System.currentTimeMillis();
+        final boolean[] claimed = new boolean[1];
+        lastAutoEnqueueAt.compute(gid, (k, last) -> {
+            if (autoEnqueueCount.getOrDefault(gid, 0) >= MAX_AUTO_ENQUEUE) return last;      // 配额已满
+            if (last != null && now - last < MIN_AUTO_ENQUEUE_INTERVAL_MS) return last;      // 冷却中
+            claimed[0] = true;
+            return now;
+        });
+        if (!claimed[0]) return false;
+
         autoEnqueueCount.merge(gid, 1, Integer::sum);
-        lastAutoEnqueueAt.put(gid, now);
         AiAgentActivity.qqLog("[Listen] " + (relevant ? "监听续期命中" : "主动关注命中")
                 + ": 群" + gid + " user=" + msg.getUserId()
                 + " count=" + autoEnqueueCount.get(gid));

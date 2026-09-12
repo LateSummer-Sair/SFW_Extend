@@ -59,17 +59,12 @@ public class ToolDispatcher {
     public static long timeoutForTool(String toolName) {
         if (toolName == null) return 120_000L;
         switch (toolName) {
-            case "time": case "balance": case "skillinfo": case "getpreference":
             case "markmessage": case "getselfinfo": case "pendingrequests":
             case "friendlist": case "grouplist": case "groupmembers":
             case "queryaffection": case "affectionrank": case "donationlist":
                 return 15_000L;
-            case "web": case "search": case "weather": case "readfile":
-            case "readdir": case "findfile": case "searchnote": case "searchglobal":
             case "vision": case "sendsticker": case "collectsticker":
                 return 60_000L;
-            case "download": case "eval": case "evaljs": case "sys": case "cmd":
-            case "batchrename": case "batchconvert": case "sendimage": case "sendrecord":
             case "sendfile": case "sendfileto": case "relay": case "forwardmsg":
             case "sendgroupmsg": case "call_agent": case "ask_agent":
                 return 180_000L;
@@ -113,6 +108,11 @@ public class ToolDispatcher {
         this.agentBus = bus;
     }
 
+    /** 获取 Agent 总线（供 FunctionCallingBridge 编排折叠消息/视觉兜底时唤起子 Agent）。 */
+    public AgentBus getAgentBus() {
+        return agentBus;
+    }
+
     /**
      * 注册 Harness 生命周期钩子（确定性约束层）。
      * 多个钩子按注册顺序依次执行；preExecute 任一返回非 null 即阻断执行。
@@ -151,18 +151,6 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("cmd", "执行SFW插件命令（组件名/函数名 参数）。不确定先 cmd /help 或 cmd 组件名/help")
                 .addString("command", "插件命令"));
 
-        tools.add(new ToolDefinition("readfile", "读取指定文件的文本内容。大文件超长会被截断，可用 offset(起始字符偏移)+limit(最多读取字符数) 分段读取")
-                .addString("path", "文件路径")
-                .addProperty("offset", "integer", "起始字符偏移（默认0从头读；续读大文件时传上次被截断的位置）", false, null)
-                .addProperty("limit", "integer", "最多读取的字符数（默认读全部，超长会被截断）", false, null));
-
-        tools.add(new ToolDefinition("readdir", "列出指定目录的文件与子目录结构")
-                .addOptionalString("path", "目录路径，留空则列出当前目录"));
-
-        tools.add(new ToolDefinition("findfile", "递归查找指定目录下文件名匹配关键词的文件/目录（快速定位，避免逐层 readdir 探索）")
-                .addString("path", "起始目录路径")
-                .addOptionalString("keyword", "文件名关键词（子串匹配，忽略大小写，留空=返回全部）"));
-
         tools.add(new ToolDefinition("sys", "执行系统命令（shell）")
                 .addString("command", "系统命令"));
 
@@ -172,28 +160,11 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("eval", "编译并执行 Java 代码（动态注入，终极兜底），可用 SFW 内部 API（Libraries/SairCons/Activity）或 JDK 标准类")
                 .addString("code", "要执行的 Java 代码"));
 
-        tools.add(new ToolDefinition("web", "抓取网页/API内容，自动识别JSON返回。URL需完整http/https")
-                .addString("url", "完整URL"));
-
-        tools.add(new ToolDefinition("search", "必应搜索，返回标题/链接/摘要")
-                .addString("query", "关键词"));
-
         tools.add(new ToolDefinition("remember", "记录一条跨会话的持久化记忆")
                 .addString("content", "要记住的内容"));
 
-        tools.add(new ToolDefinition("correct", "记录一条纠正信息（当用户指出你的错误、或你发现自己犯错时，记录纠正内容避免重复犯错）")
-                .addString("topic", "纠正主题/关键词（归类检索用）")
-                .addString("content", "纠正内容")
-                .addOptionalString("viewpoint", "观点标签（同一主题多观点时区分用，可留空）"));
-
-        tools.add(new ToolDefinition("download", "下载文件到 dataDir/downloads/ 目录")
-                .addString("url", "下载地址（http/https）"));
-
         tools.add(new ToolDefinition("superise", "弹出一个彩蛋/惊喜窗口")
                 .addString("content", "彩蛋文本内容"));
-
-        tools.add(new ToolDefinition("editprompt", "修改系统提示词（持久化到配置）")
-                .addString("content", "新的系统提示词（至少 30 字符）"));
 
         tools.add(new ToolDefinition("stop", "立即停止当前 Agent 执行循环"));
 
@@ -206,48 +177,11 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("sendfile", "发送文件（传递文件路径）")
                 .addString("path", "文件路径"));
 
-        tools.add(new ToolDefinition("schedule", "创建/管理定时任务，命令格式：add \"cron\" \"command\" | list | remove id | enable id | disable id")
-                .addString("content", "完整子命令字符串"));
-
-        tools.add(new ToolDefinition("note", "知识库：add title|content|tags / search q / list / get id / delete id / update id title|content|tags")
-                .addString("content", "子命令"));
-
-        tools.add(new ToolDefinition("searchnote", "在知识库中检索相关笔记")
-                .addString("query", "检索关键词"));
-
-        tools.add(new ToolDefinition("batchrename", "批量重命名文件（dir=/path pattern=regex replacement=text）")
-                .addString("dir", "目标目录")
-                .addString("pattern", "匹配的正则")
-                .addString("replacement", "替换文本"));
-
-        tools.add(new ToolDefinition("batchconvert", "批量图片格式转换（dir=/path from=EXT to=EXT）")
-                .addString("dir", "目标目录")
-                .addString("from", "源格式扩展名")
-                .addString("to", "目标格式扩展名"));
-
-        tools.add(new ToolDefinition("balance", "查询 DeepSeek 账户余额"));
-
         tools.add(new ToolDefinition("skillextract", "从执行轨迹中蒸馏提取技能")
                 .addOptionalString("focus", "本次提取关注的主题（可为空）"));
 
-        tools.add(new ToolDefinition("weather", "查询指定城市的实时天气")
-                .addString("city", "城市名"));
-
-        tools.add(new ToolDefinition("time", "查询当前日期和时间"));
-
         tools.add(new ToolDefinition("vision", "视觉分析图片：调用视觉模型分析并返回图片特征（类型/主体/文字/色调/二维码/违规内容等），适用于看图理解与内容鉴定")
                 .addString("url", "图片 URL（http/https）或 file_id"));
-
-        tools.add(new ToolDefinition("skillinfo", "查询某个技能/工具的完整使用说明书（不熟悉某技能或工具用法时，先调用本工具查详情）")
-                .addString("name", "技能名或工具名（如 weather、eval、sendimage 等）"));
-
-        tools.add(new ToolDefinition("setimageremark", "修改/设置某张图片的注释（AI 根据上下文或用户指正更新图片备注，注释与图片 MD5 强绑定并持久化，图片进入长期存储时注释随图保留）")
-                .addOptionalString("image_url", "图片 URL（http/https），与 image_md5 二选一")
-                .addOptionalString("image_md5", "图片 MD5（若已知，优先用此精确绑定，无需下载）")
-                .addString("remark", "新的图片注释内容"));
-
-        tools.add(new ToolDefinition("thirdskill", "管理三方技能库（仅 execs / QQ execs 可用）。命令格式：list | add 技能名|描述|内容 | delete 技能名")
-                .addString("content", "完整子命令字符串，如 list、add 技能名|描述|技能内容、delete 技能名"));
 
         tools.add(new ToolDefinition("callskill", "调用三方技能（data/skills/*.md）内嵌代码段的 airun 入口函数。仅 execs/本地通道可用。args 为 JSON（字符串用引号包裹、对象用 {}，如 {\"city\":\"北京\"} 或 \"你好\"）")
                 .addString("skill", "三方技能名")
@@ -259,10 +193,12 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("searchglobal", "全局记忆检索：跨群/跨用户检索 Bot 的对话历史、群聊记录和长期记忆（用于回答「某用户/某群之前聊了什么」）。涉及隐私的内容由你判断是否透露，隐私则跳过不说")
                 .addString("query", "检索关键词（话题/人名/群名等）"));
 
-        tools.add(new ToolDefinition("markmessage", "给消息打 Mark 备注（AI 自用内部标记，用户看不到）。action=set 标记某条消息的处理结果（message 可留空=当前消息，mark 必填）；action=get 查询某条消息是否已处理（message 必填）；action=list 列出最近带备注的消息")
+        tools.add(new ToolDefinition("markmessage", "给消息打 Mark 备注（AI 自用内部标记，用户看不到）。action=set 打备注（mark 必填）；action=get 查备注；action=list 列出最近带备注的消息。默认标记【当前消息】；要标记【被引用的消息】用 target=quoted；也可用 message_id 精确指定。会同时按 message_id 与内容双写，保证下轮必定查到")
                 .addString("action", "set/get/list")
-                .addOptionalString("message", "要标记或查询的消息内容（set 留空=当前消息；get 必填）")
-                .addOptionalString("mark", "备注内容（set 时必填，如「已记录XXX捐赠10元」）"));
+                .addOptionalString("mark", "备注内容（set 时必填，如「已分析：xxx」「已记录XXX捐赠10元」）")
+                .addOptionalString("target", "标记目标：current=当前消息（默认）/ quoted=被引用的消息")
+                .addOptionalString("message", "要标记或查询的消息内容（留空=按 target 自动定位；指定历史消息时填其正文）")
+                .addOptionalString("message_id", "精确指定消息 ID（最保险，优先于内容匹配）"));
 
         tools.add(new ToolDefinition("setpreference", "设置一条结构化偏好/设定（如找文件优先在哪找、谁能读哪个文件、发消息用什么语气）。scope=user/group/global，key=偏好名，value=偏好内容")
                 .addString("scope", "user/group/global")
@@ -273,11 +209,17 @@ public class ToolDispatcher {
                 .addString("scope", "user/group/global")
                 .addOptionalString("key", "偏好名，留空列出全部"));
 
-        // 三方技能（含代码段）动态注册为 Function Calling 工具（tp_ 前缀），execs/本地始终可用
-        addThirdPartyToolTools(tools);
+        // 三方技能动态注册为 Function Calling 工具（本地/execs 通道）
+        int builtinCount = tools.size();   // 记下内置工具边界：下面的「剔除被顶替的内置」只作用于这一段
+        addThirdPartyToolTools(tools, "console");
 
         // 多智能体递归唤起（call_agent/ask_agent）
         tools.addAll(AgentBus.callAgentTools());
+
+        // 被技能顶替的内置工具从列表里剔除（保持同名函数唯一）。
+        // ★ 只能剔「内置」那一段：技能自己提供的同名工具就在后面，一起剔掉就等于把工具删了
+        //   （曾经的真 bug：time/skillinfo/searchnote 剥离后根本没进过模型可见的工具列表）。
+        tools = dropReplacedBuiltins(tools, "console", builtinCount);
 
         applyStrictIfEnabled(tools);
         cachedAllTools = tools;
@@ -300,58 +242,17 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("eval", "编译并执行一段 Java 代码（动态注入）。execq 通道【仅限多对象拆分搜索场景破例使用】：用 HttpURLConnection 并发抓取多个对象的搜索结果并解析合并；其他场景禁止使用")
                 .addString("code", "要执行的 Java 代码（仅限搜索抓取）"));
 
-        tools.add(new ToolDefinition("web", "抓取指定 URL 的网页或 API 接口内容（自动识别 JSON 并原样返回）")
-                .addString("url", "要抓取的完整 URL（http/https）"));
-
-        tools.add(new ToolDefinition("search", "在必应搜索网页并返回标题、链接、摘要（适合查实时信息、公开资料、新闻）")
-                .addString("query", "搜索关键词"));
-
-        tools.add(new ToolDefinition("readdir", "列出指定目录的文件与子目录结构")
-                .addOptionalString("path", "目录路径，留空则列出当前目录"));
-
-        tools.add(new ToolDefinition("findfile", "递归查找指定目录下文件名匹配关键词的文件/目录（快速定位，避免逐层 readdir 探索）")
-                .addString("path", "起始目录路径")
-                .addOptionalString("keyword", "文件名关键词（子串匹配，忽略大小写，留空=返回全部）"));
-
-        tools.add(new ToolDefinition("readfile", "读取指定文件的文本内容。大文件超长会被截断，可用 offset(起始字符偏移)+limit(最多读取字符数) 分段读取")
-                .addString("path", "文件路径")
-                .addProperty("offset", "integer", "起始字符偏移（默认0从头读；续读大文件时传上次被截断的位置）", false, null)
-                .addProperty("limit", "integer", "最多读取的字符数（默认读全部，超长会被截断）", false, null));
-
-        tools.add(new ToolDefinition("weather", "查询指定城市的实时天气")
-                .addString("city", "城市名"));
-
-        tools.add(new ToolDefinition("time", "查询当前日期和时间"));
-
         tools.add(new ToolDefinition("vision", "视觉分析图片：调用视觉模型分析并返回图片特征（类型/主体/文字/色调/二维码/违规内容等），适用于看图理解与内容鉴定")
                 .addString("url", "图片 URL（http/https）或 file_id"));
 
         tools.add(new ToolDefinition("remember", "记录一条跨会话的持久化记忆")
                 .addString("content", "要记住的内容"));
 
-        tools.add(new ToolDefinition("correct", "记录一条纠正信息（当用户指出你的错误、或你发现自己犯错时，记录纠正内容避免重复犯错）")
-                .addString("topic", "纠正主题/关键词（归类检索用）")
-                .addString("content", "纠正内容")
-                .addOptionalString("viewpoint", "观点标签（同一主题多观点时区分用，可留空）"));
-
-        tools.add(new ToolDefinition("note", "知识库：add title|content|tags / search q / list / get id / delete id / update id title|content|tags")
-                .addString("content", "子命令"));
-
-        tools.add(new ToolDefinition("searchnote", "在知识库中检索相关笔记")
-                .addString("query", "检索关键词"));
-
-        tools.add(new ToolDefinition("balance", "查询 DeepSeek 账户余额"));
-
         tools.add(new ToolDefinition("sendsticker", "发送表情包（按图片内容描述匹配库存）")
                 .addOptionalString("context", "简短表情/情绪关键词（如「猫」「开心」「哭」），留空则返回库存清单"));
 
         tools.add(new ToolDefinition("collectsticker", "收藏表情包（imageUrl|context）")
                 .addString("content", "imageUrl|context 格式"));
-
-        tools.add(new ToolDefinition("setimageremark", "修改/设置某张图片的注释（根据上下文或用户指正更新图片备注，与图片 MD5 强绑定并持久化）")
-                .addOptionalString("image_url", "图片 URL（http/https），与 image_md5 二选一")
-                .addOptionalString("image_md5", "图片 MD5（若已知，优先用此精确绑定，无需下载）")
-                .addString("remark", "新的图片注释内容"));
 
         tools.add(new ToolDefinition("clearsticker", "清空表情包图片库（删数据库记录+本地文件）"));
 
@@ -383,9 +284,6 @@ public class ToolDispatcher {
 
         tools.add(new ToolDefinition("setsignature", "修改机器人自己的 QQ 个性签名")
                 .addString("signature", "新的个性签名内容"));
-
-        tools.add(new ToolDefinition("settrigger", "设置/修改 Bot 的消息触发词（仅主人）。多个触发词用 ; 分隔（如 小助手;助手;小助），群聊中提到任一触发词即触发回复。主人说「把触发词改成XX」「新增/删除触发词」「查看触发词」时调用")
-                .addOptionalString("words", "触发词列表，多个用 ; 分隔；留空或填 list/查看 则查询当前触发词"));
 
         tools.add(new ToolDefinition("leavegroup", "退出群聊（仅主人）")
                 .addProperty("dismiss", "boolean", "是否解散群（默认false）", false, null));
@@ -442,9 +340,6 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("friendlist", "查询 Bot 的好友列表（昵称/备注 + QQ 号）。私聊找某人（如私聊传话）时，先查它拿到目标 QQ 号")
                 .addOptionalString("keyword", "可选：按关键词过滤好友昵称/备注"));
 
-        tools.add(new ToolDefinition("skillinfo", "查询某个技能/工具的完整使用说明书（不熟悉某技能或工具用法时，先调用本工具查详情）")
-                .addString("name", "技能名或工具名"));
-
         // === 好友申请 / 群邀请决策工具（AI 处理待处理请求池） ===
         tools.add(new ToolDefinition("pendingrequests", "列出待处理的好友申请与群邀请（等待 AI/主人决策）"));
 
@@ -493,10 +388,12 @@ public class ToolDispatcher {
         tools.add(new ToolDefinition("searchglobal", "全局记忆检索：跨群/跨用户检索 Bot 的对话历史、群聊记录和长期记忆（用于回答「某用户/某群之前聊了什么」）。涉及隐私的内容由你判断是否透露，隐私则跳过不说")
                 .addString("query", "检索关键词（话题/人名/群名等）"));
 
-        tools.add(new ToolDefinition("markmessage", "给消息打 Mark 备注（AI 自用内部标记，用户看不到）。action=set 标记某条消息的处理结果（message 可留空=当前消息，mark 必填）；action=get 查询某条消息是否已处理（message 必填）；action=list 列出最近带备注的消息")
+        tools.add(new ToolDefinition("markmessage", "给消息打 Mark 备注（AI 自用内部标记，用户看不到）。action=set 打备注（mark 必填）；action=get 查备注；action=list 列出最近带备注的消息。默认标记【当前消息】；要标记【被引用的消息】用 target=quoted；也可用 message_id 精确指定。会同时按 message_id 与内容双写，保证下轮必定查到")
                 .addString("action", "set/get/list")
-                .addOptionalString("message", "要标记或查询的消息内容（set 留空=当前消息；get 必填）")
-                .addOptionalString("mark", "备注内容（set 时必填，如「已记录XXX捐赠10元」）"));
+                .addOptionalString("mark", "备注内容（set 时必填，如「已分析：xxx」「已记录XXX捐赠10元」）")
+                .addOptionalString("target", "标记目标：current=当前消息（默认）/ quoted=被引用的消息")
+                .addOptionalString("message", "要标记或查询的消息内容（留空=按 target 自动定位；指定历史消息时填其正文）")
+                .addOptionalString("message_id", "精确指定消息 ID（最保险，优先于内容匹配）"));
 
         tools.add(new ToolDefinition("setpreference", "设置一条结构化偏好/设定。scope=user/group/global，key=偏好名，value=偏好内容")
                 .addString("scope", "user/group/global")
@@ -509,10 +406,13 @@ public class ToolDispatcher {
 
         // 三方技能代码段执行能力（callskill + tp_ 动态工具）：默认放权给用户，用户可通过配置关闭
         if (AiConfig.getInstance().isThirdPartyCodeExecq()) {
-            tools.add(new ToolDefinition("callskill", "调用三方技能（data/skills/*.md）内嵌代码段的 airun 入口函数。args 为 JSON（字符串用引号包裹、对象用 {}）")
+            int builtinCount = tools.size();
+            tools.add(new ToolDefinition("callskill", "调用三方技能（data/skills/<技能名>/ 里的 Java 实现）airun 入口函数。args 为 JSON（字符串用引号包裹、对象用 {}）")
                     .addString("skill", "三方技能名")
                     .addString("args", "传给 airun 的参数（JSON 字符串）"));
-            addThirdPartyToolTools(tools);
+            addThirdPartyToolTools(tools, "execq");
+            // 被技能顶替的内置工具剔除（execq 通道）；同样只剔内置那一段
+            tools = dropReplacedBuiltins(tools, "execq", builtinCount);
         }
 
         // 多智能体递归唤起（call_agent/ask_agent）
@@ -540,34 +440,113 @@ public class ToolDispatcher {
     }
 
     /**
-     * 将含代码段的三方技能动态注册为 Function Calling 工具（tp_ 前缀）。
-     * 参数来自 front matter 的 airun 声明；未声明时退化为单个 args（JSON 字符串）。
+     * 将三方技能注册为 Function Calling 工具。
+     * <p>
+     * 两种注册名：
+     * <ol>
+     *   <li>声明了 {@code tool:} → 用该名字，并<b>顶替内置同名工具</b>（把硬编码实现剥离成 .md 的机制）；</li>
+     *   <li>未声明 → {@code tp_<规范化技能名>}。</li>
+     * </ol>
+     * 另有四处硬约束：工具名必须合法（{@code ^[a-zA-Z0-9_-]+$}，违规会导致<b>整条请求 400</b>）；
+     * 没有 airun 入口的不注册；纯文档技能不注册；{@code channels} 不含本通道的不注册。
+     * </p>
+     *
+     * @param channel 本工具列表所属通道（console / execq / execs）
      */
-    private static void addThirdPartyToolTools(List<ToolDefinition> tools) {
+    private static void addThirdPartyToolTools(List<ToolDefinition> tools, String channel) {
         SkillBank bank = SkillBank.getInstance();
         ThirdPartySkillStore store = bank == null ? null : bank.getThirdPartyStore();
         if (store == null) return;
-        // 按技能名排序，保证工具注册顺序字节稳定（DeepSeek 前缀缓存要求 tools 数组字节稳定，ConcurrentHashMap 迭代顺序不稳定会破坏缓存）
+        // 按技能名排序，保证工具注册顺序字节稳定（DeepSeek 前缀缓存要求 tools 数组字节稳定，
+        // ConcurrentHashMap 迭代顺序不稳定会破坏缓存）
         java.util.List<ThirdPartySkill> sorted = new java.util.ArrayList<>(store.getAll());
         sorted.sort(java.util.Comparator.comparing(ThirdPartySkill::getName));
         for (ThirdPartySkill tp : sorted) {
-            if (tp == null || !tp.hasCodeBlocks()) continue; // 仅注册含可执行代码段的技能
-            String toolName = "tp_" + tp.getName();
+            if (tp == null || !tp.hasJavaSource()) continue;
+            if (!tp.mentionsAirun()) continue;              // 无 airun 入口 → 不注册（加载期已红字告警）
+            if (!tp.appliesToChannel(channel)) continue;    // md 声明了通道 → 按声明过滤
+            String toolName = store.getRegisteredToolName(tp);
             String desc = tp.getAirunDescription();
             if (desc == null || desc.trim().isEmpty()) desc = tp.getDescription();
             if (desc == null || desc.trim().isEmpty()) desc = "调用三方技能 " + tp.getName();
+            // returns: 是给模型看的「返回什么」，写进工具描述能让它决定要不要调、结果怎么用
+            String ret = tp.getReturnType();
+            if (ret != null && !ret.trim().isEmpty()) {
+                desc = appendHint(desc, "返回: " + ret.trim());
+            }
             ToolDefinition td = new ToolDefinition(toolName, desc);
             List<ThirdPartySkill.AirunParam> params = tp.getAirunParams();
             if (params != null && !params.isEmpty()) {
                 for (ThirdPartySkill.AirunParam p : params) {
                     if (p == null || p.name.isEmpty()) continue;
-                    td.addProperty(p.name, p.type, p.description, p.required, null);
+                    // 描述里补上示例/默认值：模型看到「示例」的命中率明显高于抽象类型说明
+                    String pdesc = p.description == null ? "" : p.description;
+                    if (p.example != null && !p.example.trim().isEmpty()) {
+                        pdesc = appendHint(pdesc, "示例: " + p.example.trim());
+                    }
+                    if (p.defaultValue != null && !p.defaultValue.trim().isEmpty()) {
+                        pdesc = appendHint(pdesc, "默认: " + p.defaultValue.trim());
+                    }
+                    if (p.isArray()) {
+                        td.addArrayProperty(p.name, pdesc, p.required, p.items, p.itemsDescription);
+                    } else {
+                        td.addProperty(p.name, p.type, pdesc, p.required, p.enumValues);
+                    }
                 }
-            } else {
+            } else if (tp.getDeclaredToolName() == null || tp.getDeclaredToolName().isEmpty()) {
+                // 未声明参数的「新」技能：退化为单个 args 参数（兼容旧写法）
                 td.addString("args", "传给 airun 的 JSON 参数（字符串或对象，如 \"hello\" 或 {\"city\":\"北京\"}）");
             }
+            // 声明了 tool:（顶替内置实现）且未声明参数 → 生成零参数 schema，与原内置工具一致
             tools.add(td);
         }
+    }
+
+    /** 把补充说明追加到描述尾部（已有内容用全角括号包裹，空描述则直出）。 */
+    private static String appendHint(String desc, String hint) {
+        if (hint == null || hint.isEmpty()) return desc;
+        if (desc == null || desc.trim().isEmpty()) return hint;
+        return desc + "（" + hint + "）";
+    }
+
+    /** 本通道下由 .md 技能顶替的内置工具名集合（这些内置 ToolDefinition 必须从列表里剔除，否则同名重复）。 */
+    static java.util.Set<String> mdReplacedToolNames(String channel) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        SkillBank bank = SkillBank.getInstance();
+        ThirdPartySkillStore store = bank == null ? null : bank.getThirdPartyStore();
+        if (store == null) return out;
+        for (ThirdPartySkill tp : store.getAll()) {
+            if (tp == null || !tp.replacesBuiltinTool()) continue;
+            if (!tp.appliesToChannel(channel)) continue;
+            out.add(tp.getDeclaredToolName());
+        }
+        return out;
+    }
+
+    /** 移除被 .md 技能顶替的内置工具（保持工具列表里同名函数唯一）。 */
+    /**
+     * 把「被技能顶替的内置工具」从列表里剔除（保持同名函数唯一）。
+     *
+     * @param builtinCount 内置工具的数量（列表前段）—— <b>只在这一段里剔除</b>。
+     *                     后段是技能自己提供的 ToolDefinition，同名是正常且必须保留的：
+     *                     早先无差别剔除会把技能提供的工具一并删掉，导致剥离后的工具
+     *                     压根进不了模型可见的工具列表。
+     */
+    private static List<ToolDefinition> dropReplacedBuiltins(List<ToolDefinition> tools, String channel,
+                                                             int builtinCount) {
+        java.util.Set<String> replaced = mdReplacedToolNames(channel);
+        if (replaced.isEmpty()) return tools;
+        List<ToolDefinition> kept = new ArrayList<>(tools.size());
+        for (int i = 0; i < tools.size(); i++) {
+            ToolDefinition t = tools.get(i);
+            if (i < builtinCount && t != null && replaced.contains(t.getName())) {
+                AiAgentActivity.debugLog("[thirdskill] 内置工具 " + t.getName()
+                        + " 的实现已剥离到技能，本次请求使用技能版本");
+                continue;
+            }
+            kept.add(t);
+        }
+        return kept;
     }
 
     // ==================== 执行 ====================
@@ -589,6 +568,15 @@ public class ToolDispatcher {
         auditToolAccess(toolName, argumentsJson, ctx);
         String fileBlock = checkQqFileAccess(toolName, argumentsJson, ctx);
         if (fileBlock != null) return fileBlock;
+
+        // .md 技能顶替的内置工具：优先路由到 airun 实现（实现已从 Java 剥离）
+        if (toolName != null && isMdProvidedTool(toolName, channel)) {
+            long mdStart = System.currentTimeMillis();
+            String r = executeThirdPartyTool(toolName, argumentsJson, ctx);
+            recordToolTrace(toolName, channel, argumentsJson, r, true,
+                    System.currentTimeMillis() - mdStart, "md-skill");
+            return r;
+        }
 
         HarnessHook[] snapshot;
         synchronized (hooks) {
@@ -646,7 +634,7 @@ public class ToolDispatcher {
         return null;
     }
 
-    /** 对高风险/文件访问工具做审计日志（QQ 文件访问、本地高危执行）。 */
+    /** 对高风险/文件访问工具做审计日志（QQ 文件访问、本地高危执行、三方技能代码执行）。 */
     private static void auditToolAccess(String toolName, String argumentsJson, ToolContext ctx) {
         if (toolName == null) return;
         boolean qq = ctx != null && ctx.isExecq();
@@ -658,6 +646,16 @@ public class ToolDispatcher {
         if (("cmd".equals(toolName) || "sys".equals(toolName) || "eval".equals(toolName) || "evaljs".equals(toolName))
                 && ctx != null && !ctx.isExecq()) {
             AiAgentActivity.debugLog("[Audit] 本地高危执行 tool=" + toolName + " args=" + briefArgs(argumentsJson));
+        }
+        // 三方技能 = 执行 .md 内嵌的任意代码，此前完全不在审计范围内
+        if (toolName.startsWith("tp_") || "callskill".equals(toolName)) {
+            long uid = (ctx != null) ? ctx.senderQQ : 0;
+            int aff = (ctx != null) ? ctx.affection : 0;
+            boolean master = ctx != null && ctx.isMaster;
+            AiAgentActivity.debugLog("[Audit] 三方技能代码执行 tool=" + toolName
+                    + " channel=" + (ctx != null ? (ctx.execsMode ? "execs" : ctx.channel) : "?")
+                    + " user=" + uid + " affection=" + aff + (master ? " (ROOT/主人)" : "")
+                    + " args=" + briefArgs(argumentsJson));
         }
     }
 
@@ -743,28 +741,6 @@ public class ToolDispatcher {
                 }
                 return act("cmd", cmdArg);
             }
-            case "readfile": {
-                String path = arg(argumentsJson, "path");
-                int offset = parseIntArg(argumentsJson, "offset", 0);
-                int limit = parseIntArg(argumentsJson, "limit", -1);
-                String[] resolved = resolveQqPath(ctx, path, false);
-                if (resolved[1] != null) return resolved[1];
-                return actionHandler.executeReadFile(resolved[0], offset, limit);
-            }
-            case "readdir": {
-                String path = arg(argumentsJson, "path");
-                String[] resolved = resolveQqPath(ctx, path, true);
-                if (resolved[1] != null) return resolved[1];
-                return act("readdir", resolved[0]);
-            }
-            case "findfile": {
-                String fpath = arg(argumentsJson, "path");
-                String fkw = arg(argumentsJson, "keyword");
-                String[] resolved = resolveQqPath(ctx, fpath, true);
-                if (resolved[1] != null) return resolved[1];
-                String fcontent = (fkw == null || fkw.trim().isEmpty()) ? resolved[0] : (resolved[0] + "|" + fkw.trim());
-                return act("findfile", fcontent);
-            }
             case "sys":          return act("sys", arg(argumentsJson, "command"));
             case "evaljs": {
                 // execq 通道已彻底禁用动态执行（evaljs），仅本地 execs / QQ execs: 可用
@@ -783,40 +759,16 @@ public class ToolDispatcher {
                 }
                 return act("eval", arg(argumentsJson, "code"));
             }
-            case "web": {
-                String url = arg(argumentsJson, "url");
-                String result = act("web", url);
-                autoStoreWebResult(url, result);
-                return result;
-            }
-            case "search": {
-                String query = arg(argumentsJson, "query");
-                String result = act("search", query);
-                autoStoreSearchResult(query, result);
-                return result;
-            }
             case "remember":     return executeRemember(arg(argumentsJson, "content"), ctx);
-            case "correct":      return executeCorrect(argumentsJson, ctx);
-            case "download":     return act("download", arg(argumentsJson, "url"));
             case "superise":     return act("superise", arg(argumentsJson, "content"));
-            case "editprompt":   return act("editprompt", arg(argumentsJson, "content"));
             case "stop":         return act("stop", "");
             case "sendimage":    return ctx.isExecq() ? executeSendImageQq(arg(argumentsJson, "content"), ctx) : act("sendimage", arg(argumentsJson, "content"));
             case "sendrecord":   return ctx.isExecq() ? executeSendRecordQq(arg(argumentsJson, "path"), ctx) : act("sendrecord", arg(argumentsJson, "path"));
             case "sendfile":     return ctx.isExecq() ? executeSendFileQq(arg(argumentsJson, "path"), ctx) : act("sendfile", arg(argumentsJson, "path"));
-            case "schedule":     return act("schedule", arg(argumentsJson, "content"));
-            case "note":         return act("note", arg(argumentsJson, "content"));
-            case "searchnote":   return act("searchnote", arg(argumentsJson, "query"));
-            case "batchrename":  return act("batchrename", batchRenameContent(argumentsJson));
-            case "batchconvert": return act("batchconvert", batchConvertContent(argumentsJson));
-            case "balance":      return act("balance", "");
             case "skillextract": return act("skillextract", arg(argumentsJson, "focus"));
-            case "weather":      return act("weather", arg(argumentsJson, "city"));
-            case "time":         return executeTime();
             case "vision":       return executeVision(argumentsJson, ctx);
             case "setname":      return executeSetName(arg(argumentsJson, "name"), ctx);
             case "setsignature": return executeSetSignature(arg(argumentsJson, "signature"), ctx);
-            case "settrigger":   return executeSetTrigger(arg(argumentsJson, "words"), ctx);
             case "sendsticker":  return actionHandler.executeSendSticker(arg(argumentsJson, "context"));
             case "collectsticker": return actionHandler.executeCollectSticker(arg(argumentsJson, "content"));
             case "clearsticker":  return actionHandler.executeClearSticker();
@@ -840,9 +792,6 @@ public class ToolDispatcher {
             case "groupmembers": return executeGroupMembers(argumentsJson, ctx);
             case "sendgroupmsg": return executeSendGroupMsg(argumentsJson, ctx);
             case "friendlist":    return executeFriendList(argumentsJson, ctx);
-            case "skillinfo":       return executeSkillInfo(arg(argumentsJson, "name"));
-            case "setimageremark":   return executeSetImageRemark(argumentsJson);
-            case "thirdskill":       return executeThirdSkill(arg(argumentsJson, "content"));
             case "callskill":        return executeCallSkill(argumentsJson, ctx);
             case "pendingrequests":    return executePendingRequests(ctx);
             case "approvefriend":      return executeApproveFriend(arg(argumentsJson, "flag"), ctx);
@@ -895,34 +844,7 @@ public class ToolDispatcher {
     }
 
     /** 记录纠正信息（correct 工具）：写入 corrections 表，避免 AI 重复犯错。 */
-    private String executeCorrect(String json, ToolContext ctx) {
-        String topic = arg(json, "topic");
-        String content = arg(json, "content");
-        String viewpoint = arg(json, "viewpoint");
-        if (content == null || content.trim().isEmpty()) {
-            return "[correct] 错误：content（纠正内容）不能为空";
-        }
-        if (topic == null || topic.trim().isEmpty()) {
-            topic = "general";
-        }
-        PersistenceManager pm = PersistenceManager.getInstance();
-        if (pm == null) {
-            return "[correct] 错误：持久化层未初始化";
-        }
-        long qq = (ctx != null && ctx.senderQQ > 0) ? ctx.senderQQ : 0;
-        int id = pm.addCorrection(topic.trim(), content.trim(),
-                viewpoint != null ? viewpoint.trim() : "", "ai", qq);
-        return id >= 0
-            ? "[correct] 已记录纠正 #" + id + "（主题: " + topic + "）"
-            : "[correct] 记录失败";
-    }
-
     /** 查询当前日期时间。 */
-    private static String executeTime() {
-        return "当前时间: " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss EEEE")
-                .format(new java.util.Date());
-    }
-
     /** vision 工具的视觉分析提示词：要求视觉模型返回图片的详细特征描述。 */
     private static final String VISION_PROMPT =
             "请仔细分析这张图片，并输出详细的结构化描述，包括：\n"
@@ -1016,6 +938,8 @@ public class ToolDispatcher {
         String action = arg(argumentsJson, "action");
         String message = arg(argumentsJson, "message");
         String mark = arg(argumentsJson, "mark");
+        String target = arg(argumentsJson, "target");          // current（默认）/ quoted
+        long explicitMsgId = parseLongArg(arg(argumentsJson, "message_id"));
         sair.aiagent.onebot.UnifiedQQMemoryManager mem = ctx != null ? ctx.unifiedMemory : null;
         if (mem == null) {
             return "[markmessage] 统一记忆库不可用（仅 QQ 通道支持消息备注）";
@@ -1034,6 +958,43 @@ public class ToolDispatcher {
         }
         if (action == null) action = "";
         action = action.trim();
+
+        // === 目标消息定位（最保险：能拿到 message_id 就精确标记，同时保留内容匹配兜底） ===
+        boolean quotedTarget = "quoted".equalsIgnoreCase(target == null ? "" : target.trim());
+        long targetMsgId = explicitMsgId;
+        long targetSenderQQ = senderQQ;
+        String targetContent = null;
+        if (ctx != null && ctx.qqMsg != null) {
+            sair.aiagent.onebot.model.QQMessage q = ctx.qqMsg;
+            if (quotedTarget) {
+                if (targetMsgId <= 0) targetMsgId = q.getReplyMessageId();
+                targetSenderQQ = (q.getQuotedSenderQQ() > 0) ? q.getQuotedSenderQQ() : senderQQ;
+                targetContent = q.getQuotedMessageContent();
+            } else {
+                if (targetMsgId <= 0) targetMsgId = q.getMessageId();
+                targetContent = q.getPlainText();
+            }
+        }
+        // 显式 message 参数优先作为内容匹配键（get 必填；set 用于指定历史消息）
+        if (message != null && !message.trim().isEmpty()) {
+            String supplied = message.trim();
+            if (!quotedTarget && explicitMsgId <= 0 && targetMsgId > 0) {
+                // 模型给了 message 但没给 message_id：只有当这段文字与「当前消息」内容一致时，
+                // 才保留当前消息 ID 的精确写入；否则视为要标记别的历史消息，放弃 ID 语义避免标错。
+                String cur = (ctx != null && ctx.qqMsg != null) ? ctx.qqMsg.getPlainText() : null;
+                if (!looksLikeSameMessage(cur, supplied)) targetMsgId = 0;
+            }
+            targetContent = supplied;
+        }
+        // 引用折叠消息时，拿到的正文含「[折叠消息展开内容]」标记，而库里存的是标记之前的头部；
+        // 这里归一化为头部，保证内容匹配兜底也能命中。
+        if (targetContent != null) {
+            int foldIdx = targetContent.indexOf("[折叠消息展开内容]");
+            if (foldIdx > 0) {
+                String head = targetContent.substring(0, foldIdx).trim();
+                if (!head.isEmpty()) targetContent = head;
+            }
+        }
 
         if ("list".equals(action)) {
             if ("group".equals(srcType)) {
@@ -1054,12 +1015,20 @@ public class ToolDispatcher {
         }
 
         if ("get".equals(action)) {
-            if (message == null || message.trim().isEmpty()) {
-                return "[markmessage] get 需要 message 参数（要查询的消息内容）";
+            String existing = null;
+            // 1) 按 message_id 精确查（最保险）
+            if (targetMsgId > 0) {
+                existing = "group".equals(srcType)
+                        ? mem.getGroupMessageMarkById(srcId, targetMsgId)
+                        : mem.getConversationMarkById(srcType, srcId, targetMsgId);
             }
-            String existing = "group".equals(srcType)
-                    ? mem.getGroupMessageMark(srcId, senderQQ, message.trim())
-                    : mem.getConversationMark(srcType, srcId, message.trim());
+            // 2) 兜底：内容匹配
+            if ((existing == null || existing.isEmpty())
+                    && targetContent != null && !targetContent.trim().isEmpty()) {
+                existing = "group".equals(srcType)
+                        ? mem.getGroupMessageMark(srcId, targetSenderQQ, targetContent.trim())
+                        : mem.getConversationMark(srcType, srcId, targetContent.trim());
+            }
             return existing != null && !existing.isEmpty()
                     ? "[markmessage] 该消息已有备注: " + existing
                     : "[markmessage] 该消息暂无备注（说明尚未处理或无需处理）";
@@ -1069,22 +1038,67 @@ public class ToolDispatcher {
             if (mark == null || mark.trim().isEmpty()) {
                 return "[markmessage] set 需要 mark 参数（备注内容）";
             }
-            String target = (message != null && !message.trim().isEmpty())
-                    ? message.trim()
-                    : (ctx != null && ctx.qqMsg != null ? ctx.qqMsg.getPlainText() : null);
-            if (target == null || target.trim().isEmpty()) {
-                return "[markmessage] 无法确定要标记的消息（请提供 message 参数）";
+            String m = mark.trim();
+            boolean wrote = false;
+            // 1) 按 message_id 精确写（最保险）
+            if (targetMsgId > 0) {
+                if ("group".equals(srcType)) {
+                    mem.setGroupMessageMarkById(srcId, targetMsgId, m);
+                } else {
+                    mem.setConversationMarkById(srcType, srcId, targetMsgId, m);
+                }
+                wrote = true;
             }
-            if ("group".equals(srcType)) {
-                mem.setGroupMessageMark(srcId, senderQQ, target, mark.trim());
-            } else {
-                mem.setConversationMark(srcType, srcId, target, mark.trim());
+            // 2) 同时按内容写一份兜底（两条路都覆盖，任一路径都能查到「已处理」）
+            if (targetContent != null && !targetContent.trim().isEmpty()) {
+                String content = targetContent.trim();
+                if ("group".equals(srcType)) {
+                    mem.setGroupMessageMark(srcId, targetSenderQQ, content, m);
+                } else {
+                    mem.setConversationMark(srcType, srcId, content, m);
+                }
+                wrote = true;
             }
-            String brief = target.length() > 40 ? target.substring(0, 40) + "..." : target;
-            return "[markmessage] 已标记消息 \"" + brief + "\" → " + mark.trim();
+            if (!wrote) {
+                return "[markmessage] 无法确定要标记的消息（请提供 message 或 message_id 参数）";
+            }
+            String brief = (targetContent != null ? targetContent : "(按消息ID)");
+            if (brief.length() > 40) brief = brief.substring(0, 40) + "...";
+            return "[markmessage] 已标记消息 \"" + brief + "\" → " + m
+                    + (targetMsgId > 0 ? "（精确 message_id=" + targetMsgId + " + 内容匹配双写）" : "（内容匹配）");
         }
 
-        return "[markmessage] 用法: action=set（打备注，mark 必填）/ get（查备注，message 必填）/ list（列出最近带备注消息）";
+        return "[markmessage] 用法: action=set（打备注，mark 必填）/ get（查备注）/ list（列出最近带备注消息）；"
+             + "target=current（默认，当前消息）/ quoted（被引用的消息）；也可直接给 message_id 精确指定";
+    }
+
+    /** 解析 long 参数（非法/缺省返回 0）。 */
+    private static long parseLongArg(String v) {
+        if (v == null || v.trim().isEmpty()) return 0L;
+        try { return Long.parseLong(v.trim()); } catch (NumberFormatException e) { return 0L; }
+    }
+
+    /**
+     * 判断模型给出的 message 文本是否就在描述「当前消息」（用于决定是否保留按 message_id 的精确写入）。
+     * <p>模型常自行加前缀（如 "[图片] "）或截断，故依次做：直接包含 → URL 命中 → 去空白/括号后包含。</p>
+     */
+    private static boolean looksLikeSameMessage(String currentPlainText, String supplied) {
+        if (currentPlainText == null || supplied == null) return false;
+        String a = currentPlainText.trim();
+        String b = supplied.trim();
+        if (a.isEmpty() || b.isEmpty()) return false;
+        if (a.contains(b) || b.contains(a)) return true;
+        // URL 比对：消息里的图片 URL 是最可靠的锚点
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("https?://\\S+").matcher(b);
+        while (m.find()) {
+            String url = m.group();
+            if (url.length() > 16 && a.contains(url)) return true;
+        }
+        // 归一化后包含（忽略空白与各类括号）
+        String na = a.replaceAll("[\\s\\[\\]【】()（）]+", "");
+        String nb = b.replaceAll("[\\s\\[\\]【】()（）]+", "");
+        if (na.isEmpty() || nb.isEmpty()) return false;
+        return na.contains(nb) || nb.contains(na);
     }
 
     /** 设置结构化偏好（setpreference 工具）。 */
@@ -1179,17 +1193,6 @@ public class ToolDispatcher {
     }
 
     /** 查询技能/工具的完整说明书（skillinfo 工具）。 */
-    private String executeSkillInfo(String name) {
-        if (name == null || name.trim().isEmpty()) {
-            return "[skillinfo] 用法: 传 name 参数指定技能名或工具名";
-        }
-        String detail = SkillBank.getInstance().getTagDetail(name.trim());
-        if (detail == null) {
-            return "[skillinfo] 未找到技能或工具: " + name + "（可尝试其它名称）";
-        }
-        return detail;
-    }
-
     /** 列出待处理的好友申请与群邀请（pendingrequests 工具）。 */
     private String executePendingRequests(ToolContext ctx) {
         if (ctx == null || ctx.pendingRequestPool == null) {
@@ -1680,36 +1683,6 @@ public class ToolDispatcher {
     }
 
     /** 修改/设置图片注释（setimageremark 工具）：按 MD5 强绑定写入持久化。 */
-    private String executeSetImageRemark(String json) {
-        String remark = FunctionCallingBridge.extractArg(json, "remark");
-        if (remark == null || remark.trim().isEmpty()) {
-            return "[setimageremark] 错误：remark 不能为空";
-        }
-        String md5 = FunctionCallingBridge.extractArg(json, "image_md5");
-        if (md5 == null || md5.trim().isEmpty()) {
-            String imageUrl = FunctionCallingBridge.extractArg(json, "image_url");
-            if (imageUrl == null || imageUrl.trim().isEmpty()) {
-                return "[setimageremark] 错误：需提供 image_url 或 image_md5 之一";
-            }
-            try {
-                byte[] bytes = sair.aiagent.onebot.ImageDownloader.downloadImage(imageUrl.trim());
-                if (bytes == null || bytes.length == 0) {
-                    return "[setimageremark] 错误：图片下载失败，无法计算 MD5";
-                }
-                md5 = sair.aiagent.onebot.ImageRecognizer.md5(bytes);
-            } catch (Exception e) {
-                return "[setimageremark] 错误：图片下载异常: " + e.toString();
-            }
-        }
-        md5 = md5.trim().toLowerCase();
-        PersistenceManager pm = PersistenceManager.getInstance();
-        if (pm == null) {
-            return "[setimageremark] 错误：持久化层未初始化";
-        }
-        pm.setImageRemark(md5, remark.trim(), "ai");
-        return "[setimageremark] 已更新图片注释（MD5: " + md5 + "）";
-    }
-
     /** 调用三方技能代码段 airun 入口（callskill 工具）。是否在 execq/QQ 通道可用由 setthirdpartycode 配置决定。 */
     private String executeCallSkill(String json, ToolContext ctx) {
         String skillName = arg(json, "skill");
@@ -1721,15 +1694,37 @@ public class ToolDispatcher {
         if (skill == null) return "[callskill] 未找到三方技能: " + skillName.trim();
         String blocked = checkThirdPartySkillExecqSafety(skill, ctx);
         if (blocked != null) return blocked;
-        return invokeSkill(skill, argsJson);
+        return invokeSkill(skill, argsJson, ctx);
     }
 
-    /** 执行动态注册的三方技能工具（tp_ 前缀），组装入参后调用 airun 入口。 */
+    /** 该工具名是否由 .md 技能提供（顶替内置实现），且适用于本通道。 */
+    private static boolean isMdProvidedTool(String toolName, String channel) {
+        if (toolName.startsWith("tp_")) return true;   // tp_ 前缀本身就是 .md 技能
+        SkillBank bank = SkillBank.getInstance();
+        ThirdPartySkillStore store = bank == null ? null : bank.getThirdPartyStore();
+        if (store == null) return false;
+        for (ThirdPartySkill tp : store.getAll()) {
+            if (tp == null || !tp.replacesBuiltinTool()) continue;
+            if (!toolName.equals(tp.getDeclaredToolName())) continue;
+            if (!tp.appliesToChannel(channel)) return false;
+            return true;
+        }
+        return false;
+    }
+
+    /** 执行动态注册的三方技能工具（tp_ 前缀或顶替内置的工具名），组装入参后调用 airun 入口。 */
     private String executeThirdPartyTool(String skillName, String argumentsJson, ToolContext ctx) {
         ThirdPartySkillStore store = SkillBank.getInstance().getThirdPartyStore();
         if (store == null) return "[callskill] 三方技能库未初始化";
+        // 工具名可能是「tp_<安全名>」「安全名」或「顶替的内置工具名」，三种都要能查到
         ThirdPartySkill skill = store.get(skillName);
+        if (skill == null) skill = store.getBySanitizedToolName(skillName);
+        if (skill == null) skill = store.getByProvidedToolName(skillName);
         if (skill == null) return "[callskill] 未找到三方技能: " + skillName;
+        // 权限闸门：默认 AFFECTION:300（主人=ROOT 直接放行），技能可声明覆盖
+        String denied = HarnessConfig.getInstance().checkPermission(
+                skillName, ctx, skill.getDeclaredPermission());
+        if (denied != null) return denied;
         String blocked = checkThirdPartySkillExecqSafety(skill, ctx);
         if (blocked != null) return blocked;
         String argsJson = argumentsJson;
@@ -1738,17 +1733,13 @@ public class ToolDispatcher {
             String raw = arg(argumentsJson, "args");
             if (raw != null && !raw.trim().isEmpty()) argsJson = raw;
         }
-        return invokeSkill(skill, argsJson);
+        return invokeSkill(skill, argsJson, ctx);
     }
 
     private static String checkThirdPartySkillExecqSafety(ThirdPartySkill skill, ToolContext ctx) {
         if (ctx == null || !ctx.isExecq() || ctx.execsMode || ctx.isMaster) return null;
-        if (skill == null || skill.getCodeBlocks() == null || skill.getCodeBlocks().isEmpty()) return null;
-        StringBuilder code = new StringBuilder();
-        for (String block : skill.getCodeBlocks().values()) {
-            if (block != null) code.append(block).append('\n');
-        }
-        String c = code.toString().toLowerCase();
+        if (skill == null || !skill.hasJavaSource()) return null;
+        String c = skill.getJavaText().toLowerCase();
         for (String pattern : HarnessConfig.getInstance().getForbiddenCodePatterns()) {
             if (c.contains(pattern)) {
                 return "[harness] 代码安全阻断：三方技能 " + skill.getName() + " 含禁用模式 '" + pattern + "'";
@@ -1757,8 +1748,12 @@ public class ToolDispatcher {
         return null;
     }
 
-    /** 实际调用三方技能 airun 入口（懒创建 SkillCodeRunner）。 */
-    private String invokeSkill(ThirdPartySkill skill, String argsJson) {
+    /**
+     * 实际调用三方技能 airun 入口。
+     * <p>技能代码在<b>加载期</b>就由 {@code ThirdPartySkillStore.setCodeRunner()} 注册进运行时，
+     * 这里只做兜底懒创建（正常路径下 runner 早已由 AiAgentActivity 注入 store）。</p>
+     */
+    private String invokeSkill(ThirdPartySkill skill, String argsJson, ToolContext ctx) {
         if (skillCodeRunner == null) {
             synchronized (this) {
                 if (skillCodeRunner == null) {
@@ -1769,26 +1764,10 @@ public class ToolDispatcher {
                 }
             }
         }
-        return skillCodeRunner.invoke(skill, argsJson);
+        return skillCodeRunner.invoke(skill, argsJson, ctx);
     }
 
-    /** 管理三方技能库（thirdskill 工具）：list / add / delete。 */
-    private String executeThirdSkill(String content) {
-        ThirdPartySkillStore store = SkillBank.getInstance().getThirdPartyStore();
-        if (store == null) return "[thirdskill] 三方技能库未初始化";
-        if (content == null || content.trim().isEmpty()) return "[thirdskill] 用法: list | add 技能名|描述|内容 | delete 技能名";
-        String cmd = content.trim();
-        if ("list".equalsIgnoreCase(cmd)) return store.list();
-        if (cmd.toLowerCase().startsWith("delete ")) return store.delete(cmd.substring(7).trim());
-        if (cmd.toLowerCase().startsWith("add ")) {
-            String args = cmd.substring(4).trim();
-            String[] parts = args.split("\\|", 3);
-            if (parts.length < 2) return "[thirdskill] add 格式错误: add 技能名|描述|内容";
-            return store.add(parts[0].trim(), parts[1].trim(), parts.length > 2 ? parts[2].trim() : "");
-        }
-        return "[thirdskill] 未知子命令: " + cmd + "（支持 list / add / delete）";
-    }
-
+    /** 管理三方技能库（thirdskill 工具）：list / validate / add / delete。 */
     /** 将工具调用委托给 AgentActionHandler 执行（保持与 XML 标签执行逻辑一致）。 */
     private String act(String type, String content) {
         return actionHandler.executeAction(new AgentAction(type, content));
@@ -1802,97 +1781,6 @@ public class ToolDispatcher {
         String v = arg(argumentsJson, key);
         if (v == null || v.trim().isEmpty()) return def;
         try { return Integer.parseInt(v.trim()); } catch (NumberFormatException e) { return def; }
-    }
-
-    // ==================== 联网成功自动沉淀 ====================
-
-    /**
-     * 搜索成功时自动沉淀到知识库（notes），作为下次同类问题的探索资料。
-     * 仅「拿到预期结果」才沉淀；失败（超时/被反爬/空结果）不沉淀。
-     */
-    private static void autoStoreSearchResult(String query, String result) {
-        if (query == null || query.trim().isEmpty()) return;
-        if (!isSearchSuccess(result)) return;
-        final String q = query.trim();
-        final String note = truncateNote(result.trim());
-        ThreadManager.getInstance().newNamedCached("AutoNote").submit(() -> {
-            PersistenceManager pm = PersistenceManager.getInstance();
-            if (pm == null) return;
-            try {
-                int id = pm.addNote("[联网搜索] " + q, note, q);
-                if (id >= 0) {
-                    AiAgentActivity.debugLog("[AutoNote] 搜索成功已沉淀笔记 #" + id + ": " + q);
-                }
-            } catch (Exception ignored) {
-                // 沉淀失败不影响主流程
-            }
-        });
-    }
-
-    /**
-     * 抓取成功时自动沉淀到知识库（notes），作为下次同类问题的探索资料。
-     * 仅「抓到有效正文」才沉淀；失败（HTTP 错误/被拒绝/空正文）不沉淀。
-     */
-    private static void autoStoreWebResult(String url, String result) {
-        if (url == null || url.trim().isEmpty()) return;
-        if (!isWebSuccess(result)) return;
-        final String u = url.trim();
-        final String note = truncateNote(result.trim());
-        ThreadManager.getInstance().newNamedCached("AutoNote").submit(() -> {
-            PersistenceManager pm = PersistenceManager.getInstance();
-            if (pm == null) return;
-            try {
-                int id = pm.addNote("[网页抓取] " + u, note, u);
-                if (id >= 0) {
-                    AiAgentActivity.debugLog("[AutoNote] 抓取成功已沉淀笔记 #" + id + ": " + u);
-                }
-            } catch (Exception ignored) {
-                // 沉淀失败不影响主流程
-            }
-        });
-    }
-
-    /** 判断搜索结果是否成功：SearchTool 成功以 [搜索] 开头，失败一律以 [search] 开头。 */
-    private static boolean isSearchSuccess(String result) {
-        if (result == null) return false;
-        String r = result.trim();
-        if (r.isEmpty()) return false;
-        return !r.startsWith("[search]");
-    }
-
-    /** 判断抓取结果是否成功：抓到有效正文才算成功，失败/被拒绝/空正文不算。 */
-    private static boolean isWebSuccess(String result) {
-        if (result == null) return false;
-        String r = result.trim();
-        if (r.isEmpty()) return false;
-        if (!r.startsWith("Web GET")) return false;
-        if (r.contains("失败:") || r.contains("错误:") || r.contains("被拒绝")) return false;
-        int httpIdx = r.indexOf("(HTTP ");
-        if (httpIdx > 0) {
-            int colon = r.indexOf(':', httpIdx);
-            String body = colon > 0 ? r.substring(colon + 1).trim() : "";
-            if (body.length() < 30) return false;
-        }
-        return true;
-    }
-
-    /** 截断过长的笔记正文，避免单条笔记膨胀。 */
-    private static String truncateNote(String content) {
-        if (content == null) return "";
-        if (content.length() <= 3000) return content;
-        return content.substring(0, 3000) + "\n...(笔记过长已截断)";
-    }
-
-    private static String batchRenameContent(String argumentsJson) {
-        return "dir=" + arg(argumentsJson, "dir")
-                + " pattern=" + arg(argumentsJson, "pattern")
-                + " replacement=" + arg(argumentsJson, "replacement");
-    }
-
-    private static String batchConvertContent(String argumentsJson) {
-        return "dir=" + arg(argumentsJson, "dir")
-                + " from=" + arg(argumentsJson, "from")
-                + " to=" + arg(argumentsJson, "to");
     }
 
     private String executeSetName(String name, ToolContext ctx) {
@@ -1916,24 +1804,6 @@ public class ToolDispatcher {
         }
         String resp = ctx.napcatApi.setSelfLongnick(signature.trim());
         return "[setsignature] 个性签名已设置: " + signature.trim() + " " + resp;
-    }
-
-    private String executeSetTrigger(String words, ToolContext ctx) {
-        // 仅主人可修改触发词
-        if (ctx == null || !ctx.isMaster) {
-            return "[settrigger] 无权限：仅主人可修改触发词";
-        }
-        AiConfig cfg = AiConfig.getInstance();
-        if (words == null || words.trim().isEmpty()
-                || "list".equalsIgnoreCase(words.trim()) || "查看".equals(words.trim())) {
-            java.util.List<String> current = cfg.getTriggerWords();
-            if (current.isEmpty()) return "[settrigger] 当前未设置触发词（@机器人 始终有效）";
-            return "[settrigger] 当前触发词: " + String.join("; ", current);
-        }
-        cfg.setBotName(words); // setBotName 内部按 ; 拆分去重
-        cfg.save();
-        java.util.List<String> list = cfg.getTriggerWords();
-        return "[settrigger] 触发词已设置: " + String.join("; ", list);
     }
 
     // ==================== QQ 媒体发送（execq 通道真实发送） ====================

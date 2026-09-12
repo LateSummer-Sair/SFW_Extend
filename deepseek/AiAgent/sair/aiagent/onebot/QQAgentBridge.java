@@ -142,6 +142,7 @@ class QQAgentBridge {
 
     // ==================== 消息发送 ====================
 
+    /** 去掉模型可能残留的 <quote> 标记（已取消主动引用，仅作清理兜底）。 */
     private static final Pattern QUOTE_PATTERN = Pattern.compile(
             "<quote\\s+id\\s*=\\s*[\"']?(\\d+)[\"']?\\s*>(.*?)</quote>",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
@@ -155,47 +156,29 @@ class QQAgentBridge {
         }
     }
 
-    void sendReplyWithQuote(QQMessage msg, long quoteMessageId, String text) {
-        if (server == null || text == null || text.trim().isEmpty()) return;
-        if (!msg.isGroupMessage() || quoteMessageId <= 0 || !isQuoteAllowed(msg, quoteMessageId)) {
-            sendReply(msg, text);
-            return;
-        }
-        String payload = "[CQ:reply,id=" + quoteMessageId + "]" + text;
-        server.sendGroupMsg(msg.getGroupId(), payload);
+    /**
+     * 剥离模型输出中残留的 &lt;quote&gt; 标签（取消主动引用后仅作清理兜底，引用 ID 一律丢弃）。
+     */
+    private String stripQuoteTags(String text) {
+        if (text == null) return null;
+        if (text.indexOf("<quote") < 0) return text;
+        return QUOTE_PATTERN.matcher(text).replaceAll("$2").trim();
     }
 
-    /** 只允许引用当前群聊候选消息，避免模型输出错误 ID 后发送无效引用。 */
-    private boolean isQuoteAllowed(QQMessage msg, long quoteMessageId) {
-        if (unifiedMemory == null || !msg.isGroupMessage() || quoteMessageId <= 0) return false;
-        try {
-            List<String[]> history = unifiedMemory.getRecentGroupChatHistoryWithMessageId(msg.getGroupId(), 25);
-            if (history == null) return false;
-            for (String[] h : history) {
-                if (h != null && h.length > 4 && String.valueOf(quoteMessageId).equals(h[4])) {
-                    return true;
-                }
-            }
-        } catch (Exception ignored) {
-            // 校验失败时降级为普通回复
-        }
-        return false;
+    /** 只剥离约定的控制标记（见 {@link sair.aiagent.util.MarkerTags}）。 */
+    private static String stripMarkerTags(String text) {
+        return sair.aiagent.util.MarkerTags.strip(text);
     }
 
-    /** 解析最终回复中的引用标记，返回 [quoteMessageId, cleanText]；无引用时 quoteMessageId 为 0。 */
-    private String[] extractQuoteReply(String text) {
-        if (text == null) return new String[]{"0", text};
-        Matcher m = QUOTE_PATTERN.matcher(text);
-        if (!m.find()) return new String[]{"0", text};
-        long id;
-        try {
-            id = Long.parseLong(m.group(1));
-        } catch (NumberFormatException e) {
-            return new String[]{"0", text};
-        }
-        String body = m.group(2).trim();
-        String clean = text.substring(0, m.start()) + body + text.substring(m.end());
-        return new String[]{String.valueOf(id), clean.trim()};
+    /**
+     * 群聊回复的 @ 前缀：@ 当前消息的发送者（提出问题的人）。
+     * <p>取消主动引用后，改用 @ 明确指向提问者，避免「A 提问却回复到 B」的引用错乱。</p>
+     */
+    private String buildAtPrefix(QQMessage msg) {
+        if (msg == null || !msg.isGroupMessage()) return "";
+        long askerQQ = msg.getUserId();
+        if (askerQQ <= 0) return "";
+        return "[CQ:at,qq=" + askerQQ + "] ";
     }
 
     void sendMultipleReplies(QQMessage msg, List<String> texts) {
@@ -216,8 +199,11 @@ class QQAgentBridge {
         }
     }
 
-    /** 拟人化发送：群聊短句优先，长文本拆条，引用只用于第一条。 */
-    private void sendHumanizedReplies(QQMessage msg, List<String> messages, long quoteMessageId, boolean bareMention) {
+    /**
+     * 拟人化发送：群聊短句优先，长文本拆条。
+     * <p>群聊回复统一 @ 提出问题的人（首条），不再使用引用回复——避免引用错乱与「A 提问回复到 B」。</p>
+     */
+    private void sendHumanizedReplies(QQMessage msg, List<String> messages) {
         if (messages == null || messages.isEmpty()) return;
         List<String> out = new ArrayList<>();
         for (String m : messages) {
@@ -230,21 +216,20 @@ class QQAgentBridge {
             }
         }
         if (out.isEmpty()) return;
-        if (bareMention && msg.isGroupMessage()) {
-            out.set(0, "[CQ:at,qq=" + msg.getUserId() + "] " + out.get(0));
+        // 群聊：@ 提问者（写在首条最前面才能实际生效）
+        String atPrefix = buildAtPrefix(msg);
+        if (!atPrefix.isEmpty()) {
+            String first = out.get(0);
+            // 模型若自己输出了 @ 前缀则不再重复添加
+            if (!first.startsWith("[CQ:at,")) {
+                out.set(0, atPrefix + first);
+            }
         }
         AiAgentActivity.qqLog("[Humanize] 群=" + (msg.isGroupMessage() ? msg.getGroupId() : "private")
                 + " 条数=" + out.size()
-                + " 引用=" + quoteMessageId
+                + " @提问者=" + (atPrefix.isEmpty() ? "无" : msg.getUserId())
                 + " 首条长度=" + out.get(0).length());
-        if (quoteMessageId > 0 && msg.isGroupMessage()) {
-            sendReplyWithQuote(msg, quoteMessageId, out.get(0));
-            if (out.size() > 1) {
-                sendMultipleReplies(msg, out.subList(1, out.size()), true);
-            }
-        } else {
-            sendMultipleReplies(msg, out, true);
-        }
+        sendMultipleReplies(msg, out, true);
     }
 
     /** 去掉明显 AI 味，并压缩群聊回复。 */
@@ -577,20 +562,16 @@ class QQAgentBridge {
             if (aiResponse != null && !aiResponse.trim().isEmpty()) {
                 AiAgentActivity.qqLog("[QQMsg] AI返回文本: 长度=" + aiResponse.length()
                         + ", 前100字=" + (aiResponse.length() > 100 ? aiResponse.substring(0, 100) + "..." : aiResponse));
-                String[] quote = extractQuoteReply(aiResponse);
-                long quoteMessageId = Long.parseLong(quote[0]);
-                String quoteClean = quote[1] != null ? quote[1] : aiResponse;
-                String cleanResponse = quoteClean.replaceAll("<[^>]+>", "").trim();
+                // 已取消主动引用：仅剥离模型残留的 <quote> 标签，引用 ID 一律丢弃
+                String quoteClean = stripQuoteTags(aiResponse);
+                if (quoteClean == null) quoteClean = aiResponse;
+                String cleanResponse = stripMarkerTags(quoteClean);
 
                 // 记忆落库：存储去标签后的干净文本，避免 <quote>/<split> 等标记污染聊天记录浪费 token
                 String memoryContent = cleanResponse.isEmpty() ? aiResponse : cleanResponse;
                 if (msg.isGroupMessage()) {
                     unifiedMemory.addConversation("assistant", memoryContent, "group",
                         msg.getGroupId(), selfId, null);
-                    // 引用回复语义回填：标记被引用消息"已被回复"，供后续 prompt 展示 〖已处理〗
-                    if (quoteMessageId > 0) {
-                        unifiedMemory.setGroupMessageMarkById(msg.getGroupId(), quoteMessageId, "已回复");
-                    }
                     // 标记当前被回复的消息"已回复"，避免历史里已回答的问题被重复回答（答非所问）
                     unifiedMemory.setGroupMessageMarkById(msg.getGroupId(), msg.getMessageId(), "已回复");
                 } else {
@@ -599,14 +580,14 @@ class QQAgentBridge {
                 }
                 AiAgentActivity.qqLog("[QQMsg] cleanResponse=" + (cleanResponse.isEmpty() ? "空" : ("非空(长度" + cleanResponse.length() + ")"))
                         + ", server=" + (server != null) + ", 是否群聊=" + msg.isGroupMessage()
-                        + ", quoteMessageId=" + quoteMessageId);
+                        + ", 回复对象QQ=" + msg.getUserId());
                 if (!cleanResponse.isEmpty()) {
                     List<String> messages;
                     String[] splitParts = quoteClean.split("<split>");
                     if (splitParts.length > 1) {
                         messages = new ArrayList<>();
                         for (String part : splitParts) {
-                            String cleaned = part.replaceAll("<[^>]+>", "").trim();
+                            String cleaned = stripMarkerTags(part);
                             if (!cleaned.isEmpty()) messages.add(cleaned);
                         }
                     } else {
@@ -641,7 +622,7 @@ class QQAgentBridge {
                     }
 
                     AiAgentActivity.qqLog("[QQMsg] 准备发送 " + messages.size() + " 条回复");
-                    sendHumanizedReplies(msg, messages, quoteMessageId, bareMention);
+                    sendHumanizedReplies(msg, messages);
                 } else {
                     // 兜底：AI 只输出了标签没有纯文本，发送确认提示
                     AiAgentActivity.qqLog("[QQMsg] 仅标签无文本，发送兜底");

@@ -38,7 +38,7 @@
           <div class="card"><div class="card-icon ic-cyan">1️⃣</div><h3>单例模式 Singleton</h3><p>AiConfig / PromptManager / SkillBank / StreamPrinter / RedisClient / FileServer / HarnessConfig 全局唯一实例。</p></div>
           <div class="card"><div class="card-icon ic-purple">2️⃣</div><h3>门面模式 Facade</h3><p>PersistenceManager 统一管理 16 张表，MemoryManager 封装记忆 CRUD。</p></div>
           <div class="card"><div class="card-icon ic-magenta">3️⃣</div><h3>策略模式 Strategy</h3><p>DeepSeekClient chatStream/chatSync/chatSyncWithTools 三种策略 + model=auto 智能路由（pro/flash）。</p></div>
-          <div class="card"><div class="card-icon ic-amber">4️⃣</div><h3>观察者模式 Observer</h3><p>WatchService 文件监听：ThirdPartySkillStore / AgentSkillStore 监听技能目录变化自动重载。</p></div>
+          <div class="card"><div class="card-icon ic-amber">4️⃣</div><h3>观察者模式 Observer</h3><p>WatchService 文件监听：ThirdPartySkillStore 监听 data/skills 目录变化，新增/删除/编辑自动重载。</p></div>
           <div class="card"><div class="card-icon ic-green">5️⃣</div><h3>工厂模式 Factory</h3><p>ToolDispatcher buildAllTools/buildExecqTools/buildExecsTools 三套工具工厂 + tp_ 动态工具注册。</p></div>
           <div class="card"><div class="card-icon ic-blue">6️⃣</div><h3>命令模式 Command</h3><p>ActivityActions.route() 路由 58 个命令到 handle* 方法，命令与执行解耦。</p></div>
           <div class="card"><div class="card-icon ic-cyan">7️⃣</div><h3>模板方法模式 Template Method</h3><p>AgentExecutor executeFcLocal/executeFcExecq/executeFcExecs 共享 buildSystemPrompt + FC 循环模板。</p></div>
@@ -46,7 +46,7 @@
           <div class="card"><div class="card-icon ic-amber">9️⃣</div><h3>状态机模式 State Machine</h3><p>EmotionManager / EmotionStateManager 情绪状态机，情绪阈值触发状态迁移。</p></div>
           <div class="card"><div class="card-icon ic-green">🔟</div><h3>建造者模式 Builder</h3><p>ToolDefinition addString/addOptionalString/addProperty 链式构建 JSON Schema。</p></div>
           <div class="card"><div class="card-icon ic-blue">1️⃣1️⃣</div><h3>生产者消费者模式</h3><p>StreamPrinter LinkedBlockingQueue FIFO 队列，生产者 offer + 消费者逐字打印。</p></div>
-          <div class="card"><div class="card-icon ic-cyan">1️⃣2️⃣</div><h3>守护线程模式 Daemon</h3><p>AutoDistill（5min）/ MemoryLifecycleManager（30min）/ AutoClear（3min）/ CronScheduler / AlarmScheduler / StickerManager 清理。</p></div>
+          <div class="card"><div class="card-icon ic-cyan">1️⃣2️⃣</div><h3>守护线程模式 Daemon</h3><p>AutoDistill（5min）/ MemoryLifecycleManager（30min）/ AutoClear（vmin）/ CronScheduler / AlarmScheduler / StickerManager 清理。</p></div>
           <div class="card"><div class="card-icon ic-purple">1️⃣3️⃣</div><h3>降级模式 Fallback</h3><p>FunctionCallingBridge eval 兜底 + Redis 旁路降级 + WebSocket 文件回退本地路径。</p></div>
           <div class="card"><div class="card-icon ic-magenta">1️⃣4️⃣</div><h3>多智能体递归通信 AgentBus</h3><p>把「唤起另一个 Agent」做成 call_agent / ask_agent 两个 Function Calling 工具，main/vision/passage 三个 Agent 双向递归协作，MAX_DEPTH=6 防死循环。</p></div>
           <div class="card"><div class="card-icon ic-cyan">1️⃣5️⃣</div><h3>多智能体编排 Orchestrator</h3><p>AgentOrchestrator 流水线 / 扇出扇入 / 专家池三种模式，任务分解 + 子代理执行 + 结果聚合。</p></div>
@@ -148,7 +148,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.10 · 16 种设计模式 · 策略降级 · 情绪状态机 · 多智能体递归通信 · 多智能体编排 · 线程池</p>
+        <p><span class="brand">AiAgent</span> v4.0 · 16 种设计模式 · 策略降级 · 情绪状态机 · 多智能体递归通信 · 多智能体编排 · 线程池</p>
       </div>
     </footer>
   </main>

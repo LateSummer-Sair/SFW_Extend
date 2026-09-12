@@ -30,6 +30,13 @@ import sair.aiagent.onebot.util.JsonUtil;
  */
 public class QQMessageHandler implements ListeningStateManager.TaskHandler {
 
+    /**
+     * 折叠消息正文的硬上限（纯文本字符数）。
+     * <p>原先的两处截断（内嵌 content 走 1000、get_forward_msg 走 5000）会把长折叠的尾巴整段丢掉；
+     * 现统一放宽到该值，超长部分由上层「分段分析」处理，而不是静默丢失。</p>
+     */
+    private static final int FOLD_TEXT_MAX_CHARS = 20000;
+
     /** 机器人自身QQ号 */
     private volatile long selfId;
 
@@ -45,13 +52,35 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
     /** 统一记忆管理器（所有QQ和群聊共享） */
     private UnifiedQQMemoryManager unifiedMemory;
 
-    /** execq 消息处理线程池：有界队列 + 拒绝降级（CallerRuns），线程数可经系统属性 aiagent.execq.poolSize 配置。 */
+    /** execq 线程池大小（系统属性 aiagent.execq.poolSize，默认 3，限幅 1..32）。 */
     private static final int EXECQ_POOL_SIZE = resolveExecqPoolSize();
+
+    /**
+     * execq 消息处理线程池：有界队列 + 拒绝降级。
+     * <p>
+     * 队列容量从 256 降到 64：单条 AI 请求平均约 17 秒，3 个并发 worker 下 256 条积压意味着
+     * 队尾消息要等 ~24 分钟才被处理（这时回复已经毫无意义）；64 条把最坏延迟压到 ~6 分钟。
+     * 拒绝策略仍是「丢弃最旧」，但会显式打日志——旧实现用 DiscardOldestPolicy 静默丢弃，
+     * 被丢的消息既不回复也不清理 processingMessages，导致该 messageId 被永久屏蔽。
+     * </p>
+     */
     private final ExecutorService execPool = new ThreadPoolExecutor(
-            EXECQ_POOL_SIZE, Math.max(EXECQ_POOL_SIZE, 6), 60L, TimeUnit.SECONDS,
-            new LinkedBlockingQueue<Runnable>(256),
+            EXECQ_POOL_SIZE, EXECQ_POOL_SIZE, 60L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<Runnable>(EXECQ_QUEUE_CAPACITY),
             r -> { Thread t = new Thread(r, "OneBot-ExecQ"); t.setDaemon(true); return t; },
-            new ThreadPoolExecutor.DiscardOldestPolicy());
+            new ThreadPoolExecutor.DiscardOldestPolicy() {
+                @Override
+                @SuppressWarnings("rawtypes")
+                public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
+                    AiAgentActivity.qqLog("[QQMsg] execPool 队列已满(" + e.getQueue().size()
+                            + "/" + EXECQ_QUEUE_CAPACITY + ", active=" + e.getActiveCount()
+                            + ")，丢弃最旧的一条待处理消息");
+                    super.rejectedExecution(r, e);
+                }
+            });
+
+    /** execPool 队列容量：限制最坏排队延迟（见 execPool 注释）。 */
+    private static final int EXECQ_QUEUE_CAPACITY = 64;
 
     /** 解析 execq 线程池大小（系统属性 aiagent.execq.poolSize，默认 3，限幅 1..32）。 */
     private static int resolveExecqPoolSize() {
@@ -69,8 +98,31 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
     /** 是否启用拟人化监听态（默认关闭；需手动开启，关闭时回到 execPool 并发处理消息） */
     private volatile boolean listenStateEnabled = false;
 
-    /** 正在处理中的消息ID集合（防重复） */
-    private final Set<Long> processingMessages = Collections.synchronizedSet(new HashSet<>());
+    /**
+     * 正在处理中的消息ID → 开始处理时间（防重复）。
+     * <p>
+     * 旧实现是无 TTL 的 {@code Set<Long>}：任何一条没走到 remove 的路径（线程池拒绝丢弃、
+     * 异常、提前 return）都会让该 messageId 被<b>永久</b>屏蔽，而且集合只增不减。
+     * 现在带 10 分钟陈旧窗口，并在每次登记时顺带清理过期项，自愈。
+     * </p>
+     */
+    private static final long PROCESSING_STALE_MS = 10 * 60_000L;
+    private final Map<Long, Long> processingSince = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 尝试登记一条消息为「处理中」；返回 false 表示重复消息（或仍在处理中）。 */
+    private boolean beginProcessing(long msgId) {
+        long now = System.currentTimeMillis();
+        // 清理陈旧条目：被丢弃/异常的路径可能漏删，靠这里自愈
+        if (!processingSince.isEmpty()) {
+            processingSince.values().removeIf(ts -> now - ts > PROCESSING_STALE_MS);
+        }
+        return processingSince.putIfAbsent(msgId, now) == null;
+    }
+
+    /** 处理结束（含所有提前返回路径），解除该消息的屏蔽。 */
+    private void endProcessing(long msgId) {
+        processingSince.remove(msgId);
+    }
 
     /** 定时任务线程池（用于主动查看群聊） */
     private final ExecutorService scheduledPool = Executors.newSingleThreadExecutor(r -> {
@@ -211,6 +263,9 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
     
     /** 获取Bot名称（戳一戳上下文分析用） */
     public String getSelfName() { return getBotLabel(); }
+
+    /** 插件数据目录（供 InternalAgents 等读取可编辑配置文件）。 */
+    public String getDataDirPath() { return dataDir; }
     
     /** 获取DeepSeekClient（AI戳一戳回复用） */
     public sair.aiagent.core.DeepSeekClient getDeepSeekClient() {
@@ -439,7 +494,9 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                         );
                         
                         if (response != null && !response.trim().isEmpty()) {
-                            String cleanResponse = response.replaceAll("<[^>]+>", "").trim();
+                            // 只剥离约定的控制标记：旧实现用 <[^>]+> 通配剥离会把回复里的
+                            // HTML/泛型/比较符一并吞掉（如 List<String>、x < 0 > y）。
+                            String cleanResponse = sair.aiagent.util.MarkerTags.strip(response);
                             if (!cleanResponse.isEmpty()) {
                                 // 支持多消息发送：按换行符分割成多条消息
                                 List<String> messages = splitIntoMessages(cleanResponse);
@@ -811,6 +868,8 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 hasForward = true;
                 boolean extractedFromContent = false;
                 if (seg.content != null && !seg.content.isEmpty()) {
+                    // 原始 JSON 留存：供上层结构化解析（图片 URL + 嵌套折叠递归展开）
+                    msg.setForwardRaw(seg.content);
                     // content直接可用（部分实现如NapCat内嵌）
                     String extracted = ForwardMessageExpander.extractForwardText(seg.content);
                     if (extracted != null && !extracted.isEmpty()) {
@@ -872,7 +931,11 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
             msg.setHasForward(true);
             if (forwardText.length() > 0) {
                 String content = forwardText.toString();
-                if (content.length() > 1000) content = content.substring(0, 1000) + "...";
+                // 折叠正文不再砍到 1000 字（长折叠会整段丢失）；上限放宽到 FOLD_TEXT_MAX_CHARS，
+                // 超长由上层「分段分析」处理，而不是在这里静默截断。
+                if (content.length() > FOLD_TEXT_MAX_CHARS) {
+                    content = content.substring(0, FOLD_TEXT_MAX_CHARS) + "…(正文过长已截断)";
+                }
                 msg.setForwardContent(content);
                 AiAgentActivity.qqLog("[QQMsg] 检测到折叠消息，内容长度: " + content.length());
             }
@@ -887,7 +950,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
     void handleMessage(QQMessage msg, Consumer<String> responseSender) {
         // 防重复
         final long msgId = msg.getMessageId();
-        if (!processingMessages.add(msgId)) {
+        if (!beginProcessing(msgId)) {
             AiAgentActivity.qqLog("[QQMsg] 消息已处理中，忽略: " + msgId);
             return;
         }
@@ -898,7 +961,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
             if (unifiedMemory == null) {
                 AiAgentActivity.qqLog("[QQMsg] 错误: unifiedMemory未初始化！dataDir=" + dataDir);
                 sendReply(msg, "系统错误：记忆管理器未就绪，请稍后再试。");
-                processingMessages.remove(msgId);
+                endProcessing(msgId);
                 return;
             }
             
@@ -923,9 +986,13 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                     AiAgentActivity.qqLog("[QQMsg] 同步展开折叠消息: forwardId=" + msg.getForwardId());
                     String fwdJson = napcatApi.getForwardMsg(msg.getForwardId());
                     if (fwdJson != null && !fwdJson.isEmpty()) {
+                        // 原始 JSON 留存，供上层结构化递归展开（图片 URL + 嵌套折叠）
+                        msg.setForwardRaw(fwdJson);
                         String extracted = ForwardMessageExpander.extractForwardMsgContent(fwdJson);
                         if (extracted != null && !extracted.isEmpty()) {
-                            if (extracted.length() > 5000) extracted = extracted.substring(0, 5000) + "...";
+                            if (extracted.length() > FOLD_TEXT_MAX_CHARS) {
+                                extracted = extracted.substring(0, FOLD_TEXT_MAX_CHARS) + "…(正文过长已截断)";
+                            }
                             msg.setForwardContent(extracted);
                             AiAgentActivity.qqLog("[QQMsg] 折叠消息同步展开成功，长度: " + extracted.length());
                         }
@@ -994,14 +1061,15 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                     );
                 }
             } else {
-                // 私聊：记录到统一对话历史，标记为私聊来源
+                // 私聊：记录到统一对话历史，标记为私聊来源（带上 message_id，供按 ID 精确打 Mark）
                 unifiedMemory.addConversation(
                     "user",
                     plainText,
                     "private",
                     msg.getUserId(),
                     msg.getUserId(),
-                    msg.getDisplayName()
+                    msg.getDisplayName(),
+                    msg.getMessageId()
                 );
             }
 
@@ -1029,7 +1097,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                         return;
                     }
                     AiAgentActivity.qqLog("[QQMsg] 群消息已忽略(未@或提到名字): " + msg.getRawMessage());
-                    processingMessages.remove(msgId);
+                    endProcessing(msgId);
                     return;
                 }
             }
@@ -1047,7 +1115,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 
                 if (shouldBlock) {
                     AiAgentActivity.qqLog("[QQMsg] 消息被InternalAgents拦截: userId=" + qq);
-                    processingMessages.remove(msgId);
+                    endProcessing(msgId);
                     return;
                 }
             }
@@ -1064,7 +1132,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 if (gi != null && gi.isUnfriendly()) {
                     // 群印象→情绪反向联动：群氛围差会让 AI 情绪变差（双向联动第二向）
                     if (emotionManager != null) {
-                        try { emotionManager.noteUnfriendlyGroup(); } catch (Exception ignored) {}
+                        try { emotionManager.noteUnfriendlyGroup(msg.getGroupId()); } catch (Exception ignored) {}
                     }
                     if (!sair.aiagent.core.AiConfig.getInstance().isMasterQQ(qq)) {
                         int roll = java.util.concurrent.ThreadLocalRandom.current().nextInt(100);
@@ -1075,7 +1143,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                                 ? gi.getAtmosphere() : "这个群的氛围让我有些不适";
                             sendReply(msg, "（我注意到" + why + "，暂时不太想参与本群的互动。"
                                 + "如果我之前的言行有冒犯之处，请告诉我，我会认真改进。）");
-                            processingMessages.remove(msgId);
+                            endProcessing(msgId);
                             return;
                         }
                     }
@@ -1111,7 +1179,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
 
 
         } catch (Exception e) {
-            processingMessages.remove(msgId);
+            endProcessing(msgId);
             AiAgentActivity.qqLog("[QQMsg] handleMessage错误: " + e.toString());
             java.io.StringWriter sw = new java.io.StringWriter();
             e.printStackTrace(new java.io.PrintWriter(sw));
@@ -1207,19 +1275,20 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                                 (quotedText.length() > 100 ? quotedText.substring(0, 100) + "..." : quotedText));
                         }
                         java.util.List<String> quotedImgUrls = ForwardMessageExpander.extractQuotedImageUrls(quotedJson);
-                        if (quotedImgUrls != null && !quotedImgUrls.isEmpty()) {
-                            for (String imgUrl : quotedImgUrls) {
-                                msg.addQuotedImageUrl(imgUrl);
-                            }
-                            AiAgentActivity.qqLog("[QQMsg] 引用消息包含图片: " + quotedImgUrls.size() + "张");
-                        }
-                        // 提取引用图片的 file（md5）字段，供 NapCat get_image 兜底下载（HTTP 直连内网图失败时）
                         java.util.List<String> quotedImgFiles = ForwardMessageExpander.extractQuotedImageFiles(quotedJson);
-                        if (quotedImgFiles != null && !quotedImgFiles.isEmpty()) {
-                            for (String imgFile : quotedImgFiles) {
-                                msg.addQuotedImageFile(imgFile);
+                        // 两个列表按「图片段顺序」逐项对齐（url 为空也会占位），成对写入 message，
+                        // 避免只有 file 没有 url 的图片把后面的 (url, md5) 全部错位。
+                        int quotedImgCount = Math.max(
+                                quotedImgUrls == null ? 0 : quotedImgUrls.size(),
+                                quotedImgFiles == null ? 0 : quotedImgFiles.size());
+                        if (quotedImgCount > 0) {
+                            for (int qi = 0; qi < quotedImgCount; qi++) {
+                                String iu = (quotedImgUrls != null && qi < quotedImgUrls.size()) ? quotedImgUrls.get(qi) : null;
+                                String ifl = (quotedImgFiles != null && qi < quotedImgFiles.size()) ? quotedImgFiles.get(qi) : null;
+                                msg.addQuotedImage(iu, ifl);
                             }
-                            AiAgentActivity.qqLog("[QQMsg] 引用消息图片 file(md5) 已提取: " + quotedImgFiles.size() + "个");
+                            AiAgentActivity.qqLog("[QQMsg] 引用消息包含图片: " + msg.getQuotedImages().size()
+                                    + "张 (含 " + msg.getQuotedImageUrls().size() + " 个可用 URL)");
                         }
                         // 优先提取内嵌的 forward content（NapCat get_msg 直接内嵌转发内容，data.id 对获取内容无用）
                         String fwdContent = ForwardMessageExpander.extractForwardContentFromMsgJson(quotedJson);
@@ -1240,6 +1309,8 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                                     String fwdJson = napcatApi.getForwardMsg(quotedFwdId);
                                     AiAgentActivity.debugLog("[QQMsg] get_forward_msg 返回: " + (fwdJson == null ? "null" : (fwdJson.isEmpty() ? "空" : "长度" + fwdJson.length())));
                                     if (fwdJson != null && !fwdJson.isEmpty()) {
+                                        // 引用折叠也留存原始 JSON，供上层结构化递归展开
+                                        msg.setForwardRaw(fwdJson);
                                         fwdC = ForwardMessageExpander.extractForwardMsgContent(fwdJson);
                                         AiAgentActivity.debugLog("[QQMsg] extractForwardMsgContent 返回: " + (fwdC == null ? "null" : "长度" + fwdC.length()));
                                     }
@@ -1249,7 +1320,9 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                             }
                         }
                         if (fwdC != null && !fwdC.isEmpty()) {
-                            if (fwdC.length() > 5000) fwdC = fwdC.substring(0, 5000) + "...";
+                            if (fwdC.length() > FOLD_TEXT_MAX_CHARS) {
+                                fwdC = fwdC.substring(0, FOLD_TEXT_MAX_CHARS) + "…(正文过长已截断)";
+                            }
                             String exist = msg.getQuotedMessageContent();
                             msg.setQuotedMessageContent((exist != null ? exist + "\n\n" : "")
                                 + "[折叠消息展开内容]\n" + fwdC);
@@ -1348,7 +1421,7 @@ public class QQMessageHandler implements ListeningStateManager.TaskHandler {
                 sendReply(msg, "处理失败: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
             } catch (Exception ignored) {}
         } finally {
-            processingMessages.remove(msgId);
+            endProcessing(msgId);
         }
     }
 

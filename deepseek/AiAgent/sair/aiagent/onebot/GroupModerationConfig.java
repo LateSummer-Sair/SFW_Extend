@@ -147,6 +147,74 @@ public class GroupModerationConfig {
         this.ruleDescription = description;
     }
     
+    // ==================== 持久化 ====================
+    //
+    // 旧实现所有配置只存在内存里（groupConfigs 是 ConcurrentHashMap）：
+    // 插件重启后 autoMonitorEnabled 回到默认 false、监控间隔/禁言时长、
+    // 自定义违规关键词、白名单用户、群规描述<b>全部丢失</b>。
+    // 这里提供紧凑的序列化格式，由 GroupModeratorAgent 落到 app_state 表。
+
+    private static final String FIELD_SEP = "\u0001";
+    private static final String ITEM_SEP = "\u0002";
+
+    /** 序列化为一行文本（最后一段是规则描述，可以包含任意分隔符之外的内容）。 */
+    public String toStorageString() {
+        StringBuilder kw = new StringBuilder();
+        for (String k : customViolationKeywords) {
+            if (kw.length() > 0) kw.append(ITEM_SEP);
+            kw.append(k);
+        }
+        StringBuilder wl = new StringBuilder();
+        for (Long u : whitelistUsers) {
+            if (wl.length() > 0) wl.append(ITEM_SEP);
+            wl.append(u);
+        }
+        return (autoMonitorEnabled ? "1" : "0") + FIELD_SEP
+                + monitorIntervalSeconds + FIELD_SEP
+                + messagesPerCheck + FIELD_SEP
+                + violationMuteDuration + FIELD_SEP
+                + (sensitiveWordCheckEnabled ? "1" : "0") + FIELD_SEP
+                + (spamCheckEnabled ? "1" : "0") + FIELD_SEP
+                + (adCheckEnabled ? "1" : "0") + FIELD_SEP
+                + kw + FIELD_SEP
+                + wl + FIELD_SEP
+                + (ruleDescription == null ? "" : ruleDescription);
+    }
+
+    /** 从 {@link #toStorageString()} 的输出恢复配置；解析失败时保留默认值。 */
+    public static GroupModerationConfig fromStorageString(long groupId, String s) {
+        GroupModerationConfig cfg = new GroupModerationConfig(groupId);
+        if (s == null || s.isEmpty()) return cfg;
+        try {
+            String[] parts = s.split(FIELD_SEP, -1);
+            if (parts.length >= 9) {
+                cfg.autoMonitorEnabled = "1".equals(parts[0]);
+                cfg.monitorIntervalSeconds = Integer.parseInt(parts[1]);
+                cfg.messagesPerCheck = Integer.parseInt(parts[2]);
+                cfg.violationMuteDuration = Integer.parseInt(parts[3]);
+                cfg.sensitiveWordCheckEnabled = "1".equals(parts[4]);
+                cfg.spamCheckEnabled = "1".equals(parts[5]);
+                cfg.adCheckEnabled = "1".equals(parts[6]);
+                if (!parts[7].isEmpty()) {
+                    for (String k : parts[7].split(ITEM_SEP)) {
+                        if (!k.isEmpty()) cfg.customViolationKeywords.add(k);
+                    }
+                }
+                if (!parts[8].isEmpty()) {
+                    for (String u : parts[8].split(ITEM_SEP)) {
+                        if (!u.isEmpty()) {
+                            try { cfg.whitelistUsers.add(Long.parseLong(u.trim())); } catch (NumberFormatException ignored) {}
+                        }
+                    }
+                }
+                if (parts.length >= 10) cfg.ruleDescription = parts[9];
+            }
+        } catch (Exception ignored) {
+            // 数据损坏时退回默认配置，不让启动失败
+        }
+        return cfg;
+    }
+
     // ==================== 工具方法 ====================
     
     /**

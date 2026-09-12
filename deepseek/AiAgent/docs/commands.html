@@ -22,7 +22,8 @@
         <h1>命令<span class="gradient-text">参考</span></h1>
         <p class="lead">
           所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 58 个用户命令 + 74 个 FC 工具（另有动态注册的 tp_* 工具）。
-          v3.10 特性：存图多智能体协作、表情包 TTL 治理、提示词 md 化（systemPrompt.md/execqPrompt.md）、卡片消息识别 + 拦截结果注入、发文件/发语音权限 AFFECTION:300。
+          v4.0 特性：三方技能协议化（airun 声明式入参 default/enum/example、returns 返还说明、context 只读上下文注入、timeout 单次超时、state 实例策略）、<code>.md</code> 加载期编译注册（改文件新替旧、调用期不再动态编译）、<code>thirdskill validate</code> 体检、技能与笔记去重 <code>ai/dedup</code>、83 条硬编码技能整体迁出为单文件 <code>.md</code>。
+          v3.14 特性：DeepSeek V4.1 Flash 迁移（模型名 deepseek-flash）、原生多模态视觉（不再单独调用视觉模型）、取消 Bot 主动引用改为 @ 提问者、移除 Agent 工具调用次数上限、戳一戳系统拦截直接 @ 回「？」、提示词 md 化（systemPrompt.md/execqPrompt.md）、存图多智能体协作、发文件/发语音权限 AFFECTION:300。
         </p>
       </div>
     </header>
@@ -41,12 +42,14 @@
             <tbody>
               <tr><td class="cmd-name">ai/setkey</td><td>[API Key]</td><td><span class="badge b-purple">配置</span></td><td>设置 DeepSeek API 密钥，AES-GCM 加密存储（兼容旧 ECB），持久化到 config.properties</td></tr>
               <tr><td class="cmd-name">ai/seturl</td><td>[URL]</td><td><span class="badge b-purple">配置</span></td><td>设置 API 地址，默认 https://api.deepseek.com</td></tr>
-              <tr><td class="cmd-name">ai/setmodel</td><td>[模型名]</td><td><span class="badge b-purple">配置</span></td><td>设置模型，默认 auto。auto 下本地 execs 走 deepseek-v4-pro、QQ execq 走 deepseek-v4-flash（智能路由）</td></tr>
+              <tr><td class="cmd-name">ai/setmodel</td><td>[模型名]</td><td><span class="badge b-purple">配置</span></td><td>设置模型，默认 auto。<b>auto</b>=启用自动路由（各通道取默认 deepseek-flash）；<b>填写具体模型名</b>=严格按该名称调用，所有通道一律照用、不做替换</td></tr>
               <tr><td class="cmd-name">ai/setthirdpartycode</td><td>on|off</td><td><span class="badge b-purple">配置</span></td><td>三方技能代码段权限：on=放权（含 QQ）；off=仅 execs/本地</td></tr>
-              <tr><td class="cmd-name">ai/setprompt</td><td>[提示词]</td><td><span class="badge b-purple">配置</span></td><td>设置系统提示词（写入 systemPrompt.md 持久化），AI 也可通过 editprompt 工具修改</td></tr>
-              <tr><td class="cmd-name">ai/showprompt</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看当前系统提示词全文（硬编码 + systemPrompt.md 角色设定）</td></tr>
+              <tr><td class="cmd-name">ai/setprompt</td><td>[提示词]</td><td><span class="badge b-purple">配置</span></td><td>设置系统提示词的「角色设定」段（写入 <code>data/prompts/systemPrompt.md</code> 持久化，基础规则原样保留），AI 也可通过 editprompt 工具修改</td></tr>
+              <tr><td class="cmd-name">ai/showprompt</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看当前系统提示词全文（= prompts/systemPrompt.md 去标记行后的内容；文件缺失则为空）</td></tr>
               <tr><td class="cmd-name">ai/config</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看配置摘要（含思考模式/温度/top_p）+ 对话统计 + 记忆条数 + 数据目录</td></tr>
               <tr><td class="cmd-name">ai/status</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看运行时状态：OneBot、Redis、FileServer、线程池、最近 Harness/工具轨迹、技能与记忆计数</td></tr>
+              <tr><td class="cmd-name">ai/ctx</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>上下文诊断：提示词各段字符数与估算 token、累计的「结果截断 / 图片丢弃 / 上下文溢出」计数</td></tr>
+              <tr><td class="cmd-name">ai/dedup</td><td>[skills|notes|all] [apply] [阈值]</td><td><span class="badge b-purple">配置</span><span class="badge b-cyan">维护</span></td><td>去重（技能库 + 知识库笔记）：扫描「同一件事/同一个问题的不同说法」（倒排索引+稀有词分桶，4600 条约 200ms），默认阈值 0.85；不带 apply 只预演。<code>ai/dedup apply</code>=技能、<code>ai/dedup notes apply</code>=笔记、<code>ai/dedup all apply</code>=两者；<code>ai/dedup 0.7</code> 调激进度。合并=技能标记 <code>merged</code> / 笔记标记 <code>merged_into</code> 并指向代表条目，<b>内容都不删除</b></td></tr>
               <tr><td class="cmd-name">ai/setconfig</td><td>[key] [value]</td><td><span class="badge b-purple">配置</span></td><td>统一配置开关：思考模式/温度/top_p/最大输出/惩罚项/strict/botname 等，持久化 config.properties</td></tr>
               <tr><td class="cmd-name">ai/execs</td><td>[任务]</td><td><span class="badge b-cyan">对话</span></td><td>唯一 Agent 入口（合并 chat/exec/execs/execfc），原生 Function Calling 免确认全能模式</td></tr>
               <tr><td class="cmd-name">ai/chat / exec / execfc</td><td>[消息]</td><td><span class="badge b-cyan">对话</span></td><td>execs 的别名，统一走 Function Calling 链路</td></tr>
@@ -184,7 +187,7 @@
 
     <footer class="footer">
       <div class="container">
-        <p><span class="brand">AiAgent</span> v3.10 · 58 命令 · 74 FC 工具 · 部署三步骤</p>
+        <p><span class="brand">AiAgent</span> v4.0 · 60 命令 · 74 FC 工具 · 部署三步骤</p>
       </div>
     </footer>
   </main>

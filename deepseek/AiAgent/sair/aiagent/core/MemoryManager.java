@@ -26,6 +26,26 @@ public class MemoryManager {
         this.pm = pm;
     }
 
+    // ==================== 单例入口（供三方技能复用同一份实现） ====================
+
+    /** 最近一次由插件创建/接线的实例（插件在 {@code AiAgentActivity} 里登记）。 */
+    private static volatile MemoryManager instance;
+
+    public static void setInstance(MemoryManager m) {
+        instance = m;
+    }
+
+    /**
+     * 供三方技能使用的入口：拿的是插件正在用的那一份（因此与内置实现写进同一个库）。
+     * <p>已剥离到 {@code data/skills/} 的工具（如 download）需要在完成时补一条记忆，
+     * 走这里就与原来的 {@code memoryManager.add(...)} 完全等价。</p>
+     *
+     * @return 实例；插件未初始化时返回 null（技能应容错跳过记忆，而不是失败）
+     */
+    public static MemoryManager getInstance() {
+        return instance;
+    }
+
     // ==================== 加载（向后兼容：静默空实现，迁移由 PersistenceManager.init 完成） ====================
 
     public synchronized void load(String dataDir) {

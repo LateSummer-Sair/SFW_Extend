@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import sair.aiagent.AiAgentActivity;
+import sair.aiagent.util.FtsQuery;
 
 /**
  * QQ统一记忆管理器 —— 所有消息存储在一个数据库中，通过标记区分来源。
@@ -35,8 +36,20 @@ import sair.aiagent.AiAgentActivity;
  */
 public class UnifiedQQMemoryManager {
 
-    private static final int CONV_MAX = 500; // 对话历史保留最近500条
-    private static final int MEM_MAX = 200;  // AI记忆保留最近200条
+    /**
+     * 对话历史保留条数。
+     * <p>实测 conversations 只有约 248 条/天，原来保留 500 条 ≈ 只覆盖 2 天，
+     * 「上周说过的事」全部被裁掉。提到 5000 条约覆盖 20 天，代价只是每 50 次写入多跑一次
+     * 带索引的 DELETE 子查询（created_at 上有 idx_conv_created）。</p>
+     */
+    private static final int CONV_MAX = 5000;
+    /** AI 记忆保留条数（memories 表实际只有十几行，放宽上限只为不再无谓裁剪）。 */
+    private static final int MEM_MAX = 2000;
+    /**
+     * 对话去重时间窗：只有在这个窗口内、且来源/发送者/角色/内容全同的重复才被丢弃。
+     * 窗口外即使内容完全相同也要正常入库（否则「好的」「哈哈」这类短句会被永久吞掉）。
+     */
+    private static final long CONV_DEDUP_WINDOW_MS = 120_000L;
     
     private final String dbPath;
     private Connection conn;
@@ -134,12 +147,14 @@ public class UnifiedQQMemoryManager {
                     ")"
                 );
 
-                // FTS5 全文索引（升级：替代 LIKE 搜索，支持 BM25 相关性排序）
+                // FTS5 全文索引（trigram 分词器：unicode61 会把整段中文当成一个 token，
+                // 导致 MATCH 只能命中"整段完全相同"的文档，中文子串召回几乎为 0）
                 stmt.execute(
                     "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(" +
                     "  content," +
                     "  content='memories'," +
-                    "  content_rowid='id'" +
+                    "  content_rowid='id'," +
+                    "  tokenize='trigram'" +
                     ")"
                 );
 
@@ -181,12 +196,13 @@ public class UnifiedQQMemoryManager {
                     ")"
                 );
                 
-                // 群聊历史 FTS5 全文索引（支持跨群检索群聊内容）
+                // 群聊历史 FTS5 全文索引（支持跨群检索群聊内容；trigram 分词器以支持中文子串匹配）
                 stmt.execute(
                     "CREATE VIRTUAL TABLE IF NOT EXISTS group_chat_history_fts USING fts5(" +
                     "  content," +
                     "  content='group_chat_history'," +
-                    "  content_rowid='id'" +
+                    "  content_rowid='id'," +
+                    "  tokenize='trigram'" +
                     ")"
                 );
                 stmt.execute(
@@ -237,6 +253,7 @@ public class UnifiedQQMemoryManager {
 
                 // 幂等迁移：老库补 mark 列（列已存在时 ALTER TABLE 会报错，静默忽略）
                 ensureColumn("conversations", "mark TEXT");
+                ensureColumn("conversations", "message_id INTEGER NOT NULL DEFAULT 0");
                 ensureColumn("group_chat_history", "mark TEXT");
                 ensureColumn("group_chat_history", "message_id INTEGER NOT NULL DEFAULT 0");
 
@@ -245,7 +262,75 @@ public class UnifiedQQMemoryManager {
                     idxStmt.execute("CREATE INDEX IF NOT EXISTS idx_conv_source ON conversations(source_type, source_id)");
                     idxStmt.execute("CREATE INDEX IF NOT EXISTS idx_conv_sender ON conversations(sender_id)");
                     idxStmt.execute("CREATE INDEX IF NOT EXISTS idx_gch_group_time ON group_chat_history(group_id, created_at)");
+                    // 新增：跨群"最近活跃"按时间倒序取 N 条（原 WHERE group_id != ? ORDER BY created_at 是全表扫描 336ms）
+                    idxStmt.execute("CREATE INDEX IF NOT EXISTS idx_gch_created ON group_chat_history(created_at)");
+                    // 新增：按用户跨群取消息（原为全表扫描 147ms）
+                    idxStmt.execute("CREATE INDEX IF NOT EXISTS idx_gch_user_time ON group_chat_history(user_id, created_at)");
+                    // 新增：按 (群, 消息ID) 精确打标/查标（原只能用到 group_id 前缀，每次群回复后 ~50ms）
+                    idxStmt.execute("CREATE INDEX IF NOT EXISTS idx_gch_group_msgid ON group_chat_history(group_id, message_id)");
+                    // 新增：conversations 按时间排序（原先只有 (source_type,source_id)，排序要走 TEMP B-TREE）
+                    idxStmt.execute("CREATE INDEX IF NOT EXISTS idx_conv_created ON conversations(created_at)");
                 } catch (SQLException ignored) {}
+
+                // FTS5 分词器迁移：老库是 unicode61（中文子串召回≈0），改为 trigram。
+                // 重建 36 万行索引约需数十秒，放到后台线程执行，避免阻塞插件启动。
+                migrateFtsToTrigram();
+            }
+        }
+    }
+
+    /**
+     * 把 FTS5 索引迁移到 trigram 分词器（仅执行一次）。
+     * <p>判定方式：读 {@code sqlite_master} 里 FTS 表的建表 SQL，若不含 {@code trigram} 则重建。
+     * 重建在后台守护线程执行（36 万行约数十秒）；期间 FTS 查询会返回 0 行，
+     * 调用方自动退回 LIKE，因此迁移过程不会导致功能不可用。</p>
+     */
+    private void migrateFtsToTrigram() {
+        final String[] targets = {
+            "memories_fts|memories|content",
+            "group_chat_history_fts|group_chat_history|content"
+        };
+        Thread t = new Thread(() -> {
+            for (String spec : targets) {
+                String[] p = spec.split("\\|");
+                String fts = p[0], contentTable = p[1], col = p[2];
+                try {
+                    if (!needsTrigramRebuild(fts)) continue;
+                    AiAgentActivity.qqLog("[Memory] FTS 分词器迁移开始: " + fts + " → trigram（中文子串召回修复）");
+                    long t0 = System.currentTimeMillis();
+                    synchronized (lock) {
+                        try (Statement st = conn.createStatement()) {
+                            st.execute("DROP TABLE IF EXISTS " + fts);
+                            st.execute("CREATE VIRTUAL TABLE " + fts + " USING fts5(" + col
+                                     + ", content='" + contentTable + "', content_rowid='id', tokenize='trigram')");
+                            st.execute("INSERT INTO " + fts + "(" + fts + ") VALUES('rebuild')");
+                        }
+                    }
+                    AiAgentActivity.qqLog("[Memory] FTS 分词器迁移完成: " + fts
+                            + "（耗时 " + (System.currentTimeMillis() - t0) + "ms）");
+                } catch (Exception e) {
+                    AiAgentActivity.qqLog("[Memory] FTS 迁移失败（保留旧索引，功能回退 LIKE）: "
+                            + fts + " - " + e.toString());
+                }
+            }
+        }, "Memory-FtsMigrate");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** 判断某 FTS 表是否需要重建为 trigram（表不存在或 DDL 已含 trigram 则返回 false）。 */
+    private boolean needsTrigramRebuild(String ftsTable) {
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name=?")) {
+                ps.setString(1, ftsTable);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) return false;           // 表还没建（新库已用 trigram DDL 建好）
+                    String sql = rs.getString(1);
+                    return sql != null && !sql.toLowerCase().contains("trigram");
+                }
+            } catch (SQLException e) {
+                return false;
             }
         }
     }
@@ -287,34 +372,64 @@ public class UnifiedQQMemoryManager {
      */
     public void addConversation(String role, String content, String sourceType, 
                                  long sourceId, Long senderId, String senderName) {
+        addConversation(role, content, sourceType, sourceId, senderId, senderName, 0L);
+    }
+
+    /**
+     * 记录一条对话（带 OneBot message_id，用于按消息 ID 精确打 Mark）。
+     *
+     * @param messageId OneBot 消息 ID（0 表示未知；仅 user 消息有意义）
+     */
+    public void addConversation(String role, String content, String sourceType,
+                                 long sourceId, Long senderId, String senderName, long messageId) {
         if (content == null || content.trim().isEmpty()) return;
         
         String trimmedContent = content.trim();
-        
+        long now = System.currentTimeMillis();
+
         synchronized (lock) {
-            // 去重检查：检查最近10条消息中是否有相同内容（避免重复存储）
+            // 去重检查：只有「同一来源 + 同一发送者 + 同一角色 + 相同内容 + 很近时间内」才算重发。
+            // 旧实现 `WHERE sender_id=? AND content=? ORDER BY created_at DESC LIMIT 10` 有两个致命缺陷：
+            //   (a) LIMIT 10 对「存在性判断」毫无意义，等价于「该发送者历史上说过同样的话就永远不再记录」；
+            //   (b) 没有 source_type/source_id 作用域，别的群 / 私聊会互相压制。
+            // 后果：常用短句（好的/哈哈/在吗）全局只存第一条；命中后还会把新消息的 message_id
+            // 写到另一条（甚至另一个群、另一个人）的行上，导致按 ID 打 Mark 标错消息。
+            long dupRowId = -1;
             try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT id FROM conversations WHERE sender_id = ? AND content = ? ORDER BY created_at DESC LIMIT 10")) {
+                    "SELECT id FROM conversations WHERE content = ? AND role = ? " +
+                    "AND source_type = ? AND source_id = ? " +
+                    "AND COALESCE(sender_id, -1) = COALESCE(?, -1) AND created_at >= ? " +
+                    "ORDER BY created_at DESC LIMIT 1")) {
+                ps.setString(1, trimmedContent);
+                ps.setString(2, role);
+                ps.setString(3, sourceType);
+                ps.setLong(4, sourceId);
                 if (senderId != null) {
-                    ps.setLong(1, senderId);
+                    ps.setLong(5, senderId);
                 } else {
-                    ps.setNull(1, java.sql.Types.INTEGER);
+                    ps.setNull(5, java.sql.Types.INTEGER);
                 }
-                ps.setString(2, trimmedContent);
+                ps.setLong(6, now - CONV_DEDUP_WINDOW_MS);
                 try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        // 发现重复，不插入
-                        AiAgentActivity.debugLog("[Memory] 检测到重复消息，跳过存储: " + trimmedContent.substring(0, Math.min(50, trimmedContent.length())));
-                        return;
-                    }
+                    if (rs.next()) dupRowId = rs.getLong(1);
                 }
             } catch (SQLException e) {
                 AiAgentActivity.debugLog("[Memory] 去重检查失败: " + e.toString());
             }
-            
+
+            if (dupRowId > 0) {
+                // 发现重复，不插入（但仍补写 message_id，供按 ID 精确打 Mark）
+                if (messageId > 0) {
+                    fillConversationMessageId(dupRowId, messageId);
+                }
+                AiAgentActivity.debugLog("[Memory] 检测到重复消息，跳过存储: "
+                        + trimmedContent.substring(0, Math.min(50, trimmedContent.length())));
+                return;
+            }
+
             // 插入新消息
             try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO conversations (role, content, source_type, source_id, sender_id, sender_name, created_at) VALUES (?,?,?,?,?,?,?)")) {
+                    "INSERT INTO conversations (role, content, source_type, source_id, sender_id, sender_name, created_at, message_id) VALUES (?,?,?,?,?,?,?,?)")) {
                 ps.setString(1, role);
                 ps.setString(2, trimmedContent);
                 ps.setString(3, sourceType);
@@ -325,7 +440,8 @@ public class UnifiedQQMemoryManager {
                     ps.setNull(5, java.sql.Types.INTEGER);
                 }
                 ps.setString(6, senderName);
-                ps.setLong(7, System.currentTimeMillis());
+                ps.setLong(7, now);
+                ps.setLong(8, Math.max(0L, messageId));
                 ps.executeUpdate();
             } catch (SQLException ignored) {}
 
@@ -338,6 +454,16 @@ public class UnifiedQQMemoryManager {
                 } catch (SQLException ignored) {}
             }
         }
+    }
+
+    /** 重复消息补写 message_id：按去重命中的那一行精确更新（不再按 content 全局乱匹配）。 */
+    private void fillConversationMessageId(long rowId, long messageId) {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "UPDATE conversations SET message_id = ? WHERE id = ? AND (message_id IS NULL OR message_id = 0)")) {
+            ps.setLong(1, messageId);
+            ps.setLong(2, rowId);
+            ps.executeUpdate();
+        } catch (SQLException ignored) {}
     }
 
     /** 
@@ -532,33 +658,37 @@ public class UnifiedQQMemoryManager {
         }
     }
 
-    /** 搜索相关记忆（FTS5 全文搜索 + LIKE 回退） */
+    /**
+     * 搜索相关记忆（FTS5 trigram 全文搜索 + LIKE 回退）。
+     * <p>trigram 支持中文子串匹配；查询过短（&lt;3 字，trigram 无法命中）或 FTS 无结果时退回 LIKE。</p>
+     */
     public List<String> searchMemories(String query, int maxResults) {
         List<String> list = new ArrayList<>();
         if (query == null || query.trim().isEmpty()) return list;
         synchronized (lock) {
-            // 优先 FTS5：清理特殊字符后执行全文搜索
-            String ftsQuery = query.trim()
-                .replaceAll("[*\"()\\-:]", " ")
-                .replaceAll("\\s+", " OR ")
-                .trim();
-            try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT m.content FROM memories_fts f " +
-                    "JOIN memories m ON f.rowid = m.id " +
-                    "WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?")) {
-                ps.setString(1, ftsQuery);
-                ps.setInt(2, maxResults);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        list.add(rs.getString(1));
-                    }
-                }
-            } catch (SQLException ftsErr) {
-                // FTS5 失败回退 LIKE
-                list.clear();
-                String pattern = "%" + query.trim() + "%";
+            String ftsQuery = FtsQuery.build(query, FtsQuery.DEFAULT_MAX_TERMS);
+            if (ftsQuery != null) {
                 try (PreparedStatement ps = conn.prepareStatement(
-                        "SELECT content FROM memories WHERE content LIKE ? ORDER BY created_at DESC LIMIT ?")) {
+                        "SELECT m.content FROM memories_fts f " +
+                        "JOIN memories m ON f.rowid = m.id " +
+                        "WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?")) {
+                    ps.setString(1, ftsQuery);
+                    ps.setInt(2, maxResults);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            list.add(rs.getString(1));
+                        }
+                    }
+                } catch (SQLException ftsErr) {
+                    AiAgentActivity.debugLog("[Memory] FTS 检索失败，回退 LIKE: " + ftsErr.getMessage());
+                }
+            }
+            // 回退：查询过短（trigram 不可用）或 FTS 返回 0 条时用子串匹配兜底
+            if (list.isEmpty()) {
+                String pattern = "%" + FtsQuery.likeEscape(query.trim()) + "%";
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT content FROM memories WHERE content LIKE ? ESCAPE '\\' "
+                      + "ORDER BY created_at DESC LIMIT ?")) {
                     ps.setString(1, pattern);
                     ps.setInt(2, maxResults);
                     try (ResultSet rs = ps.executeQuery()) {
@@ -572,45 +702,54 @@ public class UnifiedQQMemoryManager {
         return list;
     }
 
-    /** 跨群全文检索群聊历史（返回 "[群X] 昵称: 内容" 格式化结果，用于群与群之间的记忆共享） */
+    /**
+     * 跨群全文检索群聊历史（返回 "[群X] 昵称: 内容" 格式化结果，用于群与群之间的记忆共享）。
+     * <p>改用 trigram FTS：中文子串可直接命中，无需再靠 N-gram LIKE 全表扫描
+     * （实测原实现每次 1.16-1.21 秒且持有全局 DB 锁，现为毫秒级）。</p>
+     */
     public List<String> searchGroupChatHistory(String query, int maxResults) {
         List<String> list = new ArrayList<>();
         if (query == null || query.trim().isEmpty()) return list;
         String q = query.trim();
         synchronized (lock) {
             LinkedHashSet<String> matched = new LinkedHashSet<>();
-            // 1. FTS5 全文检索（英文/空格分词）
-            String ftsQuery = q.replaceAll("[*\"()\\-:]", " ")
-                    .replaceAll("\\s+", " OR ").trim();
-            try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT gch.nickname, gch.group_id, gch.content FROM group_chat_history_fts f " +
-                    "JOIN group_chat_history gch ON f.rowid = gch.id " +
-                    "WHERE group_chat_history_fts MATCH ? ORDER BY rank LIMIT ?")) {
-                ps.setString(1, ftsQuery);
-                ps.setInt(2, maxResults);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next() && matched.size() < maxResults) {
-                        matched.add(formatHistoryHit(rs));
-                    }
-                }
-            } catch (SQLException ignored) {}
-            // 2. 中文 N-gram 子串匹配（覆盖无空格中文长句的关键词召回，单次 SQL）
-            if (matched.size() < maxResults) {
-                List<String> grams = extractNGrams(q);
-                if (!grams.isEmpty()) {
-                    StringBuilder where = new StringBuilder("content LIKE ?");
-                    for (int i = 1; i < grams.size(); i++) where.append(" OR content LIKE ?");
-                    try (PreparedStatement ps = conn.prepareStatement(
-                            "SELECT nickname, group_id, content FROM group_chat_history WHERE " +
-                            where + " ORDER BY created_at DESC LIMIT ?")) {
-                        for (int i = 0; i < grams.size(); i++) ps.setString(i + 1, "%" + grams.get(i) + "%");
-                        ps.setInt(grams.size() + 1, maxResults);
-                        try (ResultSet rs = ps.executeQuery()) {
-                            while (rs.next() && matched.size() < maxResults) {
-                                matched.add(formatHistoryHit(rs));
-                            }
+            String ftsQuery = FtsQuery.build(q, FtsQuery.DEFAULT_MAX_TERMS);
+            boolean ftsFailed = false;
+            if (ftsQuery != null) {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT gch.nickname, gch.group_id, gch.content FROM group_chat_history_fts f " +
+                        "JOIN group_chat_history gch ON f.rowid = gch.id " +
+                        "WHERE group_chat_history_fts MATCH ? ORDER BY rank LIMIT ?")) {
+                    ps.setString(1, ftsQuery);
+                    ps.setInt(2, maxResults);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next() && matched.size() < maxResults) {
+                            matched.add(formatHistoryHit(rs));
                         }
-                    } catch (SQLException ignored) {}
+                    }
+                } catch (SQLException e) {
+                    ftsFailed = true;
+                    AiAgentActivity.debugLog("[Memory] 群聊历史 FTS 检索失败: " + e.getMessage());
+                }
+            }
+            // LIKE 兜底仅在「trigram 无法表达该查询」或「FTS 索引不可用（迁移中/缺失）」时执行。
+            // 刻意不在「FTS 正常但 0 命中」时兜底：trigram 能命中任意 3 字子串，0 命中即真的没有，
+            // 再跑一次 LIKE 会对 36 万行做全表扫描（实测约 200ms，且持有全局 DB 锁）。
+            // 排序用 id DESC 而不是 created_at DESC：id 是 rowid 主键，倒序扫描找到 maxResults
+            // 条匹配即停（实测 1-5ms）；created_at 无可用索引时会退化成 TEMP B-TREE 全表排序（230ms）。
+            if (matched.isEmpty() && (ftsQuery == null || ftsFailed)) {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT nickname, group_id, content FROM group_chat_history " +
+                        "WHERE content LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?")) {
+                    ps.setString(1, "%" + FtsQuery.likeEscape(q) + "%");
+                    ps.setInt(2, maxResults);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next() && matched.size() < maxResults) {
+                            matched.add(formatHistoryHit(rs));
+                        }
+                    }
+                } catch (SQLException e) {
+                    AiAgentActivity.debugLog("[Memory] 群聊历史 LIKE 兜底失败: " + e.getMessage());
                 }
             }
             list.addAll(matched);
@@ -627,8 +766,8 @@ public class UnifiedQQMemoryManager {
             LinkedHashSet<String> matched = new LinkedHashSet<>();
             try (PreparedStatement ps = conn.prepareStatement(
                     "SELECT role, content, source_type, source_id, sender_name FROM conversations " +
-                    "WHERE content LIKE ? ORDER BY created_at DESC LIMIT ?")) {
-                ps.setString(1, "%" + q + "%");
+                    "WHERE content LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?")) {
+                ps.setString(1, "%" + FtsQuery.likeEscape(q) + "%");
                 ps.setInt(2, maxResults);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
@@ -660,7 +799,10 @@ public class UnifiedQQMemoryManager {
         return "[群" + groupId + "] " + (nick != null && !nick.isEmpty() ? nick : "某人") + ": " + content;
     }
 
-    /** 提取中文 N-gram（2-gram 与 3-gram），用于无空格中文长句的关键词召回 */
+    /**
+     * 提取中文 N-gram（2-gram 与 3-gram），用于无空格中文长句的关键词召回。
+     * <p>仅作为 trigram FTS 不可用时的兜底保留（trigram 生效时不再调用，避免全表扫描）。</p>
+     */
     private List<String> extractNGrams(String text) {
         LinkedHashSet<String> grams = new LinkedHashSet<>();
         if (text == null) return new ArrayList<>();
@@ -748,7 +890,10 @@ public class UnifiedQQMemoryManager {
         java.util.Map<String, Long> map = new java.util.LinkedHashMap<>();
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT nickname, user_id FROM group_nicknames WHERE group_id=? ORDER BY updated_at DESC")) {
+                    "SELECT nickname, user_id FROM group_nicknames WHERE group_id=? " +
+                        // 固定顺序：updated_at 会随群里每次发言被刷新，按它排序会让
+                        // 「群昵称映射」这段稳定前缀的字节每次都可能变，打断 KV 前缀缓存。
+                        "ORDER BY nickname ASC, user_id ASC")) {
                 ps.setLong(1, groupId);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
@@ -902,6 +1047,54 @@ public class UnifiedQQMemoryManager {
         }
         return null;
     }
+
+    /** 按 OneBot message_id 精确查询群聊消息的 Mark 备注（无则返回 null）——最保险的查标方式。 */
+    public String getGroupMessageMarkById(long groupId, long messageId) {
+        if (groupId <= 0 || messageId <= 0) return null;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT mark FROM group_chat_history WHERE group_id = ? AND message_id = ? AND mark IS NOT NULL LIMIT 1")) {
+                ps.setLong(1, groupId);
+                ps.setLong(2, messageId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return rs.getString(1);
+                }
+            } catch (SQLException ignored) {}
+        }
+        return null;
+    }
+
+    /** 按 message_id 精确给私聊/群聊对话记录打 Mark（私聊场景的精确标记入口）。 */
+    public void setConversationMarkById(String sourceType, long sourceId, long messageId, String mark) {
+        if (sourceType == null || sourceId <= 0 || messageId <= 0 || mark == null || mark.trim().isEmpty()) return;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE conversations SET mark = ? WHERE source_type = ? AND source_id = ? AND message_id = ?")) {
+                ps.setString(1, mark.trim());
+                ps.setString(2, sourceType);
+                ps.setLong(3, sourceId);
+                ps.setLong(4, messageId);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {}
+        }
+    }
+
+    /** 按 message_id 精确查询私聊/群聊对话记录的 Mark 备注（无则返回 null）。 */
+    public String getConversationMarkById(String sourceType, long sourceId, long messageId) {
+        if (sourceType == null || sourceId <= 0 || messageId <= 0) return null;
+        synchronized (lock) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT mark FROM conversations WHERE source_type = ? AND source_id = ? AND message_id = ? AND mark IS NOT NULL LIMIT 1")) {
+                ps.setString(1, sourceType);
+                ps.setLong(2, sourceId);
+                ps.setLong(3, messageId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) return rs.getString(1);
+                }
+            } catch (SQLException ignored) {}
+        }
+        return null;
+    }
     
     /** 获取全局最近的群聊历史（跨群，按时间倒序，排除指定群），用于跨群续聊上下文 */
     public List<String> getRecentGroupChatHistoryGlobal(int limit, long excludeGroupId) {
@@ -955,7 +1148,9 @@ public class UnifiedQQMemoryManager {
         List<String[]> list = new ArrayList<>();
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT user_id, nickname, role FROM group_members WHERE group_id=? AND role IN ('owner','admin') ORDER BY role='owner' DESC, updated_at DESC")) {
+                    "SELECT user_id, nickname, role FROM group_members WHERE group_id=? AND role IN ('owner','admin') " +
+                        // 同理：角色列表用确定顺序，避免 updated_at 抖动导致提示词字节漂移。
+                        "ORDER BY role='owner' DESC, user_id ASC")) {
                 ps.setLong(1, groupId);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
@@ -1076,7 +1271,9 @@ public class UnifiedQQMemoryManager {
         Map<Long, String> result = new LinkedHashMap<>();
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT key, value FROM app_state WHERE key LIKE 'group_name_%'")) {
+                    // ORDER BY key：SQLite 不保证无序查询的返回顺序，顺序一变提示词字节就变，
+                    // 会白白打断 KV 前缀缓存。这里固定按 key 升序。
+                    "SELECT key, value FROM app_state WHERE key LIKE 'group_name_%' ORDER BY key")) {
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
                         String key = rs.getString(1);
@@ -1110,7 +1307,8 @@ public class UnifiedQQMemoryManager {
         Map<Long, String> result = new LinkedHashMap<>();
         synchronized (lock) {
             try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT key, value FROM app_state WHERE key LIKE 'friend_name_%'")) {
+                    // 同上：固定顺序，避免提示词里好友列表顺序漂移打断前缀缓存。
+                    "SELECT key, value FROM app_state WHERE key LIKE 'friend_name_%' ORDER BY key")) {
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
                         String key = rs.getString(1);

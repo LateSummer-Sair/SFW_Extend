@@ -127,7 +127,11 @@ public class ImpressionEntry implements Serializable {
         sb.append("[Person印象] QQ:").append(qq);
         if (nickname != null && !nickname.isEmpty())
             sb.append("(").append(nickname).append(")");
-        sb.append(" 累计").append(messageCount).append("条消息\n");
+        // 注意：这里【不能】输出精确的消息条数。messageCount 每条消息都会 +1，
+        // 一旦写进提示词，用户画像段就会逐条消息变化 —— 而这段位于提示词的「稳定前缀」区域，
+        // 字节一变 KV 前缀缓存立刻断开（命中 ¥0.02-0.04/M vs 未命中 ¥1-2/M）。
+        // 改成粗粒度熟悉度：只在跨过阈值时才变化，信息量不降。
+        sb.append(" 熟悉度:").append(familiarityLabel(messageCount)).append("\n");
         if (!emotionStability.isEmpty())
             sb.append("- 情绪状态: ").append(emotionStability).append("\n");
         if (!interests.isEmpty())
@@ -141,6 +145,17 @@ public class ImpressionEntry implements Serializable {
         if (impressionLevel != 0)
             sb.append("- 印象好坏: ").append(impressionLevel > 0 ? "好(" + impressionLevel + ")" : "差(" + impressionLevel + ")").append("\n");
         return sb.toString().trim();
+    }
+
+    /**
+     * 粗粒度熟悉度标签 —— 刻意用分档而不是精确条数，避免每来一条消息就把
+     * 提示词稳定段（用户画像）的字节改掉、打断 KV 前缀缓存。
+     */
+    private static String familiarityLabel(int msgs) {
+        if (msgs >= 500) return "很熟";
+        if (msgs >= 100) return "较熟";
+        if (msgs >= 20) return "认识";
+        return "初识";
     }
 
     @Override

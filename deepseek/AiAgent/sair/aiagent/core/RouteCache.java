@@ -223,12 +223,27 @@ public class RouteCache {
         return list;
     }
 
-    /** 清理低于阈值的低权重路由 */
+    /**
+     * 清理「从未成功且长期未用」的低权重路由。
+     * <p>
+     * 旧实现是 {@code DELETE FROM route_cache WHERE weight < ?}，配合
+     * {@link #recordRoute} 的「失败 → 权重减半、下限 0.05」衰减：
+     * 1.0 → 0.5 → 0.25 → 0.125 → 0.0625，<b>连续失败 4 次就被永久删除</b>
+     * （默认阈值 0.1，且 weight 下限 0.05 天生低于阈值，等于必然被清）。
+     * 而本类守护线程每 5 分钟清理一次 —— 路由学习成果会被反复抹掉，
+     * 这也是路由提示长期几乎不生效的原因之一。
+     * </p>
+     * <p>
+     * 现在只删除真正没价值的行：从未成功过（success_count = 0）且 7 天内没被用过。
+     * 有过成功记录的路由即使暂时失败也会保留，交给时间衰减与权重排序自然降权。
+     * </p>
+     */
     public int cleanupLowWeight(double threshold) {
         if (pm == null) return 0;
         synchronized (lock) {
             try (PreparedStatement ps = pm.getConnection().prepareStatement(
-                     "DELETE FROM route_cache WHERE weight < ?")) {
+                     "DELETE FROM route_cache WHERE weight < ? AND success_count = 0 " +
+                     "AND last_used < datetime('now', '-7 days')")) {
                 ps.setDouble(1, threshold);
                 return ps.executeUpdate();
             } catch (Exception e) {

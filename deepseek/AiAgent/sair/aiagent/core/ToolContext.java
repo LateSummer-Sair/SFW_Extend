@@ -58,6 +58,26 @@ public class ToolContext {
         return "execq".equals(channel);
     }
 
+    /**
+     * 会话作用域标识（群/私聊 + 发送者）。
+     * <p>用于给「按任务文本缓存结果」的组件（如 AgentBus 子 Agent 结果缓存）加作用域，
+     * 否则同一个问题在 A 群得到的答案会被直接返回给 B 群，造成跨群串味。</p>
+     */
+    public String scopeKey() {
+        if (qqMsg == null) return channel;
+        long gid = qqMsg.isGroupMessage() ? qqMsg.getGroupId() : 0L;
+        return channel + ":" + (gid > 0 ? "g" + gid : "p" + qqMsg.getUserId());
+    }
+
+    /**
+     * 当前通道实际使用的模型是否具备原生视觉（能自己看图）。
+     * <p>Flash 系模型为 true（主/段落 Agent 可直接看图）；
+     * Pro 等无视觉模型为 false（必须由视觉 Agent 兜底识图）。</p>
+     */
+    public boolean hasNativeVision() {
+        return AiConfig.hasNativeVision(model);
+    }
+
     /** 浅拷贝一份上下文，供并行子 Agent 独立使用，避免并发修改同一 depth/字段。 */
     public ToolContext copy() {
         ToolContext c = new ToolContext(this.channel);

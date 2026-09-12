@@ -1,5 +1,6 @@
 package sair.aiagent.onebot;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import sair.aiagent.AiAgentActivity;
@@ -8,10 +9,322 @@ import sair.aiagent.onebot.util.JsonUtil;
 /**
  * 折叠/转发消息内容展开工具类。
  * 从 QQMessageHandler 中提取，负责从 OneBot v11 API 响应中提取文本内容。
+ *
+ * <p>除原有的「扁平化文本」提取外，另提供<b>结构化解析</b>（{@link #parseForwardStructure}）：
+ * 保留图片真实 URL 与嵌套折叠的 forward_id，供上层递归展开（嵌套折叠需再调 get_forward_msg）。</p>
  */
 public final class ForwardMessageExpander {
 
     private ForwardMessageExpander() {} // 纯静态工具类，禁止实例化
+
+    // ==================== 结构化解析（保留图片 URL 与嵌套折叠） ====================
+
+    /** 折叠消息中的一个内容项。 */
+    public static final class ForwardItem {
+        public static final String TYPE_TEXT = "text";
+        public static final String TYPE_IMAGE = "image";
+        public static final String TYPE_FACE = "face";
+        public static final String TYPE_AT = "at";
+        public static final String TYPE_NESTED = "nested";
+        /** 未单独建模的消息段（视频/语音/文件/卡片/位置等），渲染为可读占位符，避免静默丢失。 */
+        public static final String TYPE_PLACEHOLDER = "placeholder";
+
+        public final String type;
+        /** text 内容 / at 的 QQ 号 */
+        public final String text;
+        /** image 的图片 URL（可能为空，说明该图拿不到地址） */
+        public final String imageUrl;
+        /** nested: 嵌套折叠消息的 forward_id（可用于 get_forward_msg） */
+        public final String nestedId;
+        /** nested: 直接内嵌的 content JSON（部分实现会内嵌，优先用它，省一次 API 调用） */
+        public final String nestedRaw;
+
+        private ForwardItem(String type, String text, String imageUrl, String nestedId, String nestedRaw) {
+            this.type = type; this.text = text; this.imageUrl = imageUrl;
+            this.nestedId = nestedId; this.nestedRaw = nestedRaw;
+        }
+        static ForwardItem text(String t) { return new ForwardItem(TYPE_TEXT, t, null, null, null); }
+        static ForwardItem image(String url) { return new ForwardItem(TYPE_IMAGE, null, url, null, null); }
+        static ForwardItem face() { return new ForwardItem(TYPE_FACE, null, null, null, null); }
+        static ForwardItem at(String qq) { return new ForwardItem(TYPE_AT, qq, null, null, null); }
+        static ForwardItem nested(String id, String raw) { return new ForwardItem(TYPE_NESTED, null, null, id, raw); }
+        /** 未建模段落：只带一段可读占位文本（如 "[视频]"）。 */
+        static ForwardItem placeholder(String label) { return new ForwardItem(TYPE_PLACEHOLDER, label, null, null, null); }
+
+        public boolean isText() { return TYPE_TEXT.equals(type); }
+        public boolean isImage() { return TYPE_IMAGE.equals(type); }
+        public boolean isNested() { return TYPE_NESTED.equals(type); }
+    }
+
+    /** 折叠消息中的一条消息（发送者 + 内容项列表）。 */
+    public static final class ForwardMessage {
+        public String senderName;
+        public long senderQQ;
+        public final List<ForwardItem> items = new ArrayList<>();
+
+        /** 拼出该条消息的纯文本（图片渲染为 [图片:url]）。 */
+        public String render() {
+            StringBuilder sb = new StringBuilder();
+            for (ForwardItem it : items) {
+                switch (it.type) {
+                    case ForwardItem.TYPE_TEXT:
+                        if (it.text != null && !it.text.isEmpty()) {
+                            if (sb.length() > 0) sb.append(" ");
+                            sb.append(it.text);
+                        }
+                        break;
+                    case ForwardItem.TYPE_IMAGE:
+                        if (sb.length() > 0) sb.append(" ");
+                        sb.append(it.imageUrl != null && !it.imageUrl.isEmpty()
+                                ? "[图片:" + it.imageUrl + "]" : "[图片]");
+                        break;
+                    case ForwardItem.TYPE_FACE:
+                        if (sb.length() > 0) sb.append(" ");
+                        sb.append("[表情]");
+                        break;
+                    case ForwardItem.TYPE_AT:
+                        if (sb.length() > 0) sb.append(" ");
+                        sb.append("@").append(it.text != null ? it.text : "");
+                        break;
+                    case ForwardItem.TYPE_PLACEHOLDER:
+                        // 折叠消息里未单独建模的段（视频/语音/文件/卡片/位置/骰子…）。
+                        // 旧实现这些段在 parseOneMessage 的 default 分支被直接丢弃，
+                        // 于是「折叠里发了个视频/文件」在 AI 看来完全不存在。
+                        if (sb.length() > 0) sb.append(" ");
+                        sb.append(it.text);
+                        break;
+                    default:
+                        break; // nested 由递归展开处理，不在此渲染
+                }
+            }
+            return sb.toString();
+        }
+
+        /** 该条消息中是否含嵌套折叠。 */
+        public boolean hasNested() {
+            for (ForwardItem it : items) if (it.isNested()) return true;
+            return false;
+        }
+    }
+
+    /** 嵌套折叠消息的取回回调（由持有 NapCatApi 的调用方实现）。 */
+    public interface NestedForwardResolver {
+        /** 按 forward_id 取回嵌套折叠消息的原始 JSON（get_forward_msg 响应或 content 数组）；取不到返回 null。 */
+        String resolve(String forwardId);
+    }
+
+    /**
+     * 结构化解析折叠消息内容。入参可为：
+     * <ul>
+     *   <li>get_forward_msg 响应：{@code {"data":{"messages":[...]}}}</li>
+     *   <li>内嵌 content 数组：{@code [{"type":"node","data":{...}}]} 或 {@code [{sender,message}...]}</li>
+     * </ul>
+     */
+    public static List<ForwardMessage> parseForwardStructure(String raw) {
+        List<ForwardMessage> out = new ArrayList<>();
+        if (raw == null || raw.trim().isEmpty()) return out;
+        String src = raw.trim();
+        String arr = JsonUtil.extractArray(src, "messages");
+        if (arr == null) {
+            if (src.startsWith("[")) {
+                arr = src.substring(1, src.length() - 1);
+            } else {
+                arr = src; // 单个对象当一条消息处理
+            }
+        }
+        for (String item : JsonUtil.splitJsonArray(arr)) {
+            ForwardMessage fm = parseOneMessage(item);
+            if (fm != null && (!fm.items.isEmpty() || fm.senderName != null)) out.add(fm);
+        }
+        return out;
+    }
+
+    /** 解析单条消息/节点（兼容 {sender,message} 与 {type:node,data:{name,content}} 两种形态）。 */
+    private static ForwardMessage parseOneMessage(String item) {
+        ForwardMessage fm = new ForwardMessage();
+        try {
+            String senderObj = JsonUtil.extractObject(item, "sender");
+            if (senderObj != null) {
+                fm.senderQQ = JsonUtil.extractLong(senderObj, "user_id");
+                String card = JsonUtil.extractString(senderObj, "card");
+                String nick = JsonUtil.extractString(senderObj, "nickname");
+                fm.senderName = (card != null && !card.isEmpty()) ? card
+                        : (nick != null && !nick.isEmpty() ? nick : null);
+            }
+            String segs = JsonUtil.extractArray(item, "message");
+            if (segs == null) {
+                String dataObj = JsonUtil.extractObject(item, "data");
+                if (dataObj != null) {
+                    segs = JsonUtil.extractArray(dataObj, "content");
+                    if (fm.senderName == null) {
+                        String name = JsonUtil.extractString(dataObj, "name");
+                        if (name != null && !name.isEmpty()) fm.senderName = name;
+                    }
+                    if (fm.senderQQ <= 0) fm.senderQQ = JsonUtil.extractLong(dataObj, "user_id");
+                }
+            }
+            if (segs == null) return fm;
+
+            for (String seg : JsonUtil.splitJsonArray(segs)) {
+                String type = JsonUtil.extractString(seg, "type");
+                if (type == null) continue;
+                String dataObj = JsonUtil.extractObject(seg, "data");
+                switch (type) {
+                    case "text": {
+                        String t = (dataObj != null) ? JsonUtil.extractString(dataObj, "text") : null;
+                        if (t != null && !t.isEmpty()) fm.items.add(ForwardItem.text(t));
+                        break;
+                    }
+                    case "image": {
+                        String url = (dataObj != null) ? JsonUtil.extractString(dataObj, "url") : null;
+                        if ((url == null || url.isEmpty()) && dataObj != null) {
+                            url = JsonUtil.extractString(dataObj, "file");
+                        }
+                        fm.items.add(ForwardItem.image(url));
+                        break;
+                    }
+                    case "face":
+                        fm.items.add(ForwardItem.face());
+                        break;
+                    case "at": {
+                        String qq = (dataObj != null) ? JsonUtil.extractString(dataObj, "qq") : null;
+                        fm.items.add(ForwardItem.at(qq));
+                        break;
+                    }
+                    case "forward": {
+                        String fid = (dataObj != null) ? JsonUtil.extractString(dataObj, "id") : null;
+                        String inner = (dataObj != null) ? JsonUtil.extractArray(dataObj, "content") : null;
+                        if (inner == null && dataObj != null) inner = JsonUtil.extractString(dataObj, "content");
+                        fm.items.add(ForwardItem.nested(fid, inner));
+                        break;
+                    }
+                    default:
+                        // 不再静默丢弃：视频/语音/文件/卡片/位置等段落渲染为可读占位符，
+                        // 让 AI 至少知道「这里还有一条非文本内容」。
+                        fm.items.add(ForwardItem.placeholder(foldSegmentLabel(type)));
+                        break;
+                }
+            }
+        } catch (Exception e) {
+            AiAgentActivity.debugLog("[Fwd] 结构化解析单条消息失败: " + e.toString());
+        }
+        return fm;
+    }
+
+    /** 折叠消息内未建模段落 → 可读占位标签。 */
+    private static String foldSegmentLabel(String type) {
+        if (type == null) return "[其他内容]";
+        switch (type.toLowerCase()) {
+            case "video":    return "[视频]";
+            case "record":   return "[语音]";
+            case "file":     return "[文件]";
+            case "json":
+            case "xml":
+            case "markdown": return "[卡片]";
+            case "location": return "[位置]";
+            case "music":    return "[音乐]";
+            case "contact":  return "[名片]";
+            case "share":    return "[分享]";
+            case "dice":     return "[骰子]";
+            case "rps":      return "[猜拳]";
+            case "poke":     return "[戳一戳]";
+            case "mface":
+            case "sface":    return "[表情]";
+            default:         return "[CQ:" + type + "]";
+        }
+    }
+
+    /** 结构里是否含嵌套折叠（供上层决定要不要递归展开）。 */
+    public static boolean hasNestedForward(List<ForwardMessage> msgs) {
+        if (msgs == null) return false;
+        for (ForwardMessage m : msgs) {
+            if (m == null) continue;
+            if (m.hasNested()) return true;
+            for (ForwardItem it : m.items) {
+                if (it.isNested() && it.nestedRaw != null) {
+                    List<ForwardMessage> inner = parseForwardStructure(it.nestedRaw);
+                    if (!inner.isEmpty()) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 把结构渲染成带缩进的文本，<b>嵌套折叠就地递归展开</b>（不调模型，纯结构展开）。
+     *
+     * @param resolver   嵌套折叠取回回调（可为 null，此时嵌套只留占位）
+     * @param maxDepth   最大递归层数
+     * @param maxChars   渲染总长度上限
+     * @param imageUrls  输出参数：收集到的所有图片 URL（含各嵌套层）
+     */
+    public static String renderStructure(List<ForwardMessage> msgs, NestedForwardResolver resolver,
+                                         int maxDepth, int maxChars, List<String> imageUrls) {
+        StringBuilder sb = new StringBuilder();
+        renderLevel(msgs, resolver, 0, maxDepth, maxChars, imageUrls, sb, "");
+        String out = sb.toString().trim();
+        return out.isEmpty() ? null : out;
+    }
+
+    private static void renderLevel(List<ForwardMessage> msgs, NestedForwardResolver resolver,
+                                    int depth, int maxDepth, int maxChars,
+                                    List<String> imageUrls, StringBuilder sb, String indent) {
+        if (msgs == null) return;
+        for (ForwardMessage m : msgs) {
+            if (m == null) continue;
+            if (sb.length() >= maxChars) return;
+            StringBuilder line = new StringBuilder();
+            for (ForwardItem it : m.items) {
+                if (it.isText()) {
+                    if (line.length() > 0) line.append(" ");
+                    line.append(it.text);
+                } else if (it.isImage()) {
+                    if (line.length() > 0) line.append(" ");
+                    if (it.imageUrl != null && !it.imageUrl.isEmpty()) {
+                        line.append("[图片:").append(it.imageUrl).append("]");
+                        if (imageUrls != null && !imageUrls.contains(it.imageUrl)) imageUrls.add(it.imageUrl);
+                    } else {
+                        line.append("[图片]");
+                    }
+                } else if (ForwardItem.TYPE_FACE.equals(it.type)) {
+                    if (line.length() > 0) line.append(" ");
+                    line.append("[表情]");
+                } else if (ForwardItem.TYPE_AT.equals(it.type)) {
+                    if (line.length() > 0) line.append(" ");
+                    line.append("@").append(it.text != null ? it.text : "");
+                }
+            }
+            String name = (m.senderName != null && !m.senderName.isEmpty()) ? m.senderName : "未知";
+            if (line.length() > 0) {
+                sb.append(indent).append(name).append(": ").append(line).append("\n");
+            }
+            // 嵌套折叠就地递归展开
+            for (ForwardItem it : m.items) {
+                if (!it.isNested()) continue;
+                if (sb.length() >= maxChars) return;
+                if (depth >= maxDepth) {
+                    sb.append(indent).append("  └[嵌套折叠：已达最大展开层数 ").append(maxDepth).append("，未继续展开]\n");
+                    continue;
+                }
+                List<ForwardMessage> inner = null;
+                if (it.nestedRaw != null && !it.nestedRaw.isEmpty()) {
+                    inner = parseForwardStructure(it.nestedRaw);
+                }
+                if ((inner == null || inner.isEmpty()) && it.nestedId != null && !it.nestedId.isEmpty()
+                        && resolver != null) {
+                    String nestedJson = resolver.resolve(it.nestedId);
+                    if (nestedJson != null && !nestedJson.isEmpty()) inner = parseForwardStructure(nestedJson);
+                }
+                if (inner == null || inner.isEmpty()) {
+                    sb.append(indent).append("  └[内嵌折叠消息：内容获取失败]\n");
+                    continue;
+                }
+                sb.append(indent).append("  ┌[内嵌折叠消息]\n");
+                renderLevel(inner, resolver, depth + 1, maxDepth, maxChars, imageUrls, sb, indent + "    ");
+                sb.append(indent).append("  └[内嵌折叠消息结束]\n");
+            }
+        }
+    }
 
     /** 从get_forward_msg API响应中提取文本 */
     public static String extractForwardMsgContent(String apiResponse) {
@@ -196,10 +509,11 @@ public final class ForwardMessageExpander {
                 String type = JsonUtil.extractString(seg, "type");
                 if ("image".equals(type)) {
                     String data = JsonUtil.extractObject(seg, "data");
-                    if (data != null) {
-                        String url = JsonUtil.extractString(data, "url");
-                        if (url != null && !url.isEmpty()) urls.add(url);
-                    }
+                    String url = (data != null) ? JsonUtil.extractString(data, "url") : null;
+                    // 关键：即使 url 为空也占位，保证与 extractQuotedImageFiles 逐项对齐。
+                    // 旧实现会跳过空 url，导致后续 (url, file) 全部错位一格 ——
+                    // 于是 NapCat 兜底下载拿到的是**另一张图**的 md5，图注/去重全部张冠李戴。
+                    urls.add(url != null ? url : "");
                 }
             }
             return urls;

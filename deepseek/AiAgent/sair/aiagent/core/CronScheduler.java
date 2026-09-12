@@ -54,6 +54,20 @@ public class CronScheduler {
         this.persistence = persistence;
     }
 
+    // ==================== 单例入口（供三方技能复用同一份调度器） ====================
+
+    private static volatile CronScheduler instance;
+
+    /** 插件建调度器时登记；技能用同一份，才不会出现「两个调度器各跑一半任务」。 */
+    public static void setInstance(CronScheduler s) {
+        instance = s;
+    }
+
+    /** 供已剥离到 data/skills/ 的 schedule 工具使用；未初始化返回 null（技能应回错误而不是崩）。 */
+    public static CronScheduler getInstance() {
+        return instance;
+    }
+
     /** 设置任务触发回调 */
     public void setTaskCallback(Runnable callback) {
         this.taskCallback = callback;

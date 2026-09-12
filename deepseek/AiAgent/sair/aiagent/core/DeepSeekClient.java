@@ -45,9 +45,6 @@ import com.google.gson.JsonObject;
  */
 public class DeepSeekClient {
 
-    /** SSE数据行前缀 */
-    private static final String SSE_PREFIX = "data: ";
-
     /** SSE结束标记 */
     private static final String SSE_DONE = "[DONE]";
 
@@ -60,13 +57,31 @@ public class DeepSeekClient {
     /** 共享 Gson 实例（避免每轮 Function Calling 重复 new Gson）。 */
     private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
     /** 工具集序列化缓存：按工具列表对象身份缓存，避免每轮重复序列化 tools 数组。 */
-    private static volatile List<ToolDefinition> cachedToolsKey;
-    private static volatile com.google.gson.JsonArray cachedToolsArr;
+    private static final class ToolsCache {
+        final List<ToolDefinition> key;
+        final com.google.gson.JsonArray json;
+        ToolsCache(List<ToolDefinition> key, com.google.gson.JsonArray json) {
+            this.key = key;
+            this.json = json;
+        }
+    }
+    /** 单一 volatile 引用保证 key/json 成对可见（两个独立字段会被并发写交错成错配）。 */
+    private static volatile ToolsCache toolsCache;
 
-    /** 非流式请求默认 max_tokens */
-    private static final int DEFAULT_MAX_TOKENS = 4096;
+    /** 最近一次调用的用量快照 {prompt, completion, cacheHit, cacheMiss}。 */
+    private volatile long[] lastCallUsage;
+    private volatile long lastCallUsageAt;
+
+    /** 非流式请求默认 max_tokens（对齐官方「非思考模式默认 8K」） */
+    private static final int DEFAULT_MAX_TOKENS = 8192;
+    /** 思考模式默认 max_tokens（对齐官方「思考模式默认 64K」；reasoning tokens 与正文共用该预算） */
+    private static final int DEFAULT_MAX_TOKENS_THINKING = 65536;
+    /** thinking = max 时的默认 max_tokens（对齐官方「effort=max 默认 128K」） */
+    private static final int DEFAULT_MAX_TOKENS_THINKING_MAX = 131072;
     /** Agent/execs 模式 max_tokens（支持长输出） */
     private static final int AGENT_MAX_TOKENS = 32768;
+    /** max_tokens 官方上限（393216），超出会被服务端拒绝 */
+    private static final int MAX_TOKENS_LIMIT = 393216;
     /** 重试最大次数（429/503） */
     private static final int MAX_RETRIES = 3;
     /** 重试退避基础等待 ms */
@@ -92,6 +107,20 @@ public class DeepSeekClient {
      */
     public DeepSeekClient(AiConfig config) {
         this.config = config;
+    }
+
+    // ==================== 单例入口（供三方技能复用同一份客户端） ====================
+
+    private static volatile DeepSeekClient instance;
+
+    /** 插件建客户端时登记；技能用同一份（避免另起一个客户端、各自持有连接与统计）。 */
+    public static void setInstance(DeepSeekClient c) {
+        instance = c;
+    }
+
+    /** 供已剥离到 data/skills/ 的工具（如 balance）使用；未初始化时返回 null。 */
+    public static DeepSeekClient getInstance() {
+        return instance;
     }
 
     // ==================== 公共API ====================
@@ -426,11 +455,6 @@ public class DeepSeekClient {
         }
         root.add("messages", msgs);
 
-        // --- max_tokens ---
-        int maxTok = cfg.getMaxOutputTokens();
-        if (maxTok <= 0) maxTok = DEFAULT_MAX_TOKENS;
-        root.addProperty("max_tokens", maxTok);
-
         // --- thinking mode (思考模式开关) ---
         // DeepSeek thinking 默认 enabled、effort 默认 high。为让「空/none=关闭思考模式」语义成立，
         // 显式下发 thinking 开关。思考模式下 temperature/top_p/frequency_penalty/presence_penalty
@@ -449,11 +473,23 @@ public class DeepSeekClient {
             root.addProperty("reasoning_effort", re);
         }
 
+        // --- max_tokens ---
+        // 官方默认：不传时非思考 8K、思考 64K、reasoning_effort=max 时 128K；上限 393216。
+        // 思考模式下 reasoning tokens 与正文共用 max_tokens，故默认值需比非思考大一档，否则正文易被截断。
+        int maxTok = cfg.getMaxOutputTokens();
+        if (maxTok <= 0) {
+            maxTok = thinkingEnabled
+                    ? (isMaxEffort(re) ? DEFAULT_MAX_TOKENS_THINKING_MAX : DEFAULT_MAX_TOKENS_THINKING)
+                    : DEFAULT_MAX_TOKENS;
+        }
+        if (maxTok > MAX_TOKENS_LIMIT) maxTok = MAX_TOKENS_LIMIT;
+        root.addProperty("max_tokens", maxTok);
+
         if (!thinkingEnabled) {
             // --- temperature ---
             double temp = cfg.getTemperature();
             if (temp < 0 && hasMultimodalContent(messages)) {
-                temp = 0.1; // Vision API recommended temp
+                temp = 0.1; // 视觉多模态推荐的保守温度
             }
             if (temp >= 0 && temp <= 2.0) {
                 root.addProperty("temperature", temp);
@@ -465,17 +501,8 @@ public class DeepSeekClient {
                 root.addProperty("top_p", tp);
             }
 
-            // --- frequency_penalty ---
-            double fp = cfg.getFrequencyPenalty();
-            if (fp >= -2.0 && fp <= 2.0) {
-                root.addProperty("frequency_penalty", fp);
-            }
-
-            // --- presence_penalty ---
-            double pp = cfg.getPresencePenalty();
-            if (pp >= -2.0 && pp <= 2.0) {
-                root.addProperty("presence_penalty", pp);
-            }
+            // 注意：frequency_penalty / presence_penalty 已被官方标记 deprecated
+            //（「该参数已不再支持。传入该参数将不会产生任何效果。」），故不再下发。
         }
 
         // --- stop sequences ---
@@ -505,17 +532,21 @@ public class DeepSeekClient {
         // --- tools (Function Calling) ---
         if (tools != null && !tools.isEmpty()) {
             JsonArray toolsArr;
-            // 工具列表对象身份不变（ToolDispatcher 缓存）时复用已序列化的 tools 数组，避免每轮重复序列化
-            if (cachedToolsKey == tools) {
-                toolsArr = cachedToolsArr;
-            } else {
-                toolsArr = new JsonArray();
+            // 工具列表对象身份不变（ToolDispatcher 缓存）时复用已序列化的 tools 数组，避免每轮重复序列化。
+            // 必须用「单一不可变持有对象」而不是两个独立 volatile 字段：旧写法
+            // （cachedToolsKey / cachedToolsArr 分别赋值）在并发下会被交错成
+            // key=渠道B 而 arr=渠道A 的错配，下一个请求就会把**另一个渠道的工具集**发给模型
+            // （例如群里 execq 请求拿到本地全量工具）。单个 volatile 引用读写原子，不会错配。
+            ToolsCache tc = toolsCache;
+            if (tc == null || tc.key != tools) {
+                JsonArray arr = new JsonArray();
                 for (ToolDefinition td : tools) {
-                    toolsArr.add(GSON.toJsonTree(td.toRequestObject()));
+                    arr.add(GSON.toJsonTree(td.toRequestObject()));
                 }
-                cachedToolsKey = tools;
-                cachedToolsArr = toolsArr;
+                tc = new ToolsCache(tools, arr);
+                toolsCache = tc;
             }
+            toolsArr = tc.json;
             root.add("tools", toolsArr);
             if (toolChoice != null && !toolChoice.isEmpty()) {
                 root.addProperty("tool_choice", toolChoice);
@@ -544,8 +575,13 @@ public class DeepSeekClient {
                 new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                if (!line.startsWith(SSE_PREFIX)) continue;
-                String data = line.substring(SSE_PREFIX.length()).trim();
+                // === Keep-alive 容错（官方文档明确提示自解析 HTTP 响应需处理）===
+                // 非流式会收到重复空行；流式会收到 SSE 注释 ": keep-alive"。二者都需跳过。
+                if (line.isEmpty()) continue;
+                if (line.charAt(0) == ':') continue;              // SSE 注释行（: keep-alive）
+                if (!line.startsWith("data:")) continue;          // 只处理 data 行
+                String data = line.substring(5).trim();           // 兼容 "data:" 与 "data: "
+                if (data.isEmpty()) continue;
                 if (SSE_DONE.equals(data)) break;
 
                 // Extract reasoning_content first (may also contain content delta)
@@ -565,6 +601,13 @@ public class DeepSeekClient {
             }
         }
         return new StreamResult(fullContent.toString(), fullReasoning.toString());
+    }
+
+    /**
+     * 判断 reasoning_effort 是否为最高档（官方文档：ultra 映射为 max）。
+     */
+    private static boolean isMaxEffort(String effort) {
+        return effort != null && "max".equalsIgnoreCase(effort.trim());
     }
 
     /**
@@ -636,7 +679,20 @@ public class DeepSeekClient {
                 arr[2] += hit;
                 arr[3] += miss;
             }
+            lastCallUsage = new long[] { prompt, completion, hit, miss };
+            lastCallUsageAt = System.currentTimeMillis();
         } catch (Exception ignored) {}
+    }
+
+    /** 最近一次 API 调用的用量 {prompt, completion, cacheHit, cacheMiss}（未调用过返回 null）。 */
+    public long[] getLastCallUsage() {
+        long[] v = lastCallUsage;
+        return v == null ? null : v.clone();
+    }
+
+    /** 最近一次调用的时间戳（用于判断 getLastCallUsage 是否是本轮的）。 */
+    public long getLastCallUsageAt() {
+        return lastCallUsageAt;
     }
 
     /** Get cumulative token usage stats */

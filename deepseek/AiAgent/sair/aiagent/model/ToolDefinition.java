@@ -74,6 +74,43 @@ public class ToolDefinition implements Serializable {
         return addProperty(paramName, "string", description, true, enumValues);
     }
 
+    /**
+     * 添加数组类型参数（JSON Schema {@code array} + {@code items}）。
+     * <p>三方技能的 airun 声明支持 {@code type: array}，没有 items 的数组在 schema 里是非法的，
+     * 模型也无法知道元素类型，因此单独开一个入口。</p>
+     *
+     * @param itemType    元素类型（string/integer/number/boolean/object，非法值回退 string）
+     * @param itemDesc    元素描述（可空）
+     */
+    public ToolDefinition addArrayProperty(String paramName, String description, boolean required,
+                                           String itemType, String itemDesc) {
+        Map<String, Object> prop = new LinkedHashMap<>();
+        prop.put("type", "array");
+        if (description != null && !description.isEmpty()) {
+            prop.put("description", description);
+        }
+        Map<String, Object> items = new LinkedHashMap<>();
+        items.put("type", normalizeItemType(itemType));
+        if (itemDesc != null && !itemDesc.isEmpty()) {
+            items.put("description", itemDesc);
+        }
+        prop.put("items", items);
+        properties.put(paramName, prop);
+        if (required) this.required.add(paramName);
+        return this;
+    }
+
+    /** 数组元素类型白名单校验（JSON Schema 不接受任意字符串）。 */
+    private static String normalizeItemType(String t) {
+        if (t == null) return "string";
+        switch (t.trim().toLowerCase()) {
+            case "integer": case "number": case "boolean": case "object": case "array":
+                return t.trim().toLowerCase();
+            default:
+                return "string";
+        }
+    }
+
     public String getName() { return name; }
     public String getDescription() { return description; }
 

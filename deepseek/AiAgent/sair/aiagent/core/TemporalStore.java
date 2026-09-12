@@ -71,7 +71,7 @@ public final class TemporalStore {
         RedisClient redis = RedisClient.getInstance();
         if (redis != null && redis.isAvailable()) {
             try {
-                String json = redis.get(key);
+                String json = redis.get(redisKey(key));
                 if (json != null && !json.isEmpty()) {
                     T obj = gson.fromJson(json, clazz);
                     if (obj != null) {
@@ -106,7 +106,7 @@ public final class TemporalStore {
         RedisClient redis = RedisClient.getInstance();
         if (redis != null && redis.isAvailable()) {
             try {
-                String json = redis.get(key);
+                String json = redis.get(redisKey(key));
                 if (json != null && !json.isEmpty()) {
                     T obj = gson.fromJson(json, type);
                     if (obj != null) {
@@ -136,9 +136,32 @@ public final class TemporalStore {
         if (redis != null && redis.isAvailable()) {
             try {
                 int seconds = (int) Math.max(1, (ttlMs > 0 ? ttlMs : defaultTtlMs) / 1000);
-                redis.setex(key, seconds, gson.toJson(value));
+                redis.setex(redisKey(key), seconds, gson.toJson(value));
             } catch (Exception ignored) {}
         }
+    }
+
+    /**
+     * 前缀失效代数：{@code prefix -> generation}。
+     * <p>
+     * {@link #invalidateByPrefix} 只能清内存（Redis 没有 SCAN 就无法按前缀删除），
+     * 于是「写库 → 前缀失效 → 下一次读」会在内存 miss 后从 Redis 回源到<b>失效前的旧值</b>
+     * （旧数据复活）。把代数拼进 Redis 键名即可隔离：失效后代数 +1，旧键再也读不到，
+     * 由各自的 TTL 自然过期。
+     * </p>
+     */
+    private final Map<String, Integer> prefixGeneration = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 计算实际使用的 Redis 键名（带所有命中前缀的失效代数签名）。 */
+    private String redisKey(String key) {
+        StringBuilder sig = null;
+        for (Map.Entry<String, Integer> e : prefixGeneration.entrySet()) {
+            if (key.startsWith(e.getKey())) {
+                if (sig == null) sig = new StringBuilder();
+                sig.append(e.getKey()).append('#').append(e.getValue()).append(';');
+            }
+        }
+        return (sig == null ? "" : sig.toString()) + key;
     }
 
     /** 使单个 key 失效（内存 + Redis）。 */
@@ -149,20 +172,22 @@ public final class TemporalStore {
         }
         RedisClient redis = RedisClient.getInstance();
         if (redis != null) {
-            try { redis.del(key); } catch (Exception ignored) {}
+            try { redis.del(redisKey(key)); } catch (Exception ignored) {}
         }
     }
 
-    /** 使某前缀下所有 key 失效（内存；Redis 无法按前缀遍历，仅清理内存）。 */
+    /** 使某前缀下所有 key 失效（内存 + Redis 代数隔离）。 */
     public void invalidateByPrefix(String prefix) {
         if (prefix == null) return;
+        prefixGeneration.merge(prefix, 1, Integer::sum);
         synchronized (lru) {
             lru.keySet().removeIf(k -> k.startsWith(prefix));
         }
     }
 
-    /** 清空内存缓存。 */
+    /** 清空内存缓存（并用空前缀代数让所有 Redis 旧值失效）。 */
     public void clear() {
+        prefixGeneration.merge("", 1, Integer::sum);
         synchronized (lru) {
             lru.clear();
         }

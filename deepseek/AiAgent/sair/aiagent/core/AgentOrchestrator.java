@@ -87,8 +87,6 @@ public class AgentOrchestrator {
     private static final int MAX_FANOUT_PARALLEL = 3;
     /** 子 Agent 结果/合成输入截断长度。 */
     private static final int RESULT_MAX_CHARS = 1200;
-    /** 子 Agent 单次工具调用预算。 */
-    private static final int SUB_AGENT_MAX_TOOL_CALLS = 12;
 
     private final DeepSeekClient client;
     private final ToolDispatcher dispatcher;
@@ -220,7 +218,6 @@ public class AgentOrchestrator {
                                String model, ToolContext ctx, java.util.function.BooleanSupplier stopCheck) {
         FunctionCallingBridge bridge = new FunctionCallingBridge(client);
         bridge.setCritic(critic);
-        bridge.setMaxToolCalls(SUB_AGENT_MAX_TOOL_CALLS);
         String result = bridge.runWithDispatcher(task, stableSystem, null, tools, model,
                 dispatcher, ctx, stopCheck);
         if (result != null && result.length() > RESULT_MAX_CHARS) {

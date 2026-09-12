@@ -46,6 +46,13 @@ public final class FileUtils {
 
     /**
      * Read file content with optional chunking (offset/limit) for large text files.
+     * <p>
+     * 重要：offset/limit 必须作用在<b>完整解码文本</b>上。旧实现先把内容截断到
+     * {@link #MAX_OUTPUT_CHARS}(50000) 再切片，导致任何超过 5 万字符的文件：
+     * {@code offset=60000} 会被 clamp 到「截断后缀」内部，{@code start >= end} 后
+     * 返回一段截断提示文字甚至空串——AI 以为文件读完了/内容为空（而且工具返回被判为成功），
+     * 于是<b>永远无法读取第 5 万字符之后的内容</b>。
+     * </p>
      * @param offset 起始字符偏移（0=从头读）
      * @param limit  最多读取的字符数（-1 或 0=读全部）
      */
@@ -67,11 +74,33 @@ public final class FileUtils {
         if (content == null || content.startsWith("File too large") || content.startsWith("Read file error")) {
             return content;
         }
+        int total = content.length();
         if (offset > 0 || limit > 0) {
-            int start = Math.min(Math.max(offset, 0), content.length());
-            int end = (limit > 0) ? Math.min(start + limit, content.length()) : content.length();
-            if (start >= end) return content.substring(start);
-            return content.substring(start, end);
+            int start = Math.min(Math.max(offset, 0), total);
+            int end = (limit > 0) ? Math.min(start + limit, total) : total;
+            if (start >= end) {
+                return "[已到文件末尾] 请求范围 offset=" + offset + ", limit=" + limit
+                        + "，但文件总长度仅 " + total + " 字符。";
+            }
+            String slice = content.substring(start, end);
+            // 单次返回上限：超出时给出「下次 offset」，让分段读取可以真正接上
+            if (slice.length() > MAX_OUTPUT_CHARS) {
+                int nextOffset = start + MAX_OUTPUT_CHARS;
+                return slice.substring(0, MAX_OUTPUT_CHARS)
+                     + "\n\n... (本次返回截断于 " + MAX_OUTPUT_CHARS + " 字符；文件总长 " + total
+                     + " 字符，续读请用 offset=" + nextOffset + ")";
+            }
+            if (end < total) {
+                return slice + "\n\n... (已读到 " + end + "/" + total
+                     + " 字符，续读请用 offset=" + end + ")";
+            }
+            return slice;
+        }
+        // 未指定 offset/limit：整文件返回，超限时明确告知总长度与续读方式
+        if (total > MAX_OUTPUT_CHARS) {
+            return content.substring(0, MAX_OUTPUT_CHARS)
+                 + "\n\n... (truncated to " + MAX_OUTPUT_CHARS + " chars; 文件总长 " + total
+                 + " 字符，续读请用 offset=" + MAX_OUTPUT_CHARS + ")";
         }
         return content;
     }
@@ -222,6 +251,9 @@ public final class FileUtils {
 
     /**
      * Read text file with cross-platform encoding detection.
+     * <p>返回<b>完整</b>解码文本，<b>不截断</b>：截断统一由
+     * {@link #readFile(String, int, int)} 负责，它必须拿到完整文本，
+     * offset/limit 才能定位到第 5 万字符之后的内容。</p>
      * Strategy: UTF-8 -> system default -> GBK -> UTF-8 (force).
      * On Windows, system default is typically GBK/CP936. On Linux/Mac it's UTF-8.
      */
@@ -236,18 +268,18 @@ public final class FileUtils {
 
             // Try UTF-8 first
             String text = tryDecode(bytes, StandardCharsets.UTF_8);
-            if (text != null) return truncateIfNeeded(text);
+            if (text != null) return text;
 
             // Try system default charset (cross-platform: GBK on Win, UTF-8 on Unix)
             text = tryDecode(bytes, Charset.defaultCharset());
-            if (text != null) return truncateIfNeeded(text);
+            if (text != null) return text;
 
             // Try GBK explicitly (works cross-platform as fallback)
             text = tryDecode(bytes, Charset.forName("GBK"));
-            if (text != null) return truncateIfNeeded(text);
+            if (text != null) return text;
 
             // All failed: force UTF-8
-            return truncateIfNeeded(new String(bytes, StandardCharsets.UTF_8));
+            return new String(bytes, StandardCharsets.UTF_8);
         } catch (Exception e) {
             return "Read file error: " + e.getMessage();
         }
@@ -291,7 +323,7 @@ public final class FileUtils {
         }
     }
 
-    /** Truncate if too long */
+    /** Truncate if too long（仅用于未显式指定 offset/limit 的整文件读取路径） */
     private static String truncateIfNeeded(String content) {
         if (content.length() > MAX_OUTPUT_CHARS) {
             return content.substring(0, MAX_OUTPUT_CHARS)

@@ -110,6 +110,31 @@ public class ConfirmationGate {
         return await(type, description, DEFAULT_TIMEOUT_MS);
     }
 
+    // ==================== 单例入口（供三方技能使用） ====================
+
+    /** 插件启动时创建的<b>那一份</b>确认闸门（ai/yes、ai/no、execs 绕过开关都作用于它）。 */
+    private static volatile ConfirmationGate instance;
+
+    /** 由 {@code AiAgentActivity} 在建闸门时登记，保证技能用的是同一份状态。 */
+    public static void setInstance(ConfirmationGate gate) {
+        instance = gate;
+    }
+
+    /**
+     * 给三方技能用的确认入口：走的是与内置实现<b>同一个</b>闸门
+     * （因此 execs/QQ 通道的 bypass、ai/yes 与 ai/no 的语义完全一致）。
+     *
+     * <p>已剥离到 {@code data/skills/} 的工具（readfile/readdir/findfile/web/search/download…）
+     * 通过本方法保留「控制台先问一句」的行为 —— 剥的是业务逻辑，不是安全交互。</p>
+     *
+     * @return true = 允许执行；闸门未初始化（例如独立探针）时返回 true 以免技能直接不可用
+     */
+    public static boolean confirm(String type, String description) {
+        ConfirmationGate g = instance;
+        if (g == null) return true;
+        return g.await(type, description);
+    }
+
     /**
      * 设置是否绕过确认（execs 模式）。
      * @param bypass true=自动允许所有高危操作
