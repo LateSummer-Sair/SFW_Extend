@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>文件与数据根 · AiAgent V4 文档</title>
+<meta name="description" content="AiAgent V4 文件与数据根布局：源码包结构、数据根下每个文件是什么、数据表落在哪个文件、提示词文件、构建产物与仓根产物。">
+<link rel="stylesheet" href="css/site.css">
+<noscript><style>.reveal{opacity:1 !important;transform:none !important}#bg-canvas,.scanline{display:none !important}</style></noscript>
+</head>
+<body data-page="files">
+
+<canvas id="bg-canvas" aria-hidden="true"></canvas>
+<div class="scanline" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="brand-mark">V4</span>
+    <span class="brand-text"><b>AiAgent V4</b><span>SFW PLUGIN DOCS</span></span>
+  </a>
+      <nav class="nav" aria-label="页面导航">
+    <a href="index.html"><span class="n">01</span>总览</a>
+    <a href="usage.html"><span class="n">02</span>使用</a>
+    <a href="deploy.html"><span class="n">03</span>部署</a>
+    <a href="config.html"><span class="n">04</span>配置</a>
+    <a href="commands.html"><span class="n">05</span>命令</a>
+    <a href="capabilities.html"><span class="n">06</span>能力</a>
+    <a href="perms.html"><span class="n">07</span>权限</a>
+    <a href="files.html"><span class="n">08</span>文件</a>
+    <a href="architecture.html"><span class="n">09</span>实现</a>
+    <a href="migration.html"><span class="n">10</span>升级</a>
+    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+  </nav>
+  <div class="topbar-meta">
+    <span class="chip live">纯静态</span>
+    <span class="chip">无外链资源</span>
+  </div>
+  <button class="burger" type="button" aria-label="展开导航" aria-expanded="false">☰</button>
+</header>
+<div class="progress" id="progress" aria-hidden="true"></div>
+
+<main class="shell">
+  <div class="doc">
+
+    <section class="hero">
+      <span class="eyebrow">文件 · 数据根</span>
+      <h1>文件与数据根<br><span class="grad">每个文件是什么</span></h1>
+      <p class="lede">源码包结构、数据根下每个文件是什么、数据表落在哪个文件、提示词文件，以及构建产物与仓根产物。</p>
+    </section>
+
+    <div class="doc-body" id="doc-body">
+
+      <section class="chapter" id="packages">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">01 / PACKAGES</span>
+          <h2>源码包结构</h2>
+          <p class="chapter-desc">全部实现都在 <code>src\sair\v4\</code> 下，110 个 <code>.java</code> 分 17 个包（1 个根包 + 16 个子包）。这张表是"哪段逻辑在哪个包"的入口。</p>
+        </header>
+
+        <div class="grid-4">
+          <div class="kpi reveal"><div class="k">.java 文件</div><div class="v">110</div></div>
+          <div class="kpi reveal d1"><div class="k">代码行</div><div class="v">33103</div></div>
+          <div class="kpi reveal d2"><div class="k">源码字节</div><div class="v">1974887</div></div>
+          <div class="kpi amber reveal d3"><div class="k">包</div><div class="v">17<small>1 根 + 16 子</small></div></div>
+        </div>
+
+        <h3 class="sec">计数命令</h3>
+        <div class="code reveal" data-lang="powershell">
+          <div class="code-head"><span class="lang">powershell</span><span class="path">C:\Sair\Local\AiAgent-V4</span><button class="copy" type="button">复制</button></div>
+          <pre><code>(Get-ChildItem src -Recurse -Filter *.java).Count
+# 110
+
+(Get-ChildItem src\sair\v4 -Directory).Count
+# 16（子包数；再加根包 sair\v4 自己，合计 17）
+
+Get-ChildItem src\sair\v4 -Recurse -Filter *.java |
+  Group-Object { $_.Directory.FullName.Replace(
+      'C:\Sair\Local\AiAgent-V4\src\sair\v4','').TrimStart('\') } |
+  Sort-Object Name |
+  ForEach-Object { "{0,-12} {1}" -f ($_.Name -replace '^\\','(root)'), $_.Count }
+# (root) 6   agent 2   ai 5   auth 7   ctx 6   dev 4   ext 7   hot 7
+# kit 12     prompt 3  qq 15  schedule 7  store 9  term 6  tool 3  ui 4</code></pre>
+        </div>
+
+        <h3 class="sec">16 个包分别管什么</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead>
+              <tr><th>包</th><th class="num">文件</th><th>职责（一句话）</th><th>关键词</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>sair.v4</code>（根包）</td><td class="num">6</td><td>装配、内建工具面、配置、QQ 网关入口、心跳、组件入口</td><td><code>Boot</code> <code>Builtins</code> <code>Conf</code> <code>QqGateway</code> <code>Tick</code> <code>V4Activity</code></td></tr>
+              <tr><td><code>agent</code></td><td class="num">2</td><td>Agent 执行循环与子 Agent 并发控制</td><td><code>Agent</code> <code>Loop</code></td></tr>
+              <tr><td><code>ai</code></td><td class="num">5</td><td>模型接口客户端、SSE 流式解析、消息与工具规格、返回封装</td><td><code>DeepSeek</code> <code>Sse</code> <code>Msg</code> <code>Res</code> <code>ToolSpec</code></td></tr>
+              <tr><td><code>auth</code></td><td class="num">7</td><td>权限判定：资源分类、位数、调用者、账本、好感度分级</td><td><code>Acl</code> <code>Auth</code> <code>Bits</code> <code>Caller</code> <code>Res</code> <code>Favor</code></td></tr>
+              <tr><td><code>ctx</code></td><td class="num">6</td><td>回合上下文装配：事实块、聊天窗口、调用者作用域</td><td><code>CtxBuild</code> <code>ChatWindow</code> <code>Turn</code> <code>RecognizerState</code></td></tr>
+              <tr><td><code>dev</code></td><td class="num">4</td><td>本机调试口与调试日志：只绑回环的输出口、输入口、命令外壳、日志</td><td>类名不列出（只绑 <code>127.0.0.1</code>，起停见 <a href="commands.html#table">控制台命令</a>）</td></tr>
+              <tr><td><code>ext</code></td><td class="num">7</td><td>扩展点：注册表、上下文提供者、出站改写、投票、生命周期钩子</td><td><code>ExtRegistry</code> <code>ContextProvider</code> <code>OutboundStage</code> <code>TriggerVoter</code></td></tr>
+              <tr><td><code>hot</code></td><td class="num">7</td><td>动态编译与类加载：内存编译、源码状态、工具名、说明书解析</td><td><code>DynCode</code> <code>Sk</code> <code>SkClassLoader</code> <code>SkCompile</code> <code>SkMd</code></td></tr>
+              <tr><td><code>kit</code></td><td class="num">12</td><td>基础件：JSON、文件、字符串、线程、HTTP、文本解码、输出、加密、指纹、网络护栏</td><td><code>J</code> <code>Fs</code> <code>Str</code> <code>Th</code> <code>Http</code> <code>Crypto</code> <code>NetGuard</code></td></tr>
+              <tr><td><code>prompt</code></td><td class="num">3</td><td>提示词文件加载与注入位（身份、子 Agent 公共部分、按位注入）</td><td><code>Prompts</code> <code>PromptFile</code> <code>Inject</code></td></tr>
+              <tr><td><code>qq</code></td><td class="num">15</td><td>NapCat 接入：反向 WS、事件与入站、API 调用、分段与渲染、引用缓存、文件外链中转、去重</td><td><code>Link</code> <code>Api</code> <code>Ev</code> <code>Inbound</code> <code>QuoteCache</code> <code>Relay</code> <code>Seen</code></td></tr>
+              <tr><td><code>schedule</code></td><td class="num">7</td><td>回合调度：按会话分道、优先级、有界池、任务抽象</td><td><code>Lanes</code> <code>Pool</code> <code>Job</code> <code>ChatJob</code> <code>Dispatcher</code></td></tr>
+              <tr><td><code>store</code></td><td class="num">9</td><td>存储：连接与建表、表声明、库注册表、检索、行维护、人物聚合</td><td><code>Db</code> <code>Store</code> <code>LibSpec</code> <code>Lib</code> <code>Libs</code> <code>FtsQuery</code> <code>Person</code></td></tr>
+              <tr><td><code>term</code></td><td class="num">6</td><td>控制台：命令面、捕获器、回复分段、输出与投递、装配进度</td><td><code>Cmd</code> <code>ConsoleTap</code> <code>Segmenter</code> <code>Sinks</code> <code>SfwOut</code></td></tr>
+              <tr><td><code>tool</code></td><td class="num">3</td><td>工具注册表、工具声明与构建、能力索引</td><td><code>Registry</code> <code>Tool</code> <code>ToolIndex</code></td></tr>
+              <tr><td><code>ui</code></td><td class="num">4</td><td>本地界面：交流面板、面板挂载、输出桥、样式工具</td><td><code>TalkPanel</code> <code>TalkMount</code> <code>PanelSink</code> <code>SfwStyle</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note reveal">
+          <p><span class="n-title">上表少列 1 个包</span>：17 个包里还有 1 个子包的职责属外挂层（源文件与数据根下的同名目录一一对应，见 <a href="#datadir">数据根布局</a> 那一节），按本文档口径不展开 —— 它的 7 个 <code>.java</code> 已计入总数 110。所以上表 16 行的文件数合计 103，差出的 7 个就是它。</p>
+        </div>
+        <p class="t-cap">外挂层（技能）不在本文档范围内。</p>
+
+        <h3 class="sec">依赖从哪来</h3>
+        <p>实现只依赖两项第三方运行时件：SQLite 驱动（<code>org.sqlite.JDBC</code>，<code>src\sair\v4\store\Db.java:48</code>）与 JSON 库（<code>com.google.gson</code>，见 <code>Conf.java:3-4</code> 的 import）。两者都<b>不打进插件 jar</b>，由宿主运行环境提供 —— 这也是为什么产物只有几百 KB。</p>
+      </section>
+
+      <section class="chapter" id="src-tree">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">02 / SRC</span>
+          <h2>源码树与规模</h2>
+          <p class="chapter-desc">仓库根下的 <code>src\</code> 是全部源码，只有一条 <code>sair\v4</code> 路径；没有多模块、没有资源目录。</p>
+        </header>
+
+        <div class="code reveal" data-lang="text">
+          <div class="code-head"><span class="lang">text</span><span class="path">C:\Sair\Local\AiAgent-V4\src</span><button class="copy" type="button">复制</button></div>
+          <pre><code>src\
+└─ sair\
+   └─ v4\                       110 个 .java / 33,103 行 / 1,974,887 字节
+      ├─ Boot.java  Builtins.java  Conf.java              (根包 6 个)
+      ├─ QqGateway.java  Tick.java  V4Activity.java
+      ├─ agent\      2   ai\       5   auth\     7   ctx\      6
+      ├─ dev\        4   ext\      7   hot\      7   kit\     12
+      ├─ prompt\     3   qq\      15   schedule\ 7   store\    9
+      ├─ term\       6   tool\     3   ui\       4
+      └─ （另有 1 个子包属外挂层，7 个文件，见本页「数据根布局」一节）</code></pre>
+        </div>
+
+        <h3 class="sec">最大的几个文件</h3>
+        <p>体积集中在"装配 + 内建工具面"与"控制台命令面"两处，这也是读代码时的两个入口：</p>
+        <div class="tw scroll reveal">
+          <table>
+            <thead>
+              <tr><th>文件</th><th class="num">字节</th><th>里面是什么</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>Builtins.java</code></td><td class="num">190396</td><td>15 个基板工具的注册与实现（工具面见 <a href="capabilities.html#nine">基板能力 · 九项</a>）</td></tr>
+              <tr><td><code>Boot.java</code></td><td class="num">118372</td><td>装配各步、空数据骨架、状态自省、面板挂载</td></tr>
+              <tr><td><code>QqGateway.java</code></td><td class="num">81284</td><td>入站判定与路由、落行、去重、通知渲染</td></tr>
+              <tr><td><code>Conf.java</code></td><td class="num">80641</td><td>键面、文件面、加解密落盘、生效口径（逐键说明见 <a href="config.html#keys">配置 · 键面</a>）</td></tr>
+              <tr><td><code>term\Cmd.java</code></td><td class="num">74925</td><td>控制台命令面（命令全表见 <a href="commands.html#table">控制台命令</a>）</td></tr>
+              <tr><td><code>term\ConsoleTap.java</code></td><td class="num">57922</td><td>控制台捕获与转发代理</td></tr>
+              <tr><td><code>store\Store.java</code></td><td class="num">48459</td><td>行的读写、检索入口、保留期维护</td></tr>
+              <tr><td><code>qq\Api.java</code></td><td class="num">43474</td><td>NapCat 动作目录与统一调用改写</td></tr>
+              <tr><td><code>qq\QuoteCache.java</code></td><td class="num">35822</td><td>引用正文补拉与缓存</td></tr>
+              <tr><td><code>qq\Link.java</code></td><td class="num">35528</td><td>反向 WS 服务、事件调度、动作回包</td></tr>
+              <tr><td><code>store\Db.java</code></td><td class="num">33049</td><td>连接与 PRAGMA、建表、全文索引与触发器（见 <a href="#db">数据表</a>）</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="dim">其余文件的字节数可用 <code>Get-ChildItem src -Recurse -Filter *.java | Sort-Object Length -Descending</code> 复核（只读命令）。</p>
+
+        <h3 class="sec">命名与分层的两条约定</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h3>包名就是职责边界</h3>
+            <p>没有 <code>impl</code> / <code>util</code> 这种无信息量的包名：<code>kit</code> 是可复用的基础件，<code>store</code> 是存储，<code>qq</code> 是接入，<code>schedule</code> 是调度。<code>src\sair\v4\</code> 下只有一层子包，不嵌套第三层。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h3>跨包只走小接口</h3>
+            <p>装配期把实例注入给消费方：库注册表注入存储层（<code>Db.setLibs</code>，<code>Db.java:81</code>）、事件池按配置建成后交给接入层（<code>Boot.java:1369-1370</code>、<code>Link.java:611-620</code>）。所以线程数与表名这些"可配置的事实"都只有一个来源。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="chapter" id="datadir">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">03 / DATAROOT</span>
+          <h2>数据根布局</h2>
+          <p class="chapter-desc">运行期只碰<b class="hl">一个数据根目录</b>：<code>SairFrameWork\data\AiAgent-V4\</code>。下面是这个目录里每个文件与子目录是什么。</p>
+        </header>
+
+        <div class="note reveal">
+          <p><span class="n-title">两个位置的关系</span>：插件落位后，数据根是 <code>C:\Sair\SairFrameWork\data\AiAgent-V4\</code>；本仓的 <code>data\</code> 是同名结构的本地对照副本（同一套文件名与子目录名）。本页凡引用"实测字节数"处都注明是哪个目录量的。</p>
+        </div>
+
+        <div class="code reveal" data-lang="text">
+          <div class="code-head"><span class="lang">text</span><span class="path">SairFrameWork\data\AiAgent-V4\</span><button class="copy" type="button">复制</button></div>
+          <pre><code>data\AiAgent-V4\
+├─ v4.db              SQLite 单文件库：六库 + 运行表 + 全文索引（见下一节）
+├─ v4.db-wal          预写日志：WAL 模式下未合并的改动
+├─ v4.db-shm          WAL 的共享内存索引
+├─ config.json        全部配置键（逐键说明见 config.html）
+├─ perms.json         权限例外账本（权限模型见 capabilities.html）
+├─ prompts\           提示词正文：identity.md / subagent.md / tools-index.md
+├─ files\             收到的文件与导出的落点（下载、导出、表情包图片）
+└─ （另有 1 个外挂层目录，见下表）</code></pre>
+        </div>
+
+        <h3 class="sec">逐个文件</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead>
+              <tr><th>名字</th><th>是什么</th><th>谁读写</th><th>实测字节数</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>：全部业务数据与运行台账都在它里面（表清单见 <a href="#db">数据表落在哪</a>）</td><td>存储层 <code>store.Db</code> / <code>store.Store</code></td><td class="num">本仓 <code>data\v4.db</code> = 121,057,280；<br>线上数据根 = 126,443,520</td></tr>
+              <tr><td><code>v4.db-wal</code></td><td>预写日志，WAL 模式的正常伴生文件；连接建立时就设上（<code>Db.java:134</code>）</td><td>SQLite 自己</td><td class="num">视运行状态变化</td></tr>
+              <tr><td><code>v4.db-shm</code></td><td>WAL 的共享内存索引文件，同样是 SQLite 自己维护的</td><td>SQLite 自己</td><td class="num">一般 32768</td></tr>
+              <tr><td><code>config.json</code></td><td>扁平 JSON，94 个已知键集中在这里；敏感键是密文</td><td><code>Conf</code>（<code>Conf.java:367</code> 拼出这个路径）</td><td class="num">本仓 = 852</td></tr>
+              <tr><td><code>perms.json</code></td><td>权限例外账本：按主体的按资源类型例外条目</td><td><code>auth</code> 侧；装配期读</td><td class="num">本仓 = 45,498；<br>线上数据根 = 154</td></tr>
+              <tr><td><code>prompts\</code></td><td>提示词正文目录，见 <a href="#prompts">提示词文件</a></td><td><code>prompt.Prompts</code>（<code>Prompts.java:47</code>）</td><td class="num">本仓 3 个 .md</td></tr>
+              <tr><td><code>files\</code></td><td>文件落点：下载、导出（控制台的导出会写到 <code>files\&lt;库名&gt;-&lt;时间戳&gt;.jsonl</code>，<code>term\Cmd.java:1332</code>、<code>Builtins.java:229</code>）</td><td>工具面与控制台命令</td><td class="num">本仓含 <code>stickers\</code> 共 32 个文件</td></tr>
+              <tr><td><code>data\skills\</code></td><td>外挂层目录：本页只交代数据根下有这么一个目录，内容不展开</td><td>装配期扫描</td><td class="num">本仓 35 个子目录</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sec">空数据首次启动会生成什么</h3>
+        <p>整个数据根不存在（或为空）时，<b>第一次启动就把骨架全部落盘</b>，不需要手建任何文件；只创建、不覆盖、不写正文（<code>src\sair\v4\Boot.java:851-876</code>、<code>Boot.java:837-847</code>）：</p>
+        <div class="grid-3">
+          <div class="panel reveal">
+            <h3>目录先建出来</h3>
+            <p>数据根本身、提示词目录、库目录、文件目录 —— 一律 <code>mkdirs</code>，已存在就跳过；同名文件挡路时不覆盖，交给上层报错（<code>Boot.java:927-933</code>）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h3>两个提示词空壳</h3>
+            <p><code>prompts\identity.md</code> 与 <code>prompts\subagent.md</code> 建成 <b>0 字节空文件</b>：空文件与文件不存在在提示词层语义完全一致（<code>Boot.java:840-843</code>）。</p>
+          </div>
+          <div class="panel reveal d2">
+            <h3>库文件与配置</h3>
+            <p><code>config.json</code> 由配置层落盘（<code>Conf.java:1329-1406</code>）、<code>v4.db</code> 由存储层连出来；<b>表</b>在库文件里由建表动作落盘（<code>Boot.java:845-847</code>）。</p>
+          </div>
+        </div>
+        <div class="note ok reveal">
+          <p><span class="n-title">二次启动幂等</span>：已存在的文件一律不动，已建的表不会重复建，骨架不会重复创建；日志里只会打一行"空数据骨架已建立 N 项"（<code>Boot.java:872-874</code>）。控制台可用性不依赖数据内容 —— 骨架齐备后命令面立刻可用。</p>
+        </div>
+
+        <h3 class="sec">数据根路径怎么被拼出来</h3>
+        <p>数据根只有一处入口，其余路径都是从它派生的相对路径（<code>Conf.java:370-375</code>、<code>Conf.java:1093-1103</code>）：</p>
+        <div class="code reveal" data-lang="java">
+          <div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\Conf.java</span><button class="copy" type="button">复制</button></div>
+          <pre><code>public File path(String rel) { return new File(root, rel); }   // :375 唯一的拼接口
+public File promptsDir() { return path("prompts"); }           // :1093
+public File filesDir()   { return path("files");   }           // :1097
+public File dbFile()     { return path("v4.db");   }           // :1103</code></pre>
+        </div>
+        <p>所以数据根搬到哪儿，整棵布局跟着走；<code>config.json</code> 的位置就是 <code>new File(root, "config.json")</code>（<code>Conf.java:367</code>）。</p>
+      </section>
+
+      <section class="chapter" id="db">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">04 / DB</span>
+          <h2>数据表落在哪</h2>
+          <p class="chapter-desc">全部表都在<b>一个</b> SQLite 文件 <code>v4.db</code> 里：6 张业务库表 + 6 张基板运行表，另有全文索引虚表与同步触发器。</p>
+        </header>
+
+        <div class="grid-3">
+          <div class="kpi reveal"><div class="k">业务库表</div><div class="v">6</div></div>
+          <div class="kpi reveal d1"><div class="k">运行表</div><div class="v">6<small>Lib.java:33-40</small></div></div>
+          <div class="kpi reveal d2"><div class="k">库文件</div><div class="v">1<small>v4.db</small></div></div>
+        </div>
+
+        <div class="note reveal">
+          <p><span class="n-title">运行表数怎么核</span>：<code>(Select-String -Path src\sair\v4\store\Lib.java -Pattern '^\s*\{"').Count</code> → <b>6</b>（<code>Lib.java:33-40</code> 的声明表）。业务库表数：基板声明 2 张（<code>store\EnvLibs.java:35-66</code>）+ 外挂层声明 4 张 = 6。</p>
+        </div>
+
+        <h3 class="sec">连接与建表时机</h3>
+        <ul>
+          <li>驱动：<code>org.sqlite.JDBC</code>（<code>src\sair\v4\store\Db.java:48</code>），连接串是 <code>jdbc:sqlite:&lt;绝对路径&gt;</code>（<code>Db.java:126</code>）。</li>
+          <li>打开连接时设四项 PRAGMA（<code>Db.java:134-137</code>）：<code>journal_mode=WAL</code>、<code>busy_timeout=5000</code>、<code>foreign_keys=ON</code>、<code>synchronous=NORMAL</code>。<code>open()</code> 只连库、<b>不建表</b>（<code>Db.java:107</code>）。</li>
+          <li>连上不等于能用：还要做一次真实读，好让装配能把"这一步"标失败（<code>Db.java:141-148</code>）。</li>
+          <li>建表在<b>插件装载完成之后</b>跑一次，缺表即建、缺列即补、幂等（<code>Db.java:610-623</code>）；某个表失败只影响那一个（<code>Db.java:637</code>）。</li>
+          <li>补列走"先查表结构、缺了才加"，避免在补过的库上刷假报错（<code>store\Lib.java:113-131</code>、<code>Db.java:648-673</code>）。</li>
+        </ul>
+
+        <h3 class="sec">六张业务库表</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead>
+              <tr><th>表名</th><th>中文名</th><th>谁声明</th><th>关键列</th><th>全文索引列</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>dialog</code></td><td>对话历史</td><td>基板（<code>EnvLibs.java:35</code>）</td><td><code>session</code> <code>role</code> <code>content</code> <code>tokens</code> <code>extra</code></td><td><code>content</code></td></tr>
+              <tr><td><code>grouplog</code></td><td>群聊历史</td><td>基板（<code>EnvLibs.java:51</code>）</td><td><code>group_id</code> <code>user_id</code> <code>nickname</code> <code>content</code> <code>msg_id</code> <code>extra</code></td><td><code>content</code> <code>nickname</code></td></tr>
+              <tr><td><code>memory</code></td><td>长期记忆</td><td>外挂层（装载期声明）</td><td><code>scope</code> <code>scope_id</code> <code>content</code> <code>importance</code> <code>tags</code> <code>extra</code></td><td><code>content</code> <code>tags</code></td></tr>
+              <tr><td><code>note</code></td><td>知识笔记</td><td>外挂层（装载期声明）</td><td><code>title</code> <code>content</code> <code>tags</code> <code>source</code> <code>extra</code></td><td><code>title</code> <code>content</code> <code>tags</code></td></tr>
+              <tr><td><code>sticker</code></td><td>表情包</td><td>外挂层（装载期声明）</td><td><code>file</code> <code>hash</code> <code>scene</code> <code>source</code> <code>uses</code> <code>extra</code></td><td>无（走回退列匹配）</td></tr>
+              <tr><td><code>pref</code></td><td>偏好设定</td><td>外挂层（装载期声明）</td><td><code>scope</code> <code>scope_id</code> <code>key</code> <code>value</code> <code>importance</code></td><td>无（走回退列匹配）</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>基板为什么只声明两张：<b>消息流就是环境</b>，基板是它们唯一的写入者（入站落行、装配读回）；其余四张是业务表，由各自的使用方声明（<code>EnvLibs.java:9-15</code>）。表名与列名的唯一来源是表声明，拼 SQL 前一律过白名单校验（<code>store\LibSpec.java:14-22</code>、<code>Db.java:33-35</code>）。</p>
+        <p>外挂层那四张表的声明与索引名不在基板源码里，而在各单元自己的源码里。按本文档口径不逐个列出文件名，表名与索引名本身就是可复核的凭据：</p>
+        <div class="code reveal" data-lang="powershell">
+          <div class="code-head"><span class="lang">powershell</span><span class="path">C:\Sair\Local\AiAgent-V4</span><button class="copy" type="button">复制</button></div>
+          <pre><code>(Get-ChildItem data -Recurse -Filter *.java |
+  Select-String -Pattern 'new LibSpec\(').Count
+# 结果：6 —— 外挂层共声明 6 张表；
+# 其中 4 张与"六库"对得上（memory / note / sticker / pref），
+# 另外 2 张属该层自己的状态表，本页不展开。
+
+# 看某一列名/索引名是谁声明的（把 X 换成列名或索引名）
+Get-ChildItem data -Recurse -Filter *.java |
+  Select-String -Pattern 'idx_' | ForEach-Object { $_.Line.Trim() }</code></pre>
+        </div>
+
+        <h3 class="sec">六张基板运行表</h3>
+        <p>这六张<b>不是"库"</b>：有的是自定义主键、没有统一的行号与时间列，所以它们不进库注册表，DDL 与列清单留在基板里（<code>store\Lib.java:10-27</code>、<code>Lib.java:133-138</code>）。</p>
+        <div class="tw scroll reveal">
+          <table>
+            <thead>
+              <tr><th>表名</th><th>是什么</th><th>建表位置</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>favor</code></td><td>好感度（主键是号码），权限判定的数据源（按好感度分级）</td><td><code>Lib.java:45-51</code></td></tr>
+              <tr><td><code>alarm</code></td><td>定时表：触发时间、重复、作用域、目标、任务正文、启停状态、归属</td><td><code>Lib.java:53-66</code></td></tr>
+              <tr><td><code>task</code></td><td>子 Agent 台账：状态、归属、用了哪些工具、结果、耗时</td><td><code>Lib.java:71-81</code></td></tr>
+              <tr><td><code>kv</code></td><td>通用键值对（键为主键）</td><td><code>Lib.java:83-86</code></td></tr>
+              <tr><td><code>sent</code></td><td>出站消息台账：按会话与消息号记录"她发过什么"，供按范围批量撤回</td><td><code>Lib.java:96-108</code></td></tr>
+              <tr><td>（第 6 张，表名按本文档口径不列出）</td><td>外挂单元索引表：名字、内容散列、工具名、权限、钩子、装载时间</td><td><code>Lib.java:88-94</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note reveal">
+          <p><span class="n-title">外挂层还会加自己的表</span>：装载期声明并注册的表会在同一次建表动作里落盘（<code>Db.java:610-623</code>），新声明的表在重扫时也能立刻落盘（<code>Db.java:616</code>）。它们不属于"六库 + 运行表"这两类，本页不展开。</p>
+        </div>
+
+        <h3 class="sec">索引清单</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead>
+              <tr><th>索引名</th><th>落在哪个表</th><th>列</th><th>声明位置</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>idx_dialog_session</code></td><td><code>dialog</code></td><td><code>session,ts</code></td><td><code>EnvLibs.java:45</code></td></tr>
+              <tr><td><code>idx_dialog_ts</code></td><td><code>dialog</code></td><td><code>ts</code></td><td><code>EnvLibs.java:46</code></td></tr>
+              <tr><td><code>idx_dialog_role</code></td><td><code>dialog</code></td><td><code>role</code></td><td><code>EnvLibs.java:47</code></td></tr>
+              <tr><td><code>idx_grouplog_group</code></td><td><code>grouplog</code></td><td><code>group_id,ts</code></td><td><code>EnvLibs.java:62</code></td></tr>
+              <tr><td><code>idx_grouplog_user</code></td><td><code>grouplog</code></td><td><code>user_id,ts</code></td><td><code>EnvLibs.java:63</code></td></tr>
+              <tr><td><code>idx_grouplog_ts</code></td><td><code>grouplog</code></td><td><code>ts</code></td><td><code>EnvLibs.java:64</code></td></tr>
+              <tr><td><code>idx_grouplog_user_group</code></td><td><code>grouplog</code></td><td><code>user_id,group_id,ts</code></td><td><code>EnvLibs.java:65</code>、<code>Person.java:50</code></td></tr>
+              <tr><td><code>idx_memory_ts</code></td><td><code>memory</code></td><td><code>ts</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_memory_scope</code></td><td><code>memory</code></td><td><code>scope,scope_id</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_memory_importance</code></td><td><code>memory</code></td><td><code>importance</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_note_ts</code></td><td><code>note</code></td><td><code>ts</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_note_title</code></td><td><code>note</code></td><td><code>title</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_sticker_scene</code></td><td><code>sticker</code></td><td><code>scene</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_sticker_hash</code></td><td><code>sticker</code></td><td><code>hash</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_sticker_uses</code></td><td><code>sticker</code></td><td><code>uses</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_pref_scope</code></td><td><code>pref</code></td><td><code>scope,scope_id</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_pref_key</code></td><td><code>pref</code></td><td><code>key</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_pref_ts</code></td><td><code>pref</code></td><td><code>ts</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_favor_value</code></td><td><code>favor</code></td><td><code>value</code></td><td><code>Lib.java:51</code></td></tr>
+              <tr><td><code>idx_alarm_fire</code></td><td><code>alarm</code></td><td><code>fire_at</code></td><td><code>Lib.java:65</code></td></tr>
+              <tr><td><code>idx_alarm_enabled</code></td><td><code>alarm</code></td><td><code>enabled,fire_at</code></td><td><code>Lib.java:66</code></td></tr>
+              <tr><td><code>idx_task_status</code></td><td><code>task</code></td><td><code>status,ts</code></td><td><code>Lib.java:81</code></td></tr>
+              <tr><td><code>idx_sent_session_ts</code></td><td><code>sent</code></td><td><code>session,ts</code></td><td><code>Lib.java:107</code></td></tr>
+              <tr><td><code>idx_sent_msgid</code></td><td><code>sent</code></td><td><code>message_id</code></td><td><code>Lib.java:108</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><code>grouplog</code> 上那条三列覆盖索引不能少：按人聚合的查询只走索引、不读表（<code>Person.java:35</code>）。装配期还会核对它是否存在（<code>Person.java:170</code>）。</p>
+
+        <h3 class="sec">全文索引与分词</h3>
+        <ul>
+          <li>有正文可检索的表各建一张 FTS5 <b>外部内容表</b>，命名规则是 <code>fts_&lt;表名&gt;</code>（<code>LibSpec.java:164</code>）：<code>fts_dialog</code>、<code>fts_grouplog</code>、<code>fts_memory</code>、<code>fts_note</code>。声明里没有索引列的表（<code>sticker</code>、<code>pref</code>）不建虚表，检索走回退列匹配。</li>
+          <li>建表语句要点：<code>content='&lt;表名&gt;'</code>、<code>content_rowid='id'</code>，并优先用 <code>tokenize='trigram'</code>（<code>Db.java:691-700</code>）。为什么优先它：中文子串检索只有它是对的 —— 默认分词器会把整串汉字当成一个 token，命中不了中间片段（<code>Db.java:676-681</code>）。</li>
+          <li>分词器是<b>逐个降档</b>的：先用 <code>trigram</code> 跑一遍全部表，失败就退回默认分词器再来一遍；两遍都失败就置"不可用"（<code>Db.java:683-712</code>）。</li>
+          <li>可用性在打开连接时探测一次并缓存：临时建一张虚表再删掉（<code>Db.java:218</code>、<code>Db.java:766-767</code>）。</li>
+          <li>每张虚表配三个同步触发器，命名 <code>&lt;表名&gt;_fts_ai</code>（插入）、<code>_ad</code>（删除）、<code>_au</code>（更新）（<code>Db.java:714-736</code>）；建好后立即做一次重建填充（<code>Db.java:702</code>）。</li>
+          <li>不想给某张表建索引就用配置键 <code>ftsOff</code> 把它关掉：连索引带触发器都不建，检索只剩回退匹配（<code>Db.java:206-216</code>、<code>Db.java:688</code>）。这是体积上最有效的杠杆（见 <a href="config.html#retention">配置 · 保留期</a>）。</li>
+        </ul>
+
+        <h3 class="sec">行的统一约定</h3>
+        <div class="grid-3">
+          <div class="panel reveal">
+            <h3>id 与 ts</h3>
+            <p>所有库表由基板统一补 <code>id INTEGER PRIMARY KEY AUTOINCREMENT</code> 与 <code>ts INTEGER NOT NULL DEFAULT 0</code>（毫秒）；声明里重复写也只算一次（<code>LibSpec.java:203-217</code>）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h3>JSON 文本列</h3>
+            <p><code>extra</code> 与 <code>tags</code> 是 TEXT 存 JSON 文本，读出来自动解析回对象／数组（<code>Lib.java:23-26</code>、<code>Lib.java:161-164</code>）。</p>
+          </div>
+          <div class="panel reveal d2">
+            <h3>表名可写中文</h3>
+            <p>库表声明带中文别名，模型可以用中文指库（例如"记忆"落到 <code>memory</code>）；规范表名的翻译在存储层一处完成（<code>Db.java:97-103</code>、<code>LibSpec.java:83-84</code>）。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">维护动作删什么</h3>
+        <ul>
+          <li>超龄<b>低重要度</b>记忆行（<code>importance &lt;= 4</code>）与停用闹钟、已成任务这些台账行（<code>store\Store.java:53</code>、<code>Store.java:423-437</code>）。</li>
+          <li>聊天记录按各自的天数独立过期（群聊与私聊两把尺子，见 <a href="config.html#retention">配置 · 保留期</a>）。</li>
+          <li><code>note</code> <b>从不</b>被维护删除 —— 笔记是刻意写下来的东西，不属于流水。</li>
+          <li>删行不会立刻还盘：SQLite 只是把页标成空闲，文件大小不变，要真正缩文件得另外做 <code>VACUUM</code>。</li>
+        </ul>
+      </section>
+
+      <section class="chapter" id="prompts">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">05 / PROMPTS</span>
+          <h2>提示词文件</h2>
+          <p class="chapter-desc">数据根下的 <code>prompts\</code> 是三类外挂文本的落点：身份、子 Agent 公共部分，以及"文案与能力索引"文件。</p>
+        </header>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead>
+              <tr><th>文件</th><th class="num">字节</th><th class="num">sha256 前 16</th><th>是什么</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>prompts\identity.md</code></td><td class="num">13028</td><td class="num">6E33BD9F3960542D</td><td>身份提示词。基板只带这一份初始提示词（<code>prompt\Prompts.java:14-16</code>、<code>Prompts.java:30</code>）</td></tr>
+              <tr><td><code>prompts\subagent.md</code></td><td class="num">1664</td><td class="num">6849F05E1C6CD745</td><td>子 Agent 的<b>公共部分</b>提示词；缺文件 = 空，基板不兜底（<code>Conf.java:1075</code>、<code>Prompts.java:31</code>）</td></tr>
+              <tr><td><code>prompts\tools-index.md</code></td><td class="num">11029</td><td class="num">2615CDAFF8765C01</td><td>文案与能力索引：索引行的预算、工具的一句话示例、队列溢出／排队／初始化中等提示语、面板标题、偏好块三行文案</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="dim">上表三项都是本仓 <code>data\prompts\</code> 的实测值（字节数 + sha256 前 16 位）。</p>
+
+        <h3 class="sec">三份文件各自的角色</h3>
+        <div class="grid-3">
+          <div class="panel reveal">
+            <h3>identity.md：她的根</h3>
+            <p>路径由配置键决定（默认 <code>prompts/identity.md</code>，<code>Conf.java:1063</code>）。字符预算只是<b>报警线，不是闸门</b>：超预算只 warn 一行，正文一个字都不截、一个字都不丢（<code>prompt\PromptFile.java:108-120</code>）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h3>subagent.md：公共层</h3>
+            <p>只描述"所有子 Agent 共同的那一层"；它<b>不是</b>某个子任务的说明书。渲染时按作用域走同一套注入位（<code>Prompts.java:141-142</code>）。</p>
+          </div>
+          <div class="panel reveal d2">
+            <h3>tools-index.md：文案外挂</h3>
+            <p>它的内容会被多处读走：工具索引行（<code>tool\ToolIndex.java:44-50</code>）、能力索引（<code>tool\Registry.java:43</code>）、生命周期回话（<code>term\Cmd.java:321-338</code>）、入站那几路提示（<code>QqGateway.java:744-792</code>）、执行循环的终止文案（<code>agent\Loop.java:33</code>）、装配校验（<code>Boot.java:656-671</code>）。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">读法与生效</h3>
+        <ul>
+          <li><b>缺键不兜底</b>：这个文件里少写一个键，用到那条文案的地方就<b>报缺键、不发那一句</b>，而不是编一句兜底话（<code>Cmd.java:332</code>、<code>QqGateway.java:759</code>、<code>Loop.java:483</code>）。</li>
+          <li><b>按修改时间自动重读</b>：解析结果带修改时间判断，文件一动就重读（<code>ToolIndex.java:120-130</code>）。</li>
+          <li><b>正文有独立的热重载</b>：命令面那条提示词重载只重读正文，不受"改配置要重启"的口径影响（<code>Cmd.java:800-805</code>、<code>Cmd.java:1170-1171</code>）。</li>
+          <li><b>路径被限制在目录内</b>：读取其它提示词时按相对路径解析并限制在提示词目录内的 <code>.md</code>（<code>Prompts.java:64-74</code>）。</li>
+          <li><b>空壳语义</b>：空文件与文件不存在完全等价 —— 空数据冷启动只建 0 字节空壳，基板不带任何提示词正文（<code>Boot.java:840-843</code>）。</li>
+        </ul>
+
+        <h3 class="sec">相关键与相邻页面</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead>
+              <tr><th>配置键</th><th>默认</th><th>作用</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>identityFile</code></td><td><code>prompts/identity.md</code></td><td>身份提示词的相对路径（<code>Conf.java:1063</code>）</td></tr>
+              <tr><td><code>identityMaxChars</code></td><td>8000</td><td>身份提示词的字符预算（只 warn）</td></tr>
+              <tr><td><code>subagentFile</code></td><td><code>prompts/subagent.md</code></td><td>子 Agent 公共部分的相对路径（<code>Conf.java:1076</code>）</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note ok reveal">
+          <p><span class="n-title">相邻内容在别处</span>：提示词怎么被用起来（注入位、作用域、命令面 ops）见 <a href="capabilities.html#prompt">基板能力 · 提示词</a>；键的含义、调错的后果、生效时机见 <a href="config.html#other">配置 · 其余键</a> 与 <a href="config.html#effective">配置 · 改配置与生效</a>。</p>
+        </div>
+      </section>
+
+      <section class="chapter" id="artifacts">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">06 / ARTIFACTS</span>
+          <h2>构建产物与仓根产物</h2>
+          <p class="chapter-desc">仓库根下哪些是产物、哪些是源码，以及产物怎么与线上落位对上。</p>
+        </header>
+
+        <h3 class="sec">插件 jar</h3>
+        <div class="grid-3">
+          <div class="kpi reveal"><div class="k">仓根 jar</div><div class="v">675173<small>字节</small></div></div>
+          <div class="kpi reveal d1"><div class="k">jar 内条目</div><div class="v">333</div></div>
+          <div class="kpi reveal d2"><div class="k">类文件条目</div><div class="v">313<small>sair\v4 下</small></div></div>
+        </div>
+        <div class="tw scroll reveal">
+          <table>
+            <thead>
+              <tr><th>位置</th><th class="num">字节</th><th>sha256</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>仓根 <code>AiAgentV4.jar</code></td><td class="num">675173</td><td><code>130746B0B207138004459B4E7101FA4B148BBAF15CA42946D8D3A4A22228B088</code></td></tr>
+              <tr><td>线上落位 <code>SairFrameWork\plugins\exection\ai.jar</code></td><td class="num">675173</td><td><code>130746B0B207138004459B4E7101FA4B148BBAF15CA42946D8D3A4A22228B088</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>两个位置<b>逐位相同</b>（同一份 sha256），所以"线上跑的是不是这个仓根产物"这件事可以直接对 hash 回答。落位与命名见 <a href="deploy.html#layout">部署 · 目录</a>。</p>
+
+        <h3 class="sec">jar 里面是什么</h3>
+        <ul>
+          <li>条目结构：<code>META-INF\MANIFEST.MF</code>（89 字节，非 <code>.class</code> 的只有它一个）+ <code>sair\v4\</code> 下的 <b>313 个类文件条目</b>，解压后合计 1,246,946 字节。</li>
+          <li>包目录与源码包一一对应：<code>sair\v4\</code> 下 16 个子包目录 + 根包类文件（与 <a href="#packages">源码包结构</a> 同构）。</li>
+          <li>清单内容只有两行：<code>Manifest-Version: 1.0</code> 与 <code>ACT: sair.v4.V4Activity</code> —— 后者是组件入口类，框架按它装载（见 <a href="architecture.html#boot">技术实现 · 装配</a>）。</li>
+          <li><b>不含第三方依赖</b>：SQLite 驱动与 JSON 库都由宿主运行环境提供，jar 里没有对应的包目录。这就是为什么产物只有 675 KB（源码 1.97 MB，编译后类文件约 1.25 MB）。</li>
+        </ul>
+
+        <h3 class="sec">仓根一览</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead>
+              <tr><th>名字</th><th>类别</th><th>是什么</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>AiAgentV4.jar</code></td><td><span class="badge ok">产物</span></td><td>插件本体，落位后按文件名决定控制台前缀（改名为 <code>ai.jar</code> 就是 <code>ai/</code>）</td></tr>
+              <tr><td><code>src\</code></td><td><span class="badge info">源码</span></td><td>全部 110 个 <code>.java</code>，见 <a href="#src-tree">源码树</a></td></tr>
+              <tr><td><code>data\</code></td><td><span class="badge mute">数据</span></td><td>数据根的本地对照副本，见 <a href="#datadir">数据根布局</a></td></tr>
+              <tr><td><code>docs\</code></td><td><span class="badge info">源码</span></td><td>本静态站：导航上的若干 <code>.html</code> 页面 + <code>css\site.css</code>（32,571 字节）+ <code>js\site.js</code>（13,794 字节）；无外链、无第三方库、无网络请求</td></tr>
+              <tr><td><code>build\</code></td><td><span class="badge mute">暂存</span></td><td>构建暂存区：3 个子目录、9 个叶子目录，共 30 个文件（12 个 <code>.java</code> + 18 个 <code>.md</code>）—— 外挂层源码与文案的中间副本，不参与插件打包</td></tr>
+              <tr><td><code>out\</code></td><td><span class="badge ok">产物</span></td><td>编译输出目录：<code>sair\v4\</code> 下 16 个子包目录 + 根包类，共 <b>313 个 <code>.class</code></b>、1,246,857 字节 —— 与 jar 内条目同构</td></tr>
+              <tr><td><code>META-INF\</code></td><td><span class="badge info">源码</span></td><td>只有 <code>MANIFEST.MF</code>，打包时进 jar 根</td></tr>
+              <tr><td><code>README.md</code></td><td><span class="badge info">文档</span></td><td>23,657 字节：九项能力、权限模型、工具面、命令面、部署要点</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sec">产物与源码怎么对上</h3>
+        <div class="code reveal" data-lang="powershell">
+          <div class="code-head"><span class="lang">powershell</span><span class="path">C:\Sair\Local\AiAgent-V4</span><button class="copy" type="button">复制</button></div>
+          <pre><code># 1) 仓根产物与线上落位是不是同一份
+Get-FileHash AiAgentV4.jar -Algorithm SHA256
+Get-FileHash C:\Sair\SairFrameWork\plugins\exection\ai.jar -Algorithm SHA256
+# 两者相同：130746B0B207138004459B4E7101FA4B148BBAF15CA42946D8D3A4A22228B088
+
+# 2) 字节数
+(Get-Item AiAgentV4.jar).Length              # 675173
+(Get-Item out -Force).GetType().Name         # 目录；编译输出
+
+# 3) 编译输出规模
+(Get-ChildItem out -Recurse -Filter *.class).Count   # 313
+
+# 4) jar 内条目数与非 .class 条目
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$z=[System.IO.Compression.ZipFile]::OpenRead((Resolve-Path AiAgentV4.jar))
+$z.Entries.Count                                            # 333
+$z.Entries | Where-Object { $_.FullName -notlike '*.class' }
+# 只有 META-INF/、sair/、sair/v4/… 目录项与 META-INF/MANIFEST.MF
+$z.Dispose()</code></pre>
+        </div>
+        <div class="note reveal">
+          <p><span class="n-title">这些命令都是只读的</span>：上面的读取只回答"产物是哪一份、有多大、里面有什么"，不改动任何文件。</p>
+        </div>
+
+        <h3 class="sec">数据与产物的边界</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h3>可丢弃的</h3>
+            <p><code>out\</code> 与 <code>build\</code> 都是中间态：删掉不影响运行，重新编译／重新打包即可再生。产物本体只有一个 <code>AiAgentV4.jar</code>。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h3>不可再生的</h3>
+            <p>数据根下的 <code>v4.db</code>、<code>config.json</code>、<code>perms.json</code>、<code>prompts\</code> 是运行资产：删了就没了。特别是 <code>v4.db</code> —— 保留期那组键是唯一会删数据的旋钮（见 <a href="config.html#retention">配置 · 保留期</a>）。</p>
+          </div>
+        </div>
+        <div class="note bad reveal">
+          <p><span class="n-title">升级前先备份数据根</span>：换新 jar 不动数据根，两侧文件互不覆盖；但 <code>v4.db</code> 里的表结构变更会由新版自动补列（<code>Db.java:648-673</code>），这一步不可逆。做法见 <a href="migration.html">升级</a>。</p>
+        </div>
+      </section>
+
+    </div>
+
+            <nav class="pager">
+      <a class="prev" href="perms.html"><span class="p-dir">← PREV</span><span class="p-name">07 · 权限管理</span></a>
+      <a class="next" href="architecture.html"><span class="p-dir">NEXT →</span><span class="p-name">09 · 技术实现</span></a>
+    </nav>
+
+    <footer class="foot">
+      <span>AiAgent V4 文档 · 纯静态、自包含（无 CDN / 无第三方库 / 无网络请求）</span>
+      <span>插件：<code>AiAgentV4.jar</code></span>
+      <span>数据目录：<code>SairFrameWork\data\AiAgent-V4\</code></span>
+      <a href="index.html">回到总览</a>
+      <div class="icp">湘ICP备2025152033号</div>
+    </footer>
+  </div>
+
+  <aside class="rail">
+    <div class="rail-inner">
+      <p class="rail-title">本页目录</p>
+      <ol id="toc-list"></ol>
+      <div class="rail-foot">点击标题右侧 <code>#</code> 可复制该小节链接</div>
+    </div>
+  </aside>
+</main>
+
+<button class="to-top" id="to-top" type="button" title="回到顶部">↑</button>
+<script src="js/site.js"></script>
+</body>
+</html>

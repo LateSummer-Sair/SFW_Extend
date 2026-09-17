@@ -1,126 +1,305 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AiAgent — SFW AI 智能代理插件 · 技术文档</title>
-  <link rel="stylesheet" href="css/style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>总览 · AiAgent V4 文档</title>
+<meta name="description" content="AiAgent V4 文档总览：当前线上基线、基板九项能力、11 个页面入口与上手前必知约束，每条断言都带 file:line 或可复核实测值。">
+<link rel="stylesheet" href="css/site.css">
+<noscript><style>.reveal{opacity:1 !important;transform:none !important}#bg-canvas,.scanline{display:none !important}</style></noscript>
 </head>
-<body>
+<body data-page="index">
 
-  <canvas id="bg-canvas"></canvas>
-  <div class="aurora"><span></span><span></span><span></span></div>
-  <div class="progress-bar"></div>
-  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航"><span></span><span></span><span></span></button>
+<canvas id="bg-canvas" aria-hidden="true"></canvas>
+<div class="scanline" aria-hidden="true"></div>
 
-  <aside class="sidebar" id="sidebar"></aside>
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="brand-mark">V4</span>
+    <span class="brand-text"><b>AiAgent V4</b><span>SFW PLUGIN DOCS</span></span>
+  </a>
+      <nav class="nav" aria-label="页面导航">
+    <a href="index.html"><span class="n">01</span>总览</a>
+    <a href="usage.html"><span class="n">02</span>使用</a>
+    <a href="deploy.html"><span class="n">03</span>部署</a>
+    <a href="config.html"><span class="n">04</span>配置</a>
+    <a href="commands.html"><span class="n">05</span>命令</a>
+    <a href="capabilities.html"><span class="n">06</span>能力</a>
+    <a href="perms.html"><span class="n">07</span>权限</a>
+    <a href="files.html"><span class="n">08</span>文件</a>
+    <a href="architecture.html"><span class="n">09</span>实现</a>
+    <a href="migration.html"><span class="n">10</span>升级</a>
+    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+  </nav>
+  <div class="topbar-meta">
+    <span class="chip live">纯静态</span>
+    <span class="chip">无外链资源</span>
+  </div>
+  <button class="burger" type="button" aria-label="展开导航" aria-expanded="false">☰</button>
+</header>
+<div class="progress" id="progress" aria-hidden="true"></div>
 
-  <main class="main">
-    <header class="page-hero">
-      <div class="container">
-        <div class="crumb">Home / 概述</div>
-        <h1><span class="gradient-text">AiAgent</span> · 智能代理插件</h1>
-        <p class="lead">
-          SairFrameWork 框架的 AI 智能代理 —— 原生 Function Calling 多轮循环、三层通道权限模型、
-          多智能体协作（AgentBus 递归通信 + AgentOrchestrator 编排）、技能自进化、八库记忆系统、
-          QQ OneBot 机器人（统一记忆 + 群管理 + 好感度体系）、原生多模态识图。
-          对接 DeepSeek V4.1 Flash API，流式逐字输出，SQLite 全局持久化，统一多线程治理。
-        </p>
-        <div class="stat-grid">
-          <div class="stat-card reveal"><div class="tint tint-cyan"></div><div class="num" data-target="93">0</div><div class="label">Java 源文件</div></div>
-          <div class="stat-card reveal" data-delay="1"><div class="tint tint-purple"></div><div class="num" data-target="37597">0</div><div class="label">代码行数</div></div>
-          <div class="stat-card reveal" data-delay="2"><div class="tint tint-magenta"></div><div class="num" data-target="58">0</div><div class="label">用户命令</div></div>
-          <div class="stat-card reveal" data-delay="3"><div class="tint tint-amber"></div><div class="num" data-target="74">0</div><div class="label">FC 工具</div></div>
-        </div>
+<main class="shell">
+  <div class="doc">
+
+    <section class="hero">
+      <span class="eyebrow">总览 · 命令使用 / 基板能力 / 技术实现</span>
+      <h1>AiAgent <span class="grad">V4</span><br>基板只做九件事</h1>
+      <p class="lede">
+        本套文档只写三件事：<b>命令怎么用</b>、<b>基板能做什么</b>、<b>它是怎么实现的</b>。
+        关于实现的每条断言都能追到源码的 <code>file:line</code> 或一个可复核的实测值；
+        没有实现的东西一律标成<b>计划中／未实现</b>，不给承诺。
+      </p>
+      <div class="hero-actions">
+        <a class="btn" href="deploy.html">① 先看怎么部署 →</a>
+        <a class="btn amber" href="commands.html">控制台能用什么</a>
+        <a class="btn ghost" href="capabilities.html">基板能做什么</a>
       </div>
-    </header>
+      <div class="hero-grid">
+        <div class="kpi"><div class="k">线上程序</div><div class="v">675,173<small>字节</small></div></div>
+        <div class="kpi amber"><div class="k">源码</div><div class="v">110<small>个 .java</small></div></div>
+        <div class="kpi amber"><div class="k">包</div><div class="v">17</div></div>
+        <div class="kpi"><div class="k">配置键面</div><div class="v">94<small>个已知键</small></div></div>
+        <div class="kpi rose"><div class="k">装配</div><div class="v">19<small>步</small></div></div>
+        <div class="kpi"><div class="k">数据文件</div><div class="v">1<small>个（v4.db）</small></div></div>
+      </div>
+    </section>
 
-    <div class="container">
-      <section class="section" id="overview">
-        <div class="section-head reveal">
-          <div class="section-tag">Overview</div>
-          <h2>核心能力</h2>
-          <p class="desc">从「对话」到「自主任务执行」再到「群管理」，一个插件全面接管 SFW 框架。</p>
-        </div>
-        <ul class="feature-list">
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">原生 Function Calling 多轮循环</div><div class="f-desc">FunctionCallingBridge 驱动 tools/tool_calls 多轮循环（<b>无轮次与工具调用次数上限</b>，由 Agent 自身判断任务是否完成，仅连续失败/显式停止才终止），ToolDispatcher 统一注册与执行工具，模型自主决定聊天或调工具</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">多智能体协作 · AgentBus</div><div class="f-desc">注册 main / passage / vision 三个 Agent，通过 call_agent / ask_agent 互相唤起、双向递归协作（MAX_DEPTH=6 防死循环）。<b>按模型视觉能力动态启用</b>：Flash 通道下 main 与 passage 自己就能看图（vision Agent 自动不启用）；Pro 通道下由 vision Agent 兜底识图，其执行模型写死 deepseek-flash</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">多智能体编排 · AgentOrchestrator</div><div class="f-desc">pipeline（流水线）/ fanout（扇出扇入）/ expert（专家池）三种编排模式，把复杂任务分解为子步骤并聚合结果（ai/orchestrate 命令）</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">三层通道权限模型</div><div class="f-desc">本地 execs（全量工具）→ QQ execq 普通消息（受限工具 + 仅 NapCat 技能）→ QQ execs: 关键字（全工具 + 全技能）。越权立即终止</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">技能自进化 + scope 四分类</div><div class="f-desc">SkillBank + SkillExtractor LLM 轨迹蒸馏 + RouteCache 路径权重缓存。scope 分 general/execq/task/persona，按通道按需注入</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">三方技能库（含代码段执行）</div><div class="f-desc">一个技能一个文件夹（md 文档 + Java 源码），airun 入口签名动态注册为 tp_ 工具，直接 Function Calling 调用；辅助类同目录一起编译；工具名自动规范化为合法字符集；默认权限位 AFFECTION:300（zip 式技能包已移除）</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">八库记忆系统</div><div class="f-desc">memories / notes / skills / impressions / conversations / stickers / corrections / group_impressions 八库架构，FTS5 全文检索 + 重要性加权 + 时间衰减</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">QQ OneBot v11 机器人</div><div class="f-desc">反向 WebSocket 接手群聊私聊，统一记忆库区分群聊/私聊，完整群管理（禁言/踢出/拉黑/设管/改群名/退群），跨群操作</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">原生多模态图片识别</div><div class="f-desc">DeepSeek V4.1 Flash（<code>deepseek-flash</code>）原生支持视觉：图片按需直接作为多模态 content 块随消息提交，<b>不再单独调用视觉模型</b>（彻底移除在线 OCR），图片注释 MD5 强绑定持久化</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">戳一戳系统拦截</div><div class="f-desc">戳一戳不再走 AI 思考：系统直接拦截并 @ 戳的人回一个「？」，零 token 消耗、响应即时</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">人格印象系统</div><div class="f-desc">ImpressionExtractor 蒸馏每个 QQ 用户 5 维人格画像，回复时自动注入印象上下文实现个性化交互</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">动态代码注入与执行</div><div class="f-desc">Nashorn JS 即时执行 + JavaCompiler 编译注入，编译→加载→执行→丢弃。execq 通道 eval/evaljs/sys 受高危代码模式拦截</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">联网搜索 + 文件下载 + 天气</div><div class="f-desc">HTTP GET（SSRF 内网黑名单 + DNS Rebinding 检测），必应搜索、文件下载、实时天气（Redis 旁路缓存）</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">情绪陪伴 + 好感度六级权限</div><div class="f-desc">情绪状态机（被夸开心/被骂难过/连续失败撒娇暂停），好感度 0~1000 六级权限：100 加好友 / 200 改马甲 / 300 入新群·发文件·发语音 / 400 挚友关注 / 800 恋人 5% 监听 / 1000 提至 10%，捐赠按 1元=1分</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">好感度查询 / 调整 / 复位 / 排行</div><div class="f-desc">queryaffection 查单个/群成员/随机抽取，setaffection 主人调整任意用户，affectionrank 本群 Top10（全局仅主人），resetaffection 一键复位；群成员关系表 + 内存缓存双层结构</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">跨群记忆检索</div><div class="f-desc">群聊完整历史 FTS5 全文索引 + 中文 N-gram 兜底，群与群之间共享记忆（如「隔壁群谁喊妈妈」可跨群命中）</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">折叠消息全交段落 Agent + 标记去重</div><div class="f-desc">折叠消息（不论引用与否）一律由 passage 段落 Agent 分析，结论注入后由<b>主 Agent 自己调用 markmessage</b> 标回原消息并标识「已分析」；下轮按 message_id 精确查 + 内容兜底查，命中即复用，绝不重复分析</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">群聊回复 @ 提问者（不引用）</div><div class="f-desc">取消 Bot 主动引用回复（引用错乱根因是引用 ID 与消息归属不匹配），改为系统自动 @ 当前提问者并强化「本次回复对象」标识，减少识别难度</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">拟人化监听态</div><div class="f-desc">消息并发处理（execPool 3 线程），每个监听群独立进入 8~20 秒监听窗口，AI 判定相关性自动续期，同群 8 次边界暂停，挚友/恋人概率主动关注</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">好友申请 / 群邀请 AI 决策</div><div class="f-desc">好友申请与群邀请不再自动处理，进入待处理请求池，AI 通过 pendingrequests/approvefriend/acceptgroupinvite 等工具按好感度决策；卡片消息（群邀请/好友申请）解析提取内容并注入系统拦截结果告知 AI，不再误答「空消息」；捐赠由主人私聊告知，AI 用 recorddonation 工具记录</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">表情包存图多智能体协作</div><div class="f-desc">存图由主 Agent 打包段落（仅好感度&gt;6、排除 Bot 自己、无图不分发）→ 段落 Agent 找图 → 视觉 Agent 识图 → 判断收藏 → collectsticker → markmessage；TTL 被动/主动双通道（保底 15 / 阈值 30 / 上限 60，3 天 TTL）</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">Cron 定时 + 自动清屏</div><div class="f-desc">标准 cron 表达式持久化定时任务，重启恢复；AutoClear 守护线程每 3 分钟防日志 OOM</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">系统闹钟（AI Alarm）</div><div class="f-desc">alarm 工具创建到点唤醒 AI 的闹钟：语义解析 once/daily/weekly 三种 schedule，上下文快照持久化，到点重建上下文走 Agent 链路执行任务；普通用户到点仅提醒、主人走受限链路、execs/本地走全权限</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">配置持久化 + AES 加密 + 校验日志</div><div class="f-desc">API Key AES-GCM 加密存储（兼容旧 ECB 回退），DeepSeek 高级参数（reasoning/温度/频率惩罚）自动保存，加载后校验关键配置并记录回退日志</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">模型解析（auto 才路由）</div><div class="f-desc"><b>model=auto</b> 时才启用自动路由，各通道取默认模型 <code>deepseek-flash</code>（V4.1 Flash，原生多模态）；配置里写了<b>具体模型名</b>则严格按该名称调用，所有通道一律照用、不做任何替换</div></div></li>
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">Harness 可观测性 + 工具遥测</div><div class="f-desc">HarnessTrace 执行轨迹 SQLite 持久化 + HarnessEval 评测报告（成功率/平均工具调用/耗时），ToolCallTrace 记录每次工具调用轻量遥测，ai/status 查看运行时状态与最近轨迹</div></div></li>
-          
-          <li class="feature-item reveal"><div class="check">✓</div><div><div class="f-title">统一多线程治理</div><div class="f-desc">ThreadManager 统一命名线程池 + OneBot 连接池 + FC 多工具并发执行 + execPool 可配置背压 + 工具执行 120s 超时</div></div></li>
-        </ul>
-      </section>
+    <div class="doc-body" id="doc-body">
 
-      <section class="section" id="nav">
-        <div class="section-head reveal">
-          <div class="section-tag">Documentation</div>
-          <h2>文档导航</h2>
-          <p class="desc">9 大篇章，覆盖架构、权限、技能、记忆、QQ 机器人、命令、类结构、设计模式与更新日志。</p>
-        </div>
-        <div class="card-grid reveal">
-          <a href="architecture.html" class="card tilt"><div class="card-icon ic-cyan">🏗</div><h3>系统架构</h3><p>分层架构 · 数据流 · Function Calling 循环 · 多 Agent 协作 · 上下文注入链</p><span class="more">查看</span></a>
-          <a href="permissions.html" class="card tilt"><div class="card-icon ic-purple">🔐</div><h3>权限与通道</h3><p>三层权限模型 · 工具权限矩阵 · 好感度门槛 · 高危代码拦截</p><span class="more">查看</span></a>
-          <a href="skills.html" class="card tilt"><div class="card-icon ic-magenta">🧠</div><h3>技能系统</h3><p>内置技能库 · 三方技能（单文件） · 技能蒸馏 · 路径路由</p><span class="more">查看</span></a>
-          <a href="memory.html" class="card tilt"><div class="card-icon ic-amber">💾</div><h3>记忆系统</h3><p>八库存储 · 人格印象 · 纠正记录 · 记忆生命周期</p><span class="more">查看</span></a>
-          <a href="commands.html" class="card tilt"><div class="card-icon ic-green">📋</div><h3>命令参考</h3><p>58 个用户命令 · 74 个 FC 工具 · 部署三步</p><span class="more">查看</span></a>
-          <a href="classes.html" class="card tilt"><div class="card-icon ic-blue">📦</div><h3>类结构</h3><p>93 个 Java 类 · 9 个包 · 核心类职责</p><span class="more">查看</span></a>
-          <a href="patterns.html" class="card tilt"><div class="card-icon ic-cyan">🎨</div><h3>设计模式</h3><p>策略 · 观察者 · 单例 · 桥接 · 模板方法 · 注册表</p><span class="more">查看</span></a>
-          <a href="changelog.html" class="card tilt"><div class="card-icon ic-amber">📜</div><h3>更新日志</h3><p>V1.0 → V4.0 版本演进 · 功能里程碑</p><span class="more">查看</span></a>
-        </div>
-      </section>
+      <!-- ============ 1 ============ -->
+      <section class="chapter" id="scope">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">范围</span>
+          <h2>这套文档写什么，不写什么</h2>
+          <p class="chapter-desc">
+            文档只覆盖基板本身：命令面、能力面、实现面。凡是不能追到 <code>file:line</code> 或可复核实测值的说法，本套文档里不会出现。
+          </p>
+        </header>
 
-      <section class="section" id="quick">
-        <div class="section-head reveal">
-          <div class="section-tag">Quick Start</div>
-          <h2>快速开始</h2>
-        </div>
-        <div class="flow-box reveal">
-          <div class="flow">
-            <div class="flow-node start"><span class="fn-title">配置 API Key</span><span class="fn-sub">ai/setkey sk-xxx</span></div>
-            <div class="flow-edge"></div>
-            <div class="flow-node core"><span class="fn-title">Agent 全能模式</span><span class="fn-sub">ai/execs 列出所有已加载的插件并分类</span></div>
-            <div class="flow-edge"></div>
-            <div class="flow-node core"><span class="fn-title">配置 QQ 机器人</span><span class="fn-sub">onebotsetport / onebotsettoken / onebotsetselfid / onebotconnect</span></div>
-            <div class="flow-edge"></div>
-            <div class="flow-node end"><span class="fn-title">开始使用</span><span class="fn-sub">本地 execs + QQ 群聊双通道</span></div>
+        <div class="grid-3">
+          <div class="tile reveal">
+            <span class="t-num">A / COMMANDS</span>
+            <h3><span class="dot"></span>命令使用</h3>
+            <p>控制台每条命令的用法格式、参数、执行后看到什么、依赖什么、有什么坑。命令表以源码里 <code>Cmd.help()</code> 与命令分发为准。</p>
+            <span class="t-meta"><span>用法 / 参数 / 效果 / 坑</span></span>
           </div>
-          <div class="flow-caption">部署完成后，在 SFW 控制台输入命令即可开始使用</div>
+          <div class="tile reveal d1">
+            <span class="t-num">B / CAPABILITIES</span>
+            <h3><span class="dot"></span>基板能力</h3>
+            <p>九项能力各能做什么、边界在哪、失败时降级成什么样；模型面、QQ 面、权限面、存储面、调试面各自的形状。</p>
+            <span class="t-meta"><span>能做什么 / 边界 / 降级</span></span>
+          </div>
+          <div class="tile reveal d2">
+            <span class="t-num">C / INTERNALS</span>
+            <h3><span class="dot"></span>技术实现</h3>
+            <p>包与分层、装配流程、线程与调度、工具注册与失败闸门、数据表与键、关键 <code>file:line</code> 索引。</p>
+            <span class="t-meta"><span>类与文件 / 机制 / 表结构</span></span>
+          </div>
+        </div>
+
+        <div class="note warn reveal">
+          <p><span class="n-title">不在范围内</span>：外挂扩展层不在本文档范围内 —— 它不写进本套文档，其加载机制只在<a href="architecture.html#hot">实现页的加载管线</a>里以"机制"的形式出现，不涉及任何具体内容。业务能力由它提供，与基板文档分层。</p>
+        </div>
+
+        <div class="note reveal">
+          <p><span class="n-title">出处口径</span>：本套文档里的实现断言有两种出处 —— ① <code>src\sair\v4\...\Xxx.java:行号</code>；② 可复核的实测值（文件字节数、sha256、计数命令 + 结果）。凡是源码里没有对应实现的，写成"计划中／未实现"。</p>
         </div>
       </section>
+
+      <!-- ============ 2 ============ -->
+      <section class="chapter" id="nine">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">能力</span>
+          <h2>基板只做九件事</h2>
+          <p class="chapter-desc">
+            命令表自己就是这么写的：<code>Cmd.java:1357</code> 的第一行 —— 「基板只做九件事：存储 / 热插拔 / 提示词 / Agent / 上下文 / 权限 / 模型 / NapCat / 控制台」。
+            九项都是基板职责，任何一张卡都能点到<a href="capabilities.html">能力页</a>对应的那一节。
+          </p>
+        </header>
+
+        <div class="grid-3">
+          <a class="tile reveal" href="capabilities.html#storage"><span class="t-num">01 / STORE</span><h3><span class="dot"></span>通用存储</h3><p>单一数据文件 <code>v4.db</code>（<code>Conf.java:1103</code>），业务库 + 运行表 + 全文检索统一走一套接口。</p><span class="t-meta"><span>sair.v4.store</span><span>单文件</span></span></a>
+          <a class="tile reveal d1" href="architecture.html#hot"><span class="t-num">02 / HOT</span><h3><span class="dot"></span>热插拔加载</h3><p>后加进来的能力不用重新打包：加载管线负责解析、编译、注册与工具面接入（机制见实现页）。</p><span class="t-meta"><span>加载管线</span><span>注册</span></span></a>
+          <a class="tile reveal d2" href="capabilities.html#prompt"><span class="t-num">03 / PROMPT</span><h3><span class="dot"></span>提示词</h3><p>从数据根读提示词文件，按槽位注入到系统提示 / 每轮上下文 / 工具说明 / 用户消息前。</p><span class="t-meta"><span>sair.v4.prompt</span><span>注入</span></span></a>
+          <a class="tile reveal" href="capabilities.html#agent"><span class="t-num">04 / AGENT</span><h3><span class="dot"></span>Agent 架构</h3><p>主循环 + 子 Agent + 任务台账；回合调度分道、模型调用过闸门。</p><span class="t-meta"><span>sair.v4.agent</span><span>主循环 / 子 Agent</span></span></a>
+          <a class="tile reveal d1" href="capabilities.html#ctx"><span class="t-num">05 / CTX</span><h3><span class="dot"></span>上下文装配</h3><p>把系统提示、事实块、历史窗口、本轮输入拼成一次请求（事实块只放事实，不放文案）。</p><span class="t-meta"><span>sair.v4.ctx</span><span>事实块</span></span></a>
+          <a class="tile reveal d2" href="capabilities.html#perm"><span class="t-num">06 / AUTH</span><h3><span class="dot"></span>权限</h3><p>资源 ACL：三个身份 × 五类资源 × 位；账本是数据根下的例外清单，<b>空位 = 拒绝</b>。</p><span class="t-meta"><span>sair.v4.auth</span><span>默认拒绝</span></span></a>
+          <a class="tile reveal" href="capabilities.html#model"><span class="t-num">07 / AI</span><h3><span class="dot"></span>模型客户端</h3><p>对话、流式输出、原生工具调用、图片理解、余额与模型清单；失败收敛成一句可读说明。</p><span class="t-meta"><span>sair.v4.ai</span><span>DeepSeek</span></span></a>
+          <a class="tile reveal d1" href="capabilities.html#qq"><span class="t-num">08 / QQ</span><h3><span class="dot"></span>NapCat 连接</h3><p>反向 WebSocket 服务端 + OneBot 动作调用 + 事件解析 + 本地文件外链中转。</p><span class="t-meta"><span>sair.v4.qq</span><span>反向 WS</span></span></a>
+          <a class="tile reveal d2" href="capabilities.html#console"><span class="t-num">09 / TERM + UI</span><h3><span class="dot"></span>控制台与界面</h3><p>装配跑在后台线程、进度实时打印；对话正文与过程日志分流；控制台在被捕获时可供模型读取（仅主人）。</p><span class="t-meta"><span>sair.v4.term</span><span>sair.v4.ui</span></span></a>
+        </div>
+      </section>
+
+      <!-- ============ 3 ============ -->
+      <section class="chapter" id="facts">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">基线</span>
+          <h2>当前线上基线（可自己复核）</h2>
+          <p class="chapter-desc">
+            下面每个数字都能用一条命令当场复核；复核命令与结果口径都写在卡片里。文档与线上字节对不上时，以线上字节为准。
+          </p>
+        </header>
+
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">线上程序</h4>
+            <p><code>C:\Sair\SairFrameWork\plugins\exection\ai.jar</code></p>
+            <p><b>675,173 字节</b><br><span class="dim">sha256 <code>130746B0B207138004459B4E7101FA4B148BBAF15CA42946D8D3A4A22228B088</code></span></p>
+            <p class="t-cap">同一份 jar 在仓库根目录另有 <code>AiAgentV4.jar</code>，与线上这份逐位相同（sha256 一致）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">源码</h4>
+            <p><b>110 个 <code>.java</code></b>，分布在 <b>17 个包</b>（根包 <code>sair.v4</code> + 16 个子包）。</p>
+            <div class="code" data-lang="powershell">
+              <div class="code-head"><span class="lang">powershell</span><span class="path">计数口径</span><button class="copy" type="button">复制</button></div>
+              <pre><code>Get-ChildItem C:\Sair\Local\AiAgent-V4\src -Recurse -Filter *.java | Measure-Object
+# =&gt; Count : 110
+Get-ChildItem C:\Sair\Local\AiAgent-V4\src -Recurse -Filter *.java |
+  ForEach-Object { $_.DirectoryName } | Sort-Object -Unique | Measure-Object
+# =&gt; Count : 17</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">配置键面</h4>
+            <p><b>94 个已知键</b>：<code>Conf.knownKeys()</code>（<code>Conf.java:1173-1288</code>）里逐条登记，共 94 次 <code>add(out, …)</code>。</p>
+            <p class="t-cap"><code>ai/status</code> 会把「文件里是新值、跑着的基板还是旧值」的键点名列成<b>待生效</b>（<code>Conf.java:578-589</code>）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">提示词实物</h4>
+            <p><code>data\prompts\identity.md</code> <b>13,028 字节</b>；<code>subagent.md</code> <b>1,664 字节</b>；<code>tools-index.md</code> <b>11,029 字节</b>。</p>
+            <p class="t-cap">冷启动时基板只建 <b>0 字节空壳</b>，不带任何提示词文案（<code>Boot.java:840-843</code>、<code>:869-870</code>）。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">装配是 19 步</h3>
+        <p>装配流程在 <code>Boot.init()</code> 里按 <code>step(…)</code> 顺序推进，源码里共有 <b>19</b> 处 <code>step(</code> 调用；命令表也这么写：「<code>ai/start</code> = 唯一的「加载并运行」：读 config.json + 跑 19 步装配」（<code>Cmd.java:1364</code>）。</p>
+        <div class="tw scroll reveal">
+          <table>
+            <thead>
+              <tr><th>要点</th><th>事实</th><th>出处</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>装配线程</td><td>装配跑在自己的线程上，进度直接打在控制台；控制台在装配期间照常可用</td><td><code>Cmd.java:1363</code>、<code>Boot.java</code> 的 <code>step()</code> 机制</td></tr>
+              <tr><td>可观测</td><td><code>ai/status</code> 未启动会说 <code>ready=0 reason=not_started</code>；失败时点名失败步骤</td><td><code>Cmd.java:1373</code></td></tr>
+              <tr><td>冷启动骨架</td><td>目录与空壳文件由 <code>ensureSkeleton()</code> 落盘：只创建、不覆盖、不写正文</td><td><code>Boot.java:851-876</code></td></tr>
+              <tr><td>数据文件</td><td>只有一个 <code>v4.db</code>；<code>config.json</code> 由 <code>Conf.ensureDefaults()</code> 落盘</td><td><code>Conf.java:1103</code>、<code>Boot.java:845</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 4 ============ -->
+      <section class="chapter" id="pages">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">目录</span>
+          <h2>十一个页面</h2>
+          <p class="chapter-desc">建议按 02 → 09 的顺序读一遍；<code>07 技术实现</code>是文档里唯一带大量 <code>file:line</code> 的页面。</p>
+        </header>
+
+        <div class="grid-3">
+          <a class="tile reveal" href="usage.html"><span class="t-num">02 / USAGE</span><h3><span class="dot"></span>使用说明</h3><p>任务导向：跟她说话、起停、改配置、提示词、权限与好感、调试面、数据与备份、常见故障 —— 每条都写清"做完会看到什么"。</p><span class="t-meta"><span>怎么做</span><span>怎么确认成功</span></span></a>
+          <a class="tile reveal d1" href="deploy.html"><span class="t-num">03 / DEPLOY</span><h3><span class="dot"></span>部署</h3><p>文件落位、启动目录的硬约束、NapCat 反向 WS 与 token、跨机中转、冷启动会生成什么、启动与关停的正确做法。</p><span class="t-meta"><span>落位</span><span>启动 / 关停</span></span></a>
+          <a class="tile reveal d2" href="config.html"><span class="t-num">04 / CONFIG</span><h3><span class="dot"></span>配置键面</h3><p>逐键说明：含义、默认值、怎么调、调错的后果；以及何时生效（<code>ai/config</code> 只写文件）。</p><span class="t-meta"><span>94 键</span><span>生效时机</span></span></a>
+          <a class="tile reveal" href="commands.html"><span class="t-num">05 / COMMANDS</span><h3><span class="dot"></span>控制台命令</h3><p>每条命令的用法、参数、效果、依赖与注意事项，含"群里只 @ 才触发"和正确关停口径。</p><span class="t-meta"><span>命令表</span><span>注意事项</span></span></a>
+          <a class="tile reveal d1" href="capabilities.html"><span class="t-num">06 / CAPABILITIES</span><h3><span class="dot"></span>基板能力</h3><p>九件事、生命周期、失败降级、模型面、QQ 面、权限面、存储面、调试面、边界。</p><span class="t-meta"><span>能力面</span><span>边界</span></span></a>
+          <a class="tile reveal d2" href="perms.html"><span class="t-num">07 / PERMS</span><h3><span class="dot"></span>权限管理</h3><p>ACL 模型（三主体 / 五类资源 / 三位）、<code>perms.json</code> 账本格式、<code>ai/acl</code> 与 <code>ai/perm</code> 的分工、怎么授权与撤销、默认与例外、拒绝长什么样。</p><span class="t-meta"><span>账本</span><span>授权 / 撤销</span></span></a>
+          <a class="tile reveal d2" href="files.html"><span class="t-num">08 / FILES</span><h3><span class="dot"></span>文件与数据根</h3><p>17 个包各自负责什么、数据根里每个文件/目录是什么、数据表落在哪个文件。</p><span class="t-meta"><span>包结构</span><span>数据根</span></span></a>
+          <a class="tile reveal" href="architecture.html"><span class="t-num">09 / INTERNALS</span><h3><span class="dot"></span>技术实现</h3><p>分层、装配、线程与调度、工具注册与失败闸门、数据表与键、关键机制与 <code>file:line</code> 索引。</p><span class="t-meta"><span>机制</span><span>file:line</span></span></a>
+          <a class="tile reveal amber d1" href="migration.html"><span class="t-num">10 / UPGRADE</span><h3><span class="dot"></span>从 V3 升级</h3><p>V4 不读 V3 的数据：会失去什么、怎么留档、哪些配置能照抄、升级后要重做哪几件事。</p><span class="t-meta"><span>数据不迁移</span><span>配置对照</span></span></a>
+          <a class="tile reveal amber d2" href="changelog.html"><span class="t-num">11 / CHANGELOG</span><h3><span class="dot"></span>更新日志</h3><p>当前版本一条 + 继承下来的历史版本条目。</p><span class="t-meta"><span>当前版</span><span>历史条目</span></span></a>
+        </div>
+      </section>
+
+      <!-- ============ 5 ============ -->
+      <section class="chapter" id="status">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">须知</span>
+          <h2>上手前请先知道的七件事</h2>
+          <p class="chapter-desc">这些都是会直接影响你怎么用、怎么排障的硬约束或行为约定，每条都给了出处。</p>
+        </header>
+
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">① 启动目录必须固定</h4>
+            <p>敏感键的加密密钥派生包含 <code>user.dir</code>（当前工作目录），派生因子是「JVM 名 / 架构 / 用户名 / 主机名 / 工作目录 / 固定尾串」的 SHA-256，取前 16 字节做 AES-128 密钥。</p>
+            <p class="t-cap">出处 <code>kit\Crypto.java:18</code>、<code>:29-31</code>、<code>:130</code>、<code>:140-148</code>。换机器 / 换用户名 / 换工作目录启动，密文就解不开，要改成明文让它重新加密。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">② 配置改完要重载才生效</h4>
+            <p>除 <code>ai/start</code> 与 <code>ai/restart</code> 外，其余命令<b>只改配置文件</b>：<code>ai/config set</code> 写完文件并不生效，要看 <code>ai/status</code> 里的「待生效」清单变空才算生效。</p>
+            <p class="t-cap">出处 <code>Cmd.java:1369-1371</code>、<code>Conf.java:578-589</code>。</p>
+          </div>
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">③ 跨机部署才需要中转</h4>
+            <p>NapCat 与插件不在同一台机器时，"发本地文件"这条路需要中转：URL 形如 <code>http://host:port/&lt;token&gt;/&lt;绝对路径&gt;</code>，token 不对一律 404。</p>
+            <p class="t-cap">出处 <code>qq\Relay.java:52-53</code>、<code>:441-442</code>。它<b>只读但能读本机任意文件</b>（<code>Relay.java:226</code>）：默认关闭，只在跨机时开。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">④ 聊天记录按保留期清理</h4>
+            <p>三把独立的尺子：记忆 <code>keepDays</code> 默认 <b>30</b>、对话 <code>dialogKeepDays</code> 默认 <b>180</b>、群聊 <code>grouplogKeepDays</code> 默认 <b>30</b>；<code>&lt;=0</code> = 不过期。</p>
+            <p class="t-cap">出处 <code>Conf.java:142</code>、<code>:144</code>、<code>:146</code>、<code>:1020-1030</code>。</p>
+          </div>
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">⑤ NapCat 没连上也能用</h4>
+            <p>监听失败（端口被占）或 <code>napcatEnabled=false</code> 时，<b>本地交互照常可用</b>，只是 QQ 侧能力不可用；而且"非本机监听 + 空 token"会直接拒绝启动监听。</p>
+            <p class="t-cap">出处 <code>Boot.java:756-760</code>、<code>qq\Link.java:148-156</code>。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">⑥ 控制台永远有反应</h4>
+            <p>命令分发整体包在兜底里：任何一条命令炸掉都不影响下一条；连装配全失败时也有一张最小命令表（<code>help / status / tools / config</code>）。</p>
+            <p class="t-cap">出处 <code>Cmd.java:220-226</code>、<code>:1389-1390</code>、<code>:1402-1407</code>。</p>
+          </div>
+        </div>
+
+        <div class="note bad reveal">
+          <p><span class="n-title">⑦ 真正关停：用 <code>/exit</code>，或按精确 pid 杀进程</span>：<code>ai/exit</code> <b>只停基板</b>。基板停下之后<b>调试口会随之关闭，而 JVM 进程仍然活着</b>；在没有控制台的场景下，这时<b>无法再 start</b>。这是当前实现的行为，<b>未计划修改</b>。</p>
+          <p>正确做法：要真正结束进程，用框架控制台的 <code>/exit</code>（框架自带文档写的是「退出 SFW」，见 <code>SairFrameWork\readme\pages\plugin-dev.html:71</code>、<code>:139</code>；进程由 <code>SairFrameWork\run.bat</code> 里的 <code>javaw -jar SFW.jar</code> 拉起），或者按精确 pid 结束进程。注意：命令表里对 <code>/exit</code> 的说明是"之后可再 start"（<code>Cmd.java:1366</code>），而实测在无控制台场景下做不到 —— 以实测为准。</p>
+        </div>
+
+        <h3 class="sec">两条最容易踩的坑</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">群里只 @ 才触发</h4>
+            <p>群消息的触发判定只认"被 @ 到自己"：判定点在 <code>QqGateway.java:874</code> 的 <code>return ev.atSelf();</code>（同一文件 <code>:752</code> 是同一判定的使用处，<code>:767</code> 决定是否剥掉开头的 @）。<code>atSelf()</code> 的判定本体在 <code>qq\Ev.java:182</code>。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">别把 jar 放错目录</h4>
+            <p>插件 jar 的落位是 <code>SairFrameWork\plugins\exection\ai.jar</code>；数据根是 <code>SairFrameWork\data\AiAgent-V4\</code>。落位与目录结构见<a href="deploy.html#layout">部署页 · 文件落位</a>与<a href="files.html#datadir">文件页 · 数据根</a>。</p>
+          </div>
+        </div>
+      </section>
+
     </div>
 
-    <footer class="footer">
-      <div class="container">
-        <p><span class="brand">AiAgent</span> v4.0 · 基于 <span style="color:var(--purple)">SairFrameWork 0.5.3</span> · 对接 <span style="color:var(--cyan)">DeepSeek V4.1 Flash API</span></p>
-        <p style="margin-top:6px">原生 Function Calling · 多智能体协作 · 三层权限模型 · 技能自进化 · 三方技能代码段 · 八库记忆 · 人格印象 · 情绪陪伴 · 好感度六级权限 · 跨群记忆检索 · 拟人化监听态 · 好友申请/群邀请 AI 决策 · 多模态识别 · AES-GCM · SSRF 防护 · Redis 缓存 · Cron 定时 · 系统闹钟 · 工具遥测 · ai/status</p>
-      </div>
-    </footer>
-  </main>
+            <nav class="pager">
+      <span></span>
+      <a class="next" href="usage.html"><span class="p-dir">NEXT →</span><span class="p-name">02 · 使用说明</span></a>
+    </nav>
 
-  <div class="back-to-top" title="回到顶部">↑</div>
-  <script src="js/main.js"></script>
+    <footer class="foot">
+      <span>AiAgent V4 文档 · 纯静态、自包含（无 CDN / 无第三方库 / 无网络请求）</span>
+      <span>插件：<code>AiAgentV4.jar</code></span>
+      <span>数据目录：<code>SairFrameWork\data\AiAgent-V4\</code></span>
+      <a href="index.html">回到总览</a>
+      <div class="icp">湘ICP备2025152033号</div>
+    </footer>
+  </div>
+
+  <aside class="rail">
+    <div class="rail-inner">
+      <p class="rail-title">本页目录</p>
+      <ol id="toc-list"></ol>
+      <div class="rail-foot">点击标题右侧 <code>#</code> 可复制该小节链接</div>
+    </div>
+  </aside>
+</main>
+
+<button class="to-top" id="to-top" type="button" title="回到顶部">↑</button>
+<script src="js/site.js"></script>
 </body>
 </html>

@@ -1,4 +1,3 @@
 Manifest-Version: 1.0
-ACT: sair.aiagent.AiAgentActivity
-Created-By: 1.8.0_392 (Red Hat, Inc.)
+ACT: sair.v4.V4Activity
 

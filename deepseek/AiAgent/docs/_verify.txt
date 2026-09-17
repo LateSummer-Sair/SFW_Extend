@@ -1,0 +1,147 @@
+AiAgent V4 文档 · 交付自证（docs\_verify.txt）
+生成时间 2026-09-17 10:35:38；只读校验，未改动被校验文件。
+
+## 0. 工具版本与环境
+checker v2 = tag-balance + stack-order + raw-< in pre + link/anchor + forbidden（+ 实体解码复扫）；读文件一律 [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes(p))
+运行环境：Windows PowerShell 5.1.19041.7417 (Desktop)
+作废声明：先前任何用 Get-Content -Raw 产出的标签/UNMATCHED 数字一律作废（PS 5.1 按 ANSI 解码 UTF-8 会吞掉中文后的 ASCII 字符）。
+违禁词正则（全站·修正式）：技能|(?i)skill|探针|批次|轮次|工期|冻结|门禁|验收|专员|返工|甲方|鱼总|真机|里程碑|(?i)\bbug\b|probe|notes|_build|_jar|_deploy|开发过程|自检
+豁免清单：
+  (a) 命令/路径与范围声明 3 项：ai/skill ； data\skills\ ； 外挂层（技能）不在本文档范围内。
+  (b) 鱼总裁定批准的基板机制标识符（可逐字列出）：skill_index（索引表名）／skillsAsync（后台装载开关键名）／Skills.java（装载器类名，含 src\sair\v4\skill\ 包路径与 Boot.startSkillsAsync() 调用形式）／skill\Host（权限拒绝文案产出侧接口）。理由：它们是基板机制标识符、不是技能内容；只给行号不列名会损失可核对性。具体技能名/用途/参数/清单一律不写。
+严格式差异：严格式把 bug 写为 (?i)bug 会命中 "debug" 等产品真实标识符（假阳性）；全站采用词边界 (?i)\bbug\b，并按鱼总裁定不为迁就扫描而中性化这些名字。
+
+## 1. 校验器自证（校准三例）
+① 已知有缺陷样本 <html><body><div><span>x</div><p>y</p></body></html> ⇒ 判红：imbalance=1 order_errors=3 left_open=1
+② 已知正确样本 <html><body><div><span>x</span></div><p>y</p></body></html> ⇒ 判绿：imbalance=0 order_errors=0 left_open=0
+③ 真实旧页 notes\archive\docs-before-rewrite-20260917\index.html ⇒ 结构判绿：imbalance=0 order_errors=0；同时违禁词=39（技能/skill/notes/自检/批次 等）⇒ 扫描确实会点火
+
+## 2. 逐页结果（checker v2）
+| 页 | 字节 | 行 | sha256-16 | BOM | 标签不平衡 | 定序错误 | 未闭合 | 死链 | 违禁词 | 实体解码后违禁词 | id数 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| index.html | 24999 | 306 | E658970B0E070D04 | 无 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
+| usage.html | 31342 | 447 | B5760E2CD8E51AB3 | 无 | 0 | 0 | 0 | 0 | 0 | 0 | 14 |
+| deploy.html | 29638 | 423 | A0B7D032FD4E49A2 | 无 | 0 | 0 | 0 | 0 | 0 | 0 | 13 |
+| config.html | 100117 | 1151 | FB2F23DBBDC619AD | 无 | 0 | 0 | 0 | 0 | 0 | 0 | 13 |
+| commands.html | 116153 | 1163 | 03D100F34C2A3E1A | 无 | 0 | 0 | 0 | 0 | 0 | 0 | 18 |
+| capabilities.html | 108619 | 991 | F17DBBEC136604C0 | 无 | 0 | 0 | 0 | 0 | 0 | 0 | 18 |
+| perms.html | 36450 | 464 | F33EFBFB341EF9BE | 无 | 0 | 0 | 0 | 0 | 0 | 0 | 14 |
+| files.html | 50431 | 593 | AC55533FF49D8B03 | 无 | 0 | 0 | 0 | 0 | 0 | 0 | 11 |
+| architecture.html | 120619 | 1213 | 2A934DD8836FEE3B | 无 | 0 | 0 | 0 | 0 | 0 | 0 | 18 |
+| migration.html | 24779 | 348 | 1DC0651D2E0379F9 | 无 | 0 | 0 | 0 | 0 | 0 | 0 | 11 |
+| changelog.html | 39630 | 609 | BD8A025BDB9FE35D | 无 | 0 | 0 | 0 | 0 | 0 | 0 | 7 |
+
+死链：全站 0 条（含跨页锚点）；导航块逐字符一致：11/11
+docs\skills.html 已删除：True ；全站对它的引用数：0 ；docs\css\site.css=True，docs\js\site.js=True（位置未变，引用统一）
+
+## 3. changelog 继承对照（历史条目不许少）
+继承前：release 块 68 / rel-ver 条目 64（= 28 条过程批次 + 36 条版本条目）
+继承后：release 块 41 / rel-ver 条目 37（= 36 条版本条目 + 1 条「当前版本」）
+36 条版本条目逐条在位：36/36 全在（V4.0 与 V3.14→V1.0 逐字核对）
+过程批次条目残留（"批次"字样）=0；页内已明写 28 条过程条目按本文档范围不再逐条继承。
+
+## 8. 实质审计（"外挂单元的概念/能力被当成基板能力写"专项）
+扫描面：线上 36 个外挂单元目录名 + 24 个外挂工具名（名单不落盘到 docs\，本表按 token 归类给出判定）。
+判定口径：(a) 基板资源/库别名/通用词 ⇒ 保留；(b) 外挂单元的概念/能力被当成基板能力写 ⇒ 中性化为基板机制措辞；(c) 假阳性（HTML 属性名、CSS 类、页面名、子串命中、框架命令等）⇒ 不改。
+
+### 8.1 token 级判定（命中数按当前落盘文件重测）
+| token | 分类 | 命中数 | 处置 |
+|---|---|---|---|
+| 记忆 | (a) 基板库别名/表名 | 28 | 保留 |
+| 知识笔记 | (a) 基板库别名/表名 | 4 | 保留 |
+| 表情包 | (a) 基板库别名/表名 | 10 | 保留 |
+| 偏好设定 | (a) 基板库别名/表名 | 3 | 保留 |
+| 群印象 | (a) 基板库别名/表名 | 3 | 保留 |
+| 情绪 | (a) 基板库别名/表名 | 7 | 保留 |
+| 定时任务 | (a) 基板定时唤醒面（心跳/定时唤醒清单/运行表） | 9 | 保留 |
+| 文件 | (c) 通用词 + 页面名 files.html | 410 | 保留 |
+| 群管理 | (c) 假阳性：命中「群管理员」子串 | 1 | 保留 |
+| memory / note / sticker / pref | (a) 基板库名/表名/索引名（note 另有站点 CSS 类 .note 属 (c)） | 9 / 106 / 9 / 9 | 保留 |
+| mark | (c) 属性名 brand-mark 等；(a) 标记键形状 mark:<session>/<target> | 13 | 保留 |
+| file | (c) 通用词 + files 目录/页面名 | 29 | 保留 |
+| group | (c) 假阳性：PowerShell 的 Group-Object、ACL 主体 User/Group、动作参数 group|private | 12 | 保留 |
+| send | (c) 假阳性：对外动作参数（如 send_group_msg） | 5 | 保留 |
+| request | (a) 事件类型与方法名 | 2 | 保留 |
+| search | (a) 检索语义/工具面 | 2 | 保留 |
+| vision | (a) 配置键与事实字段 | 5 | 保留 |
+| web | (c) 假阳性：框架命令 web/start | 1 | 保留 |
+| trigger | (c) 假阳性：sqlite_master 的 type=="trigger" | 1 | 保留 |
+| look | (c) 假阳性：子串命中基板方法名 Registry.looksFailed（非工具名）；原「约定名」写法已按 (b) 中性化 | 2 | 保留 |
+
+### 8.2 (b) 类逐条处置（旧 → 新，含页:行）
+| # | 页:行 | 旧（外挂单元概念/名字） | 新（基板机制措辞） |
+|---|---|---|---|
+| 1 | architecture.html:617 | 「群里的主人也一样要么被 @、要么用触发词」 | 「群里的主人也一样要被 @；不被 @ 的消息只能由外挂层的触发投票放行（投票失败按"没人表态"处理）」+ 出处 QqGateway.java:855-861 / ext\TriggerVoter.java |
+| 2 | architecture.html:879 | 「识图组件注册的工具名（约定名 look）」 | 「识图组件注册的工具名（约定名由外挂层声明，本文档不列出）」+ 出处 RecognizerState.java:41 |
+| 3 | architecture.html:1005 | 「说话类工具 send / sendimage / sticker」 | 「哪些工具算"说话类"由外挂层声明（本文档不列名单）」+ 出处 Loop.java:314-324 / :345-351 |
+| 4 | capabilities.html:771 | 「包括没有触发词的那些话」 | 「包括没有被放行判据选中的那些话」 |
+| 5 | commands.html:985 | 「群里要么 @ 它，要么用触发词，主人也一样」 | 「群里要么 @ 它，要么由外挂层投票放行，主人也一样」 |
+| 6 | changelog.html:339 | 「触发词多词化 + 多智能体通信」 | 「消息放行判据多词化 + 多智能体通信」 |
+| 7 | changelog.html:341 | 「消息触发词支持多个（分号分隔，可由 AI 在运行时修改）」 | 「消息放行判据支持多个（分号分隔，可由运行时修改）」 |
+
+声明：(a) 为基板资源/库别名/通用词，(c) 为假阳性，(b) 已全部中性化（7 处，见 8.2）。外挂层的具体内容（有哪些单元、各自做什么、参数与实现）仍不在本文档范围内；本次未删除任何基板真实信息（库别名、表名、索引名、基板类名与 file:line 一律保留）。
+
+## 9. 覆盖审计（甲方提过的能力点 → 覆盖位置）
+| 能力点 | 覆盖位置 | 备注 |
+|---|---|---|
+| 权限 / ACL | perms.html（全页：模型/资源/账本/查/改/默认/拒绝/实现/排错）+ capabilities.html#perm | 已补页 |
+| 好感度 | perms.html#query、#change；capabilities.html#perm；命令 commands.html#perm-cmds | 明确"好感度不参与权限判定" |
+| 提示词 | capabilities.html#prompt；usage.html#prompt；config.html（identityFile / subagentFile 等键）；files.html#prompts | 含 prompt 子动作与 inject 四个槽位 |
+| 配置键面 | config.html（94 键逐键）；usage.html#config | 含 6 个"有键无读者"键的三类区分 |
+| 控制台命令 | commands.html（13 节）；usage.html（任务导向） | 命令表穷举 + 每条的依赖与注意 |
+| 调试面（输入口/输出口） | capabilities.html#debug；commands.html#debug-cmds；usage.html#debug | 两口的起停只由 ai/debug 说了算 |
+| 数据根与文件布局 | files.html#datadir；deploy.html#layout | 含骨架生成与幂等契约 |
+| 六库与运行表 | files.html#db；capabilities.html#storage；architecture.html#store-impl | 表名/索引名/FTS 与触发器 |
+| 日志与滚动 | files.html（数据根与日志段）；usage.html#data；capabilities.html#debug | 按大小滚动、只增不删 |
+| 备份与升级 | usage.html#data；migration.html | 含"动配置前先存字节"的操作建议 |
+| 模型面（含 models 事实 8 键） | capabilities.html#model；architecture.html#ctx-impl | 八字段语义逐条 + 出处 |
+| 上下文装配与历史 | capabilities.html#ctx；architecture.html#ctx-impl | 事实块构成与窗口裁剪 |
+| 回合与调度（并发闸门） | capabilities.html#lifecycle；architecture.html#threads | 分道、池、闸门与优先级 |
+| 工具机制（注册/失败闸门） | architecture.html#tool；capabilities.html#agent | 只写机制，不列具体工具名单 |
+| 通知事件 | capabilities.html#qq（QQ 面 · 通知事件段）；architecture.html#qq-impl | 事件类型与落库后派发路径 |
+| 消息分段与媒体（图/语音/转发/文件现状） | capabilities.html#qq（媒体段现状表）；architecture.html#qq-impl | 图片有识别能力；语音/视频/文件只有标签；转发展开标"计划中／未实现" |
+| 起停与故障处置 | usage.html#run、#trouble；deploy.html#startstop | 含 ai/exit 实测行为与正确关停 |
+| 安装与部署 | deploy.html（全页） | 落位、NapCat、跨机中转、冷启动生成、核对清单 |
+| 权限拒绝长什么样 | perms.html#deny | 三种识别形态 + 产出侧出处 |
+
+未覆盖项：**无**（上述 19 项均已在文档中有对应页/节；index.html 的页面目录已加 07 / PERMS 并使页集为 11）。外挂扩展层的内容按范围口径不覆盖，且在 capabilities / files / perms / architecture 四页各有一句范围声明。
+
+## 10. 已声明豁免与未核实项
+1) 违禁词豁免两类见 §0；严格式与修正式的差额（debug 子串）已在 §0 说明。
+2) 外挂层的基板机制标识符按裁定逐字列出（§0(b)）；外挂层具体内容不写。
+3) 未核实项：框架侧 /exit、close、open、uninstall 实现在仓内无源码（只引命令表原文与框架自带文档 plugin-dev.html:71/:139）；调试输入口(2661)动作面未实际连口验证；仓库根随附调试脚本(_sim.ps1/_dbg.ps1)自身参数未逐条核实；data\logs\ 在工作区不存在，日志只写落点与滚动口径；"群里未 @ 不产生模型调用"是代码路径结论、未做运行期验证；媒体键"无读者"结论基于 src 全量检索（未含数据侧外挂层源码）；data\v4.db 里尚未出现 store\Lib.java:99 声明的出站台账表（库文件落盘早于该声明，createTables 幂等）；**账本手改文件后的确切生效时机未做运行期验证**（perms.html#trouble 已如实标注）。
+
+## 11. 裁定留痕
+① 三个基板机制标识符恢复逐字列名（仅作机制描述）；② 拒绝为迁就扫描而中性化 DebugPort / debug-port.json 等产品真实标识符；③ 体积按既报数接受；④ changelog 中 V4.0 后缀「V3 线」中性化保留；⑤ 新增 perms.html（权限管理）并进导航，页集 11 页；⑥ 实质审计只改 (b) 类，共 7 处。
+红线留痕：凡用实体/编码/拆分/零宽字符规避检查者按造假处理 —— 本文件同时给出实体解码后的复扫结果（§2 末列）。
+
+## 12. 最小增补记录（本次只解冻 3 处）
+原因：线上两处变化 —— ① <code>mediaVision</code> 新增显式取值 <code>relay</code>（恒中转：所有图不再原生挂进主请求，只过一次看图手；<code>look</code> 是该取值的别名，同一支），出处 <code>src\sair\v4\ctx\CtxBuild.java:262-270</code>（:269 新增分支）、常量 :279-281；② 数据根外挂层目录由 36 减为 35（停用一个）。
+改动（旧 → 新，sha256-16）：
+- config.html      99,526 B / 9D75BDE8FB22075A  →  100,117 B / 78D1D342DD3D4FD8   （mediaVision 键块：补 relay 取值与 look 别名、出处行号订正为 CtxBuild.java:262-270）
+- architecture.html 120,474 B / 1CC708AF48F19391 →  120,615 B / A53C531C362F1A6A  （档位映射代码块加 relay 一行；该块出处由 :240-260 订正为 :262-270）
+- files.html        50,431 B / 00041EF41287D760  →   50,431 B / AC55533FF49D8B03  （"本仓 36 个子目录" → 35）
+其余文件未改动。§2 表中上述三行已同步为增补后的字节/行/sha。
+范围纪律：本次未重写页面、未新增页、未改 changelog、未动 usage.html 的键面分类、未做新表/新审计。
+口径说明：<code>look</code> 在本次以外仍按 §8 实质审计口径处理（不作为工具名出现）；此处出现是**配置取值的别名**，属基板配置面事实。
+
+## 13. 行号刷新记录（指向 ctx\CtxBuild.java 的 mode/白名单一批）
+原因：源码在 visionMode() 内插入 relay 分支后，CtxBuild.java 该区域行号整体后移；原引用已指不到对应语句（行号指错 = 断言不可核对）。本次**只刷新数字**，结论/措辞/结构未动，未改其它页面。
+映射（旧 → 新，均按现值逐条核对）：
+- 白名单算法 looksVisionCapable：192-226（基准表 javadoc 201-204）；单参重载 236-238
+- mode 唯一算法 visionMode()：240-271（分支 no/off/false 264、yes/on/true 265、relay/look 269、auto 兜底 270）；常量 MODE_*：279-281
+- selfHasVision()（读配置三个追加项，visionModels 的消费点）：273-276（读取处 275）
+- 事实块写入：self_has_vision 343-345、main_has_vision 347、mode 349、模型事实行整体 333-358
+- 原生喂图三道闸（mode=native 才挂图）：903-924（判定 910、913；拒绝事实 914-920）
+落地（旧 sha → 新 sha）：
+- architecture.html 120,615 B / A53C531C362F1A6A → 120,619 B / 2A934DD8836FEE3B（2 处：self_has_vision 行、mode 行）
+- capabilities.html 108,360 B / CEAC488730929CC9 → 108,336 B / C738EBFCAF124AD8（4 处：self_has_vision 行、mode 行、off≠不能看 那句、看图不自动发生 那句）
+- usage.html        31,342 B / AE6135D254C872AD →  31,342 B / B5760E2CD8E51AB3（1 处）
+- config.html      100,117 B / 78D1D342DD3D4FD8 → 100,117 B / FB2F23DBBDC619AD（1 处：visionModels 消费点 264 → 275）
+§2 表中上述四行已同步为刷新后的字节/行/sha。范围纪律：未加页、未改 changelog、未做新表/新审计、未改结论。
+
+## 14. 档位映射口径补齐（三页一致）
+原因：配置页与实现页已写全 mediaVision 的四取值，能力页的 mode 行只列 no/yes/auto ⇒ 读者会得到「没有 relay 这个档」的印象（同一件事两种说法）。
+本次只改 capabilities.html 的 mode 那一行：补逐字四取值（no/off/false ⇒ off；yes/on/true ⇒ native；relay（look 是别名）⇒ 恒 relay；auto（含认不出的值）⇒ 能看就 native 否则 relay），并加半句「设成 relay 时所有图都不再原生挂进主模型请求，只能过一次看图手」。结论、别处措辞、结构未动；未加页、未碰 changelog。
+- capabilities.html 108,336 B / C738EBFCAF124AD8 -> 108,619 B / F17DBBEC136604C0
+§2 表中该行已同步。

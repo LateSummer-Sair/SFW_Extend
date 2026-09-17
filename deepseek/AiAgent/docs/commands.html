@@ -1,198 +1,1162 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>命令参考 — AiAgent 技术文档</title>
-  <link rel="stylesheet" href="css/style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>控制台命令 · AiAgent V4 文档</title>
+<meta name="description" content="AiAgent V4 控制台命令参考：命令名、参数、效果、依赖与注意事项。">
+<link rel="stylesheet" href="css/site.css">
+<noscript><style>.reveal{opacity:1 !important;transform:none !important}#bg-canvas,.scanline{display:none !important}</style></noscript>
 </head>
-<body>
+<body data-page="commands">
 
-  <canvas id="bg-canvas"></canvas>
-  <div class="aurora"><span></span><span></span><span></span></div>
-  <div class="progress-bar"></div>
-  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="切换导航"><span></span><span></span><span></span></button>
+<canvas id="bg-canvas" aria-hidden="true"></canvas>
+<div class="scanline" aria-hidden="true"></div>
 
-  <aside class="sidebar" id="sidebar"></aside>
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="brand-mark">V4</span>
+    <span class="brand-text"><b>AiAgent V4</b><span>SFW PLUGIN DOCS</span></span>
+  </a>
+      <nav class="nav" aria-label="页面导航">
+    <a href="index.html"><span class="n">01</span>总览</a>
+    <a href="usage.html"><span class="n">02</span>使用</a>
+    <a href="deploy.html"><span class="n">03</span>部署</a>
+    <a href="config.html"><span class="n">04</span>配置</a>
+    <a href="commands.html"><span class="n">05</span>命令</a>
+    <a href="capabilities.html"><span class="n">06</span>能力</a>
+    <a href="perms.html"><span class="n">07</span>权限</a>
+    <a href="files.html"><span class="n">08</span>文件</a>
+    <a href="architecture.html"><span class="n">09</span>实现</a>
+    <a href="migration.html"><span class="n">10</span>升级</a>
+    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+  </nav>
+  <div class="topbar-meta">
+    <span class="chip live">纯静态</span>
+    <span class="chip">无外链资源</span>
+  </div>
+  <button class="burger" type="button" aria-label="展开导航" aria-expanded="false">☰</button>
+</header>
+<div class="progress" id="progress" aria-hidden="true"></div>
 
-  <main class="main">
-    <header class="page-hero">
-      <div class="container">
-        <div class="crumb"><a href="index.html">Home</a> / 命令参考</div>
-        <h1>命令<span class="gradient-text">参考</span></h1>
-        <p class="lead">
-          所有命令以 <code>ai/</code> 为前缀，通过 SFW 控制台输入。共 58 个用户命令 + 74 个 FC 工具（另有动态注册的 tp_* 工具）。
-          v4.0 特性：三方技能协议化（airun 声明式入参 default/enum/example、returns 返还说明、context 只读上下文注入、timeout 单次超时、state 实例策略）、<code>.md</code> 加载期编译注册（改文件新替旧、调用期不再动态编译）、<code>thirdskill validate</code> 体检、技能与笔记去重 <code>ai/dedup</code>、83 条硬编码技能整体迁出为单文件 <code>.md</code>。
-          v3.14 特性：DeepSeek V4.1 Flash 迁移（模型名 deepseek-flash）、原生多模态视觉（不再单独调用视觉模型）、取消 Bot 主动引用改为 @ 提问者、移除 Agent 工具调用次数上限、戳一戳系统拦截直接 @ 回「？」、提示词 md 化（systemPrompt.md/execqPrompt.md）、存图多智能体协作、发文件/发语音权限 AFFECTION:300。
-        </p>
+<main class="shell">
+  <div class="doc">
+
+    <section class="hero">
+      <span class="eyebrow">命令使用 · 控制台</span>
+      <h1>控制台<br><span class="grad">命令参考</span></h1>
+      <p class="lede">每条命令的用法、参数、效果与依赖，全部以源码实现为准。</p>
+      <div class="hero-grid">
+        <div class="kpi"><div class="k">命令分支</div><div class="v">17<small>条</small></div></div>
+        <div class="kpi amber"><div class="k">框架命令</div><div class="v">4<small>条</small></div></div>
+        <div class="kpi amber"><div class="k">装配</div><div class="v">19<small>步</small></div></div>
+        <div class="kpi rose"><div class="k">永远可用</div><div class="v">4<small>条</small></div></div>
       </div>
-    </header>
+    </section>
 
-    <div class="container">
+    <div class="doc-body" id="doc-body">
+      <div class="note reveal">
+        <p><span class="n-title">按任务找命令</span>：这一页是<b>命令参考</b>（某条命令是什么、参数怎么给）。如果你想知道「<b>我要做某件事该怎么做、做完会看到什么</b>」，看<a href="usage.html">使用说明</a>；键的逐条含义看<a href="config.html#keys">配置键面</a>。</p>
+      </div>
 
-      <section class="section" id="core-cmds">
-        <div class="section-head reveal">
-          <div class="section-tag">Core</div>
-          <h2>核心命令</h2>
-          <p class="desc">配置、对话、记忆、安全、系统命令。</p>
+      <section class="chapter" id="usage">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">调用约定</span>
+          <h2>一、通用调用约定</h2>
+          <p class="chapter-desc">命令怎么敲、谁在敲、哪些命令在任何状态下都回话、为什么改了配置当场没反应。</p>
+        </header>
+
+        <h3 class="sec">命令的形状：<code>&lt;前缀&gt;/&lt;函数名&gt; &lt;参数&gt;</code></h3>
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">&lt;前缀&gt;/&lt;函数&gt; &lt;参数&gt;</span><span class="k-def">框架约定的命令行形状</span><span class="badge info">通用</span></div>
+            <dl>
+              <dt>前缀</dt>
+              <dd>前缀 = 插件名 = jar 名：<code>AiAgentV4.jar</code> → <code>AiAgentV4/status</code>，jar 改名 <code>ai.jar</code> 就是 <code>ai/status</code>（<code>src\sair\v4\V4Activity.java:21</code>）。本页下文一律写 <code>ai/…</code>。</dd>
+              <dt>函数名</dt>
+              <dd><b>大小写不敏感、两端空白裁掉</b>：分发口进来先 <code>trim().toLowerCase()</code>，参数串同理（<code>src\sair\v4\term\Cmd.java:111</code>、<code>:112</code>）。<code>ai/STATUS</code> ≡ <code>ai/status</code>。</dd>
+              <dt>参数</dt>
+              <dd>整串原样交给命令自己切分，多参命令按空白切 N 段（<code>napcat send</code> 切 3 段 <code>src\sair\v4\term\Cmd.java:1238</code>；<code>prompt inject</code> 切 3 段 <code>:1191</code>）。带空格的值放最后一段。</dd>
+              <dt>回显</dt>
+              <dd>默认落控制台主输出框；对话<b>正文</b>另有一路落点（有面板进面板，没有则回落主输出框），取法在 <code>src\sair\v4\term\Cmd.java:542</code>。</dd>
+              <dt>不抛异常</dt>
+              <dd>整条分发被 <code>catch (Throwable)</code> 兜住：任何命令炸掉只收敛成一行可读失败 + "可用 help/status/tools/config 继续操作"，<b>可以继续敲下一条</b>（<code>src\sair\v4\term\Cmd.java:220</code>–<code>:226</code>）。未知命令也只回 <code>未知命令：X（输入 ai/help 看命令表）</code>（<code>:218</code>）。</dd>
+            </dl>
+          </div>
         </div>
-        <div class="table-wrap reveal">
+
+        <h3 class="sec">谁在敲：控制台调用者恒为主人</h3>
+        <p>调用者由 <code>caller()</code> 现造：取 <code>conf.masterQQ()</code> 交给 <code>Caller.console(long)</code>，配置还没加载时主号按 <code>0</code>（<code>src\sair\v4\term\Cmd.java:461</code>–<code>:468</code>）。<code>Caller</code> 类注释第一段就是这条口径：<b>本地控制台交互 ≡ QQ 中的主人交互</b>，<code>console()</code> 造出来的就是主人（<code>src\sair\v4\auth\Caller.java:13</code>、<code>:70</code>）。命令表里的同一句话是"主人 = MASTER，工具一律全放行"（<code>src\sair\v4\term\Cmd.java:1358</code>）。<b>两个后果</b>：<code>ai/tools</code> 不带参数按这个调用者筛（<code>:453</code>）；<code>ai/chat</code> 就是主人说话那条链路（<code>:22</code> 类注释、<code>:545</code>）。</p>
+
+        <h3 class="sec">永远可用的四条：<code>help</code> / <code>status</code> / <code>tools</code> / <code>config</code></h3>
+        <p>硬要求写在类注释里：<b>不依赖模型 / 数据库 / NapCat</b> 的命令永远可用（<code>src\sair\v4\term\Cmd.java:28</code>–<code>:29</code>）。装配没跑到、跑到一半、整块失败，这四条照常回话。</p>
+        <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>命令</th><th>参数</th><th>分类</th><th>说明</th></tr></thead>
+            <thead><tr><th>命令</th><th>没装配起来时怎么回话</th><th>出处</th></tr></thead>
             <tbody>
-              <tr><td class="cmd-name">ai/setkey</td><td>[API Key]</td><td><span class="badge b-purple">配置</span></td><td>设置 DeepSeek API 密钥，AES-GCM 加密存储（兼容旧 ECB），持久化到 config.properties</td></tr>
-              <tr><td class="cmd-name">ai/seturl</td><td>[URL]</td><td><span class="badge b-purple">配置</span></td><td>设置 API 地址，默认 https://api.deepseek.com</td></tr>
-              <tr><td class="cmd-name">ai/setmodel</td><td>[模型名]</td><td><span class="badge b-purple">配置</span></td><td>设置模型，默认 auto。<b>auto</b>=启用自动路由（各通道取默认 deepseek-flash）；<b>填写具体模型名</b>=严格按该名称调用，所有通道一律照用、不做替换</td></tr>
-              <tr><td class="cmd-name">ai/setthirdpartycode</td><td>on|off</td><td><span class="badge b-purple">配置</span></td><td>三方技能代码段权限：on=放权（含 QQ）；off=仅 execs/本地</td></tr>
-              <tr><td class="cmd-name">ai/setprompt</td><td>[提示词]</td><td><span class="badge b-purple">配置</span></td><td>设置系统提示词的「角色设定」段（写入 <code>data/prompts/systemPrompt.md</code> 持久化，基础规则原样保留），AI 也可通过 editprompt 工具修改</td></tr>
-              <tr><td class="cmd-name">ai/showprompt</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看当前系统提示词全文（= prompts/systemPrompt.md 去标记行后的内容；文件缺失则为空）</td></tr>
-              <tr><td class="cmd-name">ai/config</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看配置摘要（含思考模式/温度/top_p）+ 对话统计 + 记忆条数 + 数据目录</td></tr>
-              <tr><td class="cmd-name">ai/status</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>查看运行时状态：OneBot、Redis、FileServer、线程池、最近 Harness/工具轨迹、技能与记忆计数</td></tr>
-              <tr><td class="cmd-name">ai/ctx</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>上下文诊断：提示词各段字符数与估算 token、累计的「结果截断 / 图片丢弃 / 上下文溢出」计数</td></tr>
-              <tr><td class="cmd-name">ai/dedup</td><td>[skills|notes|all] [apply] [阈值]</td><td><span class="badge b-purple">配置</span><span class="badge b-cyan">维护</span></td><td>去重（技能库 + 知识库笔记）：扫描「同一件事/同一个问题的不同说法」（倒排索引+稀有词分桶，4600 条约 200ms），默认阈值 0.85；不带 apply 只预演。<code>ai/dedup apply</code>=技能、<code>ai/dedup notes apply</code>=笔记、<code>ai/dedup all apply</code>=两者；<code>ai/dedup 0.7</code> 调激进度。合并=技能标记 <code>merged</code> / 笔记标记 <code>merged_into</code> 并指向代表条目，<b>内容都不删除</b></td></tr>
-              <tr><td class="cmd-name">ai/setconfig</td><td>[key] [value]</td><td><span class="badge b-purple">配置</span></td><td>统一配置开关：思考模式/温度/top_p/最大输出/惩罚项/strict/botname 等，持久化 config.properties</td></tr>
-              <tr><td class="cmd-name">ai/execs</td><td>[任务]</td><td><span class="badge b-cyan">对话</span></td><td>唯一 Agent 入口（合并 chat/exec/execs/execfc），原生 Function Calling 免确认全能模式</td></tr>
-              <tr><td class="cmd-name">ai/chat / exec / execfc</td><td>[消息]</td><td><span class="badge b-cyan">对话</span></td><td>execs 的别名，统一走 Function Calling 链路</td></tr>
-              <tr><td class="cmd-name">ai/orchestrate</td><td>[pipeline|fanout|expert] [任务]</td><td><span class="badge b-cyan">对话</span></td><td>多智能体编排：流水线 / 扇出扇入 / 专家池三种模式，任务分解为子步骤并聚合结果</td></tr>
-              <tr><td class="cmd-name">ai/harnesseval</td><td>—</td><td><span class="badge b-cyan">对话</span></td><td>输出最近 Harness 执行轨迹评测报告（成功率 / 平均工具调用 / 耗时）</td></tr>
-              <tr><td class="cmd-name">ai/criticon</td><td>—</td><td><span class="badge b-cyan">对话</span></td><td>开启 Harness 验证闭环审查（每次最终回复增加一次独立审查，opt-in）</td></tr>
-              <tr><td class="cmd-name">ai/criticoff</td><td>—</td><td><span class="badge b-cyan">对话</span></td><td>关闭 Harness 验证闭环审查（默认）</td></tr>
-              <tr><td class="cmd-name">ai/reset</td><td>—</td><td><span class="badge b-cyan">对话</span></td><td>清空对话上下文 + Agent 记忆链</td></tr>
-              <tr><td class="cmd-name">ai/stop</td><td>—</td><td><span class="badge b-cyan">对话</span></td><td>立即中断当前流式输出</td></tr>
-              <tr><td class="cmd-name">ai/mood</td><td>—</td><td><span class="badge b-magenta">情绪</span></td><td>查询 AI 当前心情 + 开心值 + 连续失败/夸赞次数</td></tr>
-              <tr><td class="cmd-name">ai/memories</td><td>—</td><td><span class="badge b-green">记忆</span></td><td>列出所有持久化记忆</td></tr>
-              <tr><td class="cmd-name">ai/forget</td><td>[ID]</td><td><span class="badge b-green">记忆</span></td><td>按 ID 删除指定记忆</td></tr>
-              <tr><td class="cmd-name">ai/forgetall</td><td>—</td><td><span class="badge b-green">记忆</span></td><td>清空所有持久化记忆</td></tr>
-              <tr><td class="cmd-name">ai/exportdata</td><td>[lib] [path]</td><td><span class="badge b-green">备份</span></td><td>导出库为 JSON（lib=memory/note/impression/sticker，path 缺省存数据目录）</td></tr>
-              <tr><td class="cmd-name">ai/importdata</td><td>[lib] [path]</td><td><span class="badge b-green">备份</span></td><td>从 JSON 导入库（清空覆盖原库）</td></tr>
-              <tr><td class="cmd-name">ai/autoclearon</td><td>—</td><td><span class="badge b-green">系统</span></td><td>启用自动清屏，每 3 分钟 /clear 防日志 OOM</td></tr>
-              <tr><td class="cmd-name">ai/autoclearoff</td><td>—</td><td><span class="badge b-green">系统</span></td><td>停止自动清屏</td></tr>
-              <tr><td class="cmd-name">ai/qqlogon / qqlogoff</td><td>—</td><td><span class="badge b-green">系统</span></td><td>开启 / 关闭 QQ 消息控制台输出</td></tr>
+              <tr>
+                <td><code>ai/help</code></td>
+                <td>契约是"<b>永不抛异常、永远返回非空数组</b>"：连构造都失败也有一张静态兜底表（降级命令表三行）。</td>
+                <td><code>src\sair\v4\term\Cmd.java:1350</code>–<code>:1353</code>、兜底表 <code>:1402</code>、打印口 <code>:1410</code></td>
+              </tr>
+              <tr>
+                <td><code>ai/status</code></td>
+                <td>回"status 不可用：基板没装配起来（+ 缺什么）"，并提示 <code>ai/start</code> 能让它加载并运行。</td>
+                <td><code>src\sair\v4\term\Cmd.java:354</code>–<code>:357</code></td>
+              </tr>
+              <tr>
+                <td><code>ai/tools</code></td>
+                <td>注册表还没建就报"工具面还没装配：&lt;原因&gt;"，并说明基板工具在装配的「工具面」那一步注册、其余工具在外挂扫描之后陆续出现。</td>
+                <td><code>src\sair\v4\term\Cmd.java:441</code>–<code>:451</code></td>
+              </tr>
+              <tr>
+                <td><code>ai/config</code></td>
+                <td>装配没走到第①步时用<b>壳配置</b>直接按数据根读 <code>config.json</code>：总览 / 单键 / <code>set</code> 全部照常应答，回执额外说明"基板未启动：这份配置一个键都还没加载"。</td>
+                <td>壳配置 <code>src\sair\v4\term\Cmd.java:732</code>–<code>:752</code>、取用 <code>:769</code>–<code>:771</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note reveal">
+          <p><span class="n-title">"没启动"是正常状态，不是故障</span>：<code>ai/start</code> 之前基板就是不工作的 —— 没有库、没有工具面、没有 NapCat 连接。这时 <code>ai/status</code> 第一句是 <code>未启动（ready=0 reason=not_started）：基板还没跑起来。</code>，随后给配置文件路径与待生效键清单（<code>src\sair\v4\term\Cmd.java:360</code>–<code>:382</code>）。</p>
+        </div>
+
+        <h3 class="sec">改配置为什么不立刻生效</h3>
+        <p>只有一条口径：<b>改文件 ≠ 生效</b>。让文件里的值进到跑着的基板里，只有 <code>ai/start</code>（没在跑）或 <code>ai/restart</code>（已经在跑）两条路（<code>src\sair\v4\term\Cmd.java:1369</code>–<code>:1370</code>）。</p>
+        <ol class="plain">
+          <li><code>ai/config set</code> 只写文件：调 <code>conf.fileSet(键, 值)</code>（<code>src\sair\v4\term\Cmd.java:819</code>）。写文件的纪律（最小改动、凭据键现加密、首次先落默认值）在 <code>src\sair\v4\Conf.java:519</code>–<code>:530</code>、实现 <code>:531</code>。</li>
+          <li><b>有没有人读它</b>由已知键表说了算：<code>Conf.knownKeys()</code>（<code>src\sair\v4\Conf.java:1173</code>），表里每个键都有活着的消费者（<code>:1164</code>–<code>:1168</code>）。不在表里的键写进去<b>不会有任何行为变化</b>，回执会点明（<code>src\sair\v4\term\Cmd.java:823</code>–<code>:826</code>）。</li>
+          <li><b>待生效</b>是唯一能看见"我改了但没生效"的地方：<code>Conf.pendingKeys()</code> 逐键比对文件值与已生效值（<code>src\sair\v4\Conf.java:583</code>、<code>:586</code>、判据 <code>isPending()</code> <code>:566</code>）。<code>ai/status</code> 与 <code>ai/config</code> 总览都会标它。</li>
+          <li>老那张"改了要重启"的键表已整条退休，不再有两把尺子（<code>src\sair\v4\Conf.java:41</code>–<code>:45</code>）；<b>刻意保留的例外</b>只有一个：<code>Conf.set()</code> 仍是运行期内部代码"改生效值"的口（<code>:47</code>–<code>:48</code>）。</li>
+        </ol>
+        <div class="note warn reveal">
+          <p><span class="n-title">因此</span>：<code>ai/config set …</code>、<code>ai/napcat on|off</code>、<code>ai/napcat relay on|off</code> 的回执都带同一句 —— "未生效 —— 要 <code>ai/start</code>；已在运行则 <code>ai/restart</code>"（共用回执 <code>src\sair\v4\term\Cmd.java:899</code>–<code>:903</code>）。</p>
+        </div>
+
+        <h3 class="sec">已删除的"通道"类命令</h3>
+        <p>敲 <code>execs</code> / <code>execq</code> / <code>execfc</code> / <code>orchestrate</code> 不回"未知命令"，而是告诉你这四个名字属于<b>已删除的「通道」概念</b>：V4 只有一条入口，直接用 <code>ai/chat &lt;内容&gt;</code>；<b>后面还带了内容就顺手当 chat 发出去</b>（<code>src\sair\v4\term\Cmd.java:211</code>–<code>:217</code>）。</p>
+      </section>
+
+      <section class="chapter" id="table">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">总表</span>
+          <h2>二、命令总表（穷举）</h2>
+          <p class="chapter-desc">下表就是分发口里的<b>全部分支</b>，加上命令表列出的四条框架命令。没有别的控制台命令。</p>
+        </header>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>命令</th><th>作用</th><th>依赖与关键回显</th></tr></thead>
+            <tbody>
+              <tr><td><code>ai/help</code><br><span class="dim">无函数名同义</span></td><td>打印命令表</td><td>无依赖；前后各打一行分隔<br><code>Cmd.java:114</code>、<code>:1419</code></td></tr>
+              <tr><td><code>ai/chat &lt;内容&gt;</code><br><span class="dim">别名 <code>say</code></span></td><td>和 AI 说话（主人那条链路）</td><td>模型 + apiKey + 上下文 + 六库 + 调度器；空参只回用法<br><code>Cmd.java:118</code>–<code>:125</code></td></tr>
+              <tr><td><code>ai/stop</code></td><td>中断当前输出</td><td>Agent；回"停了 N 个在跑的回合"<br><code>Cmd.java:126</code>–<code>:136</code></td></tr>
+              <tr><td><code>ai/reset</code></td><td>重置控制台会话上下文</td><td>六库；回"清掉 N 条历史"<br><code>Cmd.java:137</code>–<code>:145</code></td></tr>
+              <tr><td><code>ai/status</code></td><td>运行状态</td><td>无（轻量面）；未启动 <code>ready=0 reason=not_started</code><br><code>Cmd.java:146</code>、<code>:353</code></td></tr>
+              <tr><td><code>ai/start</code></td><td><b>唯一的"加载并运行"</b></td><td>组件入口；读 <code>config.json</code> + 19 步装配，已在跑只回话<br><code>Cmd.java:150</code>、<code>:238</code></td></tr>
+              <tr><td><code>ai/restart</code></td><td>停旧 → 重读 → 重装</td><td>组件入口；不并发，重复的会被拒<br><code>Cmd.java:154</code>、<code>:289</code></td></tr>
+              <tr><td><code>ai/tools [all]</code></td><td>当前可见工具</td><td>工具注册表；<code>all</code> = 不按调用者筛<br><code>Cmd.java:158</code>、<code>:453</code></td></tr>
+              <tr><td><code>ai/perm […]</code></td><td>好感度</td><td>好感度存储；不带参看身份与可见工具<br><code>Cmd.java:162</code>、<code>:643</code></td></tr>
+              <tr><td><code>ai/acl</code></td><td>权限账本（<b>只读</b>）</td><td>权限面 + <code>perms.json</code>；四段输出<br><code>Cmd.java:166</code>、<code>:701</code></td></tr>
+              <tr><td><code>ai/config [键 [值]]</code></td><td>看 / 改配置（都针对文件）</td><td>无（壳配置兜底）；<code>set</code> 只写文件并回"未生效"<br><code>Cmd.java:170</code>、<code>:768</code></td></tr>
+              <tr><td><code>ai/debug [on [token]|off|status|simulate on|off]</code></td><td>本机调试面的唯一开关</td><td>无（<b>独立于基板</b>）；不带子命令 = <code>status</code><br><code>Cmd.java:174</code>、<code>:940</code>、<code>:942</code></td></tr>
+              <tr><td><code>ai/skill [list|reload|validate|read 名]</code></td><td>外挂层清单与重载</td><td>外挂库装配面；不带子命令 = <code>list</code><br><code>Cmd.java:178</code>、<code>:1120</code>、<code>:1127</code></td></tr>
+              <tr><td><code>ai/prompt [show|list|sections|read 名|stat|reload|inject|clear]</code></td><td>提示词</td><td>提示词面；不带子命令 = <code>show</code><br><code>Cmd.java:182</code>、<code>:1163</code>、<code>:1169</code></td></tr>
+              <tr><td><code>ai/napcat [status|on|off|list|send …|relay …]</code></td><td>NapCat 连接与动作</td><td>连接面 + 配置；<code>on|off</code> 只改文件<br><code>Cmd.java:186</code>、<code>:1213</code></td></tr>
+              <tr><td><code>ai/store [stat|maintain|optimize|vacuum|export|import]</code></td><td>六库管理</td><td>六库；不带子命令 = <code>stat</code><br><code>Cmd.java:190</code>、<code>:1306</code>、<code>:1313</code></td></tr>
+              <tr><td><code>ai/tick</code></td><td>手动跑一次心跳</td><td>心跳；回"手动心跳完成（第 N 次）"<br><code>Cmd.java:194</code>–<code>:202</code></td></tr>
+              <tr><td><code>ai/alarm</code></td><td>定时唤醒清单</td><td>心跳；打印清单 JSON<br><code>Cmd.java:203</code>–<code>:210</code></td></tr>
+              <tr><td><code>ai/exit</code></td><td>停基板（框架转发到组件 <code>exit()</code>）</td><td>框架；<b>不结束进程</b>，见<a href="#cautions">第十三节</a><br><code>Cmd.java:1366</code></td></tr>
+              <tr><td><code>ai/close</code> / <code>ai/open</code></td><td>停止 / 恢复"接受命令"</td><td>框架；close 后只有 exit/close/open/uninstall 进得来<br><code>Cmd.java:1367</code></td></tr>
+              <tr><td><code>ai/uninstall</code></td><td>框架级卸载</td><td>框架；卸载前自动 <code>exit()</code> + <code>close()</code><br><code>Cmd.java:1368</code></td></tr>
+              <tr><td><code>ai/execs</code> · <code>execq</code> · <code>execfc</code> · <code>orchestrate</code></td><td>已删除的「通道」概念</td><td>无；回一句"直接用 chat"，带内容会顺手发出去<br><code>Cmd.java:211</code>–<code>:217</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sec">外挂层管理命令的子动作</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>用法</th><th>效果 / 回显</th><th>出处</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>ai/skill</code>（不带子命令 = <code>list</code>）</td>
+                <td>回一行合计 <code>外挂 N 个（工具 N，钩子 N）</code>，随后逐行列出每一条的名称、状态、它提供的工具名与挂的钩子名。默认子命令的判据在分发处。</td>
+                <td><code>src\sair\v4\term\Cmd.java:1154</code>–<code>:1160</code>、默认值 <code>:1127</code></td>
+              </tr>
+              <tr>
+                <td><code>ai/skill reload</code></td>
+                <td><b>显式重扫</b>（没有目录监听，改完外挂要用它）；扫描正在编译时会被拒并回"外挂正在编译中，本次 reload 未执行 —— 编完再试"，不会排到扫描锁后面把控制台卡住。成功后回 <code>已重扫：外挂 N 个，提供工具 N 个</code>。</td>
+                <td><code>src\sair\v4\term\Cmd.java:1128</code>–<code>:1137</code>、编译中判据 <code>:1130</code></td>
+              </tr>
+              <tr>
+                <td><code>ai/skill validate</code></td>
+                <td>校验外挂库：无问题回 <code>外挂库无问题（共 N 个）</code>，有问题逐条 warn 打出。</td>
+                <td><code>src\sair\v4\term\Cmd.java:1138</code>–<code>:1143</code></td>
+              </tr>
+              <tr>
+                <td><code>ai/skill read &lt;名&gt;</code></td>
+                <td>打印这一条的 JSON 与它的文档正文；名字不存在时回 <code>没有外挂 &lt;名&gt;</code>。</td>
+                <td><code>src\sair\v4\term\Cmd.java:1144</code>–<code>:1153</code></td>
+              </tr>
+              <tr>
+                <td>依赖</td>
+                <td>外挂库的装配面：不可用时回 <code>外挂层不可用：库未装配（&lt;缺什么&gt;）</code>，并补一句"外挂层不可用时基板其余能力照常"。</td>
+                <td><code>src\sair\v4\term\Cmd.java:1121</code>–<code>:1125</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">外挂层本身不在本文档范围内：本页只写它作为一条控制台命令的那一面。</p>
+
+        <div class="note reveal">
+          <p><span class="n-title">上表怎么数出来的</span>：<code>src\sair\v4\term\Cmd.java</code> 共 1,442 行 / 74,925 字节（<code>Get-ChildItem</code> 实测），分发口从 <code>:110</code> 的 <code>route()</code> 起逐条 <code>if ("名字".equals(f))</code>，最后一条分支是 <code>:211</code> 的四个已删除名字，<code>:218</code> 是未知命令兜底。命令表（<code>:1353</code>）另列的四条框架命令<b>不在分发口里</b>。</p>
+        </div>
+      </section>
+
+      <section class="chapter" id="lifecycle">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">生命周期</span>
+          <h2>三、生命周期：<code>start</code> / <code>restart</code> 与框架四条</h2>
+          <p class="chapter-desc">这两条是"基板开始工作"与"按新配置重装"的唯一入口。动作不在命令里 —— 命令只说，动作与状态机在组件里跑。</p>
+        </header>
+
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/start</span><span class="k-def">用法：<code>ai/start</code>，不接受参数</span><span class="badge ok">唯一的加载并运行</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>无。后面跟任何文字都被忽略（分发口只按函数名匹配，参数串不参与，<code>src\sair\v4\term\Cmd.java:150</code>–<code>:153</code>）。</dd>
+              <dt>效果</dt>
+              <dd>未加载 → 读 <code>config.json</code> 并跑完整 <b>19 步装配</b>；已在运行 → <b>只回一句"已在运行"，一个动作都不做</b>；已经有一条装配/重启在跑 → 明确拒绝（不并发）。装配跑在基板自己的守护线程上，进度一行行打在控制台，<b>命令立刻返回</b>（<code>src\sair\v4\term\Cmd.java:238</code>–<code>:283</code>）。</dd>
+              <dt>四种回话</dt>
+              <dd>对应生命周期面的四个结果值（<code>src\sair\v4\term\Cmd.java:48</code>–<code>:60</code>）：<span class="badge ok">ACCEPTED</span> 启动已受理 · <span class="badge info">RUNNING</span> 已在运行（幂等，不做任何动作）· <span class="badge warn">BUSY</span> 装配中（本次拒绝）· <span class="badge bad">UNAVAILABLE</span> 组件已卸载（要重装/重载插件，或重启 SFW）。</dd>
+              <dt>依赖</dt>
+              <dd><b>组件入口</b>（生命周期宿主）。宿主为 <code>null</code> 时退化成"同步装配一次"，回话里说明本环境没有生命周期宿主（<code>src\sair\v4\term\Cmd.java:240</code>–<code>:262</code>）。宿主实现者是插件组件类 <code>src\sair\v4\V4Activity.java:49</code>，它把 <code>start()</code> 写成幂等三态（<code>:329</code>–<code>:334</code>）。</dd>
+              <dt>注意</dt>
+              <dd>已在运行时<b>绝不重启</b>，但回话必须说清怎么才能生效：<code>ai/restart</code>（<code>src\sair\v4\term\Cmd.java:269</code>–<code>:271</code>）；文件里有待生效键时结尾再补一行 <code>＊ pending=…</code> 点名（<code>:424</code>–<code>:433</code>）。</dd>
+              <dt>注意</dt>
+              <dd class="risk">命令表本身（<code>help</code>/<code>status</code>/<code>tools</code>/<code>config</code>）<b>不在这里、也不在装配路径上</b>：没人敲 <code>start</code> 之前基板就是不工作的（<code>src\sair\v4\V4Activity.java:325</code>–<code>:326</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/restart</span><span class="k-def">用法：<code>ai/restart</code>，不接受参数</span><span class="badge warn">会停一次旧基板</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>停旧基板（收库 / 收监听 / 收线程池）→ <b>重读 <code>config.json</code></b> → 重新跑 19 步装配，进度照旧打在控制台（<code>src\sair\v4\term\Cmd.java:285</code>–<code>:287</code>；装配线程里的三步动作 <code>src\sair\v4\V4Activity.java:248</code>–<code>:255</code>）。</dd>
+              <dt>回话</dt>
+              <dd><span class="badge ok">ACCEPTED</span> 重启已受理 · <span class="badge warn">BUSY</span> 装配中（拒绝）· <span class="badge bad">UNAVAILABLE</span> 组件已卸载（<code>src\sair\v4\term\Cmd.java:296</code>–<code>:310</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>组件入口。<b>没有宿主时 <code>restart</code> 直接拒绝</b>并说明本环境没有生命周期宿主（<code>src\sair\v4\term\Cmd.java:291</code>–<code>:295</code>）—— 这一点与 <code>start</code> 不同。</dd>
+              <dt>不并发</dt>
+              <dd>调用线程只做两件便宜事：新建空壳基板 + 换掉命令表 + 起装配线程；"同时只允许一条装配/重启"由组件里一个原子名额守着（<code>src\sair\v4\V4Activity.java:64</code>、判据 <code>:346</code>、占用 <code>:352</code>）。</dd>
+              <dt>注意</dt>
+              <dd><b>重启只收基板，不收观测面</b>：两个调试口与落盘不归它管（<code>src\sair\v4\term\Cmd.java:1011</code>–<code>:1012</code>）。重启换的是新基板，观测面每次现取活基板，所以之后仍报同一对端口与新的活基板（<code>src\sair\v4\V4Activity.java:370</code>、<code>:426</code>）。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <h3 class="sec">装配：19 步，跑在守护线程上</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>事实</th><th>值 / 行为</th><th>出处</th></tr></thead>
+            <tbody>
+              <tr><td>总步数</td><td>常量 <code>19</code>，各处台账与进度行都用它</td><td><code>src\sair\v4\Boot.java:55</code></td></tr>
+              <tr><td>步骤清单</td><td>19 行 <code>step("名字", …)</code>：数据目录与配置 → 空数据骨架 → 六库 → 权限 → 提示词 → 工具注册表 → 模型客户端 → NapCat 连接 → 上下文装配 → 外挂库 → 回合调度器 → Agent → 心跳 → QQ 网关 → 基板工具面 → 外挂扫描 → NapCat 监听 → 文件外链中转 → 心跳启动</td><td><code>src\sair\v4\Boot.java:390</code> 起，到 <code>:783</code> 止</td></tr>
+              <tr><td>进度行</td><td><code>第 x/19 步 &lt;步骤名&gt;，已耗时 …ms</code>；装配线程已起但没到第一步时给"第 0/19 步（装配线程已起，正在准备）"</td><td><code>src\sair\v4\Boot.java:1147</code>、<code>:1154</code>–<code>:1156</code></td></tr>
+              <tr><td>在谁的线程上</td><td>守护线程 <code>v4-boot</code>；调用线程（可能是界面线程）只做"搭壳 + 起线程"</td><td><code>src\sair\v4\V4Activity.java:240</code>、<code>:216</code>–<code>:218</code></td></tr>
+              <tr><td>某一步失败</td><td>只让那项能力缺失，记下<b>第一个失败的步骤名与原因</b>，装配继续；<code>ai/status</code> 打印失败台账</td><td><code>src\sair\v4\Boot.java:816</code>–<code>:818</code>、<code>:1900</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note ok reveal">
+          <p><span class="n-title">受理与进度不打架</span>：投递被受理之后、装配线程真正跑起来之前有一个毫秒级窗口，那个窗口里 <code>ai/status</code> 已经必须说"加载中：第 0/19 步" —— 不许出现"命令说受理了、状态说没开始"，所以"有人要它跑"的标记在起线程<b>之前</b>就置位（<code>src\sair\v4\V4Activity.java:235</code>–<code>:238</code>）。</p>
+        </div>
+
+        <h3 class="sec">框架四条：<code>exit</code> / <code>close</code> / <code>open</code> / <code>uninstall</code></h3>
+        <p>这四条<b>不在分发口里</b>（<code>src\sair\v4\term\Cmd.java:110</code> 起没有任何分支匹配它们），是框架自己的控制台命令；命令表只负责列出它们并说明语义（<code>:1366</code>–<code>:1368</code>）。</p>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>命令</th><th>命令表里的原话</th><th>组件侧落到哪里</th></tr></thead>
+            <tbody>
+              <tr><td><code>ai/exit</code></td><td>框架转发到组件 <code>exit()</code>：停基板（不改配置、不卸载插件；之后可再 start）</td><td>清掉基板与命令表引用、标记卸载、<b>观测面随壳卸载</b>（停两个口 + 关落盘句柄 + 注销控制台捕获）；基板还在装配时只做标记，交装配线程收口（<code>src\sair\v4\V4Activity.java:394</code>–<code>:414</code>）</td></tr>
+              <tr><td><code>ai/close</code> / <code>ai/open</code></td><td>框架语义：停止 / 恢复「接受命令」（close 后只有 <code>exit</code>/<code>close</code>/<code>open</code>/<code>uninstall</code> 进得来）</td><td>框架侧行为，组件不参与：close 期间基板照旧在跑，只是命令进不来</td></tr>
+              <tr><td><code>ai/uninstall</code></td><td>框架级卸载：卸载前自动 <code>exit()</code> + <code>close()</code>（卸载后要重装才可用）</td><td>先走上面的 <code>exit()</code> 路径收基板与观测面，再由框架卸载插件</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note bad reveal">
+          <p><span class="n-title"><code>ai/exit</code> 不是"退出程序"</span>：它<b>只停基板</b>。基板停下后调试口关闭，而 JVM 进程仍然活着 —— 在没有控制台的场景下<b>无法"再 start"</b>。这是当前实现的行为，源码里没有计划修改的痕迹。正确关停方式与完整理由见<a href="#cautions">第十三节</a>。</p>
+        </div>
+        <div class="note reveal">
+          <p><span class="n-title">卸载之后还能敲命令吗</span>：能。卸载后命令表还在（降级命令表：<code>help</code> 仍非空、其余给"未装配"的可读回话），并且<b>不会因为有人再问一句就自动装配</b>；<code>start</code>/<code>restart</code> 是"显式要它跑"，会重新装配 —— 但这只对<b>还够得着控制台</b>的场景成立（<code>src\sair\v4\V4Activity.java:180</code>–<code>:192</code>、<code>:368</code>）。</p>
+        </div>
+      </section>
+
+      <section class="chapter" id="chat-cmds">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">对话</span>
+          <h2>四、对话命令：<code>chat</code> / <code>stop</code> / <code>reset</code></h2>
+          <p class="chapter-desc">控制台里的 <code>chat</code> 就是主人说话 —— 与 QQ 侧的主人消息走同一条链路。这一节写清它的前置判断、等待行为与三条命令的回显。</p>
+        </header>
+
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/chat &lt;内容&gt;</span><span class="k-def">别名：<code>ai/say &lt;内容&gt;</code></span><span class="badge ok">主人说话那条链路</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd><code>&lt;内容&gt;</code> 必填，整串原样当这一轮的用户输入（含空格）。空参数只回 <code>用法：chat &lt;要说的话&gt;</code>，不做别的动作（<code>src\sair\v4\term\Cmd.java:119</code>–<code>:122</code>）。</dd>
+              <dt>效果</dt>
+              <dd>组上下文 → 提交一个回合给回合线程池 → Agent 跑。正文（含流式）走对话落点，<b>主人这句话也写进对话面板</b>（否则面板里只有 AI 一侧，读起来像独角戏：<code>src\sair\v4\term\Cmd.java:543</code>–<code>:545</code>）；随后用户这句与她的回话都落库（<code>:549</code>、<code>:572</code>–<code>:573</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>模型 + <code>apiKey</code> + 上下文装配 + 六库 + 回合调度器 + Agent。<b>五道前置判断，任一道不通过都只回一句明确的话、不抛异常</b>：① 装配中（且没失败过）→ 回外挂文案的「初始化中文案」；② 装配未齐备（Agent/上下文/六库/调度器任一为 null）→ 说清缺什么并让你先看 <code>status</code>；③ 回合队列已关闭（基板已 stop）→ 提示重启组件；④ 模型客户端未装配或 <code>apiKey</code> 未配置 → 给出确切命令 <code>ai/config set apiKey &lt;你的 key&gt;</code> 并顺带报当前 api 地址与解析后的模型名；⑤ 队列已满 → <b>不提交</b>并告警（<code>src\sair\v4\term\Cmd.java:490</code>–<code>:537</code>）。</dd>
+              <dt>等待上限</dt>
+              <dd>键 <code>chatTimeoutMs</code>，出厂默认 <code>180000</code> ms（<code>src\sair\v4\Conf.java:111</code>，读口 <code>:738</code>）。超时只回"本轮仍在后台跑，控制台不受影响"，并提示可用 <code>ai/stop</code> 中断或看队列长度（<code>src\sair\v4\term\Cmd.java:597</code>–<code>:600</code>）。<b>队列堵死也不会把控制台永久卡住。</b></dd>
+              <dt>注意</dt>
+              <dd><b>在控制台手敲时命令当场就还给你</b>：控制台命令跑在界面线程上，输入框、面板重绘、控制台输出也在那条线程上 —— 在这里等一轮就是界面整块卡住。所以判据是"<b>调用线程是谁</b>"：界面线程上只提交、不等（正文由落点流式打出去，摘要行由回合线程补）；脚本 / 其它后台线程照旧阻塞等待，顺序语义不变（<code>src\sair\v4\term\Cmd.java:555</code>–<code>:561</code>、<code>:592</code>、<code>:596</code>）。</dd>
+              <dt>注意</dt>
+              <dd>回合结束那行摘要 <code>[本轮 N 轮 · Nms]</code> <b>默认不打</b>：要看得把 <code>logConsole</code> 加上 <code>turn</code>（出厂默认 <code>tool,model</code>，<code>src\sair\v4\Conf.java:324</code>；判据 <code>src\sair\v4\term\Cmd.java:562</code>、<code>:612</code>）。装配中的那句提示是<b>外挂文案</b>（<code>prompts/tools-index.md</code> 的「初始化中文案」），缺键时只报缺哪个键、<b>不自己编一句</b>（<code>:497</code>–<code>:508</code>、<code>:631</code>–<code>:641</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/stop</span><span class="k-def">用法：<code>ai/stop</code>，不接受参数</span><span class="badge warn">中断输出</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>请求中断当前输出，回 <code>已请求中断当前输出（停了 N 个在跑的回合）</code>（<code>src\sair\v4\term\Cmd.java:126</code>–<code>:136</code>）。</dd>
+              <dt>语义差别</dt>
+              <dd><b>控制台 = 主人，所以停全部</b>；QQ 侧同一个命令只停自己那个会话的回合（<code>src\sair\v4\term\Cmd.java:131</code>–<code>:133</code>，调用 <code>stop(null, true)</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>Agent。没装配时回 <code>stop 不可用：Agent 未装配（&lt;缺什么&gt;）</code>，不抛异常。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/reset</span><span class="k-def">用法：<code>ai/reset</code>，不接受参数</span><span class="badge info">只清控制台会话</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>清掉控制台会话（<code>console</code>）的对话历史，回 <code>已重置控制台会话上下文（清掉 N 条历史）</code>（<code>src\sair\v4\term\Cmd.java:137</code>–<code>:145</code>）。</dd>
+              <dt>范围</dt>
+              <dd>只动这一个会话的历史行，实现口 <code>src\sair\v4\store\Store.java:554</code>；不碰记忆库、不碰群聊历史、不碰别的会话。</dd>
+              <dt>依赖</dt>
+              <dd>六库。没装配时回 <code>reset 不可用：六库未装配（&lt;缺什么&gt;）</code>。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <h3 class="sec"><code>chat</code> 这一轮看得见什么：最近 N 条聊天记录</h3>
+        <p>上下文里那块"<b>本会话最近 N 条聊天记录</b>"是<b>回合真正开跑那一刻现查</b>的，不是提交时拍的快照 —— 排队期间新到的消息也能进窗口；窗口只有一个旋钮 <code>chatWindowSize</code>（类注释 <code>src\sair\v4\ctx\ChatWindow.java:24</code>–<code>:32</code>；取值口 <code>:144</code>，下限 1 条 <code>:110</code>，硬上限 200 条 <code>:117</code>，配 <code>&lt;=0</code> = 不带这个窗口）。<code>ai/chat</code> 提交时同样不做上下文准备，这条口径在 QQ 入站侧也写成了一句注释（<code>src\sair\v4\QqGateway.java:809</code>–<code>:812</code>）。私聊 / 控制台的窗口与历史同源，所以<b>故意不做</b>"与历史重复就丢"的去重 —— 精确去重会把整块删空（<code>src\sair\v4\ctx\ChatWindow.java:71</code>–<code>:72</code>）。</p>
+      </section>
+
+      <section class="chapter" id="config-cmds">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">配置</span>
+          <h2>五、配置命令：<code>config</code></h2>
+          <p class="chapter-desc">一个分支覆盖"总览 / 读单键 / 改单键 / 旧热重载"四件事。它读的、写的都是 <code>config.json</code> <b>这个文件</b>，运行中的基板一个字段都不动。</p>
+        </header>
+
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/config</span><span class="k-def">用法：不带参数 = 总览</span><span class="badge info">读的是文件</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>打印<b>文件面</b>的全部配置 JSON（不再打印内存里的生效面）、配置文件绝对路径与待生效键清单；敏感键一律打码，待生效的键逐条并排给出"文件里的值"与"已生效的值"（<code>src\sair\v4\term\Cmd.java:777</code>–<code>:798</code>）。</dd>
+              <dt>文件面从哪来</dt>
+              <dd><code>Conf.fileView()</code> 把 <code>config.json</code> 读成一份<b>独立</b>对象，内存里的生效值一点不动（<code>src\sair\v4\Conf.java:499</code>–<code>:512</code>）—— 所以在外面用编辑器改了文件，这里立刻看得见。</dd>
+              <dt>基板没启动时</dt>
+              <dd>额外回一行"基板未启动：这份配置一个键都还没加载 —— 全部待生效，输入 <code>ai/start</code> 让它加载并运行"，然后结束（<code>src\sair\v4\term\Cmd.java:782</code>–<code>:786</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>无。配置对象没建出来时用<b>壳配置</b>（<code>src\sair\v4\term\Cmd.java:732</code>–<code>:752</code>）；连数据根都算不出来才回 <code>config 不可用：配置未加载</code>（<code>:772</code>–<code>:775</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/config &lt;键&gt;</span><span class="k-def">读一个键（含"待生效"标注）</span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>回 <code>&lt;键&gt; = &lt;文件里的值&gt;</code>，随后三种补充之一：基板未启动 → "这个值还没被加载（要 <code>ai/start</code>）"；文件值与已生效值不同 → <code>＊ 待生效（要 ai/start；已经在跑则 ai/restart）：已生效的值是 …</code>；一致 → "已生效（文件与跑着的基板一致）"（<code>src\sair\v4\term\Cmd.java:829</code>–<code>:847</code>）。</dd>
+              <dt>文件里没写</dt>
+              <dd>回 <code>&lt;键&gt; = (文件里没有这个键)</code>；若"已生效面"里有它（来自出厂默认或运行期写入），再补一行说明（<code>src\sair\v4\term\Cmd.java:831</code>–<code>:838</code>）。</dd>
+              <dt>注意</dt>
+              <dd>显示"已生效的值"时优先走已知键表而不是内存 JSON —— 有些键常常"文件里没写、靠出厂默认在跑"，直接读 JSON 会显示成空，看起来像"没有生效值"（<code>src\sair\v4\term\Cmd.java:850</code>–<code>:864</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/config set &lt;键&gt; &lt;值&gt;</span><span class="k-def">只改文件里的那一个键</span><span class="badge warn">改完不生效</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>两段：键 + 值；只给键不给值 → <code>用法：config set &lt;键&gt; &lt;值&gt;</code>（<code>src\sair\v4\term\Cmd.java:808</code>–<code>:811</code>）。值按形状定型：整数字面量 → 整数，<code>-?\d+\.\d+</code> → 小数，<code>true</code>/<code>false</code> → 布尔，其余按字符串（<code>:816</code>–<code>:818</code>）。</dd>
+              <dt>效果</dt>
+              <dd>写 <code>config.json</code> 的那一个键并回 <code>已写入 config.json：&lt;键&gt; = &lt;值&gt;（未生效 —— 要 ai/start；已在运行则 ai/restart）</code>；写盘失败会在回执里标出 <code>（**写盘失败**：看控制台那行告警）</code>（<code>src\sair\v4\term\Cmd.java:819</code>–<code>:822</code>）。</dd>
+              <dt>不在已知键表里</dt>
+              <dd>照写，但补一行：<code>注意：&lt;键&gt; 不在已知键表里（没有消费者读它）—— 写进去了，但不会有任何行为变化。</code>（<code>src\sair\v4\term\Cmd.java:823</code>–<code>:826</code>）。已知键表 = <code>Conf.knownKeys()</code>（<code>src\sair\v4\Conf.java:1173</code> 起）。</dd>
+              <dt>写文件纪律</dt>
+              <dd>最小改动（读原文件 → 只替换这一个键 → 原样写回，其余键含解不开的密文逐字保留）；凭据键现加密（空值仍写空）；文件不存在或为空时<b>先落一份出厂默认再改它</b>（否则第一次 <code>ai/start</code> 补齐默认值，读起来像"我改的键被冲掉了"）（<code>src\sair\v4\Conf.java:519</code>–<code>:530</code>、实现 <code>:531</code>–<code>:558</code>）。</dd>
+              <dt>注意</dt>
+              <dd class="risk">本机调试口<b>不再是配置键</b>：<code>debugPort</code> / <code>debugToken</code> / <code>debugSimPort</code> / <code>debugSimulate</code> 四个键已从已知键表、出厂默认与 <code>config.json</code> 里整条拿掉 —— 两个口的起停只看 <code>ai/debug on|off|status</code>（<code>src\sair\v4\Conf.java:1283</code>–<code>:1286</code>、<code>:272</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow rose reveal">
+            <div class="k-head"><span class="k-name">ai/config reload</span><span class="k-def">已退休</span><span class="badge bad">只回一句话</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>不改任何东西，只回 <code>config reload 已退休：基板不再热读配置 —— 改 config.json 只是改文件，要 ai/start 才加载。</code>，并补两行：已经在跑就 <code>ai/restart</code>（先停旧基板再读文件重新装配 19 步）；<b>提示词正文有它自己的热重载</b>（<code>ai/prompt reload</code>），不受本口径影响（<code>src\sair\v4\term\Cmd.java:800</code>–<code>:805</code>）。</dd>
+              <dt>为什么还在</dt>
+              <dd>保留只是为了给旧习惯一句可读回话 —— 热重载这件事在实现里已经不存在（<code>src\sair\v4\Conf.java:41</code>–<code>:45</code>）。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <h3 class="sec">凭据怎么显示：打码规则</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>项</th><th>规则</th><th>出处</th></tr></thead>
+            <tbody>
+              <tr><td>哪些键算敏感</td><td><code>apiKey</code> / <code>napcatToken</code> / <code>relayToken</code>，一个不多一个不少；这三个都是"拿到就能冒充"的凭据，盘上是密文</td><td><code>src\sair\v4\Conf.java:57</code>、<code>:70</code>–<code>:75</code></td></tr>
+              <tr><td>打码形状</td><td>长度 <code>&lt;= 8</code> → <code>****</code>；否则留前 4 个字符并报总长度 <code>abcd…（已打码，共 N 字符）</code></td><td><code>src\sair\v4\term\Cmd.java:886</code>–<code>:893</code></td></tr>
+              <tr><td>总览也打码</td><td>总览走文件面，密文同样在打码范围内 —— <b>两层都不外露</b></td><td><code>src\sair\v4\term\Cmd.java:872</code>–<code>:883</code></td></tr>
+              <tr><td>待生效清单形状</td><td><code>pending=N（待生效，要 ai/start；已经在跑则 ai/restart）：键1, 键2 …</code>，最多点名 8 个，其余报"还有 M 个"；空清单只回 <code>pending=0</code></td><td><code>src\sair\v4\term\Cmd.java:1106</code>–<code>:1118</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note ok reveal">
+          <p><span class="n-title">为什么要有"壳配置"</span>：外置 <code>.ir</code> 脚本里最常见的写法就是"启动时先设几个配置项"，而配置对象要到装配第①步才建出来 —— 没有壳配置的话那些设置会全部被丢掉（控制台只反复回"配置不可用：配置未加载"）。壳配置只负责改文件：第①步会再读同一份 <code>config.json</code>，设置照样生效；第①步已经跑过时它根本不会被用到（<code>src\sair\v4\term\Cmd.java:720</code>–<code>:729</code>）。</p>
+        </div>
+      </section>
+
+      <section class="chapter" id="model-cmds">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">状态与工具面</span>
+          <h2>六、模型与状态命令：<code>status</code> / <code>tools</code></h2>
+          <p class="chapter-desc">模型这一面没有专属命令 —— 它由 <code>status</code> 报出来、由 <code>config</code> 改、由 <code>chat</code> 用。</p>
+        </header>
+
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/status</span><span class="k-def">用法：<code>ai/status</code>，不接受参数</span><span class="badge ok">永远可用</span></div>
+            <dl>
+              <dt>三种状态各说什么</dt>
+              <dd><b>① 没启动</b>：<code>未启动（ready=0 reason=not_started）：基板还没跑起来。</code> + 提示 <code>ai/start</code> + 状态 JSON + 配置文件路径 + 待生效清单（没加载过配置时打 <code>pending=-1</code>）<br><b>② 加载中</b>：首行 <code>加载中：第 x/19 步 &lt;步骤名&gt;，已耗时 …ms（装配在自己的线程上跑，控制台不受影响）</code>（重启时首行改说"重启中："），随后是<b>轻量状态 JSON</b><br><b>③ 已就绪</b>：完整状态 JSON；有失败步骤就打"基板降级运行 —— 失败步骤报告"，否则<b>总是</b>打一行待生效清单（好让人看见"清空了"）<br>出处 <code>src\sair\v4\term\Cmd.java:353</code>–<code>:401</code>。</dd>
+              <dt>轻量面是什么</dt>
+              <dd>加载中的状态查询<b>不碰六库 / NapCat / 中转</b>：那些对象正在被装配线程初始化，去读它们既可能争库锁、又可能读到半拉状态 —— 这是"加载期间 status 立即回话"的实现要点（<code>src\sair\v4\Boot.java:1929</code>–<code>:1935</code>、<code>:1952</code>–<code>:1967</code>）。</dd>
+              <dt>模型相关字段</dt>
+              <dd>已就绪 JSON 里与模型有关的四个：<code>model</code>（解析后的模型名）、<code>model_configured</code>（配置里写的值）、<code>auto_model</code>（是不是 <code>auto</code>）、<code>api_key_set</code>（凭据配了没有）（<code>src\sair\v4\Boot.java:2050</code>–<code>:2053</code>）。</dd>
+              <dt>还有哪些字段</dt>
+              <dd><code>degraded</code> / <code>failed_step</code> / <code>failed_reason</code> / <code>pending</code> / <code>data_dir</code> / <code>napcat</code>（启用·监听·已连接·连接数·端口）/ <code>relay</code> / <code>console</code> 与 <code>console_print</code> / <code>talk_panel</code> / 外挂与工具计数 / 提示词计数 / <code>store</code> / 扩展点统计 / <code>runtime</code>（心跳次数·周期·在跑任务数·闹钟数·队列与闸门·钩子池·事件池）/ <code>boot</code>（19 步台账 + 本次新建骨架项）（<code>src\sair\v4\Boot.java:2033</code>–<code>:2124</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>无。基板对象都没建起来也说清缺什么并提示 <code>ai/start</code>（<code>src\sair\v4\term\Cmd.java:354</code>–<code>:357</code>）。</dd>
+              <dt>注意</dt>
+              <dd>失败步骤<b>只能靠 <code>ai/restart</code> 重走一遍</b>：源码里没有"自动重试失败步骤"的逻辑，此处<b>不承诺</b>任何自动恢复。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/tools [all]</span><span class="k-def">用法：<code>ai/tools</code> 或 <code>ai/tools all</code></span><span class="badge ok">永远可用</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd><code>all</code>（大小写不敏感）= <b>不按调用者筛选</b>，连被权限挡住的名字一起列（诊断用）；不带参数 = 只看这个调用者能用的（<code>src\sair\v4\term\Cmd.java:453</code>）。</dd>
+              <dt>效果</dt>
+              <dd>逐行打印工具面，每行形状：<code>  工具名  [有效位 · 来源]  一句话描述（截 60 字符）</code>；有效位是该调用者在这把工具上的 <code>RWX</code> 掩码（问不出来时印 <code>-</code>），来源写着基板自带还是某个外挂提供（<code>src\sair\v4\tool\Registry.java:426</code>–<code>:436</code>、有效位 <code>:439</code>–<code>:446</code>）。排序只按名字（大小写不敏感），这样同一套工具表每次都是同一个字节序，服务端前缀缓存才有得吃（<code>:448</code>–<code>:453</code>）。</dd>
+              <dt>基板自带多少个</dt>
+              <dd>装配的「基板工具面」那一步注册 <b>17 个</b>（<code>src\sair\v4\term\Cmd.java:449</code>）；注册动作 <code>src\sair\v4\Boot.java:709</code>–<code>:711</code>，实现里 17 处 <code>reg.add(Tool.of("…"))</code>（<code>src\sair\v4\Builtins.java:63</code> 起）。其余工具在外挂扫描之后陆续出现。</dd>
+              <dt>依赖</dt>
+              <dd>工具注册表。没装配就报"工具面还没装配：&lt;原因&gt;"并提示 <code>ai/start</code>（<code>src\sair\v4\term\Cmd.java:446</code>–<code>:452</code>）；<code>boot</code> 都没有时回"工具面不可用：注册表未装配"并指向 <code>ai/status</code>（<code>:441</code>–<code>:445</code>）。装配还在跑时也能用，结尾补一行说明其余工具会陆续注册（<code>:454</code>–<code>:457</code>）。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <h3 class="sec">模型这一面怎么配、怎么验</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>要做的事</th><th>命令</th><th>之后</th></tr></thead>
+            <tbody>
+              <tr><td>填凭据</td><td><code>ai/config set apiKey &lt;你的 key&gt;</code></td><td>只写文件；要 <code>ai/start</code>（已在跑则 <code>ai/restart</code>）才生效，回执与总览都只显示打码值</td></tr>
+              <tr><td>换接口地址 / 模型</td><td><code>ai/config set apiUrl …</code> / <code>set model …</code> / <code>set autoModel …</code></td><td>出厂默认 <code>apiUrl = https://api.deepseek.com</code>、<code>model = auto</code>、<code>autoModel = deepseek-flash</code>（<code>src\sair\v4\Conf.java:78</code>–<code>:80</code>）</td></tr>
+              <tr><td>验是否就绪</td><td><code>ai/status</code></td><td>看 <code>api_key_set</code> 与 <code>model</code>；凭据没配时 <code>ai/chat</code> 直接把该敲的命令告诉你（<code>src\sair\v4\term\Cmd.java:522</code>–<code>:531</code>）</td></tr>
+              <tr><td>看真实生效的模型名</td><td><code>ai/config model</code></td><td>读文件里的值并与已生效值并排比对；<code>auto</code> 落到哪个模型由解析口决定（<code>src\sair\v4\Conf.java:641</code>）</td></tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <section class="section" id="onebot-cmds">
-        <div class="section-head reveal">
-          <div class="section-tag">QQ Bot</div>
-          <h2>OneBot QQ 机器人命令</h2>
-          <p class="desc">反向 WebSocket 连接 QQ。execs: 关键字触发权限提升（全工具 + 全技能）。</p>
+      <section class="chapter" id="qq-cmds">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">QQ 侧</span>
+          <h2>七、QQ 命令：<code>napcat</code>（含文件外链中转）</h2>
+          <p class="chapter-desc">这一族管"QQ 这条腿"：连接状态、开关、动作清单、主动发一条消息，以及本地文件怎么交给 NapCat。凡涉及开关的，都是<b>只改文件</b>。</p>
+        </header>
+
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/napcat</span><span class="k-def">用法：不带子命令 = <code>status</code></span><span class="badge info">一行事实</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>回一行：<code>NapCat：&lt;已连接 | 监听中（未连接） | 未启动&gt;  端口=&lt;N&gt;  连接数=&lt;N&gt;</code>；没连上时补一句"调用 NapCat 能力时会提示「Napcat 没有连接」"（<code>src\sair\v4\term\Cmd.java:1264</code>–<code>:1268</code>；提示语常量 <code>src\sair\v4\qq\Api.java:48</code>）。</dd>
+              <dt>三种状态的判据</dt>
+              <dd>已连接 = <code>link.connected()</code>；监听中（未连接）= <code>link.running()</code> 但没连上；未启动 = 监听都没起。端口取 <code>conf.napcatPort()</code>，出厂默认 <code>8082</code>（<code>src\sair\v4\Conf.java:128</code>），主机默认只听回环 <code>127.0.0.1</code>（<code>:130</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>NapCat 连接面 + 配置对象；任一缺就回 <code>napcat 不可用：NapCat 连接未装配（&lt;缺什么&gt;）</code>（<code>src\sair\v4\term\Cmd.java:1214</code>–<code>:1217</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/napcat on</span> <span class="k-name">ai/napcat off</span><span class="k-def">只改 <code>config.json</code> 的 <code>napcatEnabled</code></span><span class="badge warn">不立刻生效</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>回执 <code>已写入 config.json：napcatEnabled = true|false（未生效 —— 要 ai/start；已在运行则 ai/restart）</code>，随后补一行现状：<code>NapCat 监听（端口 N）现在还在按已生效的值跑：正在监听 | 没在监听 —— 要按新值重绑请 ai/restart。</code>（<code>src\sair\v4\term\Cmd.java:1224</code>–<code>:1231</code>；统一回执 <code>:899</code>–<code>:903</code>）。</dd>
+              <dt>注意</dt>
+              <dd class="risk">这条命令<b>不会</b>当场起停监听：监听的启停跟着 <code>ai/start</code> / <code>ai/restart</code> 走（<code>src\sair\v4\term\Cmd.java:1225</code> 的注释与实现）。别把它当成"立刻开关 QQ 连接"。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/napcat list</span><span class="k-def">打一份动作清单</span><span class="badge info">诊断用</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>打印 NapCat 动作清单 JSON（动作名与参数的目录）（<code>src\sair\v4\term\Cmd.java:1233</code>–<code>:1235</code>；目录口 <code>src\sair\v4\qq\Api.java:708</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>同 <code>status</code>：需要连接面与配置对象。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/napcat send &lt;group|private&gt; &lt;目标号&gt; &lt;内容&gt;</span><span class="k-def">主动发一条消息</span><span class="badge ok">要等回包</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>三段（按空白切）：<code>group</code>（群）或 <code>private</code>（私聊）、目标号（群号或 QQ 号）、内容（<b>放最后，可以带空格</b>）；少于三段只回用法行（<code>src\sair\v4\term\Cmd.java:1238</code>–<code>:1242</code>）。</dd>
+              <dt>效果</dt>
+              <dd>先回一行 <code>正在发送（群 N | 私聊 N）……</code>，再把 NapCat 的回包 JSON 打出来（<code>src\sair\v4\term\Cmd.java:1249</code>、<code>:1256</code>；动作口 <code>src\sair\v4\qq\Api.java:563</code> 群 / <code>:567</code> 私聊）。</dd>
+              <dt>依赖</dt>
+              <dd>NapCat 已连接；没连上时动作口直接返回"Napcat 没有连接"的错误结果（<code>src\sair\v4\qq\Api.java:162</code>）。</dd>
+              <dt>注意</dt>
+              <dd><b>这条命令不能在界面线程上等</b>：它要等一次网络往返（最长 <code>napcatTimeoutMs</code>），而控制台命令就跑在界面线程上。所以实现把它丢给后台线程发，结果回来再打一行（控制台输出任何线程都能打）（<code>src\sair\v4\term\Cmd.java:1243</code>–<code>:1250</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/napcat relay [status|on|off]</span><span class="k-def">文件外链中转</span><span class="badge info">决定本地文件怎么交出去</span></div>
+            <dl>
+              <dt>它管什么</dt>
+              <dd>决定"本地文件怎么交给 NapCat"：<b>开着走 URL</b>（跨机可取），<b>关着走 <code>file:///</code></b>（只有同机能取）（<code>src\sair\v4\term\Cmd.java:1271</code>–<code>:1274</code>）。</dd>
+              <dt>status</dt>
+              <dd>打印中转状态 JSON；<code>url_shape</code> 里的 token <b>已脱敏</b>，要看完整值用 <code>ai/config relayToken</code>；随后打两行用法与生效口径（<code>src\sair\v4\term\Cmd.java:1300</code>–<code>:1303</code>）。</dd>
+              <dt>on / off</dt>
+              <dd>同样<b>只改文件</b>：<code>已写入 config.json：relayEnabled = true|false（未生效 …）</code>，再补一行"中转现在还是按已生效的值跑：在跑 | 没在跑 —— 要按新值起停请 <code>ai/restart</code>"（<code>src\sair\v4\term\Cmd.java:1284</code>–<code>:1299</code>）。</dd>
+              <dt>注意</dt>
+              <dd>开 <code>relay on</code> 时若 <code>relayPublicHost</code> 是空的，会先告警一句：外链会用本机探测到的地址，跨机部署请先 <code>ai/config set relayPublicHost &lt;局域网IP&gt;</code>（<code>src\sair\v4\term\Cmd.java:1285</code>–<code>:1287</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>中转对象没装配时回 <code>没有装配文件外链中转</code>（<code>src\sair\v4\term\Cmd.java:1280</code>–<code>:1282</code>）。</dd>
+            </dl>
+          </div>
         </div>
-        <div class="table-wrap reveal">
+
+        <h3 class="sec">这一族命令涉及的键</h3>
+        <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>命令</th><th>参数</th><th>分类</th><th>说明</th></tr></thead>
+            <thead><tr><th>键</th><th>作用</th><th>出厂默认</th><th>出处</th></tr></thead>
             <tbody>
-              <tr><td class="cmd-name">ai/execq</td><td>[消息]</td><td><span class="badge b-cyan">测试</span></td><td>execq 通道测试（通常由 QQ 消息自动触发）</td></tr>
-              <tr><td class="cmd-name">ai/onebotconnect</td><td>—</td><td><span class="badge b-cyan">连接</span></td><td>启动 OneBot 反向 WebSocket 服务</td></tr>
-              <tr><td class="cmd-name">ai/onebotdisconnect</td><td>—</td><td><span class="badge b-cyan">连接</span></td><td>停止 OneBot 服务，断开所有 QQ 连接</td></tr>
-              <tr><td class="cmd-name">ai/onebotstatus</td><td>—</td><td><span class="badge b-cyan">连接</span></td><td>查看运行状态（端口、连接数、Token、机器人 QQ）</td></tr>
-              <tr><td class="cmd-name">ai/onebotsetport</td><td>[端口]</td><td><span class="badge b-purple">配置</span></td><td>设置 WebSocket 监听端口，默认 5800</td></tr>
-              <tr><td class="cmd-name">ai/onebotsettoken</td><td>[Token]</td><td><span class="badge b-purple">配置</span></td><td>设置 Access Token 鉴权</td></tr>
-              <tr><td class="cmd-name">ai/onebotsetselfid</td><td>[QQ号]</td><td><span class="badge b-purple">配置</span></td><td>设置机器人自身 QQ 号</td></tr>
-              <tr><td class="cmd-name">ai/onebotsetprompt</td><td>[提示词]</td><td><span class="badge b-purple">配置</span></td><td>设置 execq 通道提示词（写入 execqPrompt.md 持久化）</td></tr>
-              <tr><td class="cmd-name">ai/onebotshowprompt</td><td>—</td><td><span class="badge b-purple">配置</span></td><td>显示当前 execq 提示词（硬编码 + execqPrompt.md 角色设定）</td></tr>
-              <tr><td class="cmd-name">ai/onebotenableproactive</td><td>—</td><td><span class="badge b-green">功能</span></td><td>启用主动查看（每 5 分钟检查群聊）</td></tr>
-              <tr><td class="cmd-name">ai/onebotdisableproactive</td><td>—</td><td><span class="badge b-green">功能</span></td><td>禁用主动查看</td></tr>
-              <tr><td class="cmd-name">ai/onebotenablelisten</td><td>—</td><td><span class="badge b-green">功能</span></td><td>启用拟人化监听态（仅对监听群生效）</td></tr>
-              <tr><td class="cmd-name">ai/onebotdisablelisten</td><td>—</td><td><span class="badge b-green">功能</span></td><td>禁用拟人化监听态</td></tr>
-              <tr><td class="cmd-name">ai/onebotaddgroup</td><td>[群号1 群号2 ...]</td><td><span class="badge b-green">功能</span></td><td>添加监听的群（空格分隔多个）</td></tr>
-              <tr><td class="cmd-name">ai/onebotremovegroup</td><td>[群号1 群号2 ...]</td><td><span class="badge b-green">功能</span></td><td>移除监听的群（空格分隔多个）</td></tr>
-              <tr><td class="cmd-name">ai/onebotlistgroups</td><td>—</td><td><span class="badge b-green">功能</span></td><td>列出监听的群及主动查看状态</td></tr>
-              <tr><td class="cmd-name">ai/resetaffection</td><td>—</td><td><span class="badge b-green">功能</span></td><td>置空所有人的好感度（清空内存缓存 + 数据库）</td></tr>
-              <tr><td class="cmd-name">ai/resetdonations</td><td>—</td><td><span class="badge b-green">功能</span></td><td>清空全部捐赠记录（数据库层面彻底重置）</td></tr>
+              <tr><td><code>napcatEnabled</code></td><td>NapCat 监听开关（<code>ai/napcat on|off</code> 就是改它）</td><td><code>false</code></td><td><code>src\sair\v4\Conf.java:1273</code></td></tr>
+              <tr><td><code>napcatPort</code></td><td>反向 WS 监听端口</td><td><code>8082</code></td><td><code>src\sair\v4\Conf.java:1274</code>、<code>:128</code></td></tr>
+              <tr><td><code>napcatHost</code></td><td>绑定的网卡地址</td><td><code>127.0.0.1</code>（只听回环）</td><td><code>src\sair\v4\Conf.java:1275</code>、<code>:130</code></td></tr>
+              <tr><td><code>napcatToken</code></td><td>接入凭据（<b>敏感键</b>，盘上是密文）</td><td>—</td><td><code>src\sair\v4\Conf.java:1276</code>、<code>:57</code></td></tr>
+              <tr><td><code>napcatTimeoutMs</code></td><td>调用 NapCat 的等待上限（<code>ai/napcat send</code> 受它约束）</td><td>—</td><td><code>src\sair\v4\Conf.java:1277</code></td></tr>
+              <tr><td><code>relayEnabled</code> / <code>relayPort</code> / <code>relayPublicHost</code> / <code>relayToken</code> / <code>relayTtlMinutes</code></td><td>文件外链中转：开关 / 端口 / 对外地址 / 凭据（敏感键）/ 有效期</td><td>端口 <code>2671</code></td><td><code>src\sair\v4\Conf.java:1278</code>–<code>:1282</code>、<code>:133</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note warn reveal">
+          <p><span class="n-title">群里的触发口径不在这里</span>：控制台命令不受"@ 才触发"约束，QQ 群消息受 —— 那条口径写在<a href="#cautions">第十三节</a>，出处是 <code>src\sair\v4\QqGateway.java:874</code>。</p>
+        </div>
+      </section>
+
+      <section class="chapter" id="perm-cmds">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">权限与好感度</span>
+          <h2>八、权限命令：<code>perm</code> / <code>acl</code></h2>
+          <p class="chapter-desc">分工明确：<code>acl</code> 只看权限账本（只读），<code>perm</code> 只管好感度。控制台里没有"授权/撤销"的口子 —— 那是她在模型侧用工具做的事。</p>
+        </header>
+
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/perm</span><span class="k-def">用法：不带子命令 = 看调用者身份与可见工具</span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>打印调用者一行 + <code>可见工具 N / 全部 M</code> + 工具表（<code>src\sair\v4\term\Cmd.java:649</code>–<code>:652</code>；文本生成 <code>src\sair\v4\Boot.java:2127</code>–<code>:2141</code>，工具面没装配时会说明是哪一步失败）。</dd>
+              <dt>注意</dt>
+              <dd>这块输出<b>不再</b>打印任何"配置里的权限覆盖"：旧的那套档位表已随实现整类删除，权限的唯一账本是数据根的 <code>perms.json</code>（<code>src\sair\v4\Boot.java:2137</code>–<code>:2139</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/perm list</span><span class="k-def">好感度榜单（前 20）</span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>打印好感度前 20 名的 JSON（<code>src\sair\v4\term\Cmd.java:673</code>–<code>:676</code>；取数口 <code>src\sair\v4\auth\Favor.java:67</code>，上限 20 写死在命令里）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/perm set &lt;QQ&gt; &lt;好感度&gt;</span><span class="k-def">写一条好感度</span><span class="badge warn">写库</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>两段：QQ 号 + 数值；少于两段只回 <code>用法：perm set &lt;QQ&gt; &lt;好感度&gt;</code>（<code>src\sair\v4\term\Cmd.java:657</code>–<code>:662</code>）。数值按小数解析，回显时取整。</dd>
+              <dt>效果</dt>
+              <dd>回 <code>已设置 &lt;QQ&gt; 好感度 = &lt;整数&gt;（&lt;档位名&gt;）</code>；写入时记一笔来源 <code>console</code>（<code>src\sair\v4\term\Cmd.java:665</code>–<code>:666</code>；<code>Favor.set(long, double, String)</code> <code>src\sair\v4\auth\Favor.java:41</code>，档位名 <code>:76</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>好感度存储；没装配时回 <code>perm 不可用：好感度存储未装配（&lt;缺什么&gt;）</code>（<code>src\sair\v4\term\Cmd.java:653</code>–<code>:656</code>）。</dd>
+              <dt>注意</dt>
+              <dd class="risk">好感度<b>不是</b>权限：它不参与"能不能用某个工具"的判断（权限只看 ACL 账本）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow rose reveal">
+            <div class="k-head"><span class="k-name">ai/perm reset</span><span class="k-def">清空全部好感度记录</span><span class="badge bad">不可撤销</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>清空并回 <code>已清空 N 条好感度记录</code>（<code>src\sair\v4\term\Cmd.java:669</code>–<code>:672</code>；实现口 <code>src\sair\v4\auth\Favor.java:58</code>）。</dd>
+              <dt>注意</dt>
+              <dd class="risk">没有确认步骤、没有备份、没有撤销 —— 敲下去就清了。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/perm &lt;QQ&gt;</span><span class="k-def">看某个人的好感度快照</span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>打印这个 QQ 的好感度快照 JSON（<code>src\sair\v4\term\Cmd.java:680</code>–<code>:685</code>；快照口 <code>src\sair\v4\auth\Favor.java:87</code>）。</dd>
+              <dt>注意</dt>
+              <dd>参数既不是上面任何子命令、也解析不成数字时，回 <code>用法：perm [list|set &lt;QQ&gt; &lt;值&gt;|reset|&lt;QQ&gt;]</code>（<code>src\sair\v4\term\Cmd.java:684</code>）。已删除的子命令：<code>perm levels</code> / <code>perm setlevel</code> 两个分支<b>整组已删除</b>（它们背靠旧档位体系的读写口，而权限现在只看账本）（<code>:677</code>–<code>:679</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow ok reveal">
+            <div class="k-head"><span class="k-name">ai/acl</span><span class="k-def">用法：<code>ai/acl</code>，不接受参数</span><span class="badge ok">只读，不写盘</span></div>
+            <dl>
+              <dt>它打印什么</dt>
+              <dd>账本 = 数据根的 <code>perms.json</code>（<code>{"version":3,"entries":[…]}</code>），权限的唯一判据。输出四段：① 一行摘要 <code>Acl.stat()</code>（条目数量 + 分类计数 + 默认分配 + 文件名）；② <code>默认分配 &lt;…&gt; · 她自己的默认分配（SYSTEM）&lt;…&gt;</code>；③ 逐条原文（带主体层级、命中时生效位、范围匹配串与顺序说明）；④ 被跳过的非法条目（<b>有才打</b> —— 写错了要看得见，不能静默失效）。结尾两行：账本文件路径（内存账本时明说"没落盘"）+ "只读命令：授权/撤销/查询/验算请让她用 perm 工具"（<code>src\sair\v4\term\Cmd.java:688</code>–<code>:699</code>、打印实现 <code>:701</code>–<code>:718</code>）。</dd>
+              <dt>实现口</dt>
+              <dd><code>Acl.stat()</code> <code>src\sair\v4\auth\Acl.java:678</code> · <code>defaultText()</code> <code>:708</code> · <code>systemText()</code> <code>:715</code> · <code>list()</code> <code>:650</code> · <code>rejects()</code> <code>:633</code> · <code>file()</code> <code>:823</code>；被拒绝时的统一前缀 <code>[权限阻断]</code> 在 <code>:125</code>。</dd>
+              <dt>依赖</dt>
+              <dd>权限面与账本；未装配回 <code>acl 不可用：权限面未装配（&lt;缺什么&gt;）</code>，账本装载失败另有 <code>acl 不可用：账本没能装载（&lt;缺什么&gt;）</code>（<code>src\sair\v4\term\Cmd.java:702</code>–<code>:710</code>）。</dd>
+              <dt>注意</dt>
+              <dd class="risk"><b>本命令不写盘、不改任何状态</b>：授权 / 撤销 / 查询 / 验算都在她那边的 perm 工具（<code>op=grant/revoke/acl/whoami…</code>），账本改动写完即生效、不需要重载（<code>src\sair\v4\term\Cmd.java:697</code>–<code>:699</code>、<code>:717</code>）。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <h3 class="sec">一句话分清两条命令</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>问题</th><th><code>ai/acl</code></th><th><code>ai/perm</code></th></tr></thead>
+            <tbody>
+              <tr><td>管什么</td><td>权限：谁能碰哪个资源</td><td>好感度：一个人的数值与档位</td></tr>
+              <tr><td>能改吗</td><td><b>不能</b>（只读打印）</td><td>能：<code>set</code> / <code>reset</code></td></tr>
+              <tr><td>数据在哪</td><td>数据根的 <code>perms.json</code></td><td>好感度存储（六库之一）</td></tr>
+              <tr><td>改了要重启吗</td><td>账本改动写完即生效</td><td>写库即生效</td></tr>
+              <tr><td>没装配时</td><td><code>acl 不可用：权限面未装配</code></td><td><code>perm 不可用：好感度存储未装配</code></td></tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <section class="section" id="skills-cmds">
-        <div class="section-head reveal">
-          <div class="section-tag">Skills</div>
-          <h2>技能管理命令</h2>
-          <p class="desc">技能自进化系统的 9 个管理命令。</p>
+      <section class="chapter" id="store-cmds">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">六库</span>
+          <h2>九、存储命令：<code>store</code></h2>
+          <p class="chapter-desc">六库的统计、维护、索引合并、空间回收与导入导出。这一族<b>直接动数据库</b>，是全页里唯一会造成长时间独占的那几条。</p>
+        </header>
+
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/store</span><span class="k-def">用法：不带子命令 = <code>stat</code></span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>回库文件绝对路径 + 主库字节数 + <b>逐库计数</b> + <code>FTS5 可用 | 不可用（检索回退 LIKE）</code>；数据库连接未打开时补一行"以上计数不可信"（<code>src\sair\v4\term\Cmd.java:1342</code>；文本生成 <code>src\sair\v4\Boot.java:2144</code>–<code>:2158</code>；计数口径含 WAL 里还没并进主库的数据，<code>src\sair\v4\store\Store.java:280</code> 起）。</dd>
+              <dt>库名</dt>
+              <dd><code>memory</code>（长期记忆）/ <code>note</code>（知识笔记）/ <code>dialog</code>（对话历史）/ <code>grouplog</code>（群聊历史）/ <code>sticker</code>（表情包）/ <code>pref</code>（偏好设定）（<code>src\sair\v4\Builtins.java:80</code> 的工具描述用的就是这份清单）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/store maintain</span><span class="k-def">按保留期跑一次维护</span><span class="badge info">与心跳里的定时维护同口径</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>按当前配置的三档保留期与一个上限执行维护并打印结果 JSON（<code>src\sair\v4\term\Cmd.java:1314</code>–<code>:1319</code>；四参实现 <code>src\sair\v4\store\Store.java:423</code>）。</dd>
+              <dt>读哪几个键</dt>
+              <dd><code>keepDays</code>（默认 30）、<code>dialogKeepDays</code>（默认 180）、<code>grouplogKeepDays</code>（默认 30）、<code>maxLowImportance</code>（默认 500）（<code>src\sair\v4\Conf.java:142</code>、<code>:144</code>、<code>:146</code>、<code>:107</code>；三个保留期 <code>&lt;=0</code> = 不过期）。</dd>
+              <dt>注意</dt>
+              <dd>它删的是<b>超龄行</b>：改保留期要 <code>ai/config set</code> 写文件 + <code>ai/start</code> / <code>ai/restart</code> 生效之后，再敲这条命令才会按新尺度清。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/store optimize &lt;库&gt;</span><span class="k-def">合并全文索引段</span><span class="badge info">批量删行之后用</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>一个库名；库名不对或该库没有索引时回 <code>合并失败（库名不对 / 该库没有索引）</code>，成功回 <code>已合并 &lt;库&gt; 的全文索引段</code>（<code>src\sair\v4\term\Cmd.java:1321</code>–<code>:1325</code>；实现 <code>src\sair\v4\store\Store.java:493</code>）。</dd>
+              <dt>为什么需要它</dt>
+              <dd>批量删行之后，删除标记要等索引段合并才真正丢掉；随后 <code>ai/store vacuum</code> 才还盘（<code>src\sair\v4\term\Cmd.java:1322</code>）。</dd>
+              <dt>注意</dt>
+              <dd>哪些库不建全文索引由键 <code>ftsOff</code> 决定（<code>src\sair\v4\Conf.java:1257</code>，逗号分隔的库名）；被它关掉的库检索会回退到 LIKE。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/store vacuum</span><span class="k-def">回收空闲页</span><span class="badge warn">期间独占数据库</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>对数据库执行 <code>VACUUM</code>，回 <code>VACUUM 已执行（回收空闲页；期间独占数据库）</code>（<code>src\sair\v4\term\Cmd.java:1326</code>–<code>:1330</code>；连接口 <code>src\sair\v4\store\Store.java:110</code>）。</dd>
+              <dt>注意</dt>
+              <dd class="risk">它<b>独占数据库</b>：库越大耗时越长，期间别的读写都要等。建议先 <code>optimize</code> 再 <code>vacuum</code>，并避开有人用的时段。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/store export &lt;库&gt;</span><span class="k-def">导出成 jsonl</span><span class="badge ok">写文件</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>一个库名。导出文件写在配置里的 files 目录下，名字是 <code>&lt;库&gt;-&lt;时间戳&gt;.jsonl</code>；成功回 <code>已导出 &lt;绝对路径&gt;</code>，失败回 <code>导出失败</code>（<code>src\sair\v4\term\Cmd.java:1331</code>–<code>:1335</code>；实现 <code>src\sair\v4\store\Store.java:304</code>）。</dd>
+              <dt>注意</dt>
+              <dd>导出的是一个库的全部行，不是某个会话；文件名带时间戳，<b>多次导出不会互相覆盖</b>。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/store import &lt;库&gt; &lt;路径&gt;</span><span class="k-def">从 jsonl 导回</span><span class="badge warn">写库</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>按空白切两段（第二段是路径，带空格会出错）：库名 + 文件路径；成功回 <code>已导入 N 条</code>，失败回 <code>导入失败</code>（<code>src\sair\v4\term\Cmd.java:1336</code>–<code>:1341</code>；实现 <code>src\sair\v4\store\Store.java:341</code>）。</dd>
+              <dt>注意</dt>
+              <dd>没有"先清空再导入"这种开关 —— 这是<b>往库里加行</b>，不是替换。</dd>
+            </dl>
+          </div>
         </div>
-        <div class="table-wrap reveal">
+
+        <div class="note bad reveal">
+          <p><span class="n-title">六库没装配起来时</span>：这一族全部回 <code>store 不可用：六库未装配（&lt;缺什么&gt;）</code>，并明确加一句"其余命令不受影响：<code>ai/help</code>、<code>/status</code>、<code>/tools</code>、<code>/config</code> 照常可用"（<code>src\sair\v4\term\Cmd.java:1306</code>–<code>:1311</code>）。</p>
+        </div>
+      </section>
+
+      <section class="chapter" id="debug-cmds">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">观测面</span>
+          <h2>十、调试命令：<code>debug</code></h2>
+          <p class="chapter-desc">本机调试面的唯一开关。它管两个回环口：2660 输出口（读控制台捕获与对话，也能直接下框架命令）与 2661 输入口（以任意 QQ 身份造入站消息 / 下发命令）。</p>
+        </header>
+
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/debug on [token]</span><span class="k-def">起两个口</span><span class="badge ok">必带 token</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>可选 <code>token</code>；不给就<b>现生成一个</b>：16 字节随机 → 32 位十六进制（<code>src\sair\v4\dev\DebugPort.java:508</code>–<code>:513</code>）。控制台只回指纹、<b>不回 token 原文</b>；完整值在运行现场凭据文件 <code>&lt;数据根&gt;\debug-port.json</code>（<code>src\sair\v4\term\Cmd.java:958</code>–<code>:962</code>、路径口 <code>:1075</code>–<code>:1087</code>）。</dd>
+              <dt>效果</dt>
+              <dd>起输出口 → 起输入口 → 把两个口一起写进凭据文件；回 <code>调试面已开：&lt;一行事实&gt;</code>。基板还没跑时补一行：调试口照常可用（读控制台/下命令），但它看到的是「未启动」的基板；之后敲 <code>ai/start</code>（或 <code>ai/restart</code>）它们报的就是那台活基板（<code>src\sair\v4\term\Cmd.java:956</code>–<code>:975</code>）。</dd>
+              <dt>幂等</dt>
+              <dd>已经在听就直接回 <code>调试口已经在听（&lt;一行事实&gt;）—— 要重开先 ai/debug off。</code>，不重起（<code>src\sair\v4\term\Cmd.java:945</code>–<code>:948</code>）。</dd>
+              <dt>端口</dt>
+              <dd><b>固定 2660 / 2661，命令不接受端口参数，也不看任何环境变量</b>（<code>src\sair\v4\dev\DebugPort.java:498</code>–<code>:506</code>；出厂常量 <code>src\sair\v4\Conf.java:284</code>、<code>:300</code>）。只绑回环 <code>127.0.0.1</code>。</dd>
+              <dt>被拒的端口</dt>
+              <dd>落在保留 / 特权端口的 bind 会被拒并给一行可读原因：<code>&lt;1024</code>、<code>2671</code>（文件中转）、<code>8082</code>（NapCat 反向口）、<code>8083</code>；被占就放弃，<b>绝不换端口重试</b>（<code>src\sair\v4\dev\DebugPort.java:471</code>–<code>:481</code>）。</dd>
+              <dt>绝不裸开</dt>
+              <dd>token 为空一律拒绝（<code>src\sair\v4\term\Cmd.java:952</code>–<code>:955</code>；同一道判在 <code>src\sair\v4\dev\DebugPort.java:452</code>–<code>:457</code>）。</dd>
+              <dt>依赖</dt>
+              <dd><b>不依赖 <code>ai/start</code></b>：基板没跑起来时也能开（那时 <code>status</code> 会说 <code>substrate=not_started</code>）—— 好让人一眼分清"口开着、基板没跑"与"口也没开"（<code>src\sair\v4\term\Cmd.java:921</code>–<code>:926</code>）。</dd>
+              <dt>注意</dt>
+              <dd class="risk"><b>只有这条命令能起停两个口</b>：装配不自动起它们，<b>停基板（<code>ai/restart</code>）也不会把它们关掉</b>；两个口每次用基板都现取，绝不缓存（<code>src\sair\v4\term\Cmd.java:934</code>–<code>:938</code>、<code>:1011</code>–<code>:1012</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/debug off</span><span class="k-def">停两个口</span><span class="badge info">不动落盘</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>两个口都不再监听，运行现场凭据文件被删；回话里明确写落盘<b>不受影响</b>（"它随壳存在，与 on/off 无关"）以及"已有日志文件一个都没删"。本来就没开时也照常回一句事实（<code>src\sair\v4\term\Cmd.java:977</code>–<code>:991</code>）。</dd>
+              <dt>注意</dt>
+              <dd>落盘开关的真身不属于这条命令：<code>&lt;数据根&gt;\logs\console-&lt;日期&gt;.log</code> 与 <code>talk-&lt;日期&gt;.log</code> 是"日志"这个产品能力，随<b>壳</b>存在 —— 进程一起来就写，口开着关着都写，<code>ai/start</code> / <code>ai/restart</code> 也照写（<code>src\sair\v4\term\Cmd.java:914</code>–<code>:919</code>、<code>src\sair\v4\dev\DebugShell.java:29</code>–<code>:35</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/debug</span> <span class="k-name">ai/debug status</span><span class="k-def">当前事实（不带子命令就等于它）</span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>一行事实 + 一份机器可读 JSON + 两行用法与归属说明（<code>src\sair\v4\term\Cmd.java:1007</code>–<code>:1014</code>；默认 <code>status</code> 的判据 <code>:942</code>）。</dd>
+              <dt>那行事实的字段</dt>
+              <dd><code>输出口 on@2660|off@2660</code> · <code>输入口 on@2661|off@2661</code> · <code>落盘 on|off(随壳，与 on/off 无关)</code> · <code>token_fp=…</code>（口在听时才有）· <code>simulate=on|off|-</code> · <code>substrate=running|not_started</code>（未跑时带 <code>reason=</code>：<code>no_substrate</code> / <code>loading</code> / <code>degraded</code> / <code>not_started</code>）· <code>pending=N</code> · <code>凭据文件 &lt;绝对路径&gt;</code>（<code>src\sair\v4\term\Cmd.java:1024</code>–<code>:1042</code>）。</dd>
+              <dt>JSON 字段</dt>
+              <dd><code>out_port</code> / <code>out_listening</code> / <code>sim_port</code> / <code>sim_listening</code> / <code>simulate</code> / <code>spool</code> / <code>spool_owner=shell</code> / <code>spool_dir</code> / <code>ready</code>（未就绪带 <code>reason</code>）/ <code>pending</code> / <code>substrate</code> / <code>token_fp</code> / <code>credential_file</code>（<code>src\sair\v4\term\Cmd.java:1045</code>–<code>:1072</code>）。<code>spool_owner=shell</code> 是刻意加的，免得客户端把 <code>spool=0</code> 读成"off 把落盘关掉了"（<code>:1056</code>–<code>:1058</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/debug simulate on|off</span><span class="k-def">输入口动不动手</span><span class="badge warn">默认开</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>改输入口的仿真开关，回 <code>调试输入口 simulate=on（动作照常）</code> 或 <code>simulate=off（端口照常在听：动作一律回 -ERR debugSimulate=off）</code>（<code>src\sair\v4\term\Cmd.java:993</code>–<code>:1005</code>）。参数里除 <code>off</code> / <code>false</code> / <code>0</code> 之外的一切值都当"开"（<code>:995</code>–<code>:996</code>）。</dd>
+              <dt>注意</dt>
+              <dd>输入口没在听时这条<b>什么都不改</b>，只回"simulate 没改：调试输入口没在听（先 <code>ai/debug on</code>）"（<code>src\sair\v4\term\Cmd.java:997</code>–<code>:1000</code>）。关掉仿真后端口照常听、只是动作回一句错误码 —— <b>绝不表现成"连不上"</b>（<code>:936</code>–<code>:937</code>）；出厂默认是开（<code>src\sair\v4\Conf.java:308</code>）。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <h3 class="sec">口开了之后怎么用：2660 的命令面</h3>
+        <p>连上后先发认证行 <code>AUTH &lt;token&gt;</code>：失败会被拒并限流记一行（同一来源每 <code>REJECT_LOG_MS</code> 秒最多一行、带累计次数，<b>token 本身永不进日志</b>；比对是常量时间实现）（<code>src\sair\v4\dev\DebugPort.java:799</code>–<code>:815</code>、<code>:788</code>–<code>:797</code>）。</p>
+        <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>命令</th><th>参数</th><th>分类</th><th>说明</th></tr></thead>
+            <thead><tr><th>命令</th><th>作用</th></tr></thead>
             <tbody>
-              <tr><td class="cmd-name">ai/skills</td><td>—</td><td><span class="badge b-purple">技能</span></td><td>列出所有已学习的技能</td></tr>
-              <tr><td class="cmd-name">ai/skillsearch</td><td>[关键词]</td><td><span class="badge b-purple">技能</span></td><td>FTS5 全文搜索技能库</td></tr>
-              <tr><td class="cmd-name">ai/skillinfo</td><td>[ID]</td><td><span class="badge b-purple">技能</span></td><td>查看技能详情</td></tr>
-              <tr><td class="cmd-name">ai/skilldelete</td><td>[ID]</td><td><span class="badge b-purple">技能</span></td><td>删除指定技能</td></tr>
-              <tr><td class="cmd-name">ai/skillextract</td><td>—</td><td><span class="badge b-purple">技能</span></td><td>从最近日志 LLM 蒸馏提取新技能</td></tr>
-              <tr><td class="cmd-name">ai/skillevolve</td><td>—</td><td><span class="badge b-purple">技能</span></td><td>LLM 分析失败模式进化技能</td></tr>
-              <tr><td class="cmd-name">ai/skillexport</td><td>[ID]</td><td><span class="badge b-purple">技能</span></td><td>导出单个技能为 Markdown</td></tr>
-              <tr><td class="cmd-name">ai/skillexportall</td><td>—</td><td><span class="badge b-purple">技能</span></td><td>导出全部技能为 Markdown</td></tr>
-              <tr><td class="cmd-name">ai/clearstickers</td><td>—</td><td><span class="badge b-purple">技能</span></td><td>清空表情包图片库（本地 + 数据库）</td></tr>
+              <tr><td><code>ping</code> / <code>help</code> / <code>status</code></td><td>连通性 / 命令表 / 一行摘要（<code>ready</code> <code>loading</code> <code>degraded</code> 与外挂、工具、扩展点、NapCat、捕获、行数、游标、错误行数等）+ 事实行</td></tr>
+              <tr><td><code>read [sinceSeq] [maxChars]</code> / <code>tail [N]</code></td><td>增量读控制台捕获（游标式，把上次回的 seq 传回来只拿新增）/ 读最近 N 条（默认 50，上限 1000）</td></tr>
+              <tr><td><code>dump [sinceSeq]</code></td><td><b>一次取全部</b>控制台输出：从落盘读，不受内存窗口限制；单次上限 4MB，超了结尾给续取游标</td></tr>
+              <tr><td><code>talk</code> / <code>talktext</code> / <code>talksay</code> / <code>talktail</code> / <code>talkdump</code></td><td>对话正文通道：注解版 / 增量拼正文 / 只看最终整句 / 最近 N 条 / 一次取全部</td></tr>
+              <tr><td><code>hist [N]</code></td><td>框架命令历史最近 N 条（默认 20）</td></tr>
+              <tr><td><code>exit</code> / <code>quit</code> / <code>bye</code></td><td><code>exit</code> = 关框架（进程仍不结束，见<a href="#cautions">第十三节</a>）；<code>quit</code>/<code>bye</code> = 只关这条连接</td></tr>
+              <tr><td>其它任何一行</td><td>当框架控制台命令执行（等价于人在控制台敲，例如 <code>ai/status</code>、<code>ai/restart</code>）；命令顺带产生的对话正文会自动附在回包末尾</td></tr>
             </tbody>
           </table>
         </div>
+        <p class="t-cap">命令表正文出自 <code>src\sair\v4\dev\DebugPort.java:1115</code>–<code>:1138</code>（输入口的客户端脚本是 <code>_sim.ps1</code>，同一段文案里点名）；分派实现 <code>:822</code>–<code>:913</code>。两个口各自独立：任何一个起不来，另一个照常可用，基板照常可用 —— 调试口是观测面，不是关键路径（<code>:434</code>–<code>:440</code>）。</p>
       </section>
 
-      <section class="section" id="tools-local">
-        <div class="section-head reveal">
-          <div class="section-tag">Tools</div>
-          <h2>FC 工具清单</h2>
-          <p class="desc">ToolDispatcher 注册的三套工具集：本地全量 / execq 受限 / execs 全权限。</p>
-        </div>
+      <section class="chapter" id="tick-cmds">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">心跳</span>
+          <h2>十一、心跳命令：<code>tick</code> / <code>alarm</code></h2>
+          <p class="chapter-desc">心跳是"每隔一会儿做点什么"的唯一挂点：它派发定时钩子，并检查到点的定时唤醒任务。这两条命令一个手动跑一次、一个看清单。</p>
+        </header>
 
-        <div class="card-grid cols-2 reveal">
-          <div class="card"><div class="card-icon ic-cyan">📦</div><h3>本地全量工具（37 个）</h3>
-            <p style="margin-bottom:6px"><b>系统/文件</b>：<code>cmd</code> <code>readfile</code> <code>readdir</code> <code>findfile</code> <code>sys</code> <code>evaljs</code> <code>eval</code> <code>download</code> <code>batchrename</code> <code>batchconvert</code></p>
-            <p style="margin-bottom:6px"><b>网络/信息</b>：<code>web</code> <code>search</code> <code>weather</code> <code>time</code> <code>balance</code></p>
-            <p style="margin-bottom:6px"><b>记忆/知识</b>：<code>remember</code> <code>correct</code> <code>note</code> <code>searchnote</code> <code>schedule</code> <code>alarm</code> <code>skillextract</code> <code>skillinfo</code> <code>searchglobal</code> <code>markmessage</code> <code>setpreference</code> <code>getpreference</code></p>
-            <p style="margin-bottom:6px"><b>媒体/图片</b>：<code>sendimage</code> <code>sendrecord</code> <code>sendfile</code> <code>setimageremark</code> <code>vision</code></p>
-            <p><b>三方/其他</b>：<code>thirdskill</code> <code>callskill</code> <code>tp_*</code> <code>superise</code> <code>editprompt</code> <code>stop</code></p>
-            <p style="margin-top:6px"><b>多智能体</b>：<code>call_agent</code> <code>ask_agent</code></p>
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/tick</span><span class="k-def">用法：<code>ai/tick</code>，不接受参数</span><span class="badge ok">手动跑一次心跳</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>手动触发一次心跳，回 <code>手动心跳完成（第 N 次）</code>（N 是累计次数）（<code>src\sair\v4\term\Cmd.java:194</code>–<code>:202</code>）。</dd>
+              <dt>心跳做什么</dt>
+              <dd>① 派发定时钩子事件（一切"每隔一会儿做点什么"都挂这里，不再各起线程）；② 检查到点的定时唤醒任务，到点就唤起主 Agent 跑一轮并把结果送回目标会话（<code>src\sair\v4\Tick.java:23</code>–<code>:24</code>、<code>:72</code> 起；派发 <code>:81</code>、到点检查 <code>:89</code>）。</dd>
+              <dt>周期与装配位置</dt>
+              <dd>键 <code>tickMs</code>，出厂默认 <code>20000</code> ms（<code>src\sair\v4\Conf.java:131</code>）；心跳装配是第⑬步，启动是第⑲步（<code>src\sair\v4\Boot.java:690</code>、<code>:783</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>心跳面；没装配时回 <code>tick 不可用：心跳未装配（&lt;缺什么&gt;）</code>（<code>src\sair\v4\term\Cmd.java:195</code>–<code>:198</code>）。</dd>
+              <dt>注意</dt>
+              <dd>它是"手动补一拍"，不是"改周期"：周期只能 <code>ai/config set tickMs &lt;毫秒&gt;</code> 写文件后由 <code>ai/start</code> / <code>ai/restart</code> 生效。</dd>
+            </dl>
           </div>
-          <div class="card" id="tools-execq"><div class="card-icon ic-magenta">🔒</div><h3>execq 受限工具（63 个）</h3>
-            <p style="margin-bottom:6px"><b>基础/信息</b>：<code>cmd</code>（仅help）<code>eval</code>（仅搜索抓取）<code>web</code> <code>search</code> <code>readdir</code> <code>readfile</code> <code>findfile</code> <code>weather</code> <code>time</code> <code>vision</code> <code>remember</code> <code>correct</code> <code>note</code> <code>searchnote</code> <code>balance</code> <code>searchglobal</code> <code>markmessage</code> <code>setpreference</code> <code>getpreference</code></p>
-            <p style="margin-bottom:6px"><b>表情包</b>：<code>sendsticker</code> <code>collectsticker</code> <code>clearsticker</code> <code>setimageremark</code></p>
-            <p style="margin-bottom:6px"><b>群管（仅主人）</b>：<code>ban</code> <code>kick</code> <code>muteall</code> <code>setadmin</code> <code>setcard</code> <code>setgroupname</code> <code>setname</code> <code>setsignature</code> <code>settrigger</code> <code>leavegroup</code> <code>block</code> <code>unblock</code> <code>delfriend</code></p>
-            <p style="margin-bottom:6px"><b>媒体/互动</b>：<code>poke</code> <code>sendlike</code> <code>sendfileto</code> <code>sendimage</code> <code>sendrecord</code> <code>sendfile</code> <code>relay</code> <code>forwardmsg</code> <code>skillinfo</code></p>
-            <p style="margin-bottom:6px"><b>跨群</b>：<code>grouplist</code> <code>groupmembers</code> <code>sendgroupmsg</code> <code>friendlist</code></p>
-            <p style="margin-bottom:6px"><b>好友申请/群邀请</b>：<code>pendingrequests</code> <code>approvefriend</code> <code>rejectfriend</code> <code>acceptgroupinvite</code> <code>rejectgroupinvite</code> <code>getselfinfo</code></p>
-            <p style="margin-bottom:6px"><b>捐赠/好感度</b>：<code>recorddonation</code> <code>donationlist</code> <code>resetdonation</code> <code>queryaffection</code> <code>setaffection</code> <code>affectionrank</code></p>
-            <p><b>定时/多智能体</b>：<code>alarm</code> <code>call_agent</code> <code>ask_agent</code> <code>callskill</code>（受 setthirdpartycode）</p>
-          </div>
-        </div>
 
-        <div class="callout reveal" id="tools-execs"><div class="co-icon">🛡️</div><div><b>execs 全权限工具（74 个内置）</b> = 本地全量 37 个 + QQ 专属 37 个（去重合并）；另有 <code>call_agent</code>/<code>ask_agent</code> 通信工具 + <code>tp_*</code> 动态三方工具。QQ 主人发送 <code>execs:</code> 前缀消息后，AI 进入全工具 + 全技能模式。</div></div>
-      </section>
-
-      <section class="section" id="deploy">
-        <div class="section-head reveal">
-          <div class="section-tag">Deployment</div>
-          <h2>部署指南</h2>
-          <p class="desc">编译、打包、部署三步完成。</p>
-        </div>
-        <div class="card-grid reveal">
-          <div class="card"><div class="card-icon ic-cyan">1</div><h3>编译</h3>
-            <p>使用 SFW 内置 JDK (8x64) 编译全部 93 个源文件。classpath 需包含 SFW.jar、gson、zxing、jsoup。</p>
-            <pre style="margin-top:12px"><code>javac -encoding UTF-8 -cp "SFW.jar;gson.jar;zxing-core.jar;zxing-javase.jar;jsoup.jar" -d out sair/aiagent/**/*.java</code></pre>
-          </div>
-          <div class="card"><div class="card-icon ic-purple">2</div><h3>打包</h3>
-            <p>使用 jar 命令打包，MANIFEST.MF 必须包含 <code>ACT: sair.aiagent.AiAgentActivity;</code></p>
-            <pre style="margin-top:12px"><code>jar cfm AiAgent.jar META-INF/MANIFEST.MF -C out .</code></pre>
-          </div>
-          <div class="card"><div class="card-icon ic-green">3</div><h3>部署</h3>
-            <p>将 AiAgent.jar 复制到 SFW 的 plugins/exection/ 目录，启动 SFW 后即可使用 ai/ 命令。</p>
-            <pre style="margin-top:12px"><code>Copy-Item AiAgent.jar plugins/exection/AiAgent.jar</code></pre>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/alarm</span><span class="k-def">用法：<code>ai/alarm</code>，不接受参数</span><span class="badge info">只读清单</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>打印定时唤醒清单 JSON（<code>src\sair\v4\term\Cmd.java:203</code>–<code>:210</code>；取数口 <code>Tick.alarmsJson()</code> <code>src\sair\v4\Tick.java:249</code>，逐条原始清单 <code>:230</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>心跳面；没装配时回 <code>alarm 不可用：心跳未装配（&lt;缺什么&gt;）</code>（<code>src\sair\v4\term\Cmd.java:204</code>–<code>:207</code>）。</dd>
+              <dt>注意</dt>
+              <dd>这条命令<b>只能看、不能建也不能删</b>：控制台里没有任何"新增/取消定时唤醒"的分支 —— 建与删是模型侧工具做的事。停用且早已过点的闹钟行会被维护清掉（<code>src\sair\v4\Tick.java:142</code>）。</dd>
+            </dl>
           </div>
         </div>
       </section>
+
+      <section class="chapter" id="prompt-cmds">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">提示词</span>
+          <h2>十二、提示词命令：<code>prompt</code></h2>
+          <p class="chapter-desc">提示词有它自己的热重载 —— 这一点与"改了配置要 start/restart"的口径<b>不同</b>，是刻意保留的例外。这一族还带一个运行期注入口。</p>
+        </header>
+
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/prompt</span><span class="k-def">用法：不带子命令 = <code>show</code></span><span class="badge info">看真正送进去的那份</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>打印运行时真正送进模型的基础系统提示词，并补一行"以上是运行时真正送进模型的基础系统提示词"（<code>src\sair\v4\term\Cmd.java:1209</code>–<code>:1210</code>；渲染口 <code>Prompts.system("console")</code> <code>src\sair\v4\prompt\Prompts.java:136</code>；默认子命令判据 <code>src\sair\v4\term\Cmd.java:1169</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>提示词面；没装配时回 <code>prompt 不可用：提示词未装配（&lt;缺什么&gt;）</code>（<code>src\sair\v4\term\Cmd.java:1164</code>–<code>:1167</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/prompt list</span><span class="k-def">都有哪些提示词文件</span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>先打初始提示词文件的绝对路径，再逐个列出可读的提示词文件名（<code>src\sair\v4\term\Cmd.java:1175</code>–<code>:1179</code>；文件清单口 <code>src\sair\v4\prompt\Prompts.java:53</code>）。基板只带<b>一份</b>初始提示词（单文件，<code>src\sair\v4\prompt\Prompts.java:14</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/prompt sections</span><span class="k-def">初始提示词分成哪几段</span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>每行打印一个段落名（<code>src\sair\v4\term\Cmd.java:1180</code>–<code>:1183</code>；实现 <code>PromptFile.sectionNames()</code> <code>src\sair\v4\prompt\PromptFile.java:63</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/prompt read &lt;名&gt;</span><span class="k-def">读一份提示词的原文</span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>一个名字，认三种写法：<code>identity</code>、<code>初始</code>、或配置里那个路径（<code>src\sair\v4\prompt\Prompts.java:64</code>–<code>:70</code>）；其余按提示词目录下的相对路径 / 文件名解析，<b>路径被限制在该目录内的 <code>.md</code></b>（<code>:64</code>、读口 <code>:65</code>）。</dd>
+              <dt>效果</dt>
+              <dd>打印原文；没有这份提示词时回 <code>(没有这份提示词)</code>（<code>src\sair\v4\term\Cmd.java:1184</code>–<code>:1189</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/prompt stat</span><span class="k-def">初始提示词的统计</span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>打印初始提示词的统计行（段落数、字符数一类）（<code>src\sair\v4\term\Cmd.java:1205</code>–<code>:1208</code>；实现 <code>PromptFile.stats()</code> <code>src\sair\v4\prompt\PromptFile.java:162</code>）。</dd>
+              <dt>注意</dt>
+              <dd>键 <code>identityMaxChars</code>（出厂 <code>8000</code>）只是<b>报警线，不是硬闸门</b>：初始提示词一个字都不截、一个字都不丢，超预算只在控制台打一行告警（<code>src\sair\v4\Conf.java:95</code>–<code>:105</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow ok reveal">
+            <div class="k-head"><span class="k-name">ai/prompt reload</span><span class="k-def">重载初始提示词</span><span class="badge ok">当场生效</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>重新读盘并回 <code>初始提示词已重载（N 字符）</code>（<code>src\sair\v4\term\Cmd.java:1170</code>–<code>:1174</code>；重载口 <code>Prompts.reload()</code> <code>src\sair\v4\prompt\Prompts.java:46</code>、内部 <code>:49</code>）。</dd>
+              <dt>注意</dt>
+              <dd><b>这是热重载</b>：改完提示词文件敲它就生效，<b>不需要</b> <code>ai/start</code> / <code>ai/restart</code>；<code>ai/config reload</code> 的退休回话里专门留了一句提示这条不受影响（<code>src\sair\v4\term\Cmd.java:804</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/prompt inject &lt;slot&gt; &lt;key&gt; &lt;文本&gt;</span><span class="k-def">运行期注入一段文本</span><span class="badge warn">内存态，不落盘</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>三段：槽位、键、文本（<b>文本放最后，可以带空格</b>）；少于三段只回 <code>用法：prompt inject &lt;slot&gt; &lt;key&gt; &lt;文本&gt;</code>（<code>src\sair\v4\term\Cmd.java:1190</code>–<code>:1195</code>）。槽位是四个之一：<code>system</code> / <code>context</code> / <code>tool</code> / <code>arg</code>（<code>:1382</code>）。</dd>
+              <dt>效果</dt>
+              <dd>写进注入表并回 <code>已注入 &lt;slot&gt;/&lt;key&gt;</code>，来源记 <code>console</code>（<code>src\sair\v4\term\Cmd.java:1196</code>–<code>:1198</code>；实现 <code>Inject.put()</code> <code>src\sair\v4\prompt\Inject.java:42</code>）。</dd>
+              <dt>注意</dt>
+              <dd>注入是<b>运行期内存态</b>：<code>ai/restart</code> 会把它丢掉（那是新基板、新注入表）。要持久生效请改提示词文件本身再 <code>ai/prompt reload</code>。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow rose reveal">
+            <div class="k-head"><span class="k-name">ai/prompt clear</span><span class="k-def">清空全部注入</span><span class="badge bad">不可撤销</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>清空全部注入并回 <code>已清空全部注入</code>（<code>src\sair\v4\term\Cmd.java:1200</code>–<code>:1204</code>；实现 <code>Inject.clearAll()</code> <code>src\sair\v4\prompt\Inject.java:157</code>）。</dd>
+              <dt>注意</dt>
+              <dd class="risk">一次性全清，没有"删某一条"的控制台命令。</dd>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+      <section class="chapter" id="cautions">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">注意事项</span>
+          <h2>十三、注意事项与坑</h2>
+          <p class="chapter-desc">前十二节是"怎么用"，这一节是"别踩"。两条最要紧：群消息只有被 @ 才触发；真正要关停时不要用 <code>ai/exit</code>。</p>
+        </header>
+
+        <h3 class="sec">一、群消息只有被 @ 才触发</h3>
+        <p>这条口径在网关里只有一个判据方法：<b><code>QqGateway.shouldAnswer(Ev, Caller)</code></b>。方法体三行 —— 空调用者直接否，私聊一律回，<b>群里只认被 @</b>：</p>
+        <div class="code" data-lang="java">
+          <div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\QqGateway.java:871</span><button class="copy" type="button">复制</button></div>
+          <pre><code>public boolean shouldAnswer(Ev ev, Caller c) {
+    if (c == null) return false;
+    if (ev.isPrivate()) return true;      // 私聊 = 直接找它
+    return ev.atSelf();                   // 群里：只认被 @
+}</code></pre>
+        </div>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>要点</th><th>说明</th><th>出处</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>判断分支</td>
+                <td>方法所在分支：<b>群聊</b>（<code>ev.isPrivate()</code> 为假）走到最后一行 <code>return ev.atSelf();</code> —— 这一处就是"群里只有 @ 才触发"的全部实现；私聊在上一个分支直接 <code>return true</code>。</td>
+                <td><code>src\sair\v4\QqGateway.java:871</code>–<code>:875</code>（<code>return ev.atSelf()</code> 在 <b>:874</b>）</td>
+              </tr>
+              <tr>
+                <td>谁在用这个判据</td>
+                <td>入站处理链在"插件投票没人表态、且本条没有否定票"之后调它：判否就记一行 <code>skip reason=not_addressed session=…（非主人/非私聊/未@）</code> 并直接结束，<b>不产生模型调用</b>。</td>
+                <td><code>src\sair\v4\QqGateway.java:735</code>–<code>:738</code></td>
+              </tr>
+              <tr>
+                <td>主人也没有豁免</td>
+                <td>同一方法上方的注释写明：早先"主人一律返回"的写法让主人在群里说任何话都被回，现在口径统一 —— <b>群里要么 @ 它，要么由外挂层投票放行，主人也一样</b>。</td>
+                <td><code>src\sair\v4\QqGateway.java:863</code>–<code>:870</code></td>
+              </tr>
+              <tr>
+                <td>只有 @ 一下、没有文字</td>
+                <td>无文本且除 @ 之外没有内容段时，若没被 @ 就直接跳过；<b>被 @ 了则带着上下文起一轮</b>（输入文案是外挂文案里的「被单@时的输入」，缺键则报缺键且不发这一轮）。</td>
+                <td><code>src\sair\v4\QqGateway.java:751</code>–<code>:765</code>（判据 <code>:752</code>、群内去 @ 在 <code>:767</code>）</td>
+              </tr>
+              <tr>
+                <td>控制台不受它管</td>
+                <td>控制台命令不是 QQ 消息，<b>不经过</b>这个判据：<code>ai/chat</code> 是主人直接说话（见<a href="#chat-cmds">第四节</a>）。</td>
+                <td><code>src\sair\v4\term\Cmd.java:543</code> 起</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sec">二、真正要关停：用 <code>/exit</code>，或按精确 pid 杀进程</h3>
+        <div class="note bad reveal">
+          <p><span class="n-title">先把话说死</span>：<code>ai/exit</code> <b>不是"退出程序"</b> —— 它<b>只停基板</b>。基板停下之后调试口会关闭，而 <b>JVM 进程仍然活着</b>；于是在<b>没有控制台的场景下无法"再 start"</b>。<b>这是当前实现的行为，源码里没有任何"计划修改"的痕迹。</b></p>
+        </div>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>链路</th><th>发生了什么</th><th>出处</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>ai/exit</code> 的命令表文案</td>
+                <td>"框架转发到组件 <code>exit()</code>：停基板（不改配置、不卸载插件；之后可再 start）" —— <b>注意最后半句的前提</b>：要有控制台才谈得上"再 start"。</td>
+                <td><code>src\sair\v4\term\Cmd.java:1366</code></td>
+              </tr>
+              <tr>
+                <td>组件收到 <code>exit()</code></td>
+                <td>清掉基板与命令表引用 → 标记卸载 → <b>把观测面也一起收掉</b>（停两个口 + 关落盘句柄 + 注销控制台捕获）→ 基板还在装配时只做标记，交给装配线程跑完自己收口。</td>
+                <td><code>src\sair\v4\V4Activity.java:394</code>–<code>:414</code>、<code>src\sair\v4\dev\DebugShell.java:117</code>–<code>:136</code></td>
+              </tr>
+              <tr>
+                <td>两个口怎么没的</td>
+                <td>收观测面的第一件事就是停两个口，凭据文件 <code>debug-port.json</code> 随停止而删 —— 它是"口在听"的运行现场凭据。</td>
+                <td><code>src\sair\v4\dev\DebugShell.java:119</code>、<code>src\sair\v4\dev\DebugPort.java:671</code>–<code>:673</code></td>
+              </tr>
+              <tr>
+                <td>进程为什么还在</td>
+                <td>调试口源码注释把结论写死了：本组件路径<b>不结束进程</b>（全程 0 处 <code>System.exit</code>）；真退出要另走 <code>ai/exit</code> → 组件 <code>exit()</code> → 停基板，<b>那也只是"停基板"，同样不结束 JVM</b>；端口 / 日志 / 基板会关掉，<b>进程还在</b>。</td>
+                <td><code>src\sair\v4\dev\DebugPort.java:839</code>–<code>:845</code></td>
+              </tr>
+              <tr>
+                <td>实测复核</td>
+                <td>全仓检索 <code>System.exit</code>：<b>1 处命中，且该命中是一行注释</b>（就是上面那段说明自己）—— 源码里没有任何一处真的结束 JVM。</td>
+                <td>检索命令与结果：<code>Select-String -Path src\**\*.java -Pattern 'System\.exit'</code> → 1 命中 = <code>src\sair\v4\dev\DebugPort.java:841</code>（注释行）</td>
+              </tr>
+              <tr>
+                <td>退出之后的命令表</td>
+                <td>卸载后命令表还在（降级命令表：<code>help</code> 仍非空、其余给"未装配"的可读回话），也不会因为有人再问一句就自动装配；<code>start</code> / <code>restart</code> 会重新装配 —— 但这只对<b>还够得着控制台</b>的场景成立。</td>
+                <td><code>src\sair\v4\V4Activity.java:180</code>–<code>:192</code>、<code>:368</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sec">正确做法：两条</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h3>① 用框架控制台的 <code>/exit</code></h3>
+            <p>框架自带文档把 <code>/exit</code> 的定义写得很直白：<b>退出框架 / 退出 SFW</b> —— 示例行 <code>/exit  # 退出框架</code>（<code>C:\Sair\SairFrameWork\readme\pages\plugin-dev.html:71</code>），命令表行 <code>/exit</code> → 退出 SFW（<code>:139</code>）。它关的是框架自己的窗口，进程随之结束。</p>
+            <p class="dim">同一条路在调试输出口也留了入口：口上敲 <code>exit</code> / <code>/exit</code> 会走"关框架"那条调用 → 框架关窗（<code>src\sair\v4\dev\DebugPort.java:839</code>–<code>:861</code>、命令表 <code>:1131</code>）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h3>② 按精确 pid 杀进程</h3>
+            <p>框架是用 <code>javaw</code> 起的：<code>run.bat</code> 的内容是 <code>start 8x64\bin\javaw -jar SFW.jar %*</code>（实测读取 <code>C:\Sair\SairFrameWork\run.bat</code>）。<code>javaw</code> 没有控制台窗口，所以"关掉黑框"这条路不存在。</p>
+            <p class="dim">要做的是<b>先定位到这一个 pid</b>再按 pid 结束它：查 <code>javaw.exe</code> 进程列表、核对命令行 / 启动时间，确认是这一个实例之后再结束。<b>不要按进程名批量结束</b> —— 同一台机器上可能有别的 java / javaw 实例。</p>
+          </div>
+        </div>
+        <div class="note warn reveal">
+          <p><span class="n-title">把三条名字很像"关机"的命令分清</span>：<code>ai/exit</code> = 停基板 + 收观测面；<code>ai/close</code> = 只让命令进不来（基板照旧在跑）；<code>ai/uninstall</code> = 先 <code>exit()</code> + <code>close()</code>，再由框架卸载插件。<b>三条都不结束 JVM 进程。</b></p>
+        </div>
+
+        <h3 class="sec">三、其它容易踩的地方</h3>
+        <div class="keylist">
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">控制台命令跑在界面线程上</span><span class="k-def">凡"要等"的动作都不许在这里等</span><span class="badge warn">已按调用线程分流</span></div>
+            <dl>
+              <dt>现象</dt>
+              <dd>输入框、面板重绘、控制台输出都在同一条界面线程上；命令里只要阻塞几秒，界面就整块卡住。</dd>
+              <dt>现状</dt>
+              <dd><code>ai/chat</code> 在界面线程上<b>只提交、不等</b>（正文由落点流式打出去，摘要行由回合线程补），脚本 / 其它后台线程照旧阻塞等待（<code>src\sair\v4\term\Cmd.java:555</code>–<code>:561</code>、<code>:592</code>）；<code>ai/napcat send</code> 把网络往返丢给后台线程（<code>:1243</code>–<code>:1250</code>）。</dd>
+              <dt>注意</dt>
+              <dd class="risk"><code>ai/store vacuum</code>、<code>ai/store optimize</code>、<code>ai/store maintain</code> 没有这层分流 —— 它们直接在调用线程上跑数据库操作，库大时界面会等你敲完的那条命令。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">三类命令"只改文件"</span><span class="k-def">改完不生效是设计，不是故障</span><span class="badge warn">回执里已写明</span></div>
+            <dl>
+              <dt>哪三类</dt>
+              <dd><code>ai/config set</code>、<code>ai/napcat on|off</code>、<code>ai/napcat relay on|off</code> —— 回执统一带"未生效 —— 要 <code>ai/start</code>；已在运行则 <code>ai/restart</code>"（共用回执 <code>src\sair\v4\term\Cmd.java:896</code>–<code>:903</code>）。</dd>
+              <dt>怎么确认清空了</dt>
+              <dd><code>ai/status</code> 在<b>任何</b>状态下都给待生效清单：加载中给个数、已就绪<b>总是</b>打一行（哪怕是 <code>pending=0</code>），好让人看见清单变空了（<code>src\sair\v4\term\Cmd.java:397</code>–<code>:400</code>、<code>:406</code>–<code>:421</code>）。</dd>
+              <dt>例外</dt>
+              <dd>提示词正文有自己的热重载（<code>ai/prompt reload</code>），见<a href="#prompt-cmds">第十二节</a>。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">不在已知键表里的键</span><span class="k-def">写了也没用</span><span class="badge info">回执会点明</span></div>
+            <dl>
+              <dt>判据</dt>
+              <dd>已知键表 = <code>Conf.knownKeys()</code>（<code>src\sair\v4\Conf.java:1173</code> 起），表里只登记"有人读"的键；不在表里的键照写进文件，但<b>不会有任何行为变化</b>（回执原文 <code>src\sair\v4\term\Cmd.java:825</code>）。</dd>
+              <dt>注意</dt>
+              <dd>旧的口径类键若还留在 <code>config.json</code> 里，启动时只提示一行"已退休"，不报错、不参与判定（<code>src\sair\v4\Conf.java:134</code>–<code>:136</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">调试口开了不等于基板在跑</span><span class="k-def">两个口与基板相互独立</span><span class="badge info">看 substrate=</span></div>
+            <dl>
+              <dt>怎么分清</dt>
+              <dd><code>ai/debug status</code> 那行事实里有 <code>substrate=running|not_started</code>（未跑时带 <code>reason=</code>）；两个口<b>不缓存</b>基板：<code>ai/start</code> 之后它们报的就是那台活基板（<code>src\sair\v4\term\Cmd.java:1037</code>–<code>:1039</code>、<code>src\sair\v4\V4Activity.java:423</code>–<code>:427</code>）。</dd>
+              <dt>注意</dt>
+              <dd><code>ai/debug off</code> 只停两个口：<b>不停落盘、不删任何日志文件</b>；反过来停基板也不会关这两个口（<code>src\sair\v4\term\Cmd.java:980</code>–<code>:985</code>、<code>:1011</code>–<code>:1012</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow rose reveal">
+            <div class="k-head"><span class="k-name">不可撤销的几条</span><span class="k-def">敲下去就生效，没有确认步骤</span><span class="badge bad">想清楚再敲</span></div>
+            <dl>
+              <dt>清单</dt>
+              <dd><code>ai/perm reset</code>（清空全部好感度记录 <code>src\sair\v4\term\Cmd.java:669</code>）· <code>ai/prompt clear</code>（清空全部注入 <code>:1200</code>）· <code>ai/reset</code>（清控制台会话历史 <code>:137</code>）· <code>ai/store vacuum</code>（回收空闲页且期间独占数据库 <code>:1326</code>）· <code>ai/uninstall</code>（框架级卸载，卸载后要重装才可用 <code>:1368</code>）· <code>ai/store import</code>（往库里加行，不是替换 <code>:1336</code>）。</dd>
+              <dt>注意</dt>
+              <dd class="risk">这些命令都没有确认口，也不产生备份文件。数据库文件本身可以离线复制一份当保险。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">已经不存在的东西</span><span class="k-def">别照着老习惯敲</span><span class="badge mute">未实现 / 已删除</span></div>
+            <dl>
+              <dt>已删除</dt>
+              <dd><code>perm levels</code> / <code>perm setlevel</code>（旧档位体系的读写口，整组删除，<code>src\sair\v4\term\Cmd.java:677</code>–<code>:679</code>）；<code>execs</code> / <code>execq</code> / <code>execfc</code> / <code>orchestrate</code>（已删除的「通道」概念，<code>:211</code>–<code>:217</code>）；<code>debugPort</code> / <code>debugToken</code> / <code>debugSimPort</code> / <code>debugSimulate</code> 四个配置键（<code>src\sair\v4\Conf.java:1283</code>–<code>:1286</code>）；<code>config reload</code> 的热重载语义（命令还在，只回一句"已退休"，<code>src\sair\v4\term\Cmd.java:800</code>）。</dd>
+              <dt>未实现（不承诺）</dt>
+              <dd>控制台里<b>没有</b>这些口子，源码里也没有对应分支：定时唤醒的新增 / 取消；权限账本的写入（授权 / 撤销）；失败步骤的自动重试；<code>ai/exit</code> 之后"没有控制台也能再 start"的远程入口；<code>ai/debug on</code> 指定端口。要用到它们，只能走上面写明的既有路径。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <div class="note ok reveal">
+          <p><span class="n-title">一句话总括</span>：<b>改文件类命令</b>（<code>config set</code> / <code>napcat on|off</code> / <code>napcat relay on|off</code>）改完要 <code>ai/start</code> 或 <code>ai/restart</code>；<b>看状态类命令</b>（<code>help</code> / <code>status</code> / <code>tools</code> / <code>config</code> / <code>acl</code> / <code>debug status</code>）任何状态下都能敲；<b>要真关停</b>用框架控制台的 <code>/exit</code> 或按精确 pid 杀进程 —— 不要指望 <code>ai/exit</code>。</p>
+        </div>
+      </section>
+
 
     </div>
 
-    <footer class="footer">
-      <div class="container">
-        <p><span class="brand">AiAgent</span> v4.0 · 60 命令 · 74 FC 工具 · 部署三步骤</p>
-      </div>
-    </footer>
-  </main>
+            <nav class="pager">
+      <a class="prev" href="config.html"><span class="p-dir">← PREV</span><span class="p-name">04 · 配置键面</span></a>
+      <a class="next" href="capabilities.html"><span class="p-dir">NEXT →</span><span class="p-name">06 · 基板能力</span></a>
+    </nav>
 
-  <div class="back-to-top" title="回到顶部">↑</div>
-  <script src="js/main.js"></script>
+    <footer class="foot">
+      <span>AiAgent V4 文档 · 纯静态、自包含（无 CDN / 无第三方库 / 无网络请求）</span>
+      <span>插件：<code>AiAgentV4.jar</code></span>
+      <span>数据目录：<code>SairFrameWork\data\AiAgent-V4\</code></span>
+      <a href="index.html">回到总览</a>
+      <div class="icp">湘ICP备2025152033号</div>
+    </footer>
+  </div>
+
+  <aside class="rail">
+    <div class="rail-inner">
+      <p class="rail-title">本页目录</p>
+      <ol id="toc-list"></ol>
+      <div class="rail-foot">点击标题右侧 <code>#</code> 可复制该小节链接</div>
+    </div>
+  </aside>
+</main>
+
+<button class="to-top" id="to-top" type="button" title="回到顶部">↑</button>
+<script src="js/site.js"></script>
 </body>
 </html>

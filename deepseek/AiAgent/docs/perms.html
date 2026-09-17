@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>权限管理 · AiAgent V4 文档</title>
+<meta name="description" content="AiAgent V4 权限管理：ACL 模型（三主体 / 五类资源 / 三位）、perms.json 账本格式、ai/acl 与 ai/perm 的分工、怎么授权与撤销、默认与例外、拒绝长什么样、技术实现与排错。">
+<link rel="stylesheet" href="css/site.css">
+<noscript><style>.reveal{opacity:1 !important;transform:none !important}#bg-canvas,.scanline{display:none !important}</style></noscript>
+</head>
+<body data-page="perms">
+
+<canvas id="bg-canvas" aria-hidden="true"></canvas>
+<div class="scanline" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="brand-mark">V4</span>
+    <span class="brand-text"><b>AiAgent V4</b><span>SFW PLUGIN DOCS</span></span>
+  </a>
+    <nav class="nav" aria-label="页面导航">
+    <a href="index.html"><span class="n">01</span>总览</a>
+    <a href="usage.html"><span class="n">02</span>使用</a>
+    <a href="deploy.html"><span class="n">03</span>部署</a>
+    <a href="config.html"><span class="n">04</span>配置</a>
+    <a href="commands.html"><span class="n">05</span>命令</a>
+    <a href="capabilities.html"><span class="n">06</span>能力</a>
+    <a href="perms.html"><span class="n">07</span>权限</a>
+    <a href="files.html"><span class="n">08</span>文件</a>
+    <a href="architecture.html"><span class="n">09</span>实现</a>
+    <a href="migration.html"><span class="n">10</span>升级</a>
+    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+  </nav>
+  <div class="topbar-meta">
+    <span class="chip live">纯静态</span>
+    <span class="chip">无外链资源</span>
+  </div>
+  <button class="burger" type="button" aria-label="展开导航" aria-expanded="false">☰</button>
+</header>
+<div class="progress" id="progress" aria-hidden="true"></div>
+
+<main class="shell">
+  <div class="doc">
+
+    <section class="hero">
+      <span class="eyebrow">权限管理 · 资源 ACL</span>
+      <h1>谁能做什么<br><span class="grad">靠一本账说了算</span></h1>
+      <p class="lede">
+        权限是本基板的九件事之一，也是<b>唯一授予/撤销能力的地方</b>：判据只有一本账（数据根下的 <code>perms.json</code>），
+        规则只有一条 —— <b>按资源类型的默认分配 + 例外条目突破默认</b>；<b>空位 = 拒绝</b>。
+      </p>
+      <div class="hero-actions">
+        <a class="btn" href="#query">我先看看现在是什么权限 →</a>
+        <a class="btn amber" href="#change">我要给别人开权限</a>
+        <a class="btn ghost" href="#deny">被拒时长什么样</a>
+      </div>
+      <div class="hero-grid">
+        <div class="kpi"><div class="k">主体</div><div class="v">3<small>类身份</small></div></div>
+        <div class="kpi"><div class="k">资源</div><div class="v">5<small>类</small></div></div>
+        <div class="kpi"><div class="k">位</div><div class="v">3<small>R / W / X</small></div></div>
+        <div class="kpi amber"><div class="k">账本</div><div class="v">1<small>个文件</small></div></div>
+        <div class="kpi rose"><div class="k">默认</div><div class="v">拒绝<small>空位=拒</small></div></div>
+        <div class="kpi"><div class="k">判据处</div><div class="v">1<small>处实现</small></div></div>
+      </div>
+    </section>
+
+    <div class="doc-body" id="doc-body">
+
+      <!-- ============ 1 ============ -->
+      <section class="chapter" id="model">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">01 / 模型</span>
+          <h2>权限模型：谁 × 什么 × 哪一位</h2>
+          <p class="chapter-desc">一次判定永远由三件事决定：<b>主体</b>（谁在要）、<b>资源</b>（要什么）、<b>位</b>（要读、要写、还是要执行/对外）。</p>
+        </header>
+
+        <h3 class="sec">主体三类（外加两种写法）</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>主体</th><th>是谁</th><th>默认位</th><th>出处</th></tr></thead>
+            <tbody>
+              <tr><td><code>MASTER</code></td><td>主人。<b>本地控制台 ≡ QQ 里的主人</b>（控制台调用者就是主人）</td><td><b>恒全权</b>，任何条目都影响不到他</td><td><code>auth\Caller.java:13-19</code>、<code>:17</code>、<code>auth\Acl.java:883</code></td></tr>
+              <tr><td><code>SYSTEM</code></td><td><b>她自己的自主行为</b>（定时唤醒、维护、她自己发出去的话）</td><td><code>A:R</code> / <code>B:RW</code> / <code>C:RWX</code> / <code>E:X</code></td><td><code>auth\Caller.java:23-25</code>、<code>:18</code>、<code>auth\Acl.java:182-190</code></td></tr>
+              <tr><td><code>ALLUSER</code></td><td>除主人与她之外的所有人（是 <code>User&lt;QQ&gt;</code> 与 <code>Group&lt;群号&gt;</code> 的底稿）</td><td>按类默认分配（见下一节）</td><td><code>auth\Caller.java:19</code>、<code>:96-98</code>、<code>auth\Acl.java:55-56</code></td></tr>
+              <tr><td><code>User&lt;QQ号&gt;</code></td><td>某一个具体的人（裸 QQ 号是它的便捷写法）</td><td>命中例外就按例外给位</td><td><code>auth\Acl.java:42</code>、<code>:399-410</code></td></tr>
+              <tr><td><code>Group&lt;群号&gt;</code></td><td>某一个群里的所有人</td><td>命中例外就按例外给位</td><td><code>auth\Acl.java:42</code>、<code>:264-273</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">层级与顺序</h4>
+            <p><b>主体层级</b>：<code>User&lt;QQ&gt;(3) &gt; Group&lt;群号&gt;(2) &gt; ALLUSER(1)</code>；<code>SYSTEM</code> <b>自成一路</b>（只对 <code>Kind.SYSTEM</code> 生效，层级 3）。<b>同一层级里，后面的条目覆盖前面的</b>。</p>
+            <p class="t-cap">出处 <code>auth\Auth.java:27</code>、<code>auth\Acl.java:139-141</code>、<code>:264-273</code>、<code>:654</code>。判定顺序是「<b>显式 SYSTEM 标志 &gt; master &gt; 其它</b>」（<code>auth\Caller.java:26-27</code>、<code>:129-130</code>）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0"><code>MASTER</code> 不接受例外</h4>
+            <p>账本里<b>写 <code>MASTER</code> 会被拒收</b>（主体只允许 <code>User&lt;QQ号&gt;</code> / <code>Group&lt;群号&gt;</code> / <code>SYSTEM</code> / <code>ALLUSER</code>）；主人恒全权，不需要也不允许给他写例外。</p>
+            <p class="t-cap">出处 <code>auth\Acl.java:43</code>、<code>:411</code>、<code>:429-434</code>。</p>
+          </div>
+        </div>
+
+        <div class="note reveal">
+          <p><span class="n-title">她有三条"自主行为"路径会落到 <code>SYSTEM</code></span>：没有触发者的那些调用（定时唤醒、维护、她自己发出去的话）。出处 <code>auth\Caller.java:26-27</code>、<code>:80-83</code>。</p>
+        </div>
+      </section>
+
+      <!-- ============ 2 ============ -->
+      <section class="chapter" id="res">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">02 / 资源</span>
+          <h2>资源五类，位只有三个</h2>
+          <p class="chapter-desc">资源按"要动的是什么东西"分类，类别字母就是账本里条目的第一个字符。</p>
+        </header>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>类</th><th>是什么</th><th>范围怎么写</th><th><code>ALLUSER</code> 默认</th><th>出处</th></tr></thead>
+            <tbody>
+              <tr><td><code>A</code></td><td><b>本机</b>：SFW 数据根之外的任意本机路径，以及本机进程</td><td>路径（<code>""</code> = 整个 A 类）</td><td><b>无</b>（一位都不给）</td><td><code>auth\Res.java:10</code>、<code>:63-67</code>、<code>auth\Acl.java:145-150</code></td></tr>
+              <tr><td><code>B</code></td><td><b>SFW 之内</b>：SFW 运行时目录里的文件（含插件数据根里的那些）</td><td>路径（<code>""</code> = 整个 B 类）</td><td><b>无</b></td><td><code>auth\Acl.java:154-158</code>、<code>auth\Res.java:10</code></td></tr>
+              <tr><td><code>C</code></td><td><b>数据</b>：库的全部内容（<code>db:&lt;库&gt;</code> 一类）、运行期内存状态（<code>mem:xxx</code>）、数据根的 <code>files</code> 目录</td><td>库名 / <code>mem:xxx</code> / <code>files</code> 下的路径（<code>""</code> = 整个 C 类）</td><td><code>R</code></td><td><code>auth\Acl.java:164-166</code>、<code>:44-46</code></td></tr>
+              <tr><td><code>E</code></td><td><b>对外</b>：QQ 平台动作（NapCat 的输入输出）+ 向 SFW 发命令</td><td>动作名（<code>""</code> = 整个 E 类）</td><td><b>无</b></td><td><code>auth\Acl.java:171-172</code>、<code>auth\Res.java:209</code></td></tr>
+              <tr><td><code>T</code></td><td><b>工具</b>：一把工具的"入口"（工具执行过程本身不判位，判定只发生在入口）</td><td>工具名（可省 <code>tool:</code> 前缀，<code>""</code> = 整个 T 类）</td><td><b>无</b></td><td><code>auth\Acl.java:179-180</code>、<code>:457-458</code>、<code>tool\Registry.java:191-199</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">三个位</h4>
+            <p>位只有三个：<b><code>R</code></b> 读 / 看；<b><code>W</code></b> 写 / 改 / 注册；<b><code>X</code></b> 执行或对外（把东西交出去）。三个位可以任意组合写成 <code>RWX</code> 这样的串。</p>
+            <p class="t-cap">出处 <code>auth\Bits.java</code>（位运算与 <code>format()</code>）、<code>auth\Acl.java:40-47</code>（条目里"位"这一格）。<b>认不出的位串 = 空</b>（fail-closed，<code>auth\Acl.java:392-397</code>、<code>auth\Bits.java:15-16</code>）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0"><code>T</code> 类只看 <code>X</code></h4>
+            <p>工具能不能用只有一条判据：<b>有效位里有没有 <code>X</code></b>；看不到的工具名不会出现在模型面前（可见性也由同一位决定）。</p>
+            <p class="t-cap">出处 <code>tool\Registry.java:191-199</code>、<code>:210-217</code>（入口闸门）、<code>:426-446</code>（<code>ai/tools</code> 的行格式与有效位）。</p>
+          </div>
+        </div>
+
+        <div class="note warn reveal">
+          <p><span class="n-title">特例：数据根的 <code>files</code> 目录</span>：它是 <b>C 类里的一个"特例文件实体"</b> —— 位一律服从 C 的默认分配（<code>ALLUSER = R</code>、<code>SYSTEM = RWX</code>），但它会按<b>路径式范围</b>命中，所以 <code>C["User&lt;QQ&gt;","&lt;数据根&gt;/files","RWX"]</code> 这种写法能命中它下面的文件。出处 <code>auth\Res.java:118-130</code>、<code>:236-243</code>、<code>auth\Acl.java:87</code>、<code>:292-296</code>。</p>
+        </div>
+      </section>
+
+      <!-- ============ 3 ============ -->
+      <section class="chapter" id="ledger">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">03 / 账本</span>
+          <h2>账本：<code>perms.json</code></h2>
+          <p class="chapter-desc">一本账，一个文件，在数据根下。<b>账本里没有的东西 = 没给</b>；账本里写了空位 = <b>明确拒绝</b>。</p>
+        </header>
+
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">文件与格式</h4>
+            <p>文件名固定 <code>perms.json</code>，内容形如 <code>{"version":3,"entries":[…]}</code>；一条条目的形态是 <code>类["主体","范围","位"]</code>。</p>
+            <p class="t-cap">出处 <code>auth\Acl.java:121</code>（文件名）、<code>auth\Auth.java:24</code>（唯一一本账 + <code>version:3</code>）、<code>auth\Acl.java:40-47</code>（条目语法）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">它在哪、谁写它</h4>
+            <p>在数据根下：<code>SairFrameWork\data\AiAgent-V4\perms.json</code>（数据根由配置对象拼出）。<b>写入方是插件自己</b>（授权/撤销时落盘）；<b>随仓库的部署脚本明确跳过它</b> —— 不覆盖线上账本；若源侧是旧版格式只提示、不迁移。</p>
+            <p class="t-cap">出处 <code>auth\Auth.java:83</code>、<code>Conf.java:1093-1103</code>；部署脚本里的账本段与其跳过/校验行为：仓库根部署脚本 <code>:47-53</code>（账本段与文件名）、<code>:171</code>（版本不是 3 ⇒ <code>LEDGER_MIGRATION_FAILED</code>）、<code>:183</code>（条目形态非法 ⇒ <code>LEDGER_ENTRY_SHAPE_BAD</code>）、<code>:185</code>（读不了 ⇒ <code>LEDGER_UNREADABLE</code>）。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">条目形态（照这个写就不会错）</h3>
+        <div class="code" data-lang="json">
+          <div class="code-head"><span class="lang">json</span><span class="path">&lt;数据根&gt;\perms.json（写法示意，不是线上实录）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>{
+  "version": 3,
+  "entries": [
+    "T[\"User123456\",\"&lt;工具名&gt;\",\"X\"]",     // 只给这个人这一把工具的入口
+    "E[\"User123456\",\"send_group_msg\",\"X\"]", // 允许他发群消息（E 类：对外动作）
+    "A[\"Group121873503\",\"D:/share\",\"RW\"]",  // 这个群里的人可读可写 D:/share
+    "B[\"ALLUSER\",\"\",\"\"]"                   // 全体用户在 B 类：空位 = 明确拒绝
+  ]
+}</code></pre>
+        </div>
+        <p class="t-cap">语法与取值范围出处 <code>auth\Acl.java:40-47</code>；<code>E["…","send_group_msg","X"]</code> 这行是源码自带的示范写法（<code>auth\Acl.java:172</code>）；"空串 = 整个该类"见 <code>:44-47</code>、<code>:92-99</code>；<b>空位串一律当"拒绝"</b>（<code>auth\Acl.java:55-56</code> 的默认位表就是这种"空"的语义）。</p>
+
+        <div class="note bad reveal">
+          <p><span class="n-title">改账本前先备份</span>：把 <code>perms.json</code> 复制一份带时间戳再动。<b>非法条目不会被"猜"着用</b> —— 形态认不出就跳过并给一行告警（<code>auth\Acl.java:624</code>），而过期的 <code>default</code> 字段也会被忽略并告警一次（<code>:590-593</code>）。</p>
+        </div>
+      </section>
+
+      <!-- ============ 4 ============ -->
+      <section class="chapter" id="query">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">04 / 查</span>
+          <h2>怎么查：<code>ai/acl</code> 看权限，<code>ai/perm</code> 看好感度</h2>
+          <p class="chapter-desc">这两个命令名字像、含义完全不同。一句话：<b><code>ai/acl</code> 管"能不能做"（只读），<code>ai/perm</code> 管好感度数值</b>。</p>
+        </header>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>命令</th><th>干什么</th><th>做完会看到什么</th><th>能不能改</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>ai/acl</code></td>
+                <td>看权限账本：<b>默认分配 + 逐条例外（带主体层级）</b></td>
+                <td>两段：一行"默认分配（一条例外都没命中时，按资源类型）" + 一行"她自己的默认分配（SYSTEM）"，然后是账本里的条目逐条列出（空串范围会标注"（空串 = 整个 X 类）"），超出上限会写"还有 N 条"</td>
+                <td><b>只读</b></td>
+              </tr>
+              <tr>
+                <td><code>ai/perm</code></td>
+                <td>看/设/重置<b>好感度</b></td>
+                <td>好感度数值与榜单口径</td>
+                <td>能改好感度（<b>不是权限</b>）</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">出处：命令注册 <code>term\Cmd.java:166</code>（<code>acl</code>）、<code>:162</code>（<code>perm</code>）；命令表原文分工 <code>Cmd.java:1383-1384</code>、<code>:1393-1394</code>；<code>acl</code> 的输出由账本自己生成（<code>auth\Acl.java:647-663</code>）。<b>好感度不参与任何权限判定</b>（<code>auth\Auth.java:32-33</code>、<code>:57</code>）。</p>
+
+        <div class="note reveal">
+          <p><span class="n-title">她在每一轮都能看到你的权限事实</span>：事实块里有三个键 —— <code>caller.kind</code>（你属于哪类主体）、<code>caller.bits</code>（你对五类资源的<b>有效位</b> = 结论）、<code>caller.rules</code>（<b>能命中你的例外条目</b> = 依据）。她据此判断"这件事能不能答应你"。</p>
+          <p class="t-cap">出处 <code>ctx\CtxBuild.java:298</code>（<code>kind</code>）、<code>:299</code>、<code>:401</code>（<code>bits</code>）、<code>:303</code>、<code>:416-446</code>（<code>rules</code>，含条数上限 <code>:412</code>）；取值一律问账本，基板不另算一套（<code>auth\Acl.java:1113</code>、<code>ctx\CtxBuild.java:120-126</code>）。</p>
+        </div>
+      </section>
+
+      <!-- ============ 5 ============ -->
+      <section class="chapter" id="change">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">05 / 改</span>
+          <h2>怎么授权与撤销</h2>
+          <p class="chapter-desc">控制台<b>不直接改账本</b>：授权/撤销/查询/验算走<b>她那边的 <code>perm</code> 工具</b>（基板内置工具，随基板走）。</p>
+        </header>
+
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">三条路，各管一段</h4>
+            <ul class="plain">
+              <li><b>授权 / 撤销 / 查询 / 验算</b>：用她的 <code>perm</code> 工具（对主人开放）；</li>
+              <li><b>看结果</b>：<code>ai/acl</code>（只读，账本怎么判就怎么显示，不另算一套）；</li>
+              <li><b>看数值</b>：<code>ai/perm</code>（好感度，与权限无关）。</li>
+            </ul>
+            <p class="t-cap">出处 <code>term\Cmd.java:1393-1394</code>（分工原文）、<code>:1384</code>（<code>ai/acl</code> 只读）、<code>term\Builtins.java:1432-1491</code>（视图一律调账本的 <code>bitsOf</code> / <code>source</code>）、<code>:1549-1562</code>（拒绝原文与账本同形）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">落盘与生效</h4>
+            <p>授权/撤销会写账本：同一个"主体 + 类 + 规范化范围"<b>就地覆盖</b>，否则追加到末尾；撤销就是删掉那一条。</p>
+            <p class="t-cap">出处 <code>auth\Acl.java:724-732</code>（覆盖/追加）、<code>:771</code>（撤销）、<code>:810</code>（不再写已废弃的 <code>default</code> 字段）。给 <code>SYSTEM</code> 写例外时会额外提醒一行（<code>:752-753</code>）。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">可照抄的例子（每条都写"在 <code>ai/acl</code> 里会看到什么"）</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>目标</th><th>写这一条</th><th>在 <code>ai/acl</code> 里会看到</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>让<b>所有人</b>都能用某一项工具</td>
+                <td><code>T["ALLUSER","&lt;工具名&gt;","X"]</code></td>
+                <td>账本段多出一行 <code>T["ALLUSER","&lt;工具名&gt;","X"]</code>（主体 <code>ALLUSER</code>，层级 1）</td>
+              </tr>
+              <tr>
+                <td>只给<b>某一个 QQ</b>开某一项工具</td>
+                <td><code>T["User&lt;QQ号&gt;","&lt;工具名&gt;","X"]</code></td>
+                <td>多出一行 <code>T["User…"]</code>（层级 3）；同一工具如果 <code>ALLUSER</code> 另有条目，<b>层级高的先算</b></td>
+              </tr>
+              <tr>
+                <td>允许某人<b>对外发群消息</b>（E 类动作）</td>
+                <td><code>E["User&lt;QQ号&gt;","send_group_msg","X"]</code></td>
+                <td>多出一行 <code>E[…]</code>；E 类默认对 <code>ALLUSER</code> 是"无"，所以这一行是唯一来源</td>
+              </tr>
+              <tr>
+                <td><b>全员禁止</b>写 B 类（明确拒绝，压过默认）</td>
+                <td><code>B["ALLUSER","",""]</code></td>
+                <td>多出一行范围为空串的 <code>B</code> 条目（<code>ai/acl</code> 会标注"（空串 = 整个 B 类）"），位是空的 ⇒ 拒绝</td>
+              </tr>
+              <tr>
+                <td>把某一类资源<b>整类放开读</b></td>
+                <td><code>A["ALLUSER","","R"]</code></td>
+                <td>多出整类条目；A 类默认一位都不给，这一行就是"例外突破默认"</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">语法依据 <code>auth\Acl.java:40-47</code>；"空串 = 整个该类"<code>:44-47</code>；"例外突破默认"<code>:84-90</code>；E 类示范 <code>:172</code>；层级覆盖 <code>auth\Auth.java:27</code>。<b>具体有哪些工具名，不在本文档范围内</b> —— 用 <code>ai/tools</code> 可以看到当前可见的工具名（<code>Cmd.java:1374</code>）。</p>
+      </section>
+
+      <!-- ============ 6 ============ -->
+      <section class="chapter" id="defaults">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">06 / 默认</span>
+          <h2>默认分配与例外：谁说了算</h2>
+          <p class="chapter-desc">判定只有一条实现：<b>按类默认分配 + 例外突破默认</b>。一条例外都没命中时，位来自"资源类型的默认分配"。</p>
+        </header>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>主体</th><th><code>A</code> 本机</th><th><code>B</code> SFW</th><th><code>C</code> 数据</th><th><code>E</code> 对外</th><th><code>T</code> 工具</th></tr></thead>
+            <tbody>
+              <tr><td><code>MASTER</code></td><td colspan="5"><b>全权（恒定，任何条目都影响不到）</b></td></tr>
+              <tr><td><code>SYSTEM</code>（她自己）</td><td><code>R</code></td><td><code>RW</code></td><td><code>RWX</code></td><td><code>X</code></td><td><code>RWX</code></td></tr>
+              <tr><td><code>ALLUSER</code>（所有人）</td><td><b>无</b></td><td><b>无</b></td><td><code>R</code></td><td><b>无</b></td><td><b>无</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">出处：位表 <code>auth\Caller.java:17-19</code>、<code>auth\Acl.java:55-56</code>（<code>DEFAULT_BITS</code> / <code>SYSTEM_BITS</code>）、逐类常量 <code>:145-181</code>、<code>SYSTEM</code> 那一路 <code>:182-190</code>；有效位的唯一实现 <code>:962-977</code>（<code>bitsOf</code>）；主人恒 <code>RWX</code> 见 <code>:883</code>、<code>:969</code>。</p>
+
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">两层"连例外也不开"的受保护资源</h4>
+            <ul class="plain">
+              <li><b>第一层</b>：账本自身（<code>perms.json</code> 与它的临时文件）、授权动作本身（<code>mem:acl</code>）、账号凭据（登录态）。<b>只有主人</b>拿得到，连 <code>SYSTEM</code> 也恒为空。</li>
+              <li><b>第二层</b>：受限配置文件与脚本（按后缀认定的那几类，<b>只对 B 类路径生效</b>）—— 对 <code>ALLUSER</code> 连读都不给，<b>例外也不开</b>。</li>
+            </ul>
+            <p class="t-cap">出处 <code>auth\Acl.java:1000-1005</code>、<code>:1019-1043</code>、后缀清单 <code>:205-210</code>；判定入口 <code>:969-977</code>。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">为什么默认是"拒绝"</h4>
+            <p>A 类 = SFW 数据根之外的任意本机路径 + 本机进程，所以对普通用户<b>一位都不给</b>（读也不给）。要放开只能写例外。<b>fail-strict</b>：拿不准的时候按更严的那一类判。</p>
+            <p class="t-cap">出处 <code>auth\Acl.java:145-150</code>、<code>auth\Res.java:125-126</code>（真身化不可靠时仍判 A）、<code>:161-165</code>（执行本机程序恒 A 类）。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 7 ============ -->
+      <section class="chapter" id="deny">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">07 / 拒绝</span>
+          <h2>被拒时长什么样</h2>
+          <p class="chapter-desc">拒绝是一句<b>可读的说明</b>，而且它是"被算作失败"的形态之一 —— 连续失败闸门靠它计数。</p>
+        </header>
+
+        <div class="code" data-lang="text">
+          <div class="code-head"><span class="lang">text</span><span class="path">拒绝文案的形态（产出侧：Host.need* + 账本原文）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>缺 W 位 —— [权限阻断] 需要 &lt;资源&gt; 的 W 位（默认分配 &lt;…&gt;，当前有效位 &lt;…&gt;）</code></pre>
+        </div>
+        <p class="t-cap">产出侧：位名前缀 <code>skill\Host.java:289-291</code>（形如 <code>缺 W 位 —— </code>），账本原文前缀 <code>auth\Acl.java:125</code>（<code>[权限阻断] </code>），两者拼起来的完整形态见 <code>skill\Host.java:147-158</code>、<code>tool\Registry.java:207</code>、<code>term\Builtins.java:2311</code>（"一字不差同形"）。</p>
+
+        <h3 class="sec">三种拒绝形态都能被认出来</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>形态</th><th>长什么样</th><th>说明</th><th>出处</th></tr></thead>
+            <tbody>
+              <tr><td>① 现代判据</td><td>正文里<b>包含</b> <code>[权限阻断]</code></td><td>ACL 内核的产出，唯一现代判据（可能在 <code>缺 X 位 —— </code> 之后）</td><td><code>auth\Acl.java:125</code>、<code>agent\Loop.java:334-341</code>、<code>tool\Registry.java:351</code></td></tr>
+              <tr><td>② 兼容识别</td><td>出现 <code>[auth] 权限阻断</code></td><td>旧写法，<b>只用于识别兼容</b>，不再出现在任何产出文案里</td><td><code>auth\Auth.java:40-47</code>、<code>tool\Registry.java:340-341</code></td></tr>
+              <tr><td>③ 信息性前缀</td><td>以 <code>缺 R 位 —— </code> / <code>缺 W 位 —— </code> / <code>缺 X 位 —— </code> 开头</td><td>基板 <code>need*</code> 的位名前缀；它自己不是拦下的证据，但识别面保留它</td><td><code>agent\Loop.java:339-341</code>、<code>tool\Registry.java:342-354</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">为什么这件事重要：<b>权限阻断必须算"失败"</b> —— 否则连续失败闸门数不到它（<code>agent\Loop.java:358-365</code>、<code>:386</code>）。识别一律用"<b>包含</b> <code>[权限阻断]</code>"而不是"以它开头"（<code>tool\Registry.java:343-344</code>）。</p>
+
+        <div class="note ok reveal">
+          <p><span class="n-title">自己怎么复核一句拒绝</span>：拿到那句文案后，去 <code>ai/acl</code> 里比对三件事 —— ① 该类对该主体的<b>默认分配</b>；② 能命中你的<b>例外条目</b>（<code>caller.rules</code>）；③ 当前<b>有效位</b>（<code>caller.bits</code>）。三者一致就说明判对了。</p>
+        </div>
+      </section>
+
+      <!-- ============ 8 ============ -->
+      <section class="chapter" id="impl">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">08 / 实现</span>
+          <h2>技术实现（逐条给出处）</h2>
+          <p class="chapter-desc">权限面的实现集中在 <code>auth</code> 包，另外三处是"接线口"：工具入口、拒绝文案产出、失败识别。</p>
+        </header>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>要做的事</th><th>实现</th><th>出处</th></tr></thead>
+            <tbody>
+              <tr><td>资源命名与分类</td><td><code>auth\Res.java</code>：五类常量与自动判定（路径 / 进程 / 库 / 内存 / 动作 / 工具），含 <code>files</code> 特例</td><td><code>auth\Res.java:10-47</code>、<code>:193-212</code>、<code>:309-322</code></td></tr>
+              <tr><td>账本读写</td><td><code>auth\Acl.java</code>：解析条目（<code>:349-397</code>）、授权覆盖/追加（<code>:724-732</code>）、撤销（<code>:771</code>）、落盘</td><td><code>auth\Acl.java:40-47</code>、<code>:561</code>、<code>:571</code></td></tr>
+              <tr><td>唯一判定</td><td><code>Acl.bitsOf(caller, res)</code>：按类默认分配 + 例外突破默认；受保护资源对 <code>ALLUSER</code> 恒空</td><td><code>auth\Acl.java:962-977</code>、<code>:881-884</code></td></tr>
+              <tr><td>依据与结论分列</td><td><code>Acl.ruleLines()</code> / <code>rulesFor()</code> 给"能命中的例外"；<code>bitsOf</code> 给结论</td><td><code>auth\Acl.java:1082-1113</code>、<code>ctx\CtxBuild.java:416-446</code></td></tr>
+              <tr><td>接线：工具入口</td><td>工具能不能用只判 <code>T</code> 类的 <code>X</code> 位；不可见的名字不进模型面</td><td><code>tool\Registry.java:191-199</code>、<code>:210-217</code>、<code>:426-446</code></td></tr>
+              <tr><td>接线：拒绝文案</td><td><code>Host.need()</code> / <code>needTag()</code> 产出 <code>缺 X 位 —— </code> + 账本原文</td><td><code>skill\Host.java:147-158</code>、<code>:289-291</code></td></tr>
+              <tr><td>接线：失败识别</td><td><code>Loop.deniedResult()</code> 认三种形态；权限阻断计入连续失败</td><td><code>agent\Loop.java:329-341</code>、<code>:358-365</code>、<code>:386</code></td></tr>
+              <tr><td>接线：事实行</td><td><code>caller.kind</code> / <code>caller.bits</code> / <code>caller.rules</code> 三个键</td><td><code>ctx\CtxBuild.java:282-304</code>、<code>:381-401</code>、<code>:412-446</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note warn reveal">
+          <p><span class="n-title">原则：判定只有一处</span>：面板、命令、事实行都<b>不许另算一套</b>，一律调 <code>Acl.bitsOf</code> / <code>Acl.source</code>；账本自己也不下任何"有没有权限"的结论（<code>auth\Acl.java:1075</code>、<code>term\Builtins.java:1432</code>、<code>:1491</code>、<code>:1621</code>、<code>:1735</code>）。</p>
+        </div>
+      </section>
+
+      <!-- ============ 9 ============ -->
+      <section class="chapter" id="trouble">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">09 / 排错</span>
+          <h2>常见误用与排错</h2>
+          <p class="chapter-desc">权限问题九成来自三件事：写得不是那个类、位给了错的、或者压根没写。</p>
+        </header>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>现象</th><th>先看什么</th><th>原因与处理</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>写了例外但不生效</td>
+                <td><code>ai/acl</code> 里有没有那一行、位是不是你要的</td>
+                <td>① 主体写错（<code>MASTER</code> 会被拒收，要写 <code>User&lt;QQ号&gt;</code>，<code>auth\Acl.java:429-434</code>）；② 类写错（<code>T</code> 是工具、<code>E</code> 是对外动作，<code>:44-47</code>）；③ 位写空 = 拒绝（<code>:55-56</code>）</td>
+              </tr>
+              <tr>
+                <td>同一资源有人能用、有人不能</td>
+                <td><code>caller.rules</code>（能命中的例外）</td>
+                <td>层级高的先算：<code>User(3) &gt; Group(2) &gt; ALLUSER(1)</code>，同级后面的覆盖前面的（<code>auth\Auth.java:27</code>）</td>
+              </tr>
+              <tr>
+                <td>改了账本要不要重启</td>
+                <td>再问一次权限，看判定有没有变</td>
+                <td>账本首次判定时懒装载（<code>auth\Auth.java:68-69</code>），并有显式重载口（<code>auth\Acl.java:571</code>）；取值与判定共用同一份实现、文件变了会被重读（<code>ctx\CtxBuild.java:120-126</code>）。<b>手改文件后的确切生效时机本文档未做运行期验证</b></td>
+              </tr>
+              <tr>
+                <td>条目形态写坏</td>
+                <td>那行告警</td>
+                <td>非法条目被跳过并告警一次（<code>auth\Acl.java:624</code>）；部署脚本对形态非法会给 <code>LEDGER_ENTRY_SHAPE_BAD</code>（仓库根部署脚本 <code>:183</code>）</td>
+              </tr>
+              <tr>
+                <td>她"答应不了"某件事</td>
+                <td>那句 <code>[权限阻断]</code> 说明</td>
+                <td>说明里点明了资源、该类默认分配与当前有效位；按<a href="#deny">上一节</a>三步复核即可（<code>skill\Host.java:147-158</code>）</td>
+              </tr>
+              <tr>
+                <td>不确定谁能动什么</td>
+                <td><code>ai/acl</code> 的两个"默认分配"段</td>
+                <td>先读默认，再读条目：<b>没写的一律按默认，默认基本是拒绝</b>（<code>auth\Acl.java:145-181</code>）</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note reveal">
+          <p><span class="n-title">本文档未覆盖</span>：外挂扩展层的内容（有哪些单元、各自做什么、参数与实现）不在本文档范围内；本页只写基板的权限模型、账本、命令与实现口。命令的完整参数见<a href="commands.html#perm-cmds">命令参考 · 权限类</a>，键的逐条含义见<a href="config.html#keys">配置键面</a>（<b>权限不在配置里</b>，它是一本独立账本）。</p>
+        </div>
+      </section>
+
+    </div>
+
+        <nav class="pager">
+      <a class="prev" href="capabilities.html"><span class="p-dir">← PREV</span><span class="p-name">06 · 基板能力</span></a>
+      <a class="next" href="files.html"><span class="p-dir">NEXT →</span><span class="p-name">08 · 文件与数据根</span></a>
+    </nav>
+
+    <footer class="foot">
+      <span>AiAgent V4 文档 · 纯静态、自包含（无 CDN / 无第三方库 / 无网络请求）</span>
+      <span>插件：<code>AiAgentV4.jar</code></span>
+      <span>数据目录：<code>SairFrameWork\data\AiAgent-V4\</code></span>
+      <a href="index.html">回到总览</a>
+      <div class="icp">湘ICP备2025152033号</div>
+    </footer>
+  </div>
+
+  <aside class="rail">
+    <div class="rail-inner">
+      <p class="rail-title">本页目录</p>
+      <ol id="toc-list"></ol>
+      <div class="rail-foot">点击标题右侧 <code>#</code> 可复制该小节链接</div>
+    </div>
+  </aside>
+</main>
+
+<button class="to-top" id="to-top" type="button" title="回到顶部">↑</button>
+<script src="js/site.js"></script>
+</body>
+</html>
