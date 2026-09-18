@@ -106,7 +106,7 @@ public final class Builtins {
 
         // ---------------- ① 六库：读 ----------------
         reg.add(Tool.of("store")
-                .desc("读写基板六库（通用存储）。lib 取 memory(长期记忆)/note(知识笔记)/dialog(对话历史)/grouplog(群聊历史)/sticker(表情包)/pref(偏好设定)。")
+                .desc("读写基板六库：lib 取 memory 长期记忆/note 知识笔记/dialog 对话历史/grouplog 群聊历史/sticker 表情包/pref 偏好设定。")
                 .returns("查询结果（JSON 文本）")
                 .params(schemaStoreRead(libs))
                 .handler(new Tool.Handler() {
@@ -145,7 +145,7 @@ public final class Builtins {
 
         // ---------------- ① 六库：写 ----------------
         reg.add(Tool.of("store_write")
-                .desc("写入基板六库（put/update/delete）。字段名要按库的定义给，写错字段会被忽略。")
+                .desc("写基板六库（put/update/delete）：字段名按库定义给，写错会被忽略。")
                 .returns("新 id / 影响行数")
                 .params(schemaStoreWrite())
                 .handler(new Tool.Handler() {
@@ -225,7 +225,7 @@ public final class Builtins {
 
         // ---------------- ① 六库：管理（仅主人） ----------------
         reg.add(Tool.of("store_admin")
-                .desc("六库管理：stat(统计)/maintain(维护清理)/optimize(合并全文索引段)/vacuum(回收空闲页)/export(导出 JSONL)/import(导入覆盖)。")
+                .desc("六库管理：stat 统计/maintain 维护清理/optimize 合并全文索引段/vacuum 回收空闲页/export 导出 JSONL/import 导入覆盖。")
                 .returns("操作结果")
                 .params(schemaStoreAdmin())
                 .handler(new Tool.Handler() {
@@ -301,7 +301,7 @@ public final class Builtins {
 
         // ---------------- ② 技能库：读 ----------------
         reg.add(Tool.of("skill")
-                .desc("技能库（基板外挂层）：list(清单)/read(说明书)/validate(体检)/search(按名找)。技能决定你有哪些额外工具与钩子。")
+                .desc("技能库（外挂层）：list 清单/read 说明书/validate 体检/search 按名找。技能决定你有哪些额外工具与钩子。")
                 .returns("技能清单/说明书正文")
                 .params(schemaSkillRead())
                 .handler(new Tool.Handler() {
@@ -329,8 +329,8 @@ public final class Builtins {
 
         // ---------------- ② 技能库：写/重载（仅主人） ----------------
         reg.add(Tool.of("skill_write")
-                .desc("技能库管理（仅主人）：add/update(写 md 与 java 源码后需 reload)/delete/reload(重扫)/read_source；"
-                        + "draft/drafts/promote 走草稿区（先写草稿、确认没问题再 promote 进技能库）。")
+                .desc("技能库管理（仅主人）：add/update（写 md 与 java 后需 reload）/delete/reload 重扫/read_source；"
+                        + "draft/drafts/promote 走草稿区（先草稿，没问题再 promote 进技能库）。")
                 .returns("操作结果")
                 .params(schemaSkillWrite())
                 .handler(new Tool.Handler() {
@@ -428,7 +428,7 @@ public final class Builtins {
 
         // ---------------- ② 动态执行（仅主人） ----------------
         reg.add(Tool.of("exec")
-                .desc("动态执行（仅主人）：kind=java 编译并运行一段 Java 源码；kind=cmd 执行系统命令。")
+                .desc("动态执行（仅主人）：kind=java 编译运行 Java 源码；kind=cmd 执行系统命令。")
                 .returns("执行输出")
                 .params(schemaExec())
                 .handler(new Tool.Handler() {
@@ -445,7 +445,7 @@ public final class Builtins {
 
         // ---------------- ③ 提示词：读 ----------------
         reg.add(Tool.of("prompt")
-                .desc("提示词（基板只带一份初始身份提示词）：show(初始提示词)/list(还有哪些提示词文件)/read(读指定文件)/sections(初始提示词的分节名)。")
+                .desc("提示词（基板只带一份初始身份提示词）：show 初始提示词/list 还有哪些提示词文件/read 读指定文件/sections 分节名。")
                 .returns("提示词正文或清单")
                 .params(schemaPromptRead())
                 .handler(new Tool.Handler() {
@@ -464,8 +464,8 @@ public final class Builtins {
 
         // ---------------- ③ 提示词：注入/写（仅主人） ----------------
         reg.add(Tool.of("prompt_write")
-                .desc("提示词注入与写入（仅主人）：load(把某份提示词载入并注入)/inject(注入一段文本)/write(新建或覆盖提示词文件)/clear(移除注入)/reload。"
-                        + "slot 取 system(系统提示词)/context(每轮上下文)/tool(工具说明)/arg(用户消息前)。scope 省略=全局，否则是会话键。")
+                .desc("提示词注入与写入（仅主人）：load 载入某份提示词并注入/inject 注入一段文本/write 新建或覆盖提示词文件/clear 移除注入/reload。"
+                        + "slot 取 system 系统提示词/context 每轮上下文/tool 工具说明/arg 用户消息前。scope 省略=全局，否则是会话键。")
                 .returns("操作结果")
                 .params(schemaPromptWrite())
                 .handler(new Tool.Handler() {
@@ -502,11 +502,11 @@ public final class Builtins {
 
         // ---------------- ④ Agent 调度 ----------------
         reg.add(Tool.of("agent")
-                .desc("多 Agent：spawn(派一个子 Agent 去干活，可指定它能用哪些工具)/list(清单表)/status(单个任务)。"
-                        + "子 Agent 的结论自包含回传；async=true 时立刻返回任务票。"
+                .desc("多 Agent：spawn 派子 Agent 干活（可指定它用哪些工具）/list 清单表/status 单个任务。"
+                        + "子 Agent 结论自包含回传；async=true 立刻返回任务票。"
                         + "结论默认只回给你（用户看不到）；只有当这一单本来就是\"替机器人说一句话\"时才用 speak=true，"
-                        + "那时它写成什么就由基板发到当前会话。内部收尾（任务号/message_id/子 Agent 原文）永远不要写进对外内容。"
-                        + "★子 Agent 是最小单位：它们不能再派子 Agent；你可以同时派多个，它们同级（都由你分配和建立）。")
+                        + "那时它写成什么就发到当前会话；内部收尾（任务号/message_id/子 Agent 原文）不写进对外内容。"
+                        + "★子 Agent 是最小单位：不能再派子 Agent；你可同时派多个，它们同级（都由你分配和建立）。")
                 .returns("任务票/清单")
                 .params(schemaAgent())
                 .handler(new Tool.Handler() {
@@ -568,7 +568,7 @@ public final class Builtins {
 
         // ---------------- ⑤ 上下文注入 ----------------
         reg.add(Tool.of("ctx")
-                .desc("上下文注入：inject(按 slot 注入文本)/list(当前注入项)/clear(清空)。"
+                .desc("上下文注入：inject 按 slot 注入文本/list 当前注入项/clear 清空。"
                         + "slot 取 system/context/tool/arg；scope 省略=当前会话。")
                 .returns("操作结果")
                 .params(schemaCtx())
@@ -665,8 +665,8 @@ public final class Builtins {
 
         // ---------------- ⑦ 模型直连 ----------------
         reg.add(Tool.of("model")
-                .desc("直连 DeepSeek：chat(问一句)/vision(看图)/balance(余额)/models(模型清单)/info(当前模型)。"
-                        + "边界：临时问一句、不需要缓存时用我；带缓存与失败黑名单的专用看图工具是 vision。")
+                .desc("直连 DeepSeek：chat 问一句/vision 看图/balance 余额/models 模型清单/info 当前模型。"
+                        + "边界：临时问一句、不要缓存时用我；带缓存与失败黑名单的专用看图工具是 vision。")
                 .returns("模型回复文本或查询结果")
                 .params(schemaModel())
                 .handler(new Tool.Handler() {
@@ -720,7 +720,7 @@ public final class Builtins {
         // ---------------- ⑧ NapCat ----------------
         reg.add(Tool.of("napcat")
                 .desc("NapCat（OneBot v11）：action=list 看动作目录；其余 action 直接调用，params 是动作参数对象。"
-                        + "NapCat 未连接时返回“Napcat 没有连接”，其它能力不受影响。")
+                        + "未连接时返回“Napcat 没有连接”，其它能力不受影响。")
                 .returns("动作执行结果（JSON）")
                 .params(schemaNapcat())
                 .handler(new Tool.Handler() {
@@ -787,8 +787,8 @@ public final class Builtins {
         sair.v4.term.SfwOut.installTap(conf);
 
         reg.add(Tool.of("console")
-                .desc("SFW 控制台（仅主人）：read(读控制台最近的输出，游标式)/run(执行一条框架命令，如 jj/at 1+/100，"
-                        + "并回它打出来的新输出)/history(最近的框架命令)/print(打印一行)/clear(清屏)/size(控制台规模)。"
+                .desc("SFW 控制台（仅主人）：read 读控制台最近输出（游标式）/run 执行框架命令（如 jj/at 1+/100）并回它的新输出"
+                        + "/history 最近的框架命令/print 打印一行/clear 清屏/size 控制台规模。"
                         + "控制台 = 主人机位；read 与 run 都是对同一个终端说话。")
                 .returns("操作结果：read/run 回一行事实 + 输出正文；size 回规模事实；history 回命令表")
                 .params(schemaConsole())
@@ -854,11 +854,17 @@ public final class Builtins {
                     }
                 }));
 
-        // ---------------- ④ 定时唤醒 ----------------
+        // ---------------- ④ 到点的事（闹钟账本 / 职责台） ----------------
         reg.add(Tool.of("alarm")
-                .desc("定时唤醒：add(到点让 AI 自己跑一轮任务)/list/remove/clear。时间可用 at=\"YYYY-MM-DD HH:mm\"/\"HH:mm\"/\"+30m\"，或 in=分钟。"
-                        + "scope 取 console/group/private，target 是群号或 QQ 号。")
-                .returns("闹钟清单/操作结果")
+                .desc("到点的事（**待办与闹钟是同一张账**）：add 记一件（写 at/in = 到点触发；不写时间 = 先记成待办）；"
+                        + "list 看清单（主人看全部，别人只看自己委派的那些）；remove/clear 删；"
+                        + "done/fail 收尾（办妥了 / 没办成）；defer 顺延或给待办排期（别人委派的不能拖）。"
+                        + "**没有「放弃」这个动作**：只有两种结局 —— 办妥，或者如实说没办成。"
+                        + "时间：at=\"YYYY-MM-DD HH:mm\"/\"HH:mm\"/\"+30m\"/\"明天 09:00\"/\"明早\"/\"今晚\"，或 in=分钟；"
+                        + "周期：repeat=once/daily/weekly/every:分钟/cron:分 时 日 月 周。"
+                        + "scope 取 console/group/private，target 是群号或 QQ 号。"
+                        + "mine=true = 我自己定下的（承诺/提醒）；默认 false = 别人委派的工作（必办）。")
+                .returns("闹钟清单/操作结果（清单里每条带 state：pending 待办 / running 到点已触发还没收尾 / done 办妥 / failed 没办成 / abandoned 已放弃）")
                 .params(schemaAlarm())
                 .handler(new Tool.Handler() {
                     @Override
@@ -866,10 +872,18 @@ public final class Builtins {
                         Caller me = t == null ? null : t.caller();
                         boolean master = me != null && me.master();
                         String op = J.s(args, "op", "list").toLowerCase();
-                        // ACL：闹钟 = 运行期内存状态（C 类）。list 读 R；add/remove/clear 写 W。
-                        String aclDeny = needRes(auth, conf, sair.v4.auth.Res.mem("alarm"),
-                                "list".equals(op) ? 'R' : 'W');
+                        // 读：按调用者判 C 类 R（非主人默认有 R）。写见下一段：账本是**她自己的账**。
+                        String aclDeny = needRes(auth, conf, sair.v4.auth.Res.mem("alarm"), 'R');
                         if (aclDeny != null) return aclDeny;
+                        // 写（add/done/fail/defer/abandon）按 **SYSTEM** 判 W：别人委派的事要真能记进来、
+                        // 到点办完要真能收尾，而普通用户对 C 类只有 R（D43）—— 所以闸门交给"她的判断 + 配额"，
+                        // 不给用户开写位（这条是设计选择，见 notes 里的记录）。
+                        if (!"list".equals(op) && auth != null) {
+                            String wDeny = auth.allowRes(
+                                    Caller.systemActor(conf == null ? 0L : conf.masterQQ()),
+                                    sair.v4.auth.Res.mem("alarm"), 'W');
+                            if (wDeny != null) return wDeny;
+                        }
                         if ("remove".equals(op)) {
                             return tick.remove(J.l(args, "id", 0), me) ? "已删除" : "没有这个闹钟（或它不是你的）";
                         }
@@ -877,11 +891,93 @@ public final class Builtins {
                             int n = tick.clear(me);
                             return master ? ("已清空 " + n + " 个闹钟") : ("已清空你自己的 " + n + " 个闹钟");
                         }
-                        if ("add".equals(op)) {
+                        if ("done".equals(op) || "fail".equals(op)) {
+                            long id = J.l(args, "id", 0);
+                            boolean done = "done".equals(op);
+                            boolean ok = tick.mark(id, done ? Tick.ST_DONE : Tick.ST_FAILED,
+                                    J.s(args, "result", ""), J.s(args, "why", ""), me);
+                            return ok ? ("#" + id + (done ? " 已记成办妥" : " 已记成没办成"))
+                                      : ("没有这个闹钟（或它不是你的）：#" + id);
+                        }
+                        if ("defer".equals(op)) {
+                            long id = J.l(args, "id", 0);
                             long when = parseWhen(J.s(args, "at", ""), J.i(args, "in", 0));
-                            if (when <= 0) return "时间无法识别（用 at=\"HH:mm\"/\"+30m\" 或 in=分钟）";
+                            if (when <= 0) return "时间无法识别（用 at=\"HH:mm\"/\"+30m\"/\"明天 09:00\" 或 in=分钟）";
+                            boolean ok = tick.defer(id, when, J.s(args, "why", ""), me);
+                            return ok ? ("#" + id + " 已顺延到 " + stamp(when))
+                                      : ("顺延不了 #" + id + "：别人委派的是工作不能拖，或者这条不是你的");
+                        }
+                        if ("add".equals(op)) {
+                            String atArg = J.s(args, "at", "");
+                            int inArg = J.i(args, "in", 0);
+                            String repeatArg = J.s(args, "repeat", "once");
+                            boolean gaveTime = !Str.blank(atArg) || inArg > 0;
+                            long when = parseWhen(atArg, inArg);
+                            boolean cronRepeat = repeatArg.trim().toLowerCase().startsWith("cron:");
+                            if (cronRepeat && when <= 0L) {
+                                Cron cc = Cron.parse(repeatArg.trim().substring(5).trim());
+                                if (cc == null) return "cron 表达式认不出（用「分 时 日 月 周」，如 cron:0 9 * * 1-5）";
+                                when = cc.next(System.currentTimeMillis(), 366 * 24 * 60);
+                                if (when <= 0L) return "这个 cron 表达式在未来一年里都不触发，先改一下";
+                            }
+                            if (when <= 0L && gaveTime) {
+                                return "时间无法识别（用 at=\"HH:mm\"/\"+30m\"/\"明天 09:00\"，或 in=分钟；"
+                                        + "想先记成待办就别写时间）";
+                            }
+                            // 周期活第一次什么时候响：写了 repeat 却没写时间 ⇒ 从"下一次"算起
+                            // （every:N = N 分钟后；daily/weekly = 一个周期后；cron = 下一个命中分钟）
+                            if (when <= 0L && isPeriodic(repeatArg)) {
+                                when = Tick.nextFire(System.currentTimeMillis(), repeatArg, System.currentTimeMillis());
+                                if (when <= 0L) return "这个周期写法认不出（once/daily/weekly/every:分钟/cron:分 时 日 月 周）";
+                            }
                             String task = J.s(args, "task", "");
-                            if (Str.blank(task)) return "需要 task（到点让 AI 做什么）";
+                            if (Str.blank(task)) return "需要 task（这件事是什么）";
+                            // 去重：同一个人、时间相近（都没定时 = 都是待办）⇒ 当成"同一件事说了两遍"
+                            // （真机实测：两条消息合并进两个回合，她会把同一件事记两遍）
+                            long qqArg = J.l(args, "qq", 0L);
+                            long principalQq = qqArg > 0L ? qqArg : (me == null ? 0L : me.qq());
+                            long nowMs = System.currentTimeMillis();
+                            if (principalQq > 0L) {
+                                for (JsonObject a : tick.alarms()) {
+                                    if (J.i(a, "enabled", 1) != 1) continue;
+                                    if (J.l(Tick.ownerOf(a), "qq", 0L) != principalQq) continue;
+                                    long fa = J.l(a, "fire_at", 0L);
+                                    // "同一件事"的判据：任务正文归一化后一样（或互相包含）就当成同一件
+                                    boolean same = sameTask(J.s(a, "task", ""), task);
+                                    boolean dup;
+                                    if (when <= 0L) {
+                                        dup = fa <= 0L && nowMs - J.l(a, "ts", 0L) <= 300000L;
+                                    } else {
+                                        dup = fa > 0L && Math.abs(fa - when) <= 120000L;
+                                    }
+                                    // 正文一样 ⇒ 不管有没有 again 都不重复记（真机实测：合并回合会让她照着
+                                    // "要再来一条就带 again=true"的提示再记一遍同一件事）
+                                    if (same) {
+                                        return "同一件事已经记着了：#" + J.l(a, "id", 0L) + "（" + J.s(a, "task", "")
+                                                + "）—— 不重复记";
+                                    }
+                                    if (dup && !J.b(args, "again", false)) {
+                                        return "这条已经有了：#" + J.l(a, "id", 0L) + "（" + J.s(a, "task", "")
+                                                + "）—— 不重复记。真要再排一条就带 again=true";
+                                    }
+                                }
+                            }
+                            // 配额：每条到点的事 = 一次完整轮，账本是她记的、但钱是主人花的
+                            int pendingAll = 0;
+                            int pendingMine = 0;
+                            for (JsonObject a : tick.alarms()) {
+                                if (J.i(a, "enabled", 1) != 1) continue;
+                                String st = J.s(a, "state", "");
+                                if (Tick.ST_DONE.equals(st) || Tick.ST_FAILED.equals(st)) continue;
+                                pendingAll++;
+                                if (me != null && J.l(Tick.ownerOf(a), "qq", 0L) == me.qq()) pendingMine++;
+                            }
+                            if (pendingAll >= ALARM_MAX_ALL) {
+                                return "到点的事太多了（还有 " + pendingAll + " 条没办完）—— 先办掉或清掉一些再加";
+                            }
+                            if (me != null && me.qq() > 0L && pendingMine >= ALARM_MAX_ONE) {
+                                return "你手上的事已经压了 " + pendingMine + " 条没办完，先清一清再加";
+                            }
                             String scopeArg = J.s(args, "scope", "").trim().toLowerCase();
                             long target = J.l(args, "target", 0);
                             String scope;
@@ -898,11 +994,27 @@ public final class Builtins {
                                 target = inGroup ? me.groupId() : me.qq();
                             }
                             if (!"console".equals(scope) && target <= 0) return "需要 target（群号或 QQ 号）";
-                            JsonObject row = tick.add(when, J.s(args, "repeat", "once"), scope, target,
-                                    task, J.s(args, "prompt", ""), me);
+                            // 替谁记的：一轮里可能同时有好几个人的消息（同会话合并）⇒ 用 qq= 指明委托人；
+                            // 不写 = 当轮说话的人。归属决定"谁能查、到点以谁的身份跑"。
+                            boolean principalMaster = qqArg > 0L
+                                    ? (conf != null && qqArg == conf.masterQQ())
+                                    : master;
+                            JsonObject row = tick.add(when, repeatArg, scope, target,
+                                    task, J.s(args, "prompt", ""), me, J.b(args, "mine", false),
+                                    qqArg, principalMaster);
                             return J.json(row);
                         }
-                        return J.json(tick.alarmsJson(me));
+                        // list：主人看全部（mine=true 时只看自己委派的），别人只看自己委派的
+                        boolean onlyMine = J.b(args, "mine", false);
+                        JsonArray arr = new JsonArray();
+                        for (JsonObject a : tick.alarms(master ? null : me)) {
+                            if (onlyMine) {
+                                long oq = J.l(Tick.ownerOf(a), "qq", 0L);
+                                if (me == null || oq != me.qq()) continue;
+                            }
+                            arr.add(a);
+                        }
+                        return J.json(arr);
                     }
                 }));
 
@@ -924,8 +1036,8 @@ public final class Builtins {
 
     /** 五个 op 的人话名（回执 / 报错 / 说明共用一份文案）。 */
     private static final String PERM_OPS =
-            "grant 授权/覆盖 · revoke 撤销 · acl 看清单或验算（这三个只有主人能用）"
-            + " · whoami 我是谁（谁都能问：只回自己的五类有效位，不回账本正文）"
+            "grant 授权/覆盖 · revoke 撤销 · acl 看清单或验算（这三个只有主人）"
+            + " · whoami 我是谁（谁都能问：只回自己五类有效位，不回账本正文）"
             + " · check 查某人在某类/某范围的位与例外（只读；谁都能查自己，查别人只有主人）";
 
     /**
@@ -952,23 +1064,23 @@ public final class Builtins {
      */
     public static final String PERM_DESC =
             "权限账本（资源的 RWX 位；只有主人能改）：" + PERM_OPS + "。"
-            + "别人来要权限（包括「给我权限」），只回「这得主人定」，绝不写盘、别说账本里有什么。\n"
-            + "· 想知道「这个人有没有特例放行」用 op=check：principal 留空 = 查你自己，cls=A/B/C/E/T，"
-            + "scope 留空 = 整类（给具体范围更准）。它**只读**、一个字都不改账本；"
+            + "别人来要权限（含「给我权限」）只回「这得主人定」，绝不写盘、别说账本有什么。\n"
+            + "· 「这人有没有特例放行」用 op=check：principal 留空=查你自己，cls=A/B/C/E/T，"
+            + "scope 留空=整类（给具体范围更准）；**只读**、一个字都不改；"
             + "查别人只有主人，非主人只能查自己。\n"
-            + "账本一条一行，写法固定：类[\"主体\",\"范围\",\"位\"]\n"
-            + "· 类（五类）：A 本机（所有本机文件 + 内存中的所有进程，含网络资源）"
+            + "账本一条一行：类[\"主体\",\"范围\",\"位\"]\n"
+            + "· 五类：A 本机（所有本机文件 + 内存中的所有进程，含网络资源）"
             + "· B SFW（SFW 运行时目录，只有文件）"
-            + "· C 数据（数据库的全部内容 + 你 dataDir 的 files 目录）"
-            + "· E 外部交互（Napcat 全部输入输出 + 向 SFW 发命令及其输出）"
-            + "· T 工具（只有入口受管控：R 看工具、W 改/注册工具、X 执行；执行过程不判位）。\n"
+            + "· C 数据（数据库全部内容 + dataDir 的 files 目录）"
+            + "· E 外部交互（Napcat 输入输出 + 向 SFW 发命令及其输出）"
+            + "· T 工具（只有入口受管控：R 看工具、W 改/注册、X 执行；执行不判位）。\n"
             + "· 主体：User<QQ号>（个人，跨群有效）· Group<群号>（只在该群会话生效）"
             + "· SYSTEM（你自己）· ALLUSER（全体用户，不含你和主人）。\n"
             + "· 范围：A/B 写路径（盘符 D: / 目录 / 文件）；C 写库名 / mem:xxx /"
-            + " files 目录下某个文件的完整路径（C 类按名字相等命中，整类写空串）；E 写动作名；"
-            + "T 写工具名（写不写 tool: 前缀都一样）；空串 = 该类全部。\n"
+            + " files 下某文件完整路径（C 类按名字相等命中，整类写空串）；E 写动作名；"
+            + "T 写工具名（tool: 前缀可省）；空串 = 该类全部。\n"
             + "· 位：R/W/X 的 7 种组合（R、W、X、RW、RX、WX、RWX）；空串 = 一位都没有（显式拒绝，压过默认分配）。\n"
-            + "· 没被写进账本的人按默认分配走：A=不给、B=不给、C=R、E=不给、T=不给"
+            + "· 没写进账本的走默认分配：A=不给、B=不给、C=R、E=不给、T=不给"
             + "（A 类 = 本机文件与进程（含网络资源），普通用户连读都不给，R/W/X 三位全收回；"
             + "B 类 = SFW 目录内的文件，一位都不给；"
             + "C 类 = 数据库全部内容 + files 目录，只给读；"
@@ -981,17 +1093,17 @@ public final class Builtins {
             + "· 例外可以突破默认 —— 想给某人读本机文件（A 类）：A[\"User<QQ>\",\"\",\"R\"]（整类给读）；"
             + "只给某个范围：A[\"User<QQ>\",\"D:/share\",\"RWX\"]（范围外照样一点都碰不到）；"
             + "给全体用户：A[\"ALLUSER\",\"\",\"R\"]。默认收回了 A 类之后，按人放开就走这几条。\n"
-            + "主人说什么 → 你就调什么：\n"
+            + "主人说什么 → 就调什么：\n"
             + "·「帮我设定123456权限位置A=RWX」→ op=grant principal=123456 cls=A bits=RWX（scope 留空 = 整个 A 类）\n"
             + "·「帮我设定123456权限位置C盘的XXX目录=RWX」→ op=grant principal=123456 cls=A scope=C:/XXX bits=RWX\n"
             + "·「帮我设定群123456权限位置D盘=R」→ op=grant principal=群123456 cls=A scope=D: bits=R\n"
             + "·「帮我设定123456，23456，45678的权限位置D:/share = R」→ principal=123456,23456,45678"
-            + "（逗号分开 = 一个主体一条，工具自己展开）cls=A scope=D:/share bits=R\n"
+            + "（逗号 = 一主体一条，自动展开）cls=A scope=D:/share bits=R\n"
             + "·「帮我设定123456能用 agent 这个工具」→ op=grant principal=123456 cls=T scope=agent bits=X"
-            + "（T 类只管入口的三位；不带 tool: 前缀也认）\n"
+            + "（T 类只管入口三位；tool: 前缀可省）\n"
             + "·「帮我设定 A[\\\"User123456\\\",\\\"D:/share\\\",\\\"RWX\\\"]」→ 整条照抄进 principal"
-            + "（其余参数都不用给），原样落账\n"
-            + "·「帮我取消123456的A权限」→ op=revoke principal=123456 cls=A（scope 留空 = 删掉他在 A 类的全部条目 → 回到默认分配）\n"
+            + "（其余参数不用给），原样落账\n"
+            + "·「帮我取消123456的A权限」→ op=revoke principal=123456 cls=A（scope 留空 = 删其 A 类全部条目 → 回默认分配）\n"
             + "·「帮我取消123456在D:/share的权限」→ op=revoke principal=123456 scope=D:/share（只删命中这一条）\n"
             + "·「帮我禁止123456读D:/share」→ op=grant principal=123456 cls=A scope=D:/share bits="
             + "（空串！「禁止」＝写空位条目＝显式拒绝，跟「取消」不是一回事）\n"
@@ -1002,16 +1114,16 @@ public final class Builtins {
             + "会影响她的自主行为」；A 的 W/X、B 的 W、E 的 X 是高风险（接近主人的能力），基板会在控制台多打一行 warn。"
             + "② 层级优先：User<QQ>(3) > Group<群号>(2) > ALLUSER(1)，SYSTEM 自成一路（只管你自己）—— "
             + "更细的身份赢，User 条目哪怕写在 Group 条目前面也照样赢。"
-            + "③ 同层级按行序：同一层级命中多条时，账本里靠后的覆盖靠前的；范围的具体度不参与优先级 —— "
+            + "③ 同层级按行序：同层命中多条时，账本里靠后的覆盖靠前的；范围的具体度不参与优先级 —— "
             + "要「先全清、再单独放开」，就把放开那条写在后面。"
             + "④ 含糊就先复述一遍再问主人，别猜着写盘；位只认 RWX，主人说数字（老口径）就回一句「现在按 RWX 写」。";
 
     /** perm 的用法示例（盖掉 tools-index.md 那行老口径示例，见上面注册处的注释）。 */
     private static final String[] PERM_EXAMPLES = {
-            "op=acl（列出所有授权；加 principal=123456 看某个人的权限）",
+            "op=acl（列所有授权；加 principal=123456 看某人权限）",
             "op=grant principal=123456 cls=A scope=D:/share bits=RWX（主人说「帮我设定123456在D:/share读写执行」）",
             "op=revoke principal=123456 cls=A（主人说「帮我取消123456的A权限」）",
-            "op=check cls=C scope=memory（只读：某个范围上到底有多少位、有没有例外命中；principal 留空 = 自己）",
+            "op=check cls=C scope=memory（只读：某范围有多少位、有无例外命中；principal 留空=自己）",
     };
 
     /** 类别的人话名（回执 / 说明用）。 */
@@ -1825,29 +1937,29 @@ public final class Builtins {
 
     /** {@code tools} 的契约正文（她自己读的就是这一段）。 */
     public static final String TOOLS_DESC =
-            "能力自省（找工具 / 读说明书 / 验证行不行）：list 列出**你现在能用的**工具（名字 + 一句话 + 归属）；"
-            + "search 按**意图**找（如「改设置」「发图」「查余额」）；show <工具名> 读完整说明书 —— "
+            "能力自省（找工具 / 读说明书 / 验证行不行）：list 列**你现在能用**的工具（名 + 一句话 + 归属）；"
+            + "search 按**意图**找（「改设置」「发图」「查余额」）；show <工具名> 读完整说明书："
             + "描述、返回、**参数表**（类型/必填/默认/示例）、归属、**★以你现在的身份能不能用（缺哪一位也说清）**、"
             + "只读还是有副作用。\n"
-            + "什么时候用我：想不起工具名、不确定某个 op 怎么填、想确认「我这身份调不调得动」—— 先问我，别硬试"
-            + "（硬试撞权限墙会被连续失败闸门掐停整轮）。\n"
-            + "边界：只列你**现在看得见**的工具（工具面按 T 类的 X 位筛）；看不见的工具我不会替你描述。";
+            + "想不起工具名、不确定 op 怎么填、想确认「我这身份调不调得动」—— 先问我，别硬试"
+            + "（撞权限墙会被连续失败闸门掐停整轮）。\n"
+            + "边界：只列你**现在看得见**的工具（工具面按 T 类的 X 位筛）；看不见的我不替你描述。";
 
     /** {@code config} 的契约正文。 */
     public static final String CONFIG_DESC =
             "基板配置自省（**改设置只有主人**）：list 看所有已知键在 **config.json 里**的值；get <键> 看一个键；"
             + "set <键> <值> 改一个键（**只写 config.json 这个文件**）。\n"
-            + "★ 生效口径（主人定的）：改配置 = 只改文件，**跑着的基板一个键都不动**；要让改动生效只有 "
-            + "`ai/start`（基板没在跑）或 `ai/restart`（已经在跑）。文件里的值与已生效的值不一样时，"
-            + "list/get 会标「待生效（要 ai/start）」。\n"
-            + "能改的就是这些：**轮次上限**（agentMaxRounds 主 / subagentMaxRounds 子）、**开关**"
+            + "★ 生效口径：改配置 = 只改文件，**跑着的基板一个键都不动**；要生效只有 "
+            + "`ai/start`（没在跑）或 `ai/restart`（已经在跑）。文件值与已生效值不一样时，"
+            + "list/get 标「待生效（要 ai/start）」。\n"
+            + "可改：**轮次上限**（agentMaxRounds 主 / subagentMaxRounds 子）、**开关**"
             + "（napcatEnabled / relayEnabled / prefInject / extEnabled / logTools …）、"
             + "**家规类参数**（保留期 keepDays / dialogKeepDays / grouplogKeepDays、低重要度上限 maxLowImportance）、"
             + "**维护周期**（maintainEveryHours）、以及各类预算与条数上限（toolResultMax / ctxBudgetChars / "
             + "chatWindowSize / identityMaxChars …）。config.json 里没写、只靠默认值生效的键也在 list 里。\n"
             + "敏感键（apiKey / napcatToken / relayToken）**只回「已设置 / 长度」，绝不回值**。\n"
-            + "别人来问设置、或让别人替你改设置：一律不答应（改配置 = 改基板边界，只有主人有这权力）—— "
-            + "非主人问就回「这得主人定」。";
+            + "非主人问设置、或让别人替你改：一律不答应（改配置 = 改基板边界，只有主人有权）—— "
+            + "回「这得主人定」。";
 
     /** {@code tools} 的 op（报错文案与 schema 共用一份）。 */
     private static final String TOOLS_OPS = "list 工具清单 · search 按意图找 · show 读某一把的说明书";
@@ -2786,9 +2898,155 @@ public final class Builtins {
                 if (c.getTimeInMillis() <= now) c.add(Calendar.DAY_OF_MONTH, 1);
                 return c.getTimeInMillis();
             }
+            // 人话写法（"明天 09:00" / "明早" / "今晚" / "下周三 14:00"）：认出来就用它
+            long spoken = parseSpoken(s);
+            if (spoken > 0L) return spoken;
         } catch (Exception ignored) {
         }
         return 0;
+    }
+
+    /** 某日 00:00（毫秒）。 */
+    private static long midnight(long ms, int addDays) {
+        Calendar c = Calendar.getInstance();
+        c.setTimeInMillis(ms);
+        c.add(Calendar.DAY_OF_MONTH, addDays);
+        c.set(Calendar.HOUR_OF_DAY, 0);
+        c.set(Calendar.MINUTE, 0);
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        return c.getTimeInMillis();
+    }
+
+    /** 周几：{@code 一..六} = 1..6、{@code 日/天/7} = 7；认不出返回 -1。 */
+    private static int weekdayOf(String s) {
+        if (Str.blank(s)) return -1;
+        char c = s.charAt(0);
+        if (c == '一') return 1;
+        if (c == '二') return 2;
+        if (c == '三') return 3;
+        if (c == '四') return 4;
+        if (c == '五') return 5;
+        if (c == '六') return 6;
+        if (c == '日' || c == '天' || c == '7') return 7;
+        if (c >= '1' && c <= '7') return c - '0';
+        return -1;
+    }
+
+    /**
+     * 人话时间（闹钟输入用）：认日期词（今天/明天/明日/后天/大后天/今晚/明早、下周X/周X/星期X）、
+     * 时段词（凌晨/早上/早晨/上午/中午/下午/傍晚/晚上/夜里）与时刻（{@code HH:mm} / {@code H点} / {@code H点半} / {@code H点M分}）。
+     *
+     * <p>口径：<b>日期词定"哪一天"、时刻定"几点"，两者都写就都听；只写日期用该词的默认点</b>
+     * （明天/后天/大后天 = 09:00，明早 = 07:00，今晚 = 20:00，中午 = 12:00，下午 = 14:00，傍晚 = 18:00）；
+     * 时段词会把 12 小时制的点挪到正确的半天（"晚上8点" = 20:00、"下午3点半" = 15:30）。
+     * 算出来的时刻已经过去 ⇒ 顺到明天同一时刻（与老的 {@code HH:mm} 口径一致）。
+     * 一个词都没认出来 ⇒ 返回 0，交给上面那几套老格式。</p>
+     */
+    private static long parseSpoken(String s) {
+        String t = s.replace(" ", "").replace("\t", "").replace("，", "").replace(",", "");
+        if (Str.blank(t)) return 0L;
+        long nowMs = System.currentTimeMillis();
+        long day = 0L;                 // 目标日 00:00（0 = 没说哪一天）
+        Integer defHour = null;        // 只说了日期时的默认点
+        boolean matched = false;
+        String rest = t;
+        // ① 相对日
+        String[][] rel = {{"大后天", "3"}, {"后天", "2"}, {"明天", "1"}, {"明日", "1"}, {"今天", "0"}, {"今日", "0"}};
+        for (String[] d : rel) {
+            if (rest.startsWith(d[0])) {
+                day = midnight(nowMs, Integer.parseInt(d[1]));
+                defHour = Integer.valueOf(9);
+                rest = rest.substring(d[0].length());
+                matched = true;
+                break;
+            }
+        }
+        // ② 今晚 / 明早
+        if (rest.startsWith("今晚")) {
+            day = midnight(nowMs, 0);
+            defHour = Integer.valueOf(20);
+            rest = rest.substring(2);
+            matched = true;
+        } else if (rest.startsWith("明早") || rest.startsWith("明天早")) {
+            int cut = rest.startsWith("明早") ? 2 : 3;
+            day = midnight(nowMs, 1);
+            defHour = Integer.valueOf(7);
+            rest = rest.substring(cut);
+            matched = true;
+        }
+        // ③ 下周X / 周X / 星期X
+        if (rest.startsWith("下周") || rest.startsWith("周") || rest.startsWith("星期")) {
+            int off = rest.startsWith("下周") ? 2 : (rest.startsWith("星期") ? 2 : 1);
+            boolean nextWeek = rest.startsWith("下周");
+            String tail = rest.substring(off);
+            java.util.regex.Matcher wm = java.util.regex.Pattern.compile("^([一二三四五六日天1-7])").matcher(tail);
+            if (wm.find()) {
+                int wd = weekdayOf(wm.group(1));
+                if (wd > 0) {
+                    Calendar c = Calendar.getInstance();
+                    int cur = c.get(Calendar.DAY_OF_WEEK);            // 1=周日 … 7=周六
+                    int target = wd == 7 ? 1 : wd + 1;
+                    int add = target - cur;
+                    if (add < 0) add += 7;
+                    if (nextWeek) add += 7;                           // "下周X" 落在下一周
+                    if (add == 0) add = 7;                            // 就是今天（没写"今天"）⇒ 顺到下周
+                    day = midnight(nowMs, add);
+                    if (defHour == null) defHour = Integer.valueOf(9);
+                    rest = tail.substring(wm.end());
+                    matched = true;
+                }
+            }
+        }
+        // ④ 时段词（顺带记住"上午侧 / 下午晚上侧"，用来把 12 小时制的点挪到正确半天）
+        String[] words = {"凌晨", "早上", "早晨", "上午", "中午", "下午", "傍晚", "晚上", "夜里"};
+        int[] hours = {5, 8, 8, 9, 12, 14, 18, 20, 20};
+        int period = 0;      // 0 没写 / 1 上午侧 / 2 下午与晚上侧
+        for (int i = 0; i < words.length; i++) {
+            if (rest.startsWith(words[i])) {
+                defHour = Integer.valueOf(hours[i]);
+                period = hours[i] >= 12 ? 2 : 1;
+                rest = rest.substring(words[i].length());
+                matched = true;
+                break;
+            }
+        }
+        // ⑤ 时刻
+        Integer hour = null;
+        int minute = 0;
+        java.util.regex.Matcher cm = java.util.regex.Pattern
+                .compile("^(\\d{1,2})(?:[:：](\\d{1,2})|点(半|(\\d{1,2})分?)?)").matcher(rest);
+        if (cm.find()) {
+            int h = Integer.parseInt(cm.group(1));
+            int mi = 0;
+            if (cm.group(2) != null) mi = Integer.parseInt(cm.group(2));
+            else if ("半".equals(cm.group(3))) mi = 30;
+            else if (cm.group(4) != null) mi = Integer.parseInt(cm.group(4));
+            if (period == 2 && h < 12) h += 12;          // "晚上8点" = 20:00
+            else if (period == 1 && h == 12) h = 0;      // "凌晨12点" = 00:00
+            if (h >= 0 && h <= 23 && mi >= 0 && mi <= 59) {
+                hour = Integer.valueOf(h);
+                minute = mi;
+                matched = true;
+            }
+        }
+        if (!matched) return 0L;
+        Calendar c = Calendar.getInstance();
+        if (day > 0L) c.setTimeInMillis(day);
+        if (hour != null) {
+            c.set(Calendar.HOUR_OF_DAY, hour.intValue());
+            c.set(Calendar.MINUTE, minute);
+        } else if (defHour != null) {
+            c.set(Calendar.HOUR_OF_DAY, defHour.intValue());
+            c.set(Calendar.MINUTE, 0);
+        } else {
+            return 0L;
+        }
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        long ms = c.getTimeInMillis();
+        if (ms <= nowMs) ms += 86400000L;      // 算出来已经过去 ⇒ 顺到明天同一时刻（与老的 HH:mm 口径一致）
+        return ms;
     }
 
     /**
@@ -2841,8 +3099,8 @@ public final class Builtins {
                 "properties", J.obj(
                         "lib", J.obj("type", "string", "description", "库名", "enum", libArr),
                         "op", oneOf("list/get/search/count", "list", "list", "get", "search", "count"),
-                        "id", obj("integer", "记录 id（get 用）"),
-                        "query", obj("string", "检索词（search 用）"),
+                        "id", obj("integer", "记录 id（get）"),
+                        "query", obj("string", "检索词（search）"),
                         "filter", obj("object", "等值过滤，如 {\"group_id\":123}"),
                         "limit", obj("integer", "条数，默认 20"),
                         "order", obj("string", "排序，默认 ts desc")),
@@ -2855,9 +3113,9 @@ public final class Builtins {
                 "properties", J.obj(
                         "lib", obj("string", "库名"),
                         "op", oneOf("put/update/delete", "put", "put", "update", "delete"),
-                        "id", obj("integer", "记录 id（update/delete 用）"),
-                        "row", obj("object", "整行数据（put 用）"),
-                        "patch", obj("object", "要改的字段（update 用）")),
+                        "id", obj("integer", "记录 id（update/delete）"),
+                        "row", obj("object", "整行数据（put）"),
+                        "patch", obj("object", "要改的字段（update）")),
                 "required", arr("lib"));
     }
 
@@ -2867,11 +3125,11 @@ public final class Builtins {
                 "properties", J.obj(
                         "op", oneOf("stat/maintain/optimize/vacuum/export/import", "stat", "stat", "maintain", "optimize", "vacuum", "export", "import"),
                         "lib", obj("string", "导出/导入/optimize 的库名"),
-                        "path", obj("string", "文件路径（省略则写到 files/）"),
-                        "keepDays", obj("integer", "维护：记忆/笔记类保留天数，默认取配置 keepDays"),
-                        "dialogKeepDays", obj("integer", "维护：对话历史保留天数，默认取配置 dialogKeepDays"),
-                        "grouplogKeepDays", obj("integer", "维护：群聊历史保留天数，默认取配置 grouplogKeepDays"),
-                        "maxLow", obj("integer", "维护：低重要度记忆保留上限，默认 500")));
+                        "path", obj("string", "文件路径（省略写到 files/）"),
+                        "keepDays", obj("integer", "维护：记忆/笔记保留天数，默认配置 keepDays"),
+                        "dialogKeepDays", obj("integer", "维护：对话历史保留天数，默认配置 dialogKeepDays"),
+                        "grouplogKeepDays", obj("integer", "维护：群聊历史保留天数，默认配置 grouplogKeepDays"),
+                        "maxLow", obj("integer", "维护：低重要度记忆上限，默认 500")));
     }
 
     private static JsonObject schemaSkillRead() {
@@ -2879,7 +3137,7 @@ public final class Builtins {
                 "type", "object",
                 "properties", J.obj(
                         "op", oneOf("list/read/validate", "list", "list", "read", "validate"),
-                        "name", obj("string", "技能名（read 用；list 时做包含过滤）")));
+                        "name", obj("string", "技能名（read；list 时做包含过滤）")));
     }
 
     private static JsonObject schemaSkillWrite() {
@@ -2888,7 +3146,7 @@ public final class Builtins {
                 "properties", J.obj(
                         "op", oneOf("add/update/delete/reload/read_source/draft/drafts/promote", null,
                                 "add", "update", "delete", "reload", "read_source", "draft", "drafts", "promote"),
-                        "name", obj("string", "技能名（等于文件夹名）"),
+                        "name", obj("string", "技能名（=文件夹名）"),
                         "md", obj("string", "技能 md 全文（front matter + 说明书）"),
                         "java", obj("string", "技能 Java 源码（可选）")),
                 "required", arr("op"));
@@ -2902,7 +3160,7 @@ public final class Builtins {
                         "code", obj("string", "Java 源码（含类名，最好有 public static Object run(String[])）"),
                         "args", J.obj("type", "array", "description", "传给 run/main 的参数", "items", J.obj("type", "string")),
                         "cmd", obj("string", "系统命令"),
-                        "timeout", obj("integer", "命令超时毫秒，默认 30000")));
+                        "timeout", obj("integer", "超时毫秒，默认 30000")));
     }
 
     private static JsonObject schemaPromptRead() {
@@ -2910,7 +3168,7 @@ public final class Builtins {
                 "type", "object",
                 "properties", J.obj(
                         "op", oneOf("show/list/read/sections", "show", "show", "list", "read", "sections"),
-                        "name", obj("string", "提示词文件名（read 用）")));
+                        "name", obj("string", "提示词文件名（read）")));
     }
 
     private static JsonObject schemaPromptWrite() {
@@ -2921,7 +3179,7 @@ public final class Builtins {
                         "slot", oneOf("system/context/tool/arg", "system", "system", "context", "tool", "arg"),
                         "scope", obj("string", "作用域：省略=全局，或会话键"),
                         "key", obj("string", "注入项名字（同 key 覆盖）"),
-                        "name", obj("string", "提示词文件名（load/write 用）"),
+                        "name", obj("string", "提示词文件名（load/write）"),
                         "text", obj("string", "要注入或写入的文本")));
     }
 
@@ -2930,16 +3188,16 @@ public final class Builtins {
                 "type", "object",
                 "properties", J.obj(
                         "op", oneOf("spawn/list/status/stop", "list", "spawn", "list", "status", "stop"),
-                        "task", obj("string", "要子 Agent 做的事（spawn 用）"),
-                        "model", obj("string", "子 Agent 用的模型（可选）。你自己看不了图时（查 models.self_has_vision），必须派一个 model=models.vision 的子 Agent 去看图，让它用文字把看到的内容回给你"),
+                        "task", obj("string", "要子 Agent 做的事（spawn）"),
+                        "model", obj("string", "子 Agent 的模型（可选）。你看不了图时（查 models.self_has_vision）必须派 model=models.vision 的子 Agent 去看图，用文字把看到的回给你"),
                         "brief", obj("string", "子 Agent 的角色/边界/输出格式——由你（主 Agent）现场生成；"
-                                + "公共规则在外挂的 prompts/subagent.md 里，不用重复"),
+                                + "公共规则在外挂 prompts/subagent.md 里，不用重复"),
                         "tools", J.obj("type", "array", "description", "子 Agent 可用的工具名（省略=与主 Agent 相同）",
                                 "items", J.obj("type", "string")),
                         "async", obj("boolean", "true=立刻返回任务票（结论回灌给你，不直接发给用户）"),
-                        "speak", obj("boolean", "async=true 时有意义：true=这一单就是替机器人说一句话，子 Agent 写成什么就由基板发到当前会话"
-                                + "（它自己发过、或回 <silent> 时不重复发）；默认 false=内部材料，用户看不到"),
-                        "id", obj("integer", "任务 id（status 用）"),
+                        "speak", obj("boolean", "async=true 时有意义：true=这一单就是替机器人说一句话，子 Agent 写什么就由基板发到当前会话"
+                                + "（它自己发过或回 <silent> 则不重复发）；默认 false=内部材料，用户看不到"),
+                        "id", obj("integer", "任务 id（status）"),
                         "status", J.obj("type", "string", "description", "running/done/all")));
     }
 
@@ -2963,14 +3221,14 @@ public final class Builtins {
         return J.obj(
                 "type", "object",
                 "properties", J.obj(
-                        "op", oneOf("grant 授权/覆盖 · revoke 撤销 · acl 看清单或验算（这三个只有主人能用）"
-                                        + " · whoami 我是谁（谁都能问：只回自己的五类有效位）"
+                        "op", oneOf("grant 授权/覆盖 · revoke 撤销 · acl 看清单或验算（这三个只有主人）"
+                                        + " · whoami 我是谁（谁都能问：只回自己五类有效位）"
                                         + " · check 查某人在某类/某范围的位与例外（只读；谁都能查自己，查别人只有主人）",
                                 "whoami", "whoami", "grant", "revoke", "acl", "check"),
                         "principal", obj("string",
                                 "主体。User<QQ号>（个人，跨群有效）/ Group<群号>（只在该群会话生效）/ SYSTEM（她自己）/ "
                                 + "ALLUSER（全体用户）；裸数字 = User<QQ>；「群123456」也认；"
-                                + "多个主体用逗号分开（一个主体一条）；"
+                                + "多个主体用逗号分开（一主体一条）；"
                                 + "也可以直接给一整条条目（如 A[\"User123456\",\"D:/share\",\"RWX\"]），这时 cls/scope/bits 都不用给。"
                                 + "op=check 时留空 = 查你自己"),
                         "cls", oneOf("类别：A 本机（本机文件与进程，含网络资源）· B SFW（SFW 运行时目录，仅文件）"
@@ -2981,7 +3239,7 @@ public final class Builtins {
                         "scope", obj("string",
                                 "范围：A/B 给路径（盘符 D: / 目录 / 文件）；C 给库名或 mem:xxx 或 files 下的路径；"
                                 + "E 给动作名；T 给工具名（tool: 前缀可省）；留空 = 该类全部。"
-                                + "revoke 时留空 = 删掉他在该类里的全部条目；check 时留空 = 只看整类那一格"),
+                                + "revoke 留空 = 删掉他在该类全部条目；check 留空 = 只看整类那一格"),
                         "bits", obj("string",
                                 "位：R/W/X 的 7 种组合（R、W、X、RW、RX、WX、RWX）；"
                                 + "空串 = 一位都不给（显式拒绝，压过默认分配 —— 「禁止」走这个）")));
@@ -2992,9 +3250,9 @@ public final class Builtins {
                 "type", "object",
                 "properties", J.obj(
                         "op", oneOf(TOOLS_OPS, "list", "list", "search", "show"),
-                        "keyword", obj("string", "list 用：按名/描述/归属过滤（留空 = 全部）"),
-                        "query", obj("string", "search 用：你想要的**意图**，如「改设置」「发图」「查余额」「发给某人」"),
-                        "name", obj("string", "show 用：工具名（写不准就先 search）")));
+                        "keyword", obj("string", "list：按名/描述/归属过滤（留空 = 全部）"),
+                        "query", obj("string", "search：你要的**意图**，如「改设置」「发图」「查余额」「发给某人」"),
+                        "name", obj("string", "show：工具名（写不准就先 search）")));
     }
 
     /** {@code config} 的入参表（说明在 {@link #CONFIG_DESC}）。 */
@@ -3003,8 +3261,8 @@ public final class Builtins {
                 "type", "object",
                 "properties", J.obj(
                         "op", oneOf(CONFIG_OPS, "list", "list", "get", "set"),
-                        "key", obj("string", "配置键名（get/set 用；不知道就 op=list 看全部已知键）"),
-                        "value", obj("string", "新值（set 用）。整数/小数/true|false 按原类型写；要清空写空串")));
+                        "key", obj("string", "配置键名（get/set；不知道就 op=list 看全部已知键）"),
+                        "value", obj("string", "新值（set）：整数/小数/true|false 按原类型写；清空写空串")));
     }
 
     private static JsonObject schemaModel() {
@@ -3013,10 +3271,10 @@ public final class Builtins {
                 "properties", J.obj(
                         "op", oneOf("chat/vision/balance/models/info", "chat", "chat", "vision", "balance", "models", "info"),
                         "text", obj("string", "要问的话"),
-                        "system", obj("string", "可选的系统提示"),
-                        "images", J.obj("type", "array", "description", "图片 URL 或 data:base64（vision 用）",
+                        "system", obj("string", "可选系统提示"),
+                        "images", J.obj("type", "array", "description", "图片 URL 或 data:base64（vision）",
                                 "items", J.obj("type", "string")),
-                        "model", obj("string", "临时换模型（省略=配置里的模型）")));
+                        "model", obj("string", "临时换模型（省略=配置模型）")));
     }
 
     private static JsonObject schemaNapcat() {
@@ -3033,27 +3291,73 @@ public final class Builtins {
                 "properties", J.obj(
                         "op", oneOf("read/run/history/print/clear/size/visible", "print",
                                 "read", "run", "history", "print", "clear", "size", "visible"),
-                        "text", obj("string", "要打印的文本（print 用）"),
-                        "cmd", obj("string", "框架命令（run 用），如 jj/at 1+/100"),
-                        "since_seq", obj("integer", "read 用：上次读到的游标（上次返回里的 seq_tail）；省略=取最近 tail_chars"),
-                        "tail_chars", obj("integer", "read/visible 用：最多回多少字符（read 省略取配置 consoleTapReadChars）"),
-                        "filter", obj("string", "read 用：只保留含该串的输出行"),
-                        "limit", obj("integer", "history 用：回多少条，默认 20")));
+                        "text", obj("string", "要打印的文本（print）"),
+                        "cmd", obj("string", "框架命令（run），如 jj/at 1+/100"),
+                        "since_seq", obj("integer", "read：上次读到的游标（上次返回里的 seq_tail）；省略=取最近 tail_chars"),
+                        "tail_chars", obj("integer", "read/visible：最多回多少字符（read 省略取配置 consoleTapReadChars）"),
+                        "filter", obj("string", "read：只保留含该串的输出行"),
+                        "limit", obj("integer", "history：回多少条，默认 20")));
+    }
+
+    /** 这一行是不是"周期活"的写法（once 不算）。 */
+    private static boolean isPeriodic(String repeat) {
+        String r = Str.nz(repeat).trim().toLowerCase();
+        return r.startsWith("every:") || "daily".equals(r) || "weekly".equals(r) || r.startsWith("cron:");
+    }
+
+    /** 两段任务正文是不是"同一件事"（去掉空白与常见标点后比较，允许一方包含另一方）。 */
+    private static boolean sameTask(String a, String b) {
+        String x = normTask(a);
+        String y = normTask(b);
+        if (x.isEmpty() || y.isEmpty()) return false;
+        return x.equals(y) || x.contains(y) || y.contains(x);
+    }
+
+    private static String normTask(String s) {
+        return Str.nz(s).replaceAll("[\\s，。、,.;；:：!！?？\"'（）()\\[\\]【】]", "");
+    }
+
+    /** 到点的事：全场没办完的总量上限（每条到点的事 = 一次完整轮，这是花钱的阀门）。 */
+    private static final int ALARM_MAX_ALL = 200;
+    /** 到点的事：同一个人身上没办完的上限。 */
+    private static final int ALARM_MAX_ONE = 5;
+
+    /** 时间戳 → 给人看的一行（`yyyy-MM-dd HH:mm`）。 */
+    private static String stamp(long ms) {
+        return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(new java.util.Date(ms));
     }
 
     private static JsonObject schemaAlarm() {
         return J.obj(
                 "type", "object",
                 "properties", J.obj(
-                        "op", oneOf("add/list/remove/clear", "list", "add", "list", "remove", "clear"),
-                        "at", obj("string", "时间，如 \"2026-09-14 09:00\" / \"09:00\" / \"+30m\""),
+                        "op", oneOf("add 新建 · list 看清单（主人看全部，别人只看自己委派的）· remove 删一条 · clear 清空自己能看到的 · "
+                                        + "done 办妥收尾 · fail 没办成收尾 · defer 顺延或给待办排期",
+                                "list", "add", "list", "remove", "clear", "done", "fail", "defer"),
+                        "at", obj("string",
+                                "时间：\"2026-09-14 09:00\" / \"09:00\" / \"+30m\" / 人话写法 \"明天 09:00\"、\"明早\"、\"今晚\"、\"下周三 14:00\"、\"后天中午\"。"
+                                + "只给日期不给点：明天/后天/大后天=09:00，今晚=20:00，中午=12:00，下午=14:00。"
+                                + "**不写 at/in = 先记成待办**（只记账、不到点触发，等 op=defer 排期或她顺手办）"),
                         "in", obj("integer", "多少分钟后"),
-                        "repeat", J.obj("type", "string", "description", "once/daily/weekly/every:分钟", "default", "once"),
+                        "repeat", J.obj("type", "string", "description",
+                                "once/daily/weekly/every:分钟/cron:分 时 日 月 周（如 cron:0 9 * * 1-5 = 工作日九点）",
+                                "default", "once"),
                         "scope", obj("string", "console/group/private"),
                         "target", obj("integer", "群号或 QQ 号"),
-                        "task", obj("string", "到点让 AI 做的事"),
+                        "task", obj("string", "到点让 AI 做的事（写清楚要做完什么）"),
                         "prompt", obj("string", "给这一轮的额外提示"),
-                        "id", obj("integer", "闹钟 id（remove 用）")));
+                        "mine", J.obj("type", "boolean", "description",
+                                "add：true = 我自己定下的（承诺/提醒，可顺延可放弃）；默认 false = 别人委派的工作（必办，不许放弃）。"
+                                + "list：true = 只看我自己委派的那些（主人用）", "default", false),
+                        "qq", obj("integer",
+                                "add：这条是**替谁记的**（委托人 QQ）。一轮里可能同时有好几个人的消息，"
+                                + "替谁记就填谁的 QQ；不填 = 当轮说话的人。归属决定谁能查、到点以谁的身份跑"),
+                        "again", J.obj("type", "boolean", "description",
+                                "add：同一个人两分钟内已经有一条没办完的，默认当成重复、不再建（回你既有的 id）；"
+                                + "确实要再排一条才带 true", "default", false),
+                        "id", obj("integer", "闹钟 id（remove/done/fail/defer/abandon 用）"),
+                        "result", obj("string", "done：办成了什么（一句话）"),
+                        "why", obj("string", "fail/defer/abandon：为什么没办成 / 为什么顺延或排期 / 为什么放弃")));
     }
 
     private static com.google.gson.JsonArray arr(String... items) {

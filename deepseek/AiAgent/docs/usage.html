@@ -70,33 +70,33 @@
         <div class="tw scroll reveal">
           <table>
             <thead>
-              <tr><th>入口</th><th>怎么触发</th><th>你会看到</th><th>出处</th></tr>
+              <tr><th>入口</th><th>怎么触发</th><th>你会看到</th></tr>
             </thead>
             <tbody>
               <tr>
                 <td>QQ 私聊</td>
                 <td>直接发消息就行</td>
                 <td>她回一条（或按分段规则回几条）消息</td>
-                <td><code>QqGateway.java:873</code></td>
+                
               </tr>
               <tr>
                 <td>QQ 群聊</td>
-                <td><b>必须 @ 她</b>；@ 了才进入处理</td>
+                <td><b>@ 她一下</b>才会进入处理</td>
                 <td>被 @ 的那条消息会得到回复；没 @ 的消息她<b>不进入处理</b>（连模型都不调）</td>
-                <td><code>QqGateway.java:874</code>（<code>return ev.atSelf();</code>）、判定本体 <code>qq\Ev.java:182</code></td>
+                
               </tr>
               <tr>
                 <td>控制台 <code>ai/chat</code></td>
                 <td><code>ai/chat 你好</code></td>
                 <td>回答直接打在控制台（<b>本地控制台 ≡ QQ 里的主人</b>）</td>
-                <td><code>Cmd.java:118</code>、<code>:1358</code></td>
+                
               </tr>
             </tbody>
           </table>
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">"引用了她的消息但没 @" 不会触发 —— 这是设计，不是故障</span>：群聊的触发判据只有一条"这条消息是否 @ 到了她自己"（<code>QqGateway.java:874</code>）。所以<b>只引用、不 @</b> 时判定为否，不产生回合、不会回复。要想让她接话，@ 一下即可。</p>
+          <p><span class="n-title">"引用了她的消息但没 @" 不会触发 —— 这是设计，不是故障</span>：群聊的触发判据只有一条"这条消息是否 @ 到了她自己"（<code>QqGateway.java</code>）。所以<b>只引用、不 @</b> 时判定为否，不产生回合、不会回复。要想让她接话，@ 一下即可。</p>
         </div>
 
         <h3 class="sec">三个容易被当成故障的正常行为</h3>
@@ -104,17 +104,17 @@
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">① 事件缺 <code>self_id</code> 就不认 @</h4>
             <p>她怎么知道"被 @"？靠事件里带的 <code>self_id</code>；<b>缺这个字段时判定恒为否</b> —— 表现就是群里 @ 了也不理。</p>
-            <p class="t-cap">出处 <code>qq\Ev.java:18-19</code>、<code>:182</code>。</p>
+            <p class="t-cap">出处：<code>qq\Ev.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">② 一次回复可能被拆成几条</h4>
             <p>长回复按分段规则拆开发送（分段开关、长度与延迟都是配置键）。</p>
-            <p class="t-cap">出处 <code>Cmd.java:1192-1198</code>（<code>replySplit</code> / <code>replyMaxChars</code> / <code>replyGroupMaxChars</code> / <code>replySplitDelayMs</code> / <code>replySplitJitterMs</code>）。</p>
+            <p class="t-cap">出处：<code>Cmd.java</code>（<code>replySplit</code> / <code>replyMaxChars</code> / <code>replyGroupMaxChars</code> / <code>replySplitDelayMs</code> / <code>replySplitJitterMs</code>）。</p>
           </div>
           <div class="panel reveal d2">
             <h4 class="sub" style="margin-top:0">③ 发图她能看图</h4>
             <p>消息里带图时，图可以被直接挂进这一轮请求做理解（走 <code>native</code> 档）；这是<b>图片专有</b>能力：语音 / 视频 / 文件段只出标签、不做识别。</p>
-            <p class="t-cap">出处 <code>qq\MediaAttach.java:29-40</code>、<code>ctx\CtxBuild.java:903-924</code>、<code>qq\MediaRender.java:153-155</code>（图）对比 <code>:156-158</code>、<code>:178-195</code>（语音/视频只有标签）。</p>
+            <p class="t-cap">出处：<code>qq\MediaAttach.java</code>、<code>ctx\CtxBuild.java</code>、<code>qq\MediaRender.java</code>（图）对比 （语音/视频只有标签）。</p>
           </div>
         </div>
       </section>
@@ -131,12 +131,12 @@
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">启动基板：<code>ai/start</code></h4>
             <p>角色：<b>唯一的"加载并运行"命令</b>。它读 <code>config.json</code>、跑 19 步装配。</p>
-            <p class="t-cap"><b>做完会看到</b>：控制台逐行打印装配进度；结束后 <code>ai/status</code> 显示 <code>ready=1</code>；如果哪一步失败，会点名失败步骤（未启动时是 <code>ready=0 reason=not_started</code>）。出处 <code>Cmd.java:1364</code>、<code>:1373</code>。</p>
+            <p class="t-cap"><b>做完会看到</b>：控制台逐行打印装配进度；结束后 <code>ai/status</code> 显示 <code>ready=1</code>；如果哪一步失败，会点名失败步骤（未启动时是 <code>ready=0 reason=not_started</code>）。出处：<code>Cmd.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">重启基板：<code>ai/restart</code></h4>
             <p>先停旧基板 → 重读 <code>config.json</code> → 重新装配 19 步；<b>不并发</b>：已经在装配/重启时会被明确拒绝（回 <code>BUSY</code> 一句）。</p>
-            <p class="t-cap"><b>做完会看到</b>：一行"重启已受理"，随后又是一轮装配进度行，最后 <code>ai/status</code> 的「待生效」清单<b>变空</b>。出处 <code>Cmd.java:1365</code>、<code>V4Activity.java:345</code>。</p>
+            <p class="t-cap"><b>做完会看到</b>：一行"重启已受理"，随后又是一轮装配进度行，最后 <code>ai/status</code> 的「待生效」清单<b>变空</b>。出处：<code>Cmd.java</code>、<code>V4Activity.java</code>。</p>
           </div>
         </div>
 
@@ -145,12 +145,12 @@
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0"><code>ai/exit</code> 只停基板</h4>
             <p>命令表写的是"框架转发到组件 <code>exit()</code>：停基板（不改配置、不卸载插件；之后可再 start）"。</p>
-            <p class="t-cap"><b>实测行为</b>：基板停下之后，<b>调试口会随之关闭，而 JVM 进程仍然活着</b>；在<b>没有控制台</b>的场景下，这时<b>无法再 start</b>。这是当前实现的行为，<b>未计划修改</b>。出处 <code>Cmd.java:1366</code>、<code>V4Activity.java:394-414</code>。</p>
+            <p class="t-cap"><b>行为</b>：基板停下之后，<b>调试口会随之关闭，而 JVM 进程仍然活着</b>；在<b>没有控制台</b>的场景下，这时<b>无法再 start</b>。这是当前实现的行为，<b>未计划修改</b>。出处：<code>Cmd.java</code>、<code>V4Activity.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">真正结束：<code>/exit</code> 或按精确 pid</h4>
             <p>要真正关停，用<b>框架控制台的 <code>/exit</code></b>（框架自带文档：<code>/exit</code> = 退出 SFW），<b>或者按精确 pid 结束进程</b>。</p>
-            <p class="t-cap">进程由 <code>SairFrameWork\run.bat</code> 里的 <code>javaw -jar SFW.jar</code> 拉起（实测读该文件）；框架文档见 <code>SairFrameWork\readme\pages\plugin-dev.html:71</code>、<code>:139</code>。<b>不要按进程名批量杀</b>。</p>
+            <p class="t-cap">进程由 <code>SairFrameWork\run.bat</code> 里的 <code>javaw -jar SFW.jar</code> 拉起；框架文档见 <code>SairFrameWork\readme\pages\plugin-dev.html</code>。按进程名批量结束容易误伤同机的其它实例。</p>
           </div>
         </div>
 
@@ -171,12 +171,12 @@
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">怎么改</h4>
             <p><code>ai/config</code> 看全部、<code>ai/config &lt;键&gt;</code> 看一个、<code>ai/config set &lt;键&gt; &lt;值&gt;</code> 写一个。写完<b>不会生效</b>，要 <code>ai/start</code>（没在跑）或 <code>ai/restart</code>（已经在跑）。</p>
-            <p class="t-cap"><b>做完会看到</b>：改完那一行会带"未生效"的提示；<code>ai/status</code> 的「待生效」段会点名这个键；重启后这一段变空。出处 <code>Cmd.java:1375</code>、<code>:1369-1371</code>、<code>Conf.java:578-589</code>。</p>
+            <p class="t-cap"><b>做完会看到</b>：改完那一行会带"未生效"的提示；<code>ai/status</code> 的「待生效」段会点名这个键；重启后这一段变空。出处：<code>Cmd.java</code>、<code>Conf.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">谁会被加密</h4>
             <p>三个敏感键（<code>apiKey</code> / <code>napcatToken</code> / <code>relayToken</code>）<b>密文落盘</b>，回执只回"已设置 / 长度"，绝不回值。</p>
-            <p class="t-cap">密文与<b>启动目录</b>绑死：密钥派生包含 <code>user.dir</code>。换机器 / 用户名 / 工作目录会解不开 —— 这时把该键改成明文让它重新加密。出处 <code>Conf.java:57-62</code>、<code>kit\Crypto.java:18</code>、<code>:29-31</code>、<code>:130</code>。</p>
+            <p class="t-cap">密文与<b>启动目录</b>绑死：密钥派生包含 <code>user.dir</code>。换机器 / 用户名 / 工作目录会解不开 —— 这时把该键改成明文让它重新加密。出处：<code>Conf.java</code>、<code>kit\Crypto.java</code>。</p>
           </div>
         </div>
 
@@ -187,16 +187,16 @@
               <tr><th>类别</th><th>键</th><th>写进去会怎样</th></tr>
             </thead>
             <tbody>
-              <tr><td><b>有真读者</b>（放心用）</td><td><code>mediaVision</code>、<code>visionModels</code>、<code>mediaAttachMax</code>、<code>mediaAttachMaxBytes</code>、<code>mediaExpandQuote</code>、<code>mediaCacheHours</code></td><td>正常生效（读取点分别在 <code>ctx\CtxBuild.java</code>、<code>qq\QuoteCache.java:266</code>、<code>:310</code>）</td></tr>
+              <tr><td><b>有真读者</b>（放心用）</td><td><code>mediaVision</code>、<code>visionModels</code>、<code>mediaAttachMax</code>、<code>mediaAttachMaxBytes</code>、<code>mediaExpandQuote</code>、<code>mediaCacheHours</code></td><td>正常生效（读取点分别在 <code>ctx\CtxBuild.java</code>、<code>qq\QuoteCache.java</code>）</td></tr>
               <tr><td><b>有键无读者 · 尚未接线</b></td><td><code>mediaRender</code>、<code>mediaRenderMaxChars</code></td><td><b>改了没有任何效果</b>（既不报错也不生效）</td></tr>
               <tr><td><b>有键无读者 · 尚未实现</b></td><td><code>mediaExpandForward</code>、<code>mediaExpandMaxNodes</code>、<code>mediaExpandMaxDepth</code>、<code>mediaExpandMaxChars</code></td><td><b>计划中／未实现</b>：折叠转发的"展开"这件事本身还没做，现状只出一行 <code>[折叠转发 id=… 未展开]</code></td></tr>
             </tbody>
           </table>
         </div>
-        <p class="t-cap">登记处 <code>Conf.java:1239-1248</code>（getter 见 <code>:835</code>、<code>:838</code>、<code>:853-862</code>）。逐键说明与复核命令见<a href="config.html#other">配置页 · 其余键</a>。把"尚未接线"与"尚未实现"分开写，是因为前者只差一次接线、后者还差功能本身。</p>
+        <p class="t-cap">登记处 <code>Conf.java</code>（getter 见）。逐键说明与命令见<a href="config.html#other">配置页 · 其余键</a>。把"尚未接线"与"尚未实现"分开写，是因为前者只差一次接线、后者还差功能本身。</p>
 
         <div class="note bad reveal">
-          <p><span class="n-title">动配置之前先存字节</span>：改之前把 <code>config.json</code> 与 <code>perms.json</code> 各复制一份（带时间戳），再动。理由是配置里既有密文（解不开就白改）、又有人工写的例外清单（写坏了只能靠备份回滚）。这两个文件的落点：<code>SairFrameWork\data\AiAgent-V4\</code>（数据根由 <code>Conf.java:1093-1103</code> 拼出，账本名见 <code>auth\Acl.java:121</code>）。</p>
+          <p><span class="n-title">动配置之前先存字节</span>：改之前把 <code>config.json</code> 与 <code>perms.json</code> 各复制一份（带时间戳），再动。理由是配置里既有密文（解不开就白改）、又有人工写的例外清单（写坏了只能靠备份回滚）。这两个文件的落点：<code>SairFrameWork\data\AiAgent-V4\</code>（数据根由 <code>Conf.java</code> 拼出，账本名见 <code>auth\Acl.java</code>）。</p>
         </div>
       </section>
 
@@ -224,7 +224,7 @@
             </tbody>
           </table>
         </div>
-        <p class="t-cap">出处 <code>Cmd.java:1381-1382</code>（命令表原文）、<code>:804</code>（提示词正文有它自己的热重载）。冷启动只建 <b>0 字节空壳</b>文件、不带任何文案（<code>Boot.java:840-843</code>、<code>:869-870</code>）—— 所以"提示词是空的"是没放文件，不是坏了。文件落点与加载顺序见<a href="files.html#prompts">文件页 · 提示词</a>。</p>
+        <p class="t-cap">出处：<code>Cmd.java</code>（命令表原文）（提示词正文有它自己的热重载）。冷启动只建 <b>0 字节空壳</b>文件、不带任何文案（<code>Boot.java</code>）—— 所以"提示词是空的"是没放文件，不是坏了。文件落点与加载顺序见<a href="files.html#prompts">文件页 · 提示词</a>。</p>
       </section>
 
       <!-- ============ 5 ============ -->
@@ -239,17 +239,17 @@
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0"><code>ai/acl</code>：看权限账本（只读）</h4>
             <p>打印"默认分配 + 逐条例外"。判据只有一本账：数据根的 <code>perms.json</code>，规则是<b>按资源类型的默认分配 + 例外条目突破默认</b>；<b>空位 = 拒绝</b>。</p>
-            <p class="t-cap">主体三类 <code>MASTER</code> / <code>SYSTEM</code> / <code>ALLUSER</code>；资源五类 <code>A</code>（本机）/ <code>B</code>（SFW 内）/ <code>C</code>（数据）/ <code>E</code>（外部交互）/ <code>T</code>（工具）。出处 <code>Cmd.java:1384</code>、<code>auth\Auth.java:9</code>、<code>:24-27</code>、<code>auth\Acl.java:22-23</code>。</p>
+            <p class="t-cap">主体三类 <code>MASTER</code> / <code>SYSTEM</code> / <code>ALLUSER</code>；资源五类 <code>A</code>（本机）/ <code>B</code>（SFW 内）/ <code>C</code>（数据）/ <code>E</code>（外部交互）/ <code>T</code>（工具）。出处：<code>Cmd.java</code>、<code>auth\Auth.java</code>、<code>auth\Acl.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0"><code>ai/perm</code>：好感度</h4>
             <p><code>ai/perm</code> 查看 / 设置 / 重置某个人的好感度数值。<b>好感度不参与权限判定</b>——权限只看账本。</p>
-            <p class="t-cap">出处 <code>Cmd.java:1383</code>、<code>:1393-1394</code>，<code>auth\Auth.java:32-33</code>、<code>:57</code>。想给别人放开某项能力：按上面的资源写法在 <code>perms.json</code> 里写例外，或在 QQ 里让主人授权。</p>
+            <p class="t-cap">出处：<code>Cmd.java</code>，<code>auth\Auth.java</code>。想给别人放开某项能力：按上面的资源写法在 <code>perms.json</code> 里写例外，或在 QQ 里让主人授权。</p>
           </div>
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">默认对非主人是全关的</span>：一条例外都没命中时按资源类型给位，其中 <code>A</code> 类（SFW 数据根之外的本机路径）对普通用户<b>一位都不给</b>，<code>B</code> / <code>E</code> 类默认也不给；主人（<code>MASTER</code>）恒全权、任何条目都影响不到他。出处 <code>auth\Acl.java:55</code>、<code>:145-181</code>、<code>:92-99</code>。</p>
+          <p><span class="n-title">默认对非主人是全关的</span>：一条例外都没命中时按资源类型给位，其中 <code>A</code> 类（SFW 数据根之外的本机路径）对普通用户<b>一位都不给</b>，<code>B</code> / <code>E</code> 类默认也不给；主人（<code>MASTER</code>）恒全权、任何条目都影响不到他。出处：<code>auth\Acl.java</code>。</p>
         </div>
       </section>
 
@@ -264,13 +264,13 @@
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">两个口是什么</h4>
-            <p><b>输出口</b>默认 <code>2660</code>：接进来就能读状态与执行调试命令；<b>输入口</b>默认 <code>2661</code>：可以把一段"外部事件"喂进来，走和真实事件同一条链路（仿真开关默认开）。两个口都<b>只绑回环地址且必须带 token</b>。</p>
-            <p class="t-cap">出处 <code>Conf.java:284</code>（2660）、<code>:294-300</code>（2661）、<code>:308</code>（仿真出厂值）；实现 <code>dev\DebugPort.java</code>、<code>dev\DebugSimPort.java</code>。</p>
+            <p><b>输出口</b>默认 <code>2660</code>：接进来就能读状态与执行调试命令；<b>输入口</b>默认 <code>2661</code>：可以把一段"外部事件"喂进来，走和真实事件同一条链路（仿真开关默认开）。两个口都<b>只绑回环地址，并且都要带 token</b>。</p>
+            <p class="t-cap">出处：<code>Conf.java</code>（2660）（2661）（仿真出厂值）；实现 <code>dev\DebugPort.java</code>、<code>dev\DebugSimPort.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">怎么开、怎么关</h4>
             <p><code>ai/debug on [token]</code> 开（token 不给就按已有配置/生成）、<code>ai/debug status</code> 看状态、<code>ai/debug off</code> 关、<code>ai/debug simulate on|off</code> 切输入口的仿真。</p>
-            <p class="t-cap"><b>做完会看到</b>：<code>on</code> 之后回一行"调试口已经在听"加端口与 token 脱敏信息；<code>status</code> 打印两个口的监听状态。<b>只有这条命令能起停这两个口</b>；<code>ai/restart</code> 不会把它关掉。出处 <code>Cmd.java:1388</code>、<code>:1010-1012</code>、<code>:936</code>。</p>
+            <p class="t-cap"><b>做完会看到</b>：<code>on</code> 之后回一行"调试口已经在听"加端口与 token 脱敏信息；<code>status</code> 打印两个口的监听状态。<b>只有这条命令能起停这两个口</b>；<code>ai/restart</code> 不会把它关掉。出处：<code>Cmd.java</code>。</p>
           </div>
         </div>
 
@@ -284,7 +284,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">数据</span>
           <h2>数据、日志与备份</h2>
-          <p class="chapter-desc">预算有限的话只记一句：<b>要备份就复制数据根里的那几个文件</b>，别去动程序与目录结构。</p>
+          <p class="chapter-desc">预算有限的话只记一句：<b>要备份就复制数据根里的那几个文件</b>，程序与目录结构可以不动。</p>
         </header>
 
         <div class="tw scroll reveal">
@@ -293,7 +293,7 @@
               <tr><th>东西</th><th>是什么</th><th>你要注意什么</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>（业务库 + 运行表 + 全文索引都在里面）</td><td>备份就是复制它；不要用其它工具改它的表结构</td></tr>
+              <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>（业务库 + 运行表 + 全文索引都在里面）</td><td>备份就是复制它；它的表结构交给基板自己维护就好</td></tr>
               <tr><td><code>config.json</code></td><td>配置文件（已知键 94 个）</td><td>含密文；换启动目录会解不开</td></tr>
               <tr><td><code>perms.json</code></td><td>权限账本（主人写的例外清单）</td><td>写坏了只能靠备份回滚</td></tr>
               <tr><td><code>prompts\</code></td><td>提示词文件</td><td><code>ai/prompt reload</code> 即可重载，不必重启</td></tr>
@@ -302,7 +302,7 @@
             </tbody>
           </table>
         </div>
-        <p class="t-cap">数据根 = <code>SairFrameWork\data\AiAgent-V4\</code>（路径拼接见 <code>Conf.java:1093-1103</code>）；日志滚动口径见 <code>dev\DebugLog.java:24-42</code>。更细的逐文件说明见<a href="files.html#datadir">文件页 · 数据根</a>。</p>
+        <p class="t-cap">数据根 = <code>SairFrameWork\data\AiAgent-V4\</code>（路径拼接见 <code>Conf.java</code>）；日志滚动口径见 <code>dev\DebugLog.java</code>。更细的逐文件说明见<a href="files.html#datadir">文件页 · 数据根</a>。</p>
 
         <h3 class="sec">用 <code>ai/store</code> 做维护与搬运</h3>
         <div class="tw scroll reveal">
@@ -313,12 +313,12 @@
             <tbody>
               <tr><td><code>ai/store stat</code></td><td>看每个库的条数与占用</td><td>一份库清单 + 总条数 + 文件大小（含 WAL 占用）</td></tr>
               <tr><td><code>ai/store maintain</code></td><td>按保留期清理过期流水</td><td>清理结果回执；<b>清理不会自动缩小文件</b></td></tr>
-              <tr><td><code>ai/store export &lt;库&gt;</code></td><td>把某个库导出成文件</td><td>一行"已导出 &lt;绝对路径&gt;"，落点在 <code>files\</code>（<code>Cmd.java:1332</code>）</td></tr>
+              <tr><td><code>ai/store export &lt;库&gt;</code></td><td>把某个库导出成文件</td><td>一行"已导出 &lt;绝对路径&gt;"，落点在 <code>files\</code>（<code>Cmd.java</code>）</td></tr>
               <tr><td><code>ai/store import &lt;库&gt; &lt;路径&gt;</code></td><td>从文件导回某个库</td><td>一行"已导入 N 条"</td></tr>
             </tbody>
           </table>
         </div>
-        <p class="t-cap">出处 <code>Cmd.java:1387</code>、<code>:1331-1341</code>。保留期三把尺子（记忆 / 对话 / 群聊）默认 30 / 180 / 30 天，<code>&lt;=0</code> = 不过期（<code>Conf.java:142</code>、<code>:144</code>、<code>:146</code>）。</p>
+        <p class="t-cap">出处：<code>Cmd.java</code>。保留期三把尺子（记忆 / 对话 / 群聊）默认 30 / 180 / 30 天，<code>&lt;=0</code> = 不过期（<code>Conf.java</code>）。</p>
       </section>
 
       <!-- ============ 8 ============ -->
@@ -348,7 +348,7 @@
               <tr>
                 <td><code>ai/restart</code> 回 <code>BUSY</code></td>
                 <td>它自己的回话</td>
-                <td>已经有一条装配/重启在跑 —— <b>等它结束再试</b>，不要连敲</td>
+                <td>已经有一条装配/重启在跑 —— <b>等它结束再试</b>，不用连着敲</td>
               </tr>
               <tr>
                 <td>QQ 侧没反应</td>
@@ -368,17 +368,17 @@
               <tr>
                 <td>外挂层某个单元没起来</td>
                 <td><code>ai/status</code> 的步骤台账</td>
-                <td>装载失败<b>只让那一项能力缺位，装配继续往下走</b>；<code>ai/status</code> 能看出缺了哪一项（外挂层内容不在本文档范围内）</td>
+                <td>装载失败<b>只让那一项能力缺位，装配继续往下走</b>；<code>ai/status</code> 能看出缺了哪一项（技能怎么写见 <a href="capabilities.html#skill-dev">06 · 能力</a>）</td>
               </tr>
               <tr>
                 <td>程序还在、基板没了</td>
                 <td>进程是否仍在</td>
-                <td>这是 <code>ai/exit</code> 的实测行为：只停基板、调试口随之关闭而 JVM 仍活；<b>要真正关停用 <code>/exit</code> 或按精确 pid</b></td>
+                <td>这是 <code>ai/exit</code> 的行为：只停基板、调试口随之关闭而 JVM 仍活；<b>要真正关停用 <code>/exit</code> 或按精确 pid</b></td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p class="t-cap">出处：状态与失败步骤 <code>Cmd.java:1373</code>；NapCat 监听与降级 <code>Boot.java:756-760</code>、<code>qq\Link.java:148-156</code>；重载口径 <code>Cmd.java:1369-1371</code>；装配失败继续 <code>Boot.java:804-819</code>；关停实测 <code>Cmd.java:1366</code>、<code>V4Activity.java:394-414</code>。</p>
+        <p class="t-cap">出处：状态与失败步骤 <code>Cmd.java</code>；NapCat 监听与降级 <code>Boot.java</code>、<code>qq\Link.java</code>；重载口径 <code>Cmd.java</code>；装配失败继续 <code>Boot.java</code>；关停 <code>Cmd.java</code>、<code>V4Activity.java</code>。</p>
 
         <div class="note ok reveal">
           <p><span class="n-title">安全重启的标准动作</span>：① <code>ai/status</code> 记下当前状态与「待生效」清单 → ② 需要的话先备份 <code>config.json</code> / <code>perms.json</code> → ③ <code>ai/restart</code> → ④ 等装配进度打完 → ⑤ 再 <code>ai/status</code> 确认 <code>ready=1</code> 且「待生效」为空 → ⑥ 群里 <b>@ 她</b>发一条测试消息。</p>
@@ -411,7 +411,7 @@
         </div>
 
         <div class="note reveal">
-          <p><span class="n-title">本文档未覆盖</span>：外挂扩展层的内容（有哪些单元、各自做什么、怎么自己写）不在本文档范围内；本页只写"外挂层装载失败时基板怎么表现"。命令的逐条参数细节见<a href="commands.html">命令参考</a>；键的逐条含义见<a href="config.html">配置键面</a>。</p>
+          <p><span class="n-title">本文档未覆盖</span>：技能这一层有自己的页面：有哪些、各自做什么见 <a href="capabilities.html#skills">06 · 能力</a> 的技能清单，怎么写、怎么装见同页的「自己写一个技能」；本页只写"技能装载失败时基板怎么表现"。命令的逐条参数细节见<a href="commands.html">命令参考</a>；键的逐条含义见<a href="config.html">配置键面</a>。</p>
         </div>
       </section>
 

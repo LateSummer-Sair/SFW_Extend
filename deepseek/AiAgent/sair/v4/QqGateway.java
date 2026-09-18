@@ -618,6 +618,9 @@ public final class QqGateway {
             return;
         }
         // ⑥ 好感度是权限门禁的数据源：把当前数值绑到这次调用上
+        //    （主人裁 2026-09-17 起它还多一层身份：她对每个人的"关系值" ⇒ 第一次打交道就按人建账，
+        //     这样谁都能问她"我的好感度是多少"，而说不说由她定）
+        boot.favor().ensure(c.qq());
         c = c.withFavor(boot.favor().of(c.qq()));
 
         // 入站媒体登记：图片段里的 file 值 → 直连 URL（跨机 NapCat 时，技能只能靠这条 URL 取图）。
@@ -697,7 +700,7 @@ public final class QqGateway {
         payload.add("_caller", callerJson(c));
         payload.addProperty("_handled", false);
         final Caller hookCaller = c;
-        final Sink hookSink = new Sinks.QqSink(boot.guardedApi(), c, out, false, seg);
+        final Sink hookSink = new Sinks.QqSink(boot.guardedApi(), c, out, false, seg, boot.favor());
         boot.skills().dispatch(Skills.ON_MESSAGE, payload, hookCaller, new Turn(hookCaller, hookSink));
         boolean handled = J.b(payload, "_handled", false);
 
@@ -774,7 +777,7 @@ public final class QqGateway {
         // 直接 return）在这里都走不到（prompt 已非空 / 已 return）。
         if (Str.blank(prompt) && hasContent(ev)) prompt = Str.has(render) ? render : media;
         final Caller caller = c;
-        final Sink sink = new Sinks.QqSink(boot.guardedApi(), caller, out, verbose(), seg);
+        final Sink sink = new Sinks.QqSink(boot.guardedApi(), caller, out, verbose(), seg, boot.favor());
         // ★ M4：**只在"这条消息要起一轮的那一刻"**解析一次引用（真机口径 ≈16.5 次/天）。
         //   顺序就是甲方的裁定：先本地库（纯本地、无网络、最优形状 order by id desc limit 1）
         //   ⇒ 命中且有正文就直接用；没命中才入队走 NapCat（单线程 worker，**这一轮不等**）。

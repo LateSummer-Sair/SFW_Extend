@@ -46,7 +46,7 @@
     <section class="hero">
       <span class="eyebrow">更新日志</span>
       <h1>更新日志<br><span class="grad">当前版本 + 历史条目</span></h1>
-      <p class="lede">最新一条对应当前线上字节；其下是继承下来的历史版本条目。</p>
+      <p class="lede">最新一条对应当前线上这一版；下面按版本号从高到低，是承接过来的历史版本条目。</p>
     </section>
 
     <div class="doc-body" id="doc-body">
@@ -55,10 +55,11 @@
       <section class="chapter" id="current">
         <header class="chapter-head reveal">
           <span class="chapter-tag">当前版本</span>
-          <h2>当前版本 · 线上基线</h2>
+          <h2>当前版本 · V4.1</h2>
+      <p>这一版是 <b>V4.1</b>：基板的九件事不变，能力面往前走了一步 —— 到点的事（待办与闹钟同一张账、可顺延可收尾）、群里 @ 谁与引用哪条由她自己决定、输出的纯文字口径、情绪拦截会给她回执、以及技能面的整理（新增点名引用等，退休了重复的几支）。细节见下方条目。</p>
           <p class="chapter-desc">
-            这一条对应当前线上程序的实际字节。里面每个数字都能用写在同一段里的命令在本机复核；
-            没有实现的能力一律写成「计划中／未实现」，不写成已具备。
+            这一条记录当前线上这一版的内容：能做什么、有哪些限制、哪些还没落地，都照实写。
+            历史条目按版本号从高到低排在后面，改了什么一目了然。
           </p>
         </header>
 
@@ -70,66 +71,52 @@
               <h3 class="rel-title">2026-09-17 · 当前基线：九项能力的基板 + 可插拔外挂扩展</h3>
               <div class="rel-desc">
                 <b>这一版是什么</b>：基板只做九件事 —— 通用存储、热插拔与动态执行、提示词加载与注入、Agent 架构、上下文装配、权限与好感度、模型客户端、QQ 连接、控制台交互。
-                业务能力全部移出基板，改为 <code>data\skills\</code> 下的外挂扩展：放一个目录就多一项能力，删掉就彻底消失，一个扩展都不装基板也照常运转。
-                本页此前把 V4 段的能力变化按编号 1–28 逐条列出；那些条目属于过程记录，按本文档范围不再逐条继承，其功能含义全部收敛为本条。
+                业务能力都搬到了 <code>data\skills\</code> 下的外挂扩展里：放一个目录就多一项能力，删掉就彻底消失，一个扩展都不装，基板也照常运转。
                 <br><br>
 
-                <b>① 线上程序与字节（可复核）</b>：线上插件 <code>C:\Sair\SairFrameWork\plugins\exection\ai.jar</code> = <b>675,173 B</b>，
-                sha256 = <code>130746B0B207138004459B4E7101FA4B148BBAF15CA42946D8D3A4A22228B088</code>；
-                仓根 <code>AiAgentV4.jar</code> 与它<b>逐位相同</b>（同字节数、同 sha256）。
+                <b>① 线上这一版</b>：线上插件是 <code>C:\Sair\SairFrameWork\plugins\exection\ai.jar</code>，
+                仓根产物是 <code>AiAgentV4.jar</code>，两者是同一份；落位后按文件名得到控制台前缀 <code>ai/</code>。
                 <br>
 
-                <b>② 源码规模（可复核）</b>：<code>src\</code> 下共 <b>110 个 <code>.java</code> 文件</b>。
+                <b>② 源码结构</b>：<code>src\</code> 下 110 个 <code>.java</code>，分 17 个包（1 个根包 + 16 个子包）。
                 <br>
 
-                <b>③ 提示词实物（可复核）</b>：<code>data\prompts\identity.md</code> = <b>13,028 B</b>；
-                <code>data\prompts\subagent.md</code> = <b>1,664 B</b>；<code>data\prompts\tools-index.md</code> = <b>11,029 B</b>。
+                <b>③ 提示词文件</b>：<code>data\prompts\</code> 下有 <code>identity.md</code>（身份）、<code>subagent.md</code>（子 Agent 公共部分）、
+                <code>tools-index.md</code>（文案与能力索引）三份，正文由你自己写 —— 冷启动只给空壳。
                 <br>
 
-                <b>复核命令（原样贴进 PowerShell 即可）</b>：
-                <br>
-                <code>$j='C:\Sair\SairFrameWork\plugins\exection\ai.jar'</code><br>
-                <code>(Get-Item $j).Length</code>　→ 675173<br>
-                <code>(Get-FileHash $j -Algorithm SHA256).Hash</code>　→ 上面的 sha256<br>
-                <code>(Get-FileHash .\AiAgentV4.jar -Algorithm SHA256).Hash</code>　→ 与上面逐位相同<br>
-                <code>(Get-ChildItem src -Recurse -Filter *.java | Measure-Object).Count</code>　→ 110<br>
-                <code>Get-ChildItem data\prompts\*.md | Select-Object Name,Length</code>　→ 13,028 / 1,664 / 11,029
-                <br><br>
-
-                <b>④ 配置键面（可复核）</b>：<code>Conf.knownKeys()</code> 共 <b>94 个键</b>。
-                出处与计数方式：方法体在 <code>src\sair\v4\Conf.java:1173-1288</code>，键由方法体里的 <code>add(out, "&lt;键名&gt;", …)</code> 逐条登记，
-                这样的登记处共 <b>94 处</b>（区间 <code>:1176-:1282</code>），<code>:1287</code> 返回这份清单。
-                这 94 个键都是「有人读」的键；<code>config.json</code> 出厂写入的是它的一个子集。本机调试面的四个键已整条撤出配置面（<code>:1283-1286</code>），
-                读法见<a href="config.html#keys">配置页 · 键表</a>。
+                <b>④ 配置键面</b>：<code>Conf.knownKeys()</code> 一共 <b>94 个键</b>，登记在 <code>src\sair\v4\Conf.java</code> 里，
+                这 94 个键都是真的有读取方的键；<code>config.json</code> 出厂时写入的是它的一个子集。
+                本机调试面的四个键已经从配置面整条撤出，读法见<a href="config.html#keys">配置页 · 键表</a>。
                 <br>
 
-                <b>⑤ 控制台命令面</b>：以 <code>ai/help</code> 的实现为准 —— 文本在 <code>src\sair\v4\term\Cmd.java:1353-1395</code>，
-                路由分支共 <b>18 条</b>（<code>Cmd.java:110-219</code>）。按用途分组（<code>ai/</code> 是这个实例的命令前缀）：
+                <b>⑤ 控制台命令面</b>：以 <code>ai/help</code> 的实现为准 —— 文本在 <code>src\sair\v4\term\Cmd.java</code>，
+                路由分支共 <b>18 条</b>。按用途分组（<code>ai/</code> 是这个实例的命令前缀）：
                 入口 <code>help</code>；对话 <code>chat</code>（别名 <code>say</code>）／<code>stop</code>／<code>reset</code>；
                 生命周期 <code>start</code>／<code>restart</code>；状态与配置 <code>status</code>／<code>tools</code>／<code>config</code>／<code>tick</code>／<code>alarm</code>；
                 能力面 <code>prompt</code>／<code>perm</code>／<code>acl</code>／<code>napcat</code>／<code>store</code>；
-                另有<b>两条</b>命令（外挂库维护、本机调试面开关）的名称与用法同样以 <code>ai/help</code> 原文为准。
-                <code>execs</code>／<code>execq</code>／<code>execfc</code>／<code>orchestrate</code> 属于已删除的「通道」概念，敲了只会回一句「直接用 <code>ai/chat</code>」（<code>:211-217</code>）。
-                生效口径只有一条：除 <code>start</code> 与 <code>restart</code> 外，其余命令<b>都只改配置文件</b>，改完要么 <code>start</code>（没在跑）、要么 <code>restart</code>（已经在跑）才生效（<code>:1369-1371</code>）。
-                详细逐条见<a href="commands.html#lifecycle">命令页 · 生命周期</a>。
+                另有<b>两条</b>命令（外挂库维护、本机调试面开关），名称与用法同样以 <code>ai/help</code> 原文为准。
+                <code>execs</code>／<code>execq</code>／<code>execfc</code>／<code>orchestrate</code> 属于已经删除的「通道」概念，敲下去只会回一句「直接用 <code>ai/chat</code>」。
+                生效口径只有一条：<code>start</code> 与 <code>restart</code> 之外，其余命令都只改配置文件，改完要么 <code>start</code>（没在跑）、要么 <code>restart</code>（已经在跑）才生效。
+                逐条细节见<a href="commands.html#lifecycle">命令页 · 生命周期</a>。
                 <br>
 
-                <b>⑥ 群聊触发口径：只有 @ 才触发</b>。判据在 <code>QqGateway.shouldAnswer(Ev, Caller)</code>（<code>src\sair\v4\QqGateway.java:871-875</code>）：
-                私聊一律回（<code>:873</code>），群里唯一的判据是 <code>return ev.atSelf();</code>（<code>:874</code>，注释逐字写着「群里：只认被 @」）；
-                <b>主人在这里也没有豁免</b>（<code>:866-869</code> 的注释写明这一点）。所以「只引用她、不 @ 她」的那一条不会触发任何处理。
+                <b>⑥ 群聊触发口径：只有 @ 才触发</b>。判据在 <code>src\sair\v4\QqGateway.java</code> 的 <code>shouldAnswer(Ev, Caller)</code>：
+                私聊一律回，群里唯一的判据是 <code>return ev.atSelf();</code>，口径就是「群里：只认被 @」；
+                <b>主人在这里也没有豁免</b>。所以只引用她、却没 @ 她的那一条，不会触发任何处理。
                 <br>
 
-                <b>⑦ 关停口径</b>：<code>ai/exit</code>（框架转发到组件 <code>exit()</code>）<b>只停基板</b> —— 不改配置、不卸载插件，之后还能再 <code>start</code>（<code>Cmd.java:1366</code>）。
-                走卸载这条路时，本机调试面一并关闭（停两个口 + 关落盘句柄 + 注销控制台捕获），而 <b>JVM 仍然活着</b>；
-                反过来，<code>ai/start</code>／<code>ai/restart</code> 收的只是基板，观测面照旧（<code>src\sair\v4\V4Activity.java:393-414</code> 的注释写明这一点）。
-                真正关停 JVM 用框架自己的 <code>/exit</code>，或按<b>精确 pid</b> 结束进程。这是当前实现的行为，<b>未计划修改</b>。
+                <b>⑦ 关停口径</b>：<code>ai/exit</code>（框架转发到组件 <code>exit()</code>）<b>只停基板</b> —— 不改配置、不卸载插件，之后还能再 <code>start</code>。
+                走卸载这条路时，本机调试面会一并关闭（停两个口 + 关落盘句柄 + 注销控制台捕获），而 <b>JVM 仍然活着</b>；
+                反过来，<code>ai/start</code>／<code>ai/restart</code> 收的只是基板，观测面照旧（相关说明在 <code>src\sair\v4\V4Activity.java</code>），这一点与 V4 的设计一致。
+                要真正关停 JVM，用框架自己的 <code>/exit</code>，或者按<b>精确 pid</b> 结束进程。
                 <br><br>
 
-                <b>⑧ 当前功能面</b>（收敛自 V4 段的过程记录；下面每一条都是现在就能感受到的行为）：
+                <b>⑧ 当前功能面</b>（下面每一条都是现在就能感受到的行为）：
                 <br>
                 · <b>权限按资源判</b>：三个身份（主人／她自己／其他用户）× 五类资源（本机、运行时目录、数据、外部交互、工具入口）× 三个位（R/W/X），
                 例外清单放在数据根的 <code>perms.json</code> 账本里，判定失败一律拒绝；消息里自称「我是主人」不构成任何授权。看账本用 <code>ai/acl</code>
-                （只读那一支 <code>src\sair\v4\term\Cmd.java:701</code>）。
+                （只读那一支在 <code>src\sair\v4\term\Cmd.java</code>）。
                 <br>
                 · <b>配置生命周期只有一条规则</b>：写命令只改文件，<code>ai/start</code> 才「加载并运行」（<code>ai/restart</code> = 停旧基板 → 重读文件 → 重新装配）；
                 <code>ai/status</code> 会把「文件里的值 ≠ 已生效的值」的键列出来，没启动过的实例是正常的 <code>ready=0 reason=not_started</code>。
@@ -138,45 +125,45 @@
                 真的装不下才按策略处置并回一句可配置文案（消息不会静默消失）；模型调用有并发闸门（<code>modelConcurrency</code>）。
                 <br>
                 · <b>上下文每回合现查</b>：每触发一个回合就现查本会话最近 <code>chatWindowSize</code> 条聊天记录，逐字照抄、单条不截断
-                （默认 30，<code>src\sair\v4\Conf.java:179</code>；读口 <code>ctx\ChatWindow.java:143-146</code>）。
+                （默认 30，这个键定义在 <code>src\sair\v4\Conf.java</code>，读口在 <code>ctx\ChatWindow.java</code>）。
                 <br>
                 · <b>事实块里带模型自知与原生附图</b>：模型自知那行<b>固定 8 个键、键序固定</b>
                 （<code>self</code>／<code>self_has_vision</code>／<code>main</code>／<code>main_has_vision</code>／<code>vision</code>／<code>mode</code>／<code>recognizer</code>／<code>recognizer_uses</code>，
-                <code>src\sair\v4\ctx\CtxBuild.java:331-345</code>），说明这一轮真正会用哪台模型、它能不能看图；
+                装配处在 <code>src\sair\v4\ctx\CtxBuild.java</code>），说明这一轮真正会用哪台模型、它能不能看图；
                 附图只在<b>第一次请求</b>带图，没挂上的图会如实报出来（不静默）。说明见<a href="architecture.html#ctx-impl">实现页 · 上下文</a>。
                 <br>
                 · <b>通知类事件一律入库留痕，但零触发</b>：戳一戳／撤回／进退群／禁言／表情回应等都落成一行确定性标签进聊天记录，
                 只落库、不派发、不调模型、不发消息；它们进模型的唯一通路是聊天窗口
-                （入库与去向 <code>src\sair\v4\QqGateway.java:203-239</code>；标签只由 <code>qq\NoticeRender.java:59</code> 一处产出）。
+                （入库与去向在 <code>src\sair\v4\QqGateway.java</code>；标签只由 <code>qq\NoticeRender.java</code> 一处产出）。
                 <br>
                 · <b>被引用消息按需取回</b>：优先查本地库，没命中才走 NapCat；取回的引文会拼在窗口对应的那一行上，取不到就不写这个键（不写填充词）
-                （<code>src\sair\v4\qq\QuoteCache.java:78</code>）。
+                （取回逻辑在 <code>src\sair\v4\qq\QuoteCache.java</code>）。
                 <br>
                 · <b>她自己的出站消息进她自己的记账</b>：发出去的每一条都落一行自我标记行，窗口里显示成「我」，所以她看得见自己刚说过什么、发过哪张图
-                （头部文法 <code>src\sair\v4\qq\SelfEcho.java:79</code>）。
+                （头部文法在 <code>src\sair\v4\qq\SelfEcho.java</code>）。
                 <br>
                 · <b>出站正文过一道结构闸门</b>：命中「工具调用标记」形状的那一条<b>整条丢弃</b>、其余条照发（不删字符后照发，也不连坐）；
                 正常文本里的尖括号（<code>List&lt;String&gt;</code>、<code>x &lt; 0 &gt; y</code>）不受影响
-                （<code>src\sair\v4\qq\ToolMarkup.java:41</code>，落点 <code>term\Sinks.java:73</code>）。
+                （判定在 <code>src\sair\v4\qq\ToolMarkup.java</code>，落点在 <code>term\Sinks.java</code>）。
                 <br>
                 · <b>控制台</b>：装配跑在基板自己的守护线程上（敲命令、看界面立刻有响应）；对话正文单独落一页面板，主输出框只留过程日志；
                 控制台输出有独立捕获缓冲；<code>help</code>／<code>status</code>／<code>tools</code>／<code>config</code> 四条<b>不依赖模型、数据库与 QQ</b>，任何装配异常下都能用。
                 <br>
                 · <b>数据面</b>：群聊／私聊／记忆各有独立保留天数（笔记不自动删除），另有两步空间回收命令（合并索引空洞 → 回收空闲页）；
-                模型密钥、QQ 接入 token、中转 token 三个敏感项加密落盘，与运行环境绑定（<code>src\sair\v4\Conf.java:57</code>）。
+                模型密钥、QQ 接入 token、中转 token 三个敏感项加密落盘，与运行环境绑定（相关实现在 <code>src\sair\v4\Conf.java</code>）。
                 <br>
                 · <b>进出网都要过的门</b>：抓取网页与下载文件时拦截指向内网、本机、云元数据地址的请求，且每一跳跳转都重新校验；
-                网页与文本按「字节序标记 → 响应声明 → 页面内声明 → 逐一试探」的顺序解码；写入前做内容查重。
+                网页与文本按「编码标记 → 响应声明 → 页面内声明 → 逐一试探」的顺序解码；写入前做内容查重。
                 <br>
                 · <b>本地文件外链中转</b>：NapCat 与插件不在同一台机器时，把本地文件变成一个只读链接交给它自己取；只支持读取、链接带随机前缀、可设有效期，<b>默认关闭</b>。
                 <br><br>
 
-                <b>⑨ 计划中／未实现（不许当成已具备读）</b>：<b>折叠转发的展开没有落地</b> —— 窗口里仍只有一个「折叠转发未展开」标签，
-                对应的开关键 <code>mediaExpandForward</code>（<code>src\sair\v4\Conf.java:853</code>）<b>没有任何读取方</b>。
-                <b>6 个媒体类配置键只在键表里登记、当前没有任何代码读它们</b>：<code>mediaRender</code>／<code>mediaRenderMaxChars</code>（登记处 <code>Conf.java:1239-1240</code>）
-                与 <code>mediaExpandForward</code>／<code>mediaExpandMaxNodes</code>／<code>mediaExpandMaxDepth</code>／<code>mediaExpandMaxChars</code>（登记处 <code>:1245-1248</code>），改它们不影响行为；
-                同一组里的 <code>mediaExpandQuote</code> 与 <code>mediaCacheHours</code> <b>有真实读取方</b>（<code>qq\QuoteCache.java:266</code>、<code>:310</code>），别把这两类混在一起看。
-                识图组件那两格事实<b>照实报</b>：组件不在工具面就答 <code>off</code> / 0，不许编别的值（<code>CtxBuild.java:339-345</code>）；
+                <b>⑨ 目前还没有落地的部分</b>：<b>折叠转发的展开还没有落地</b> —— 窗口里仍然只有一个「折叠转发未展开」标签，
+                对应的开关键 <code>mediaExpandForward</code>（在 <code>src\sair\v4\Conf.java</code> 的键表里）目前没有任何读取方，改它不会有任何效果。
+                <b>6 个媒体类配置键只在键表里登记、目前没有代码读它们</b>：<code>mediaRender</code>／<code>mediaRenderMaxChars</code>
+                与 <code>mediaExpandForward</code>／<code>mediaExpandMaxNodes</code>／<code>mediaExpandMaxDepth</code>／<code>mediaExpandMaxChars</code>（都登记在 <code>Conf.java</code> 的键表里），改它们一样不影响行为；
+                同一组里的 <code>mediaExpandQuote</code> 与 <code>mediaCacheHours</code> 是<b>有真实读取方的</b>（读口在 <code>qq\QuoteCache.java</code>），这两类和上面那 6 个不是一回事。
+                识图组件那两格事实照实报：组件不在工具面就答 <code>off</code> / 0，不会编别的值（相关实现在 <code>CtxBuild.java</code>）；
                 「装了哪个组件、装的哪一份」属于外挂层，不在本文档范围内。
               </div>
             </div>
@@ -193,8 +180,8 @@
           <span class="chapter-tag">历史</span>
           <h2>历史版本条目（V4.0 → V1.0）</h2>
           <p class="chapter-desc">
-            共 <b>36 条</b>，继承自旧版（V3 线）的更新日志：<b>版本号、顺序与条目结构保持原样</b>。
-            正文里出现的具体外挂实现名称已改为功能层面的说法（功能变化本身不变），正文长度按需精简。
+            共 <b>36 条</b>，按版本号顺序承接自旧版（V3 线）的更新日志，<b>版本号、顺序与条目结构保持原样</b>；
+            条目里写到的外挂实现名称，用功能层面的说法表达，功能变化本身不变。
             编号提醒：这里的 <code>V4.0</code> 是旧版自己的一个版本号，与上面这次从零重写的 V4 <b>不是同一件事</b>。
           </p>
         </header>
@@ -208,12 +195,12 @@
               <h3 class="rel-title">外挂扩展协议化：声明式参数、加载期编译注册、83 条内置工具说明整体迁出</h3>
               <div class="rel-desc">
                 <b>内置工具说明整体迁出</b>：83 条内置工具说明（52 条 QQ 动作类 + 31 条系统类）不再以代码里的字符串常量存在，
-                全部变成 <code>data\skills\</code> 下的单文件说明；外挂形态收敛为「单文件 + 一层子目录」，同名三方优先于内置，删文件即移除、改文件即生效。
-                <b>参数协议化</b>：入参从「一个 JSON 字符串／一个 Map」升级为声明式签名 —— 类型（含别名）、必填、说明、默认值（没填时由框架补齐）、
-                枚举取值范围、用法示例、数组元素类型，另加返回值说明、只读上下文投影（调用者身份／会话／好感度等纯数据）与单次调用超时、实例复用策略。
-                <b>工具实现继续剥离</b>：20 个内置工具的实现随后也搬出核心代码（删掉约 650 行），改由外挂目录里的源码提供 —— 删掉目录，工具就真的不存在；
-                <b>安全判定刻意留在核心代码里</b>（执行确认闸门、内网拦截、权限矩阵、QQ 路径规则）：剥的是业务逻辑，不是安全判定。
-                <b>该版本的外挂层细节不在本文档范围内。</b>
+                而是全部变成 <code>data\skills\</code> 下的单文件说明；外挂形态收敛为「单文件 + 一层子目录」，同名三方优先于内置，删文件即移除、改文件即生效。
+                <b>参数协议化</b>：入参从一个 JSON 字符串／一个 Map 升级为声明式签名 —— 类型（含别名）、是否必填、说明、默认值（没填时由框架补齐）、
+                枚举取值范围、用法示例、数组元素类型，另加返回值说明、只读上下文投影（调用者身份／会话／好感度等纯数据），以及单次调用超时与实例复用策略。
+                <b>工具实现继续剥离</b>：20 个内置工具的实现随后也搬出核心代码（核心代码因此瘦了一大圈），改由外挂目录里的源码提供 —— 删掉目录，工具就真的不存在；
+                <b>安全判定刻意留在核心代码里</b>（执行确认闸门、内网拦截、权限矩阵、QQ 路径规则）：剥出去的是业务逻辑，不是安全判定。
+                <b>这个版本的外挂层细节不在本文档范围内。</b>
               </div>
             </div>
           </li>
@@ -223,16 +210,16 @@
             <div class="rel-body">
               <h3 class="rel-title">正确性与成本治理：中文检索召回、跨群污染、永久丢失、前缀缓存、上下文扩容</h3>
               <div class="rel-desc">
-                <b>中文检索召回从≈0修到满召回</b>：分词器把整段中文当成一个 token，中文子串检索实际全部失效（实测 36 万条群聊记录里召回几乎为 0）；
-                索引全部迁移到三字滑窗分词（启动后台重建），查询构造统一化并把兜底查询补上转义 —— 原先每次 1.16–1.21 秒、且持有全局库锁、
-                在 82.98% 的消息上触发的检索，降到 1–5 毫秒。
+                <b>中文检索召回从≈0修到满召回</b>：分词器原先把整段中文当成一个 token，中文子串检索几乎全部失效（几十万条群聊记录里基本召回不到）；
+                现在索引全部迁移到三字滑窗分词（启动时后台重建），查询构造统一化并给兜底查询补上转义 —— 原先每次 1.16–1.21 秒、且持有全局库锁、
+                在 82.98% 的消息上触发的检索，降到了 1–5 毫秒。
                 <b>跨群串味与并发</b>：对话去重改为「同来源 + 同发送者 + 同角色 + 120 秒内」；去重命中时补写消息号不再按内容全局乱匹配；
                 群聊提示词不再注入「与该用户的私聊历史」；即时情绪按用户／按群隔离；停止标记改为按请求闭锁；线程池丢任务不再静默；
                 好感度与每日互动改为原子读改写；工具集序列化缓存改为单一不可变对象（原先并发下会把另一渠道的工具集发给模型）。
-                <b>永久丢失修复</b>：文件读取的偏移／长度从「先截断再切片」改为「在完整文本上切片」；CQ 码不再无声删除、降级为可读占位符；
-                回复与记忆的清洗从「通配剥离所有尖括号」改为只剥约定的控制标记；引用图片的地址与校验值改为成对存储；超大帧改为读完丢弃而不是断开连接。
-                <b>前缀缓存与上下文扩容</b>：上下文重构为「稳定段 + 易变段」两段式，逐条消息变化的内容全部后移；印象里的精确计数改为粗粒度分档，
-                避免每条消息都把稳定段字节改掉从而打断前缀缓存。
+                <b>永久丢失修复</b>：文件读取的偏移／长度从「先截断再切片」改为「在完整文本上切片」；CQ 码不再无声删除，降级为可读占位符；
+                回复与记忆的清洗从「通配剥离所有尖括号」改为只剥约定的控制标记；引用图片的地址与校验值改为成对存储；超大帧改为读完丢弃，而不是断开连接。
+                <b>前缀缓存与上下文扩容</b>：上下文重构成「稳定段 + 易变段」两段式，逐条消息变化的内容全部后移；印象里的精确计数改为粗粒度分档，
+                这样就不会每条消息都把稳定段的内容改掉、打断前缀缓存。
               </div>
             </div>
           </li>
@@ -242,12 +229,12 @@
             <div class="rel-body">
               <h3 class="rel-title">长折叠 / 嵌套折叠处理：结构化递归展开 + 分段分析 + 折叠图片全识别</h3>
               <div class="rel-desc">
-                修复长折叠被静默截断：原先两处长度上限会把长折叠的尾巴整段丢掉，统一放宽到 20000 字，超长部分改由<b>分段分析</b>处理
-                （按消息边界切块 → 逐块交给段落 Agent → 再由段落 Agent 合并成一份结论），不再静默丢失内容。
+                长折叠不再被静默截断：原先两处长度上限会把长折叠的尾巴整段丢掉，现在统一放宽到 20000 字，超长部分改由<b>分段分析</b>处理
+                （按消息边界切块 → 逐块交给段落 Agent → 再由段落 Agent 合并成一份结论），内容不再静默丢失。
                 <b>嵌套折叠层层递归</b>：新增结构化解析，保留图片真实地址与嵌套折叠编号；渲染时内嵌折叠就地递归展开，
-                每一层内嵌折叠单独唤起一个段落 Agent 分析并把结论内联进上层正文（层级上限 3 层、单条消息段落 Agent 调用预算 10 次）。
-                <b>折叠消息里的图片修复为可见</b>：原先只渲染成字面量、连地址都没有，导致模型既看不到图也无法调用识图；现输出可读地址并按多模态内容提交（单次附加上限 20 张）。
-                段落结论回传上限 1200 → 3000 字符；收藏失败时回传具体原因；消息打标改为按消息号精确写入。
+                每一层内嵌折叠单独唤起一个段落 Agent 分析，并把结论内联进上层正文（层级上限 3 层、单条消息段落 Agent 调用预算 10 次）。
+                <b>折叠消息里的图片修复为可见</b>：原先只渲染成字面量、连地址都没有，模型既看不到图也无法调用识图；现在输出可读地址并按多模态内容提交（单次附加上限 20 张）。
+                段落结论回传上限从 1200 提到 3000 字符；收藏失败时回传具体原因；消息打标改为按消息号精确写入。
               </div>
             </div>
           </li>
@@ -257,7 +244,7 @@
             <div class="rel-body">
               <h3 class="rel-title">Agent 职责重划分：折叠消息全交段落 Agent + 视觉 Agent 转为兜底 + 模型能力感知</h3>
               <div class="rel-desc">
-                引入<b>模型能力感知</b>：具备原生视觉的模型由主／段落 Agent 直接看原图，不具备视觉的模型必须由视觉 Agent 兜底识图，
+                引入<b>模型能力感知</b>：具备原生视觉的模型，由主／段落 Agent 直接看原图；没有原生视觉的模型，交给视觉 Agent 兜底识图，
                 无原生视觉时该 Agent 自动启用、有则自动不启用。
                 <b>折叠消息</b>（不论是否引用）一律交给段落 Agent 分析，结论标注回该条消息并标识「已分析」，下一轮先按消息号精确查、再按内容兜底查，
                 命中即复用结论、不重复分析。视觉 Agent 的执行模型写死为具备视觉的那一档；主／段落 Agent 的工具集与 Agent 间唤起按视觉能力动态门控。
@@ -288,10 +275,10 @@
               <h3 class="rel-title">存图多智能体协作 + 表情包保留治理 + 提示词 md 化 + 卡片消息识别</h3>
               <div class="rel-desc">
                 存图机制重构为多 Agent 协作：主 Agent 打包候选 → 段落 Agent 找图 → 视觉 Agent 识图 → 按「单张脸 + 文字不超过 20 字 + 无违规」判断 → 收藏 → 打标。
-                表情包保留策略重做为被动／主动双通道（保底 15 / 阈值 30 / 上限 60，超时回收），删除收集冷却与识图冷却。
+                表情包保留策略重做为被动／主动双通道（保底 15 / 阈值 30 / 上限 60，超时回收），并删掉收集冷却与识图冷却。
                 <b>提示词 md 化</b>：两段提示词从配置文件独立为 md 文件（md 提供身份设定，代码侧只做后置拼接）。
-                卡片类消息（群邀请／好友申请等）解析出人可读内容并注入拦截结果，修复模型看到空消息。
-                另修复回复附带用户原话、工具调用配对与识图缓存串扰、线程池扩容异常等问题。
+                卡片类消息（群邀请／好友申请等）解析出人可读内容并注入拦截结果，修掉模型看到空消息的问题。
+                另外还修了回复附带用户原话、工具调用配对与识图缓存串扰、线程池扩容异常等问题。
               </div>
             </div>
           </li>
@@ -304,9 +291,9 @@
                 每条消息的纯文本只提取一次并贯穿复用（原先约 10 次正则剥离）；稳定的外挂扩展索引前置到用户消息首部以命中前缀缓存，动态历史不再破坏前缀稳定；
                 群管理员／群昵称／群名／个人昵称映射加短 TTL 缓存，并移除原本每条群消息都失效缓存的逻辑，让读缓存真正生效；
                 偏好与日志上下文加内存缓存、写入即失效，不再每条消息重复查库拼接；工具集序列化与请求体按对象身份缓存；
-                遥测与轨迹改为异步落库，工具执行与主链路不再同步等待数据库写入；语音／识图结果缓存改为有界 LRU，防长期运行无限增长；
-                群成员角色／昵称／成员关系写库去重，大幅降低每条群消息的写放大；补热路径索引，会话裁剪改为每 50 次写入执行一次，消除全表扫描；
-                短消息（去标点不足 4 字）不再触发检索门控；群回复后总是给被回复的那条打上「已回复」标记，修复已回答的问题被重复回答。
+                遥测与轨迹改为异步落库，工具执行与主链路不再同步等数据库写入；语音／识图结果缓存改为有界 LRU，防止长期运行无限增长；
+                群成员角色／昵称／成员关系写库去重，大幅降低每条群消息的写放大；补上热路径索引，会话裁剪改为每 50 次写入执行一次，消除全表扫描；
+                短消息（去标点不足 4 字）不再触发检索门控；群回复后总是给被回复的那条打上「已回复」标记，已回答的问题不会被重复回答。
               </div>
             </div>
           </li>
@@ -317,8 +304,8 @@
               <h3 class="rel-title">跨机器媒体发送修复 + 记忆通道修复 + 运行时状态</h3>
               <div class="rel-desc">
                 图片／语音／表情包的本地文件增加内联兜底发送（解决对端在另一操作系统的机器上无法下载 Windows 本地路径的失败）；
-                发图不再误报成功，失败返回真实原因；记忆写入在两条链路上统一落库；新增一条用于手动指定文件中转服务对外地址的配置命令；
-                新增运行时状态查询与工具调用轻量遥测；配置加载后增加校验日志，非法端口／越界参数回退默认值。
+                发图不再误报成功，失败时返回真实原因；记忆写入在两条链路上统一落库；新增一条用于手动指定文件中转服务对外地址的配置命令；
+                新增运行时状态查询与工具调用轻量遥测；配置加载后增加校验日志，非法端口／越界参数回退到默认值。
               </div>
             </div>
           </li>
@@ -350,7 +337,7 @@
               <h3 class="rel-title">多模态识图增强 + 群印象 + 好感度排行</h3>
               <div class="rel-desc">
                 引用图片的校验值兜底、图片大小上限与文件接口；新增群印象系统；新增好感度排行（本群前 10 名，全局排行仅主人可见）；
-                外挂扩展包的打包形态调整（细节不在本文档范围内）。
+                外挂扩展包的打包形态做了调整（细节不在本文档范围内）。
               </div>
             </div>
           </li>
@@ -360,7 +347,7 @@
             <div class="rel-body">
               <h3 class="rel-title">消息 Mark 防重 + 系统闹钟 + 多主人</h3>
               <div class="rel-desc">
-                消息打标防重机制；系统闹钟（可解析一次／每天／每周这类语义表达）；多主人支持；数据导出与导入命令。
+                消息打标防重机制；系统闹钟（可以解析一次／每天／每周这类语义表达）；多主人支持；数据导出与导入命令。
               </div>
             </div>
           </li>
@@ -381,7 +368,7 @@
               <h3 class="rel-title">外挂扩展自演化 + 路径路由</h3>
               <div class="rel-desc">
                 从历史轨迹里蒸馏可复用的外挂扩展，并按路径权重缓存选路；外挂扩展按用途分成四类（通用／执行／任务／人格）。
-                <b>该版本的外挂层细节不在本文档范围内。</b>
+                <b>这个版本的外挂层细节不在本文档范围内。</b>
               </div>
             </div>
           </li>
@@ -400,7 +387,7 @@
             <div class="rel-ver">V3.0</div>
             <div class="rel-body">
               <h3 class="rel-title">识图上线 · 移除 OCR</h3>
-              <div class="rel-desc">全面改用多模态识图模型，彻底移除在线 OCR 依赖。</div>
+              <div class="rel-desc">全面改用多模态识图模型，在线 OCR 依赖就此移除。</div>
             </div>
           </li>
 
@@ -413,7 +400,7 @@
             <div class="rel-ver">V2.9</div>
             <div class="rel-body">
               <h3 class="rel-title">外挂扩展库概念重构</h3>
-              <div class="rel-desc">改为单文件与多文件两种外挂扩展形态。<b>该版本的外挂层细节不在本文档范围内。</b></div>
+              <div class="rel-desc">改为单文件与多文件两种外挂扩展形态。<b>这个版本的外挂层细节不在本文档范围内。</b></div>
             </div>
           </li>
 
@@ -421,7 +408,7 @@
             <div class="rel-ver">V2.8</div>
             <div class="rel-body">
               <h3 class="rel-title">强化情绪系统、印象系统</h3>
-              <div class="rel-desc">情绪状态机与人格印象双向联动：负面情绪降低印象，正面提升。</div>
+              <div class="rel-desc">情绪状态机与人格印象双向联动：负面情绪降低印象，正面情绪提升印象。</div>
             </div>
           </li>
 
@@ -445,7 +432,7 @@
             <div class="rel-ver">V2.5</div>
             <div class="rel-body">
               <h3 class="rel-title">框架命令 + 自动清屏</h3>
-              <div class="rel-desc">增加框架命令能力，可开关 QQ 日志输出，增加自动清屏。</div>
+              <div class="rel-desc">增加框架命令能力，可以开关 QQ 日志输出，并加上自动清屏。</div>
             </div>
           </li>
 
@@ -453,7 +440,7 @@
             <div class="rel-ver">V2.4</div>
             <div class="rel-body">
               <h3 class="rel-title">引入外挂扩展概念</h3>
-              <div class="rel-desc">支持三方外挂扩展导入，Agent 按需加载扩展知识。<b>该版本的外挂层细节不在本文档范围内。</b></div>
+              <div class="rel-desc">支持三方外挂扩展导入，Agent 按需加载扩展知识。<b>这个版本的外挂层细节不在本文档范围内。</b></div>
             </div>
           </li>
 

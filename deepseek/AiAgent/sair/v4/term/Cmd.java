@@ -662,7 +662,7 @@ public final class Cmd {
             }
             long qq = Long.parseLong(p[0].trim());
             double val = Double.parseDouble(p[1].trim());
-            boot.favor().set(qq, val, "console");
+            boot.favor().setValue(qq, val, "控制台直改", "console");
             out.ok("已设置 " + qq + " 好感度 = " + (long) val + "（" + boot.favor().levelName(val) + "）");
             return;
         }
@@ -1354,7 +1354,7 @@ public final class Cmd {
         try {
             String n = name();
             return new String[] {
-                    "AiAgent V4 —— 基板只做九件事：存储 / 热插拔 / 提示词 / Agent / 上下文 / 权限 / 模型 / NapCat / 控制台",
+                    "AiAgent V4.1 —— 基板只做九件事：存储 / 热插拔 / 提示词 / Agent / 上下文 / 权限 / 模型 / NapCat / 控制台",
                     "本地控制台交互 ≡ QQ 中的主人交互；主人 = MASTER，工具一律全放行。",
                     "对话：",
                     "\t" + n + "/chat <内容>      和 AI 说话（与 QQ 主人消息同一条链路）",
@@ -1401,7 +1401,7 @@ public final class Cmd {
     /** 最底线的命令表（构造/装配都不可用时的兜底；静态常量，不可能失败）。 */
     public static String[] fallbackHelp() {
         return new String[] {
-                "AiAgent V4（降级命令表）",
+                "AiAgent V4.1（降级命令表）",
                 "控制台可用：help / status / tools / config；其余命令需要基板装配成功。",
                 "如果 status 也不可用，请查看组件日志里 [v4] 开头的错误行。",
         };

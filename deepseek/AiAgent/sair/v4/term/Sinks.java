@@ -102,23 +102,44 @@ public final class Sinks {
     public static final class ConsoleSink implements Sink {
         private final Out out;
         private volatile boolean streaming = false;
+        /** 流式时扣住的尾巴：`**` `#` `|` 这类标记可能被劈成两批，扣住几个字符等下一批一起清。 */
+        private String hold = "";
         public ConsoleSink(Out out) { this.out = out; }
 
         @Override
         public void say(String text) {
             if (streaming) {
+                if (!hold.isEmpty()) {
+                    out.print(sair.v4.qq.PlainText.cleanChunk(hold), Out.Tone.NORMAL);
+                    hold = "";
+                }
                 out.print("\n", Out.Tone.NORMAL);   // 流式已打完内容，只补一个换行
                 streaming = false;
                 return;
             }
-            out.print((text == null ? "" : text) + "\n", Out.Tone.NORMAL);
+            // 纯文字口径（主人裁 2026-09-18：控制台输出也严禁 Markdown）
+            out.print(sair.v4.qq.PlainText.clean(text == null ? "" : text) + "\n", Out.Tone.NORMAL);
         }
 
         @Override
         public void stream(String delta) {
             if (delta == null || delta.isEmpty()) return;
             streaming = true;
-            out.print(delta, Out.Tone.NORMAL);
+            String s = hold + delta;
+            hold = "";
+            int n = s.length();
+            int cut = n;
+            while (cut > 0 && cut > n - 3) {
+                char c = s.charAt(cut - 1);
+                if (c == '*' || c == '_' || c == '`' || c == '#' || c == '|' || c == '>' || c == '~') cut--;
+                else break;
+            }
+            if (cut < n) {
+                hold = s.substring(cut);
+                s = s.substring(0, cut);
+            }
+            String cleaned = sair.v4.qq.PlainText.cleanChunk(s);
+            if (!cleaned.isEmpty()) out.print(cleaned, Out.Tone.NORMAL);
         }
 
         @Override
@@ -146,27 +167,35 @@ public final class Sinks {
         private final boolean echo;
         /** 分段口径（上限、停顿）；为 null 时按出厂默认（不分段的后备路径）。 */
         private final Segmenter seg;
+        /** 好感度子系统（她自己的加减标记在这里执行）；为 null = 本路径不管好感度。 */
+        private final sair.v4.auth.Favor favor;
 
         public QqSink(Api api, Caller caller, Out out, boolean echo) {
             this(api, caller, out, echo, null);
         }
 
         public QqSink(Api api, Caller caller, Out out, boolean echo, Segmenter seg) {
-            this(api, sair.v4.qq.Sender.of(api), caller, out, echo, seg);
+            this(api, caller, out, echo, seg, null);
+        }
+
+        public QqSink(Api api, Caller caller, Out out, boolean echo, Segmenter seg, sair.v4.auth.Favor favor) {
+            this(api, sair.v4.qq.Sender.of(api), caller, out, echo, seg, favor);
         }
 
         /** 直接给"发送器"（探针用记录器；生产走上面的 {@link Api} 构造）。 */
         public QqSink(sair.v4.qq.Sender sender, Caller caller, Out out, boolean echo, Segmenter seg) {
-            this(null, sender, caller, out, echo, seg);
+            this(null, sender, caller, out, echo, seg, null);
         }
 
-        private QqSink(Api api, sair.v4.qq.Sender sender, Caller caller, Out out, boolean echo, Segmenter seg) {
+        private QqSink(Api api, sair.v4.qq.Sender sender, Caller caller, Out out, boolean echo, Segmenter seg,
+                       sair.v4.auth.Favor favor) {
             this.api = api;
             this.sender = sender == null ? sair.v4.qq.Sender.of(null) : sender;
             this.caller = caller;
             this.out = out;
             this.echo = echo;
             this.seg = seg;
+            this.favor = favor;
         }
 
         @Override
@@ -177,7 +206,7 @@ public final class Sinks {
             // 注意顺序：**先分段再剥标记** —— <split> 是分段标记，剥早了就没法按它切了
             if (api != null && !api.available()) {
                 out.warn("[qq] " + Api.NOT_CONNECTED + "：回复只打进控制台");
-                String clean = sair.v4.qq.MarkerTags.strip(raw);
+                String clean = sair.v4.qq.MarkerTags.strip(sair.v4.qq.PlainText.clean(raw));
                 String blk = block(clean);                       // 工具调用标记：降级也不打出来
                 if (blk != null) { blocked(out, "[qq]", blk); return; }
                 out.print(clean + "\n", Out.Tone.NORMAL);   // 投递降级：不打出来就丢了
@@ -185,7 +214,7 @@ public final class Sinks {
             }
             if (caller == null || (caller.groupId() <= 0 && caller.qq() <= 0)) {
                 out.warn("[qq] 没有可用的会话落点（caller 缺群号/QQ），回复只打进控制台");
-                String clean = sair.v4.qq.MarkerTags.strip(raw);
+                String clean = sair.v4.qq.MarkerTags.strip(sair.v4.qq.PlainText.clean(raw));
                 String blk = block(clean);
                 if (blk != null) { blocked(out, "[qq]", blk); return; }
                 out.print(clean + "\n", Out.Tone.NORMAL);
@@ -194,12 +223,21 @@ public final class Sinks {
             java.util.List<String> parts = seg == null
                     ? sair.v4.qq.Seg.messages(raw, 1200)
                     : seg.plan(raw, caller.isGroup());
+            // 她自己的好感度加减标记：**在出站 stage 之前**就执行掉。
+            // 为什么放在 stage 前面：stages 会否决/洗空某一批（实测「情绪」的禁词否决会把整批打掉），
+            // 而好感度是"她的判断"，不是"这句话的一部分"——话被拦下来，账照样要记；
+            // 反过来，标记在 stage 之前就消失，别的 stage 看到的正文是干净的。
+            if (favor != null) {
+                java.util.List<String> cleaned = sair.v4.qq.FavorTags.apply(parts, caller, favor, out);
+                if (cleaned != null) parts = cleaned;
+            }
             // 出站管线：分段与发送之间（零 stage = 原样，见 stage()）
             parts = stage(caller, parts, caller.isGroup(),
                     caller.isGroup() ? caller.groupId() : caller.qq(), echo, seg);
             int blockedParts = 0;                       // 本批被"工具调用标记"闸门拦下的条数
             for (int i = 0; i < parts.size(); i++) {
-                String part = sair.v4.qq.MarkerTags.strip(parts.get(i));   // 每条各自剥干净
+                // 纯文字口径（主人裁 2026-09-18：严禁 Markdown）：先清洗格式符号、再剥控制标记
+                String part = sair.v4.qq.MarkerTags.strip(sair.v4.qq.PlainText.clean(parts.get(i)));
                 if (part.isEmpty()) continue;
                 // ★ 最后一道闸：这一条是不是模型的工具调用标记（真机事故 2026-09-16 22:12）。
                 //   命中就丢这一条（其余条照发），日志只写结构事实。见 block(...) 的说明。
@@ -291,7 +329,7 @@ public final class Sinks {
             if (text == null) return;
             String raw = text.trim();
             if (raw.isEmpty()) return;
-            String body = sair.v4.qq.MarkerTags.strip(raw);
+            String body = sair.v4.qq.MarkerTags.strip(sair.v4.qq.PlainText.clean(raw));
             if (api != null && !api.available() && target > 0) {
                 if (out != null) out.warn("[task] " + Api.NOT_CONNECTED + "：结果只打进控制台");
                 String blk = block(body);          // 工具调用标记：降级也不打出来
@@ -308,7 +346,7 @@ public final class Sinks {
                 String firstErr = null;
                 int blockedParts = 0;
                 for (int i = 0; i < parts.size(); i++) {
-                    String part = sair.v4.qq.MarkerTags.strip(parts.get(i));
+                    String part = sair.v4.qq.MarkerTags.strip(sair.v4.qq.PlainText.clean(parts.get(i)));
                     if (part.isEmpty()) continue;
                     // ★ 与 QqSink 同一道闸（同一条出站纪律：工具调用标记永不外发）
                     String blk = block(part);

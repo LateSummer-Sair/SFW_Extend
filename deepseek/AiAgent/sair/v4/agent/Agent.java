@@ -65,6 +65,44 @@ public final class Agent {
 
     public Registry registry() { return registry; }
 
+    /**
+     * 这一轮没跑成时对外说的那句<b>兜底话</b>（人设口吻，不含任何内部错误）。
+     * <p>为什么不把错误原文发出去：会话里坐着的是用户，不是排障的人。原因照旧进控制台警告行。</p>
+     */
+    private static final String FAIL_NOTICE = "诶，我这边刚卡了一下，没接上话……缓一缓我再说，别急哈。";
+
+    /** 同一会话两次兜底话之间的冷却（毫秒）：连续失败不要每轮都回一句，免得刷屏。 */
+    private static final long FAIL_NOTICE_COOLDOWN_MS = 120000L;
+
+    /** 各会话上次说兜底话的时刻（进程内即可；热重载重置无妨）。 */
+    private static final java.util.Map<String, Long> FAIL_NOTICE_AT =
+            new java.util.concurrent.ConcurrentHashMap<String, Long>();
+
+    /** 对外兜底话：优先用外挂文案（{@code prompts/tools-index.md} 的「失败回话」），拿不到就用内置那句。 */
+    private String failNotice() {
+        try {
+            if (conf != null) {
+                String s = sair.v4.tool.ToolIndex.of(conf).failNoticeText();
+                if (s != null && !s.trim().isEmpty()) return s.trim();
+            }
+        } catch (Throwable ignored) {
+        }
+        return FAIL_NOTICE;
+    }
+
+    /**
+     * 这个调用者手上有没有"显式说话"的手（{@code send} 这类发送工具看得见吗）。
+     * <p>判定失败按"有手"处理（保守：宁可她自己说，也不擅自替她开口）。</p>
+     */
+    private boolean canSpeak(Caller c) {
+        try {
+            if (registry == null) return true;
+            return registry.visibleNames(c).contains("send");
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
     public CtxBuild ctx() { return ctx; }
 
     /** 注入后台回合调度器（基板的按会话分道队列）。 */
@@ -154,14 +192,25 @@ public final class Agent {
         //      那条隐式通路一律关掉，要对他们说话必须她自己显式调发送类工具（人设口吻、翻译成人话）。
         final String deliverTo = sink == null ? null : sink.deliverTo();
         final boolean deliveryPath = Str.has(deliverTo);
+        // 投递通路的例外：**这个调用者手上没有"显式说话"的手**（普通用户的回合按 D43 工具面为空）
+        // ⇒ 正文直投就是他要听到的那句话。否则"别人委派到点的事"永远送不出去（真机实测：
+        // 她把提醒写好了，却因为没有 send 的位而只能记 failed）。有手的情况照旧一律关掉（防回执腔泄漏）。
+        final boolean noSpeakTools = deliveryPath && !canSpeak(t.caller());
         if (deliveryPath) {
-            t.addSystem("delivery: {\"session\":\"" + deliverTo + "\"} —— ★这一轮是**投递通路**的回合："
-                    + "你的正文**不会被发出去**（没有人替你转达），它只留在基板里。"
-                    + "要对他们说话，就必须自己**显式调发送类工具**（send 等），而且："
-                    + "① 只发给他们（这个会话），不要发给别人；② 内容要说成人话（人设口吻、自然、不端着），"
-                    + "**不要**写汇报/回执腔（「已经查了」「得跟你说清」「已安排」「已回复」"
-                    + "「子 Agent 说…」这类都不是对用户说的话）；③ 不要写任务号、message_id、"
-                    + "工具名、调度过程、内部键值。拿不准就问自己一句：这句话发给他们看，体面吗。");
+            if (noSpeakTools) {
+                t.addSystem("delivery: {\"session\":\"" + deliverTo + "\"} —— ★这一轮你的正文**会直接发到那个会话**"
+                        + "（你手上没有显式发消息的工具）：写出来的就是你对他们说的话 —— 人话、自然、不端着；"
+                        + "不许写汇报/回执腔（「已经查了」「已安排」「子 Agent 说…」都不是人话），"
+                        + "不许写任务号、message_id、工具名、调度过程、内部键值；要 @ 谁就在正文里写 @ 标记。");
+            } else {
+                t.addSystem("delivery: {\"session\":\"" + deliverTo + "\"} —— ★这一轮是**投递通路**的回合："
+                        + "你的正文**不会被发出去**（没有人替你转达），它只留在基板里。"
+                        + "要对他们说话，就必须自己**显式调发送类工具**（send 等），而且："
+                        + "① 只发给他们（这个会话），不要发给别人；② 内容要说成人话（人设口吻、自然、不端着），"
+                        + "**不要**写汇报/回执腔（「已经查了」「得跟你说清」「已安排」「已回复」"
+                        + "「子 Agent 说…」这类都不是对用户说的话）；③ 不要写任务号、message_id、"
+                        + "工具名、调度过程、内部键值。拿不准就问自己一句：这句话发给他们看，体面吗。");
+            }
         }
         if (dialogDeny == null && store != null && Str.has(input)) store.appendDialog(t.session(), "user", input, 0);
         // 生命周期：回合开始（基板⑦）。钩子拿到的"本轮正文"就是这一轮的用户输入；
@@ -175,7 +224,7 @@ public final class Agent {
             //      那 145 字的回执正文又被多投了一遍到群里）；
             //   ② 会话回复（QQ/控制台）—— 正文就是她的回复，保留；但**本回合已经对外发过**时不再补一条
             //      （F1 去重：判据见 alreadyOut，"说过就不再拿回合正文补一句"）。
-            if (sink != null && deliveryPath) {
+            if (sink != null && deliveryPath && !noSpeakTools) {
                 if (out != null) {
                     out.dim("[agent] 投递通路（" + deliverTo + "）：正文不外发（要说话得她显式调发送类工具）"
                             + " chars=" + oc.text.length());
@@ -189,9 +238,20 @@ public final class Agent {
         } else if (!oc.ok() && sink != null) {
             // 失败兜底同理：投递通路的回合不替她说话（她自己没说 = 这一轮没有对外的话）。
             if (!deliveryPath) {
-                String notice = "（本轮失败：" + oc.error + "）";
-                hookSend(t, notice);
-                sink.say(notice);
+                // 对外只说人话：**不把内部错误抛给会话**（真机事故 2026-09-19：群里看到
+                // 「（本轮失败：SocketTimeoutException: connect timed out）」）。原因只进控制台日志。
+                // 文案外挂在 prompts/tools-index.md 的「失败回话」；同一会话 2 分钟内不重复说（免得刷屏）。
+                String notice = failNotice();
+                long nowMs = System.currentTimeMillis();
+                Long last = FAIL_NOTICE_AT.get(t.session());
+                if (last != null && nowMs - last.longValue() < FAIL_NOTICE_COOLDOWN_MS) {
+                    if (out != null) out.warn("[agent] 本轮失败，冷却中不回话（原因：" + oc.error + "）");
+                } else {
+                    FAIL_NOTICE_AT.put(t.session(), Long.valueOf(nowMs));
+                    if (out != null) out.warn("[agent] 本轮失败，对外用兜底回话（原因：" + oc.error + "）");
+                    hookSend(t, notice);
+                    sink.say(notice);
+                }
             } else if (out != null) {
                 out.warn("[agent] 投递通路（" + deliverTo + "）：本轮失败且不代发（" + oc.error + "）");
             }

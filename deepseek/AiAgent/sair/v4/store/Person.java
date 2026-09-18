@@ -61,7 +61,8 @@ public final class Person {
     /**
      * 这个人的客观事实；拿不到库或 QQ 非法返回 {@code null}（基板不编兜底文案，直接不产这一行）。
      *
-     * @param master 主人不显示 {@code favor}（与事实块的 {@code caller:} 同口径）
+     * @param master 主人也照常带 {@code favor}（主人裁 2026-09-17：好感度不判权限、是"关系值"，
+     *               每个人都能问她"我的好感度是多少" —— 她得先看得到；说不说由她定）
      */
     public static JsonObject facts(Store s, long qq, String name, double favor, boolean master) {
         if (s == null || qq <= 0L) return null;
@@ -72,7 +73,7 @@ public final class Person {
         o.addProperty("qq", qq);
         String nm = Str.oneLine(name);
         if (Str.has(nm)) o.addProperty("name", nm);
-        if (!master) o.addProperty("favor", (long) favor);
+        o.addProperty("favor", (long) favor);
 
         // 我记过他吗（记忆 + 印象：印象蒸馏的产出也是 memory 行，scope=user/scope_id=QQ）
         o.addProperty("seen_before", num(db, SQL_MEM, "user", String.valueOf(qq)) > 0L);

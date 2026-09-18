@@ -48,6 +48,9 @@ import sair.v4.term.SfwOut;
  */
 public class V4Activity extends Activity implements Cmd.Life, sair.v4.dev.DebugShell.Host {
 
+    /** 产品版本号（发布口径的唯一一处；启动横幅与文档里的版本以它为准）。 */
+    public static final String VERSION = "V4.1";
+
     private volatile Boot boot;
     private volatile Cmd cmd;
     /** 装配阶段捕获到的异常（诊断用；正常时为空串）。 */
@@ -244,13 +247,14 @@ public class V4Activity extends Activity implements Cmd.Life, sair.v4.dev.DebugS
                 try {
                     out.log("控制台命令前缀：" + safeName() + "/（输入 " + safeName()
                             + "/help 看命令表；基板在后台线程装配，加载过程会打在这里）", Out.Tone.TITLE);
+                    safeLog(out, "版本 " + VERSION);
                     if (restart) {
                         // 先把旧基板收干净（库/监听/线程池），再按新配置装配 —— 端口不会自己跟自己抢
                         safeLog(out, "重启：正在停旧基板（收库 / 收监听 / 收线程池）……");
                         if (old != null) safeStop(old);
                         safeLog(out, "重启：旧基板已停，开始按 config.json 重新装配（线程 " + bootThreadName + "）");
                     } else {
-                        safeLog(out, "基板装配开始（线程 " + bootThreadName + "，19 步，控制台不受影响）");
+                        safeLog(out, "基板装配开始（AiAgent V4.1，线程 " + bootThreadName + "，19 步，控制台不受影响）");
                     }
                     // ★ 就绪与"装配名额"必须在同一个临界区里、且名额**先**交还（既有竞态；门禁实测
                     //   首跑 ⑩(c) 8/268 红，全落在这一条根因上）：

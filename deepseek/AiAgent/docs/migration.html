@@ -47,8 +47,8 @@
       <span class="eyebrow">升级 · 用户指引</span>
       <h1>从 V3 到 <span class="grad">V4</span><br>数据不迁移，配置能照抄</h1>
       <p class="lede">
-        这一页只讲用户怎么升级：<b>会失去什么</b>、怎么先留档、哪些配置能照抄、升级后要重做哪几件事，
-        以及<b>哪几处行为换了做法</b>。全部按 V4 侧可复核的源码事实写。
+        这一页只讲一件事：怎么把线上的 V3 换成 V4。包括<b>会失去什么</b>、怎么先留档、哪些配置能照抄、
+        升级后要重做哪几件事，以及<b>哪几处行为换了做法</b>。全部按 V4 侧的实际行为写。
       </p>
       <div class="hero-actions">
         <a class="btn" href="#datamap">会失去什么 →</a>
@@ -64,24 +64,24 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">前提</span>
           <h2>V4 不读 V3 的数据</h2>
-          <p class="chapter-desc">这条是升级前必须先接受的：V4 的数据只有它自己那一个文件，没有"把 V3 数据带过来"这一步。</p>
+          <p class="chapter-desc">这一条是升级前先要接受的：V4 的数据只有它自己那一个文件，没有“把 V3 数据带过来”这一步。好消息是配置可以照抄，而且加密口径一致。</p>
         </header>
 
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">V4 只开一个数据库文件</h4>
-            <p>V4 的数据文件由配置对象给出，名字固定是 <code>v4.db</code>（<code>Conf.java:1103</code> 的 <code>dbFile()</code> → <code>path("v4.db")</code>）。</p>
-            <p class="t-cap">装配时打开的也是它：打不开就报 <code>v4.db 打不开（&lt;绝对路径&gt;）</code> 并降级继续（<code>Boot.java:444</code>、<code>:451</code>）。源码里没有读取 V3 数据文件的路径。</p>
+            <p>V4 的数据文件由配置对象给出，名字固定是 <code>v4.db</code>（<code>Conf.dbFile()</code> → <code>path("v4.db")</code>）。装配时打开的也是它：打不开就报一行 <code>v4.db 打不开（&lt;绝对路径&gt;）</code> 并降级继续，命令面照旧可用。</p>
+            <p class="t-cap">V4 的源码里没有读取 V3 数据文件的路径 —— 所以“数据不迁移”不是省了一步，而是设计如此。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">配置能照抄，而且是同一个加密口径</h4>
-            <p>敏感键的密文与 V3 逐字节兼容：密钥派生尾串"V3 原样"（<code>kit\Crypto.java:41</code>），六因子的顺序"与 V3 一致"（<code>Crypto.java:130</code>），AES-128 取 SHA-256 前 16 字节（<code>Crypto.java:130</code>、<code>:140-148</code>）。</p>
-            <p class="t-cap">所以：<b>在同一个启动目录下</b>，V3 的存量密文可以直接被 V4 解开。换了机器 / 用户名 / 工作目录就不行（<code>Crypto.java:29-31</code>）。</p>
+            <p>敏感键的密文与 V3 完全兼容：密钥派生的尾串保持 V3 原样、六因子的顺序与 V3 一致、AES-128 的密钥取摘要的前 128 位（<code>kit\Crypto.java</code>）。</p>
+            <p class="t-cap">所以：<b>在同一个启动目录下</b>，V3 留下的存量密文可以直接被 V4 解开。换了机器、用户名或工作目录就不行 —— 密文与运行环境是绑定的。</p>
           </div>
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">V3 里那些 V4 不认识的键会被忽略</span>：配置读取只认自己的已知键表；写错或过期的键会被<b>当成未知键忽略、不参与任何判定</b>（<code>Conf.java:349</code> 就是这么处理已退休的 <code>permissionMatrix</code> 的）。所以照抄旧配置是安全的 —— 多出来的键不会让基板出错，但也不会生效。</p>
+          <p><span class="n-title">V3 里那些 V4 不认识的键会被忽略</span>：配置读取只认自己的已知键表，写错或过期的键会被<b>当成未知键忽略</b>，既不参与判定、也不会让基板出错。所以照抄旧配置是安全的 —— 多出来的键不会生效，但也不会添乱。</p>
         </div>
       </section>
 
@@ -90,7 +90,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">数据</span>
           <h2>会失去什么，怎么留档</h2>
-          <p class="chapter-desc">下面这些属于<b>数据</b>：升级后一律从零开始累积，V4 不会去读 V3 的库。<b>要留档只能在升级前自己备份</b>。</p>
+          <p class="chapter-desc">下面这些都属于<b>数据</b>：升级后从零开始累积，V4 不会去读 V3 的库。想留档，只能在升级前自己备份一份。</p>
         </header>
 
         <div class="tw scroll reveal">
@@ -99,14 +99,14 @@
               <tr><th>V3 里的东西</th><th>升级后</th><th>说明</th></tr>
             </thead>
             <tbody>
-              <tr><td>群聊消息记录</td><td>不带入</td><td>V4 从启用那一刻起重新记录；群聊保留期由 <code>grouplogKeepDays</code> 控制，默认 30 天（<code>Conf.java:146</code>）</td></tr>
-              <tr><td>长期记忆与印象</td><td>不带入</td><td>V4 的记忆库从空开始，靠日常对话重新累积；保留期 <code>keepDays</code> 默认 30 天（<code>Conf.java:142</code>）</td></tr>
-              <tr><td>对话历史</td><td>不带入</td><td>私聊 / 控制台会话各自重新开始；对话保留期 <code>dialogKeepDays</code> 默认 180 天（<code>Conf.java:144</code>）</td></tr>
-              <tr><td>知识笔记与纠错记录</td><td>不带入</td><td>需要的话在升级前自己从 V3 侧导出文字另存</td></tr>
+              <tr><td>群聊消息记录</td><td>不带入</td><td>V4 从启用那一刻起重新记录；群聊保留期由 <code>grouplogKeepDays</code> 控制，默认 30 天</td></tr>
+              <tr><td>长期记忆与印象</td><td>不带入</td><td>V4 的记忆库从空开始，靠日常对话重新累积；保留期 <code>keepDays</code> 默认 30 天</td></tr>
+              <tr><td>对话历史</td><td>不带入</td><td>私聊 / 控制台会话各自重新开始；对话保留期 <code>dialogKeepDays</code> 默认 180 天</td></tr>
+              <tr><td>知识笔记与纠错记录</td><td>不带入</td><td>需要的话，在 V3 还在跑的时候自己导出文字另存</td></tr>
               <tr><td>表情包记录与磁盘图片</td><td>不带入</td><td>V4 要重新收集；图片落点在数据根的 <code>files\</code></td></tr>
-              <tr><td>好感度数值</td><td>不带入</td><td>所有人从 0 开始。注意：V4 里好感度<b>不再决定权限</b>，权限只看 ACL 账本（<code>Auth.java:32-33</code>、<code>:57</code>）</td></tr>
-              <tr><td>定时任务与运行台账</td><td>不带入</td><td>V4 需要在控制台重新设置（<code>ai/tick</code> / <code>ai/alarm</code> 可查看心跳与定时清单）</td></tr>
-              <tr><td>群成员 / 昵称缓存</td><td>不带入</td><td>这类缓存不再需要：改为按需实时查询</td></tr>
+              <tr><td>好感度数值</td><td>不带入</td><td>所有人从 0 开始。另外留意：V4 里好感度<b>不再决定权限</b>，权限只看 ACL 账本（见<a href="perms.html">权限管理</a>）</td></tr>
+              <tr><td>定时任务与运行台账</td><td>不带入</td><td>需要在控制台重新设置；<code>ai/tick</code> 与 <code>ai/alarm</code> 可以查看心跳与定时清单</td></tr>
+              <tr><td>群成员 / 昵称缓存</td><td>不带入</td><td>这类缓存不再需要：V4 改为按需实时查询</td></tr>
             </tbody>
           </table>
         </div>
@@ -118,9 +118,9 @@
 Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
 
 # 2) 备份只用于留档与查证：V4 不会去读它
-#    需要的文字内容，请在 V3 还在跑的时候自己导出</code></pre>
+#    需要的文字内容，在 V3 还在跑的时候自己导出</code></pre>
         </div>
-        <p class="t-cap">备份这一份什么时候都不亏：V4 落地后如果发现还想回查旧记录，能查的只有这份备份。</p>
+        <p class="t-cap">这份备份什么时候做都不亏：V4 落地之后如果想回查旧记录，能查的就只有它了。</p>
       </section>
 
       <!-- ============ 3 ============ -->
@@ -128,20 +128,20 @@ Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
         <header class="chapter-head reveal">
           <span class="chapter-tag">配置</span>
           <h2>配置怎么照抄</h2>
-          <p class="chapter-desc">规则只有两条：<b>同名键直接照抄</b>；<b>V4 新增的键按需补</b>。不认识的键会被忽略，不会报错。</p>
+          <p class="chapter-desc">规则就两条：<b>同名键直接照抄</b>；<b>V4 新增的键按需补</b>。不认识的键会被忽略，不会报错，所以照抄本身很安全。</p>
         </header>
 
         <h3 class="sec">可以直接照抄的同名键</h3>
         <div class="tw scroll reveal">
           <table>
             <thead>
-              <tr><th>类别</th><th>键</th><th>出处</th></tr>
+              <tr><th>类别</th><th>键</th><th>备注</th></tr>
             </thead>
             <tbody>
-              <tr><td>模型与密钥</td><td><code>apiKey</code>、<code>apiUrl</code>、<code>model</code>、<code>autoModel</code>、<code>visionModel</code>、<code>temperature</code>、<code>topP</code>、<code>maxTokens</code></td><td><code>Conf.java:1176-1183</code></td></tr>
-              <tr><td>身份</td><td><code>selfId</code>、<code>masterQQ</code>、<code>masterQQs</code></td><td><code>Conf.java:1186-1188</code></td></tr>
-              <tr><td>NapCat</td><td><code>napcatEnabled</code>、<code>napcatHost</code>、<code>napcatPort</code>、<code>napcatToken</code></td><td><code>Conf.java:1273-1276</code></td></tr>
-              <tr><td>保留期</td><td><code>keepDays</code>（记忆）</td><td><code>Conf.java:1252</code></td></tr>
+              <tr><td>模型与密钥</td><td><code>apiKey</code>、<code>apiUrl</code>、<code>model</code>、<code>autoModel</code>、<code>visionModel</code>、<code>temperature</code>、<code>topP</code>、<code>maxTokens</code></td><td><code>apiKey</code> 建议先写明文，让 V4 重新加密一次</td></tr>
+              <tr><td>身份</td><td><code>selfId</code>、<code>masterQQ</code>、<code>masterQQs</code></td><td><code>masterQQ</code> 是主人判定的依据，抄过来之后核对一遍</td></tr>
+              <tr><td>NapCat</td><td><code>napcatEnabled</code>、<code>napcatHost</code>、<code>napcatPort</code>、<code>napcatToken</code></td><td>端口与 token 要与 NapCat 侧的反向 WS 配置一致</td></tr>
+              <tr><td>保留期</td><td><code>keepDays</code>（记忆）</td><td>V4 里对话与群聊另有各自的键，见下一张表</td></tr>
             </tbody>
           </table>
         </div>
@@ -153,30 +153,30 @@ Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
               <tr><th>键</th><th>作用</th><th>默认</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>dialogKeepDays</code> / <code>grouplogKeepDays</code></td><td>对话 / 群聊各自的保留天数（与记忆分开，三把独立的尺子）</td><td><b>180</b> / <b>30</b>（<code>Conf.java:144</code>、<code>:146</code>）</td></tr>
-              <tr><td><code>maintainEveryHours</code> / <code>maxLowImportance</code></td><td>自动维护间隔、低重要度记忆条数上限</td><td><code>Conf.java:109</code>、<code>:107</code></td></tr>
-              <tr><td><code>agentMaxRounds</code> / <code>subagentMaxRounds</code> / <code>subAgentMax</code> / <code>toolResultMax</code></td><td>单回合上限、子 Agent 回合与并发、工具结果长度上限</td><td>30 / 40 / 4 / 6000（<code>Conf.java:122</code>、<code>:124</code>、<code>:126</code>、<code>:127</code>）</td></tr>
-              <tr><td><code>historyLimit</code> / <code>historyMaxChars</code></td><td>带入的历史条数与字符上限</td><td>60 / 24000（<code>Conf.java:88</code>、<code>:93</code>）</td></tr>
-              <tr><td><code>turnWorkers</code> / <code>turnQueueMax</code> / <code>turnLaneMax</code> / <code>turnOverflow</code> / <code>turnPriority</code> 等</td><td>回合调度：工作线程数、整体与单会话待办上限、溢出策略、优先级规则</td><td><code>Conf.java:154-166</code></td></tr>
-              <tr><td><code>modelConcurrency</code> / <code>modelGateWaitMs</code></td><td>模型调用闸门：同时几路调用、等闸门的上限</td><td><b>1</b> / 180000（<code>Conf.java:162</code>、<code>:233</code>）</td></tr>
-              <tr><td><code>hookWorkers</code> / <code>hookQueueMax</code> / <code>eventWorkers</code> / <code>eventQueueMax</code></td><td>两类执行池的线程数与排队上限</td><td><code>Conf.java:225-231</code></td></tr>
-              <tr><td><code>chatWindowSize</code></td><td>本会话最近 N 条聊天记录带进上下文</td><td><b>30</b>（<code>Conf.java:179</code>）</td></tr>
-              <tr><td><code>prefInject</code> / <code>prefInjectMaxRows</code> / <code>prefInjectMaxChars</code> / <code>ctxBudgetChars</code></td><td>偏好注入开关与上限、上下文 provider 的字符预算</td><td><code>Conf.java:187</code>、<code>:193</code>、<code>:196</code>、<code>:223</code></td></tr>
-              <tr><td><code>relayEnabled</code> / <code>relayPort</code> / <code>relayPublicHost</code> / <code>relayToken</code> / <code>relayTtlMinutes</code></td><td>文件外链中转（跨机部署用）</td><td>端口 <b>2671</b>（<code>Conf.java:133</code>、<code>:1278-1282</code>）</td></tr>
-              <tr><td><code>tickMs</code> / <code>chatTimeoutMs</code> / <code>logQq</code> / <code>logTools</code> / <code>logConsole</code> / <code>logVerbose</code></td><td>心跳周期、控制台等待上限、各类日志开关</td><td><code>Conf.java:131</code>、<code>:111</code>、<code>:113</code>、<code>:317</code>、<code>:324</code></td></tr>
-              <tr><td><code>consoleTapEnabled</code> / <code>consoleTapItems</code> / <code>consoleTapChars</code> / <code>consoleTapReadChars</code> / <code>consoleTapForward</code></td><td>控制台捕获面（模型能读到多少控制台输出）</td><td><code>Conf.java:248-265</code></td></tr>
-              <tr><td><code>talkPanelMaxEntries</code> / <code>talkPanelMaxChars</code></td><td>本地对话面板的条数与字符上限</td><td><code>Conf.java:945</code></td></tr>
-              <tr><td><code>ftsOff</code></td><td>给哪些库关掉全文索引</td><td><code>Conf.java:1257</code></td></tr>
+              <tr><td><code>dialogKeepDays</code> / <code>grouplogKeepDays</code></td><td>对话 / 群聊各自的保留天数（与记忆分开，是三把独立的尺子）</td><td><b>180</b> / <b>30</b></td></tr>
+              <tr><td><code>maintainEveryHours</code> / <code>maxLowImportance</code></td><td>自动维护间隔、低重要度记忆条数上限</td><td>按出厂值即可</td></tr>
+              <tr><td><code>agentMaxRounds</code> / <code>subagentMaxRounds</code> / <code>subAgentMax</code> / <code>toolResultMax</code></td><td>单回合上限、子 Agent 回合与并发、工具结果长度上限</td><td>30 / 40 / 4 / 6000</td></tr>
+              <tr><td><code>historyLimit</code> / <code>historyMaxChars</code></td><td>带进上下文的历史条数与字符上限</td><td>60 / 24000</td></tr>
+              <tr><td><code>turnWorkers</code> / <code>turnQueueMax</code> / <code>turnLaneMax</code> / <code>turnOverflow</code> / <code>turnPriority</code> 等</td><td>回合调度：工作线程数、整体与单会话待办上限、溢出策略、优先级规则</td><td>按出厂值即可</td></tr>
+              <tr><td><code>modelConcurrency</code> / <code>modelGateWaitMs</code></td><td>模型调用闸门：同时几路调用、等闸门的上限</td><td><b>1</b> / 180000</td></tr>
+              <tr><td><code>hookWorkers</code> / <code>hookQueueMax</code> / <code>eventWorkers</code> / <code>eventQueueMax</code></td><td>两类执行池的线程数与排队上限</td><td>按出厂值即可</td></tr>
+              <tr><td><code>chatWindowSize</code></td><td>本会话最近 N 条聊天记录带进上下文</td><td><b>30</b></td></tr>
+              <tr><td><code>prefInject</code> / <code>prefInjectMaxRows</code> / <code>prefInjectMaxChars</code> / <code>ctxBudgetChars</code></td><td>偏好注入开关与上限、上下文提供者的字符预算</td><td>按出厂值即可</td></tr>
+              <tr><td><code>relayEnabled</code> / <code>relayPort</code> / <code>relayPublicHost</code> / <code>relayToken</code> / <code>relayTtlMinutes</code></td><td>文件外链中转（NapCat 与插件不在同一台机器时用）</td><td>端口 <b>2671</b>；功能默认关闭</td></tr>
+              <tr><td><code>tickMs</code> / <code>chatTimeoutMs</code> / <code>logQq</code> / <code>logTools</code> / <code>logConsole</code> / <code>logVerbose</code></td><td>心跳周期、控制台等待上限、各类日志开关</td><td>按出厂值即可</td></tr>
+              <tr><td><code>consoleTapEnabled</code> / <code>consoleTapItems</code> / <code>consoleTapChars</code> / <code>consoleTapReadChars</code> / <code>consoleTapForward</code></td><td>控制台捕获面：模型能读到多少控制台输出</td><td>按出厂值即可</td></tr>
+              <tr><td><code>talkPanelMaxEntries</code> / <code>talkPanelMaxChars</code></td><td>本地对话面板的条数与字符上限</td><td>按出厂值即可</td></tr>
+              <tr><td><code>ftsOff</code></td><td>给哪些库关掉全文索引</td><td>不填就是全开</td></tr>
             </tbody>
           </table>
         </div>
 
         <div class="note bad reveal">
-          <p><span class="n-title">登在键面里、但当前没有读者 / 未实现的键（照抄了也不会有效果）</span>：<code>mediaRender</code>、<code>mediaRenderMaxChars</code> 属<b>有键无读者</b>；<code>mediaExpandForward</code>、<code>mediaExpandMaxNodes</code>、<code>mediaExpandMaxDepth</code>、<code>mediaExpandMaxChars</code> 属<b>计划中／未实现</b>。它们都登记在已知键表里（<code>Conf.java:1239-1248</code>），写进配置不改变行为。逐键说明见<a href="config.html#other">配置页 · 其余键</a>。</p>
+          <p><span class="n-title">登记在键表里、但目前没有读取方的键</span>：<code>mediaRender</code>、<code>mediaRenderMaxChars</code> 属于“有键、暂时没有读者”；<code>mediaExpandForward</code>、<code>mediaExpandMaxNodes</code>、<code>mediaExpandMaxDepth</code>、<code>mediaExpandMaxChars</code> 属于“还没有实现”。它们都在已知键表里登记着，但写进配置不会改变行为。同一组里的 <code>mediaExpandQuote</code> 与 <code>mediaCacheHours</code> 是有真实读取方的，别把这两类混在一起看。逐键说明见<a href="config.html#other">配置页 · 其余键</a>。</p>
         </div>
 
         <div class="note reveal">
-          <p><span class="n-title">调试口不再是配置键</span>：<code>debugPort</code> / <code>debugToken</code> / <code>debugSimPort</code> / <code>debugSimulate</code> 四个键已从键表、默认值写入和 <code>config.json</code> 里整条撤出 —— 两个口的起停只由控制台 <code>ai/debug on|off|status</code> 说了算（<code>Conf.java:1283-1286</code>）。</p>
+          <p><span class="n-title">调试口不再是配置键</span>：<code>debugPort</code> / <code>debugToken</code> / <code>debugSimPort</code> / <code>debugSimulate</code> 四个键已经从键表、默认值写入和 <code>config.json</code> 里整条撤出 —— 两个口的起停只由控制台 <code>ai/debug on|off|status</code> 说了算。</p>
         </div>
       </section>
 
@@ -185,7 +185,7 @@ Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
         <header class="chapter-head reveal">
           <span class="chapter-tag">步骤</span>
           <h2>升级步骤（按这个顺序做）</h2>
-          <p class="chapter-desc">六步，前两步是"留退路"，后四步是"换过来并核对"。</p>
+          <p class="chapter-desc">六步：前两步是“留退路”，后四步是“换过来并核对”。</p>
         </header>
 
         <div class="tl reveal">
@@ -195,7 +195,7 @@ Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
           </div>
           <div class="tl-item">
             <div class="tl-when">STEP 2 · 停 V3</div>
-            <div class="tl-what">停掉 V3 的组件，避免两边同时连 NapCat —— 同一个 QQ 号只能有一个实例在收消息。</div>
+            <div class="tl-what">停掉 V3 的组件，别让两边同时连 NapCat —— 同一个 QQ 号只能有一个实例在收消息。</div>
           </div>
           <div class="tl-item">
             <div class="tl-when">STEP 3 · 落位</div>
@@ -203,20 +203,20 @@ Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
           </div>
           <div class="tl-item">
             <div class="tl-when">STEP 4 · 抄配置</div>
-            <div class="tl-what">按<a href="#configmap">配置对照</a>把同名键照抄过去（<code>apiKey</code> 建议先写明文让它重新加密），并确认 <code>selfId</code> / <code>masterQQ</code> / <code>napcatEnabled</code> / <code>napcatPort</code> / <code>napcatToken</code> 都对。</div>
+            <div class="tl-what">按<a href="#configmap">配置对照</a>把同名键照抄过去（<code>apiKey</code> 建议先写明文让它重新加密），并确认 <code>selfId</code> / <code>masterQQ</code> / <code>napcatEnabled</code> / <code>napcatPort</code> / <code>napcatToken</code> 都对得上。</div>
           </div>
           <div class="tl-item">
             <div class="tl-when">STEP 5 · 启动</div>
-            <div class="tl-what"><b>用与 V3 相同的启动目录</b>启动宿主（否则密文解不开，见 <code>Crypto.java:18</code>），然后在控制台敲 <code>ai/start</code> —— 在它之前基板不工作。</div>
+            <div class="tl-what"><b>用与 V3 相同的启动目录</b>启动宿主（否则存量密文解不开），然后在控制台敲 <code>ai/start</code> —— 在它之前基板不工作。</div>
           </div>
           <div class="tl-item amber">
             <div class="tl-when">STEP 6 · 重新配</div>
-            <div class="tl-what">把身份提示词放进 <code>prompts\identity.md</code>（冷启动只建 0 字节空壳，<code>Boot.java:869-870</code>）；重新设定时任务；要给谁放开某项能力，就按<a href="capabilities.html#perm">权限面</a>的 ACL 写法在数据根的 <code>perms.json</code> 里写例外（默认对非主人是全关的）。</div>
+            <div class="tl-what">把身份提示词放进 <code>prompts\identity.md</code>（冷启动只会给它建一个空壳文件）；重新设定时任务；要给谁放开某项能力，就按<a href="perms.html">权限页</a>的写法在数据根的 <code>perms.json</code> 里写例外（默认对非主人是全关的）。</div>
           </div>
         </div>
 
         <div class="note ok reveal">
-          <p><span class="n-title">核对</span>：<code>ai/status</code> 看装配是否齐备、以及有没有"待生效"的键（<code>Cmd.java:1373</code>、<code>Conf.java:578-589</code>）；<code>ai/napcat status</code> 看 QQ 侧连上没有（<code>Cmd.java:1265</code>）。完整清单见<a href="deploy.html#checklist">部署页 · 核对清单</a>。</p>
+          <p><span class="n-title">顺手核对两件事</span>：<code>ai/status</code> 看装配是否齐备，以及有没有“待生效”的键；<code>ai/napcat status</code> 看 QQ 侧连上没有。完整清单见<a href="deploy.html#checklist">部署页 · 核对清单</a>。</p>
         </div>
       </section>
 
@@ -225,25 +225,25 @@ Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
         <header class="chapter-head reveal">
           <span class="chapter-tag">重做</span>
           <h2>升级后要重做的几件事</h2>
-          <p class="chapter-desc">这些在 V4 里都属于"数据"或"外部配置"，不会被带过来。</p>
+          <p class="chapter-desc">这些在 V4 里都属于“数据”或“外部配置”，不会被带过来，重新做一遍就好。</p>
         </header>
 
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">① 身份提示词</h4>
-            <p>冷启动建的 <code>prompts\identity.md</code> 是 <b>0 字节</b>：基板不带任何提示词文案（<code>Boot.java:840-843</code>）。不放内容，身份就是空的。</p>
+            <p>冷启动建的 <code>prompts\identity.md</code> 是<b>空的</b>：基板不带任何提示词文案。不放内容，她的身份就是空的 —— 这是最容易被落下的一步。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">② 权限例外</h4>
-            <p>V4 的权限判据只有一本账：数据根的 <code>perms.json</code>（<code>Acl.java:121</code> 的 <code>FILE_NAME</code>、<code>Auth.java:24</code>）。<b>一条例外都没命中时按资源类型给位</b>，其中 A 类（SFW 数据根之外的本机路径）对普通用户<b>一位都不给</b>（<code>Acl.java:55</code>、<code>:145-150</code>）。</p>
+            <p>V4 的权限判据只有一本账：数据根的 <code>perms.json</code>。<b>一条例外都没命中时就按资源类型给位</b>，其中 A 类（SFW 数据根之外的本机路径）对普通用户<b>一位都不给</b>。写法与例子见<a href="perms.html#change">权限页 · 怎么授权</a>。</p>
           </div>
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">③ 定时任务</h4>
-            <p>V3 的定时任务与运行台账不带入。V4 里用 <code>ai/tick</code>（手动心跳）与 <code>ai/alarm</code>（定时唤醒清单）查看与确认（<code>Cmd.java:1377-1378</code>）。</p>
+            <p>V3 的定时任务与运行台账不带入。V4 里用 <code>ai/tick</code>（手动催一次心跳）与 <code>ai/alarm</code>（定时唤醒清单）查看与确认。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">④ NapCat 侧仍是同一个端口</h4>
-            <p>插件侧默认监听 <code>127.0.0.1:8082</code>（<code>Conf.java:128</code>、<code>:130</code>）。NapCat 的反向 WS 指向这个地址与端口，并把 token 带上（<code>qq\Link.java:431-435</code>）。</p>
+            <p>插件侧默认监听 <code>127.0.0.1:8082</code>。NapCat 的反向 WS 指向这个地址与端口，并把 token 带上，两侧对得上就通。</p>
           </div>
         </div>
       </section>
@@ -253,66 +253,57 @@ Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
         <header class="chapter-head reveal">
           <span class="chapter-tag">差异</span>
           <h2>几处换了做法的行为</h2>
-          <p class="chapter-desc">这些不是配置项差异，而是"用起来会感觉不一样"的地方。</p>
+          <p class="chapter-desc">这些不是配置项的差异，而是“用起来会感觉不一样”的地方。先看一遍，升级后就不会觉得哪里怪。</p>
         </header>
 
         <div class="tw scroll reveal">
           <table>
             <thead>
-              <tr><th>主题</th><th>V4 的做法</th><th>出处</th></tr>
+              <tr><th>主题</th><th>V4 的做法</th></tr>
             </thead>
             <tbody>
               <tr>
                 <td>入口</td>
-                <td><b>没有"通道"概念</b>：旧命令名会明确回一句"属于已删除的通道概念"，并提示直接用 <code>ai/chat</code>；工具能不能用完全由权限决定，不再有按通道裁剪的工具表</td>
-                <td><code>Cmd.java:211-216</code></td>
+                <td><b>没有“通道”这个概念了</b>：旧命令名会明确回一句“属于已删除的通道概念”，并提示直接用 <code>ai/chat</code>；工具能不能用完全由权限决定，不再有按通道裁剪的工具表</td>
               </tr>
               <tr>
                 <td>身份</td>
-                <td>本地控制台交互 ≡ QQ 里的主人（<code>MASTER</code>）；主体分三类 <code>MASTER</code> / <code>SYSTEM</code> / <code>ALLUSER</code>，判定顺序"显式 SYSTEM 标志 &gt; master &gt; 其它"</td>
-                <td><code>Cmd.java:1358</code>、<code>auth\Caller.java:15-26</code>、<code>:129-130</code></td>
+                <td>本地控制台交互就是 QQ 里的主人（<code>MASTER</code>）；主体分三类 <code>MASTER</code> / <code>SYSTEM</code> / <code>ALLUSER</code>，判定顺序是“显式 SYSTEM 标志 &gt; 主人 &gt; 其它”</td>
               </tr>
               <tr>
                 <td>权限</td>
-                <td>判据换成<b>资源 ACL 账本</b>：按类默认分配 + 例外突破默认；主体层级 <code>User&lt;QQ&gt;(3) &gt; Group&lt;群号&gt;(2) &gt; ALLUSER(1)</code>，同级后者覆盖前者</td>
-                <td><code>Auth.java:9</code>、<code>:24-27</code>、<code>Acl.java:22-23</code>、<code>:92-99</code></td>
+                <td>判据换成<b>资源 ACL 账本</b>：按类默认分配 + 例外突破默认；主体层级 <code>User&lt;QQ&gt;(3) &gt; Group&lt;群号&gt;(2) &gt; ALLUSER(1)</code>，同级里后面的覆盖前面的</td>
               </tr>
               <tr>
                 <td>好感度</td>
-                <td><b>不再参与权限判定</b>；控制台 <code>ai/perm</code> 只管好感度，<code>ai/acl</code> 只看权限账本</td>
-                <td><code>Cmd.java:1383-1384</code>、<code>:1393-1394</code>、<code>Auth.java:32-33</code></td>
+                <td><b>不再参与权限判定</b>：控制台 <code>ai/perm</code> 只管好感度数值，<code>ai/acl</code> 只看权限账本</td>
               </tr>
               <tr>
                 <td>模型选择</td>
-                <td><code>model</code> 出厂值是 <code>auto</code>，<code>auto</code> 对应的默认模型是 <code>deepseek-flash</code></td>
-                <td><code>Conf.java:79-80</code></td>
+                <td><code>model</code> 的出厂值是 <code>auto</code>，<code>auto</code> 对应的默认模型是 <code>deepseek-flash</code>；写了具体模型名就严格按那个名字调用</td>
               </tr>
               <tr>
                 <td>群聊触发</td>
-                <td><b>只有被 @ 才触发</b>：判定点是一句 <code>return ev.atSelf();</code></td>
-                <td><code>QqGateway.java:874</code>、<code>:752</code>、<code>qq\Ev.java:182</code></td>
+                <td><b>只有被 @ 才触发</b>：判据是 <code>ev.atSelf()</code>，主人在这里也没有豁免 —— 群里的主人同样要被 @ 才会被回答</td>
               </tr>
               <tr>
                 <td>配置生效</td>
-                <td>改配置的命令<b>只写文件</b>；要 <code>ai/start</code>（没在跑）或 <code>ai/restart</code>（已经在跑）才生效；<code>ai/status</code> 会列出"待生效"的键</td>
-                <td><code>Cmd.java:1369-1371</code>、<code>Conf.java:578-589</code></td>
+                <td>改配置的命令<b>只写文件</b>；要 <code>ai/start</code>（还没在跑）或 <code>ai/restart</code>（已经在跑）才生效；<code>ai/status</code> 会把“待生效”的键列出来</td>
               </tr>
               <tr>
                 <td>关停</td>
-                <td><code>ai/exit</code> <b>只停基板</b>（命令表口径）；<b>实测</b>基板停下后调试口随之关闭而 JVM 仍活，无控制台场景下无法再 start —— 要真正关停请用 <code>/exit</code> 或按精确 pid</td>
-                <td><code>Cmd.java:1366</code>；<code>SairFrameWork\readme\pages\plugin-dev.html:71</code>、<code>:139</code></td>
+                <td><code>ai/exit</code> <b>只停基板</b>：命令表口径如此，之后还能再 <code>start</code>。基板停下时本机调试口随之关闭，而 <b>JVM 仍在运行</b>；真正要关停 JVM，请用框架自己的 <code>/exit</code>，或按<b>精确 pid</b> 结束进程</td>
               </tr>
               <tr>
                 <td>数据文件</td>
-                <td>合并成<b>一个</b> <code>v4.db</code>：业务库、运行表与全文索引都在这一个文件里</td>
-                <td><code>Conf.java:1103</code>、<code>Boot.java:444</code></td>
+                <td>合并成<b>一个</b> <code>v4.db</code>：业务库、运行表与全文索引都在这一个文件里，备份与迁移都只需要认准它</td>
               </tr>
             </tbody>
           </table>
         </div>
 
         <div class="note reveal">
-          <p><span class="n-title">升级完先做一次"接线测试"</span>：控制台 <code>ai/start</code> 之后 <code>ai/status</code>（看装配与待生效）、<code>ai/tools</code>（看当前可见工具）、再在群里 <b>@ 它</b>发一条消息看能否回复。三步都过，就算接上了。</p>
+          <p><span class="n-title">升级完先做一次“接线测试”</span>：控制台 <code>ai/start</code> 之后敲 <code>ai/status</code>（看装配与待生效的键）、<code>ai/tools</code>（看当前可见的工具），再到群里 <b>@ 它</b>发一条消息看能不能回。三步都过，就算接上了。</p>
         </div>
       </section>
 

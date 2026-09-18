@@ -561,11 +561,35 @@ public final class Api {
     // ---------------- 消息 ----------------
 
     public JsonObject sendGroupMsg(long groupId, String message) {
-        return call("send_group_msg", J.obj("group_id", groupId, "message", message));
+        return sendText(true, groupId, message);
     }
 
     public JsonObject sendPrivateMsg(long userId, String message) {
-        return call("send_private_msg", J.obj("user_id", userId, "message", message));
+        return sendText(false, userId, message);
+    }
+
+    /**
+     * <b>发文本的唯一出口</b>：三条口径在这里一次做掉（真机事故 2026-09-18/19）——
+     * ① 她写的标记先换成 CQ 码（{@code <at qq=…/>} ⇒ 真 @、{@code <quote id=…/>} ⇒ 真引用），
+     *    再剥其余控制标记：**既不原样漏标记，也不把引用悄悄丢掉**；
+     * ② <b>工具调用标记</b>（DSML 一族，{@link ToolMarkup}）命中 ⇒ <b>整条不发</b>，
+     *    返回失败让调用方如实知道（半剥的残留比整条不发更糟）；
+     * ③ 纯文字口径（{@link PlainText}，主人裁的"输出严禁 Markdown"）。
+     *
+     * <p><b>为什么必须在这一层</b>：正常回复走 {@code term.Sinks} 那条管线，三道闸都在；
+     * 而 {@code send} 这类工具是直接调 {@link Api} 的 —— 事故里漏出去的正是这条。</p>
+     */
+    private JsonObject sendText(boolean group, long id, String message) {
+        String clean = ChatMarkers.clean(message);
+        String leak = ToolMarkup.rule(clean);
+        if (leak != null) {
+            warn("[qq] 拦下一条工具调用标记（" + ToolMarkup.fact(clean) + "）：整条不发");
+            return error("这条正文里带工具调用标记（rule=" + leak + "），按纪律整条拦下、没有发出去");
+        }
+        if (clean.isEmpty()) return error("这条正文是空的（剥掉控制标记之后没有内容）");
+        return group
+                ? call("send_group_msg", J.obj("group_id", id, "message", clean))
+                : call("send_private_msg", J.obj("user_id", id, "message", clean));
     }
 
     public JsonObject sendMsg(boolean group, long id, String message) {

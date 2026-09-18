@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>技术实现 · AiAgent V4 文档</title>
-<meta name="description" content="AiAgent V4 技术实现：包与分层、装配流程、线程与调度、工具注册与失败闸门、数据表与键、关键机制与 file:line 索引。">
+<meta name="description" content="AiAgent V4 技术实现：包与分层、装配流程、线程与调度、工具注册与失败闸门、数据表与键、关键机制的实现索引。">
 <link rel="stylesheet" href="css/site.css">
 <noscript><style>.reveal{opacity:1 !important;transform:none !important}#bg-canvas,.scanline{display:none !important}</style></noscript>
 </head>
@@ -42,508 +42,317 @@
 <section class="hero">
 <span class="eyebrow">技术实现 · 源码级</span>
 <h1>它是<br><span class="grad">怎么实现的</span></h1>
-<p class="lede">包与分层、装配、线程与调度、数据表与键、关键机制，每条断言都带 <code>file:line</code>。</p>
+<p class="lede">包与分层、装配、线程与调度、数据表与键、关键机制，一条一条讲清它怎么工作、边界又在哪里。</p>
 </section>
 <div class="doc-body" id="doc-body">
-<div class="kpi">
-<div><b>110</b><span>.java 源文件</span></div>
-<div><b>17</b><span>个包（根包 + 16 子包）</span></div>
-<div><b>1,974,887</b><span>源码总字节</span></div>
-<div><b>19</b><span>装配命名步骤</span></div>
-</div>
 <div class="note">
-<b>取材口径</b>：只读 <code>src\sair\v4\</code> 的源码与 <code>data\prompts\</code>、<code>data\v4.db</code> 的只读结构。
-每条断言后跟真实 <code>file:line</code> 或可重跑的实测值。命令用法见 <a href="commands.html#usage">命令</a>，能力清单见 <a href="capabilities.html#nine">能力</a>。
-外挂扩展层的<b>基板机制标识符</b>（装载器类 <code>Skills.java</code>、状态表 <code>skill_index</code>、后台装载开关 <code>skillsAsync</code> 等）按机制逐字列出并附 <code>file:line</code>；<b>外挂层的具体内容</b>（有哪些单元、各自做什么、参数与实现）不在本文档范围内。
+<b>取材范围</b>：<code>src\sair\v4\</code> 的源码，以及 <code>data\prompts\</code> 与 <code>data\v4.db</code> 的结构。命令用法见 <a href="commands.html#usage">命令</a>，能力清单见 <a href="capabilities.html#nine">能力</a>。外挂扩展层的<b>基板机制标识符</b>（装载器类 <code>Skills.java</code>、状态表 <code>skill_index</code>、后台装载开关 <code>skillsAsync</code> 等）按机制逐个列出；<b>外挂层里具体有哪些单元</b>、各自做什么、参数与实现，不在本页范围内。
 </div>
 <!-- ============================================================ -->
 <section class="chapter" id="layers">
-<header class="chapter-head reveal">
-<span class="chapter-tag">01 / 结构</span>
-<h2>包与分层</h2>
-<p class="chapter-desc">110 个 <code>.java</code> 落在 17 个包：根包管装配与编排，16 个子包各守一个能力面。</p>
-</header>
-<h3 class="sec">计数证据</h3>
-<div class="code" data-lang="powershell">
-<div class="code-head"><span class="lang">powershell</span><span class="path">只读计数（可原样重跑）</span><button class="copy" type="button">复制</button></div>
-<pre><code>$src='C:\Sair\Local\AiAgent-V4\src\sair\v4'
-(Get-ChildItem $src -Recurse -Filter *.java -File).Count   # 110
-(Get-ChildItem $src -Directory).Count                     # 16
-Get-ChildItem $src -Directory | ForEach-Object {
-  "{0}`t{1}" -f $_.Name, (Get-ChildItem $_.FullName -Filter *.java -File).Count }</code></pre>
-</div>
-<p><b>实测</b>：<code>JAVA_TOTAL=110</code>、<code>PKG_SUBDIRS=16</code>（+ 根包 = <b>17 包</b>）、<code>BYTES_TOTAL=1974887</code>。
-根包 6 个文件；子包文件数 <code>agent:2 ai:5 auth:7 ctx:6 dev:4 ext:7 hot:7 kit:12 prompt:3 qq:15 schedule:7 store:9 term:6 tool:3 ui:4</code>，
-另有 1 个 7 文件的契约包（见下行）。</p>
-<div class="tw reveal">
-<table>
-<thead><tr><th>包</th><th>数</th><th>职责</th><th>代表类（字节）</th></tr></thead>
+<header class="chapter-head reveal"><span class="chapter-tag">01 / 结构</span><h2>包与分层</h2><p class="chapter-desc">根包管装配与编排，各子包分别守一个能力面；每件事只有一个落点，边界比能力更好记。</p></header>
+<h3 class="sec">九件事的分工</h3>
+<p>整份基板可以先读成九件事。每件事都只落在一个地方，各守自己那一格：</p>
+<div class="tw reveal"><table>
+<thead><tr><th>这件事</th><th>管什么</th><th>落在哪</th><th>关键类 / 关键键</th><th>它不做的事</th></tr></thead>
 <tbody>
-<tr><td><code>sair.v4</code></td><td>6</td><td>装配、编排、心跳、活动入口、基板工具面</td>
-<td><code>Builtins.java</code> 190,396 · <code>Boot.java</code> 118,372 · <code>QqGateway.java</code> 81,284 · <code>Conf.java</code> 80,641 · <code>V4Activity.java</code> 25,694 · <code>Tick.java</code> 16,141</td></tr>
-<tr><td><code>schedule</code></td><td>7</td><td>按会话分道的回合调度、有界执行池</td>
-<td><code>Lanes.java</code> 20,660 · <code>Pool.java</code> · <code>Dispatcher.java</code> · <code>Job.java</code> · <code>ChatJob.java</code> · <code>SimpleJob.java</code> · <code>Texts.java</code></td></tr>
-<tr><td><code>tool</code></td><td>3</td><td>唯一工具注册表、工具声明、能力索引、参数复核</td>
-<td><code>ToolIndex.java</code> 35,282 · <code>Registry.java</code> 23,204 · <code>Tool.java</code></td></tr>
-<tr><td><code>store</code></td><td>9</td><td>SQLite 连接与 CRUD、表声明、FTS、人物画像</td>
-<td><code>Store.java</code> 48,459 · <code>Db.java</code> 33,049 · <code>LibSpec.java</code> · <code>FtsQuery.java</code> · <code>Person.java</code></td></tr>
-<tr><td><code>ctx</code></td><td>6</td><td>上下文装配、事实块、回合状态、线程内调用者绑定</td>
-<td><code>CtxBuild.java</code> 54,283 · <code>ChatWindow.java</code> 34,520 · <code>Turn.java</code> · <code>Ctx.java</code> · <code>RecognizerState.java</code></td></tr>
-<tr><td><code>agent</code></td><td>2</td><td>Agent 门面 + 主循环（工具闭环、失败闸门）</td>
-<td><code>Agent.java</code> 44,010 · <code>Loop.java</code> 27,173</td></tr>
-<tr><td><code>ai</code></td><td>5</td><td>模型客户端、SSE 解析、消息与工具声明工厂</td>
-<td><code>DeepSeek.java</code> 20,429 · <code>Sse.java</code> 10,267 · <code>Msg.java</code> · <code>Res.java</code> · <code>ToolSpec.java</code></td></tr>
-<tr><td><code>qq</code></td><td>15</td><td>反向 WS 链接、动作出口、事件模型、分段、渲染、引用、去重</td>
-<td><code>Api.java</code> 43,474 · <code>QuoteCache.java</code> 35,822 · <code>Link.java</code> 35,528 · <code>Relay.java</code> 29,102</td></tr>
-<tr><td><code>auth</code></td><td>7</td><td>ACL 账本与判定、资源分类、位运算、主体、好感度存储</td>
-<td><code>Acl.java</code> 58,833 · <code>Res.java</code> 26,842 · <code>Bits.java</code> · <code>Caller.java</code> · <code>Auth.java</code></td></tr>
-<tr><td><code>term</code></td><td>6</td><td>控制台命令面、控制台捕获、输出端点、分段器</td>
-<td><code>Cmd.java</code> 74,925 · <code>ConsoleTap.java</code> 57,922 · <code>Sinks.java</code> 18,669 · <code>BootProgress.java</code> · <code>SfwOut.java</code> · <code>Segmenter.java</code></td></tr>
-<tr><td><code>ui</code></td><td>4</td><td>本地交流面板与挂载、面板输出端点、风格</td>
-<td><code>TalkPanel.java</code> 37,847 · <code>TalkMount.java</code> · <code>PanelSink.java</code> · <code>SfwStyle.java</code></td></tr>
-<tr><td><code>dev</code></td><td>4</td><td>本机调试口、模拟口、调试壳、调试日志</td>
-<td><code>DebugPort.java</code> 57,797 · <code>DebugSimPort.java</code> 34,852 · <code>DebugLog.java</code> 22,644 · <code>DebugShell.java</code></td></tr>
-<tr><td><code>kit</code></td><td>12</td><td>零依赖工具类：HTTP、网络护栏、文件、JSON、字符串、文本、线程、输出</td>
-<td><code>Http.java</code> · <code>NetGuard.java</code> · <code>Fs.java</code> · <code>J.java</code> · <code>Th.java</code> · <code>GatedOut.java</code></td></tr>
-<tr><td><code>ext</code></td><td>7</td><td>扩展点注册表与契约形状（上下文块、出站阶段、生命周期钩子、触发投票）</td>
-<td><code>ExtRegistry.java</code> 41,198 · <code>BuildContext.java</code> · <code>OutboundStage.java</code></td></tr>
-<tr><td><code>hot</code></td><td>7</td><td>外挂层装载机制：内存编译、类加载器、front matter 解析、名字规范化、动态执行</td>
-<td><code>SkMd.java</code> 10,466 · <code>SkCompile.java</code> 10,420 · <code>DynCode.java</code> 9,988 · <code>SkClassLoader.java</code> · <code>Sk.java</code> · <code>ToolNames.java</code></td></tr>
-<tr><td><code>prompt</code></td><td>3</td><td>提示词文件加载与分节、四个注入槽位</td>
-<td><code>Prompts.java</code> · <code>PromptFile.java</code> · <code>Inject.java</code></td></tr>
-<tr><td><span class="dim">契约包</span></td><td>7</td><td>外挂层能看到的只读契约（宿主、参数、配置视图、工具视图、好感度视图、钩子标记、入口接口）</td>
-<td>路径 <code>src\sair\v4\skill\</code></td></tr>
-</tbody>
-</table>
-</div>
-<h3 class="sec">分层规则：依赖方向可验证</h3>
-<div class="code" data-lang="powershell">
-<div class="code-head"><span class="lang">powershell</span><span class="path">kit 是不是叶子层</span><button class="copy" type="button">复制</button></div>
-<pre><code>Select-String -Path "$src\kit\*.java" -Pattern '^import sair\.v4\.'
-# 无输出 ⇒ kit 不依赖基板任何包</code></pre>
-</div>
->
-<p>解耦手法一致：注入<b>接口</b>而不是具体类 —— <code>store\Libs.java:22</code>、<code>schedule\Dispatcher.java:11</code>、
-<code>qq\Sender.java</code>、<code>ctx\Sink.java</code>、<code>ai\DeepSeek.Stream</code>。</p>
+<tr><td>通用存储</td><td>SQLite 连接与 PRAGMA、建表与补列、通用 CRUD、全文检索、保留期维护</td><td><code>store</code></td><td><code>Store</code> · <code>Db</code> · <code>LibSpec</code> · <code>Libs</code> · <code>LibRegistry</code> · <code>FtsQuery</code> · <code>Person</code></td><td>不含业务策略：表结构由声明方给出，它只负责执行与校验</td></tr>
+<tr><td>热插拔与动态执行</td><td>目录扫描、front matter 解析、内存编译、类加载、名字规范化、运行期编译执行</td><td><code>hot</code></td><td><code>SkMd</code> · <code>SkCompile</code> · <code>SkClassLoader</code> · <code>Sk</code> · <code>ToolNames</code> · <code>DynCode</code></td><td>不决定插件做什么；插件目录不进 classpath</td></tr>
+<tr><td>提示词加载与注入</td><td>提示词文件读取与分节、四个注入槽位的渲染</td><td><code>prompt</code></td><td><code>Prompts</code> · <code>PromptFile</code> · <code>Inject</code>（槽位 <code>system</code> / <code>context</code> / <code>tool</code> / <code>arg</code>）</td><td>不拼最终 <code>messages</code>，也不产生正文</td></tr>
+<tr><td>Agent 架构</td><td>回合门面、主循环、工具闭环、子 Agent、轮数上限与连续失败闸门</td><td><code>agent</code></td><td><code>Agent</code> · <code>Loop</code> · <code>Outcome</code></td><td>不管模型怎么说话（那是 <code>ai</code>），也不管消息怎么发出去（那是 <code>qq</code> 与 <code>term</code>）</td></tr>
+<tr><td>上下文装配</td><td>system、事实块、历史、本轮输入的固定顺序，以及事实的每一行</td><td><code>ctx</code></td><td><code>CtxBuild</code> · <code>ChatWindow</code> · <code>Turn</code> · <code>Ctx</code> · <code>RecognizerState</code></td><td>不重算权限位（一律问账本），也不自己发明事实来源</td></tr>
+<tr><td>权限</td><td>位、资源分类、主体层级、账本、唯一判定函数</td><td><code>auth</code></td><td><code>Acl</code> · <code>Res</code> · <code>Bits</code> · <code>Caller</code> · <code>Auth</code></td><td>不读写文件、不发网络请求；只回答「这位调用者对这个资源有哪些位」</td></tr>
+<tr><td>模型客户端</td><td>HTTP 请求、SSE 解析、消息与工具声明工厂、错误收敛</td><td><code>ai</code></td><td><code>DeepSeek</code> · <code>Sse</code> · <code>Msg</code> · <code>Res</code> · <code>ToolSpec</code></td><td>不做路由与重试编排，也不替主循环决定要不要再跑一轮</td></tr>
+<tr><td>NapCat（QQ 连接）</td><td>反向 WS、事件分派、动作出口、出站分段与渲染、引用与媒体</td><td><code>qq</code></td><td><code>Link</code> · <code>QqGateway</code> · <code>Api</code> · <code>Ev</code> · <code>Seg</code> · <code>QuoteCache</code> · <code>Relay</code></td><td>不做权限判定，也不直接跑模型</td></tr>
+<tr><td>控制台交互</td><td>命令面、流式捕获、四种输出端点、本地面板</td><td><code>term</code> + <code>ui</code></td><td><code>Cmd</code> · <code>ConsoleTap</code> · <code>Sinks</code> · <code>TalkPanel</code> · <code>TalkMount</code></td><td>控制台命令的主语恒为 MASTER，不模拟其它调用者</td></tr>
+</tbody></table></div>
+<h3 class="sec">包一览</h3>
+<div class="tw reveal"><table>
+<thead><tr><th>包</th><th>职责</th><th>代表类</th></tr></thead>
+<tbody>
+<tr><td><code>sair.v4</code></td><td>装配、编排、心跳、活动入口、基板工具面</td><td><code>Builtins</code> · <code>Boot</code> · <code>QqGateway</code> · <code>Conf</code> · <code>V4Activity</code> · <code>Tick</code></td></tr>
+<tr><td><code>schedule</code></td><td>按会话分道的回合调度、有界执行池</td><td><code>Lanes</code> · <code>Pool</code> · <code>Dispatcher</code> · <code>Job</code> · <code>ChatJob</code> · <code>SimpleJob</code> · <code>Texts</code></td></tr>
+<tr><td><code>tool</code></td><td>唯一工具注册表、工具声明、能力索引、参数检查</td><td><code>ToolIndex</code> · <code>Registry</code> · <code>Tool</code></td></tr>
+<tr><td><code>store</code></td><td>SQLite 连接与 CRUD、表声明、FTS、人物画像</td><td><code>Store</code> · <code>Db</code> · <code>LibSpec</code> · <code>FtsQuery</code> · <code>Person</code></td></tr>
+<tr><td><code>ctx</code></td><td>上下文装配、事实块、回合状态、线程内调用者绑定</td><td><code>CtxBuild</code> · <code>ChatWindow</code> · <code>Turn</code> · <code>Ctx</code> · <code>RecognizerState</code></td></tr>
+<tr><td><code>agent</code></td><td>Agent 门面 + 主循环（工具闭环、失败闸门）</td><td><code>Agent</code> · <code>Loop</code></td></tr>
+<tr><td><code>ai</code></td><td>模型客户端、SSE 解析、消息与工具声明工厂</td><td><code>DeepSeek</code> · <code>Sse</code> · <code>Msg</code> · <code>Res</code> · <code>ToolSpec</code></td></tr>
+<tr><td><code>qq</code></td><td>反向 WS 链接、动作出口、事件模型、分段、渲染、引用、去重</td><td><code>Api</code> · <code>QuoteCache</code> · <code>Link</code> · <code>Relay</code> · <code>Seg</code> · <code>Seen</code></td></tr>
+<tr><td><code>auth</code></td><td>ACL 账本与判定、资源分类、位运算、主体、好感度存储</td><td><code>Acl</code> · <code>Res</code> · <code>Bits</code> · <code>Caller</code> · <code>Auth</code></td></tr>
+<tr><td><code>term</code></td><td>控制台命令面、控制台捕获、输出端点、分段器</td><td><code>Cmd</code> · <code>ConsoleTap</code> · <code>Sinks</code> · <code>BootProgress</code> · <code>SfwOut</code> · <code>Segmenter</code></td></tr>
+<tr><td><code>ui</code></td><td>本地交流面板与挂载、面板输出端点、风格</td><td><code>TalkPanel</code> · <code>TalkMount</code> · <code>PanelSink</code> · <code>SfwStyle</code></td></tr>
+<tr><td><code>dev</code></td><td>本机调试口、模拟口、调试壳、调试日志</td><td><code>DebugPort</code> · <code>DebugSimPort</code> · <code>DebugLog</code> · <code>DebugShell</code></td></tr>
+<tr><td><code>kit</code></td><td>零依赖工具类：HTTP、网络护栏、文件、JSON、字符串、文本、线程、输出</td><td><code>Http</code> · <code>NetGuard</code> · <code>Fs</code> · <code>J</code> · <code>Th</code> · <code>GatedOut</code></td></tr>
+<tr><td><code>ext</code></td><td>扩展点注册表与契约形状（上下文块、出站阶段、生命周期钩子、触发投票）</td><td><code>ExtRegistry</code> · <code>BuildContext</code> · <code>OutboundStage</code></td></tr>
+<tr><td><code>hot</code></td><td>外挂层装载机制：内存编译、类加载器、front matter 解析、名字规范化、动态执行</td><td><code>SkMd</code> · <code>SkCompile</code> · <code>DynCode</code> · <code>SkClassLoader</code> · <code>Sk</code> · <code>ToolNames</code></td></tr>
+<tr><td><code>prompt</code></td><td>提示词文件加载与分节、四个注入槽位</td><td><code>Prompts</code> · <code>PromptFile</code> · <code>Inject</code></td></tr>
+<tr><td><span class="dim">契约包</span></td><td>外挂层能看到的只读契约（宿主、参数、配置视图、工具视图、好感度视图、钩子标记、入口接口）</td><td>路径 <code>src\sair\v4\skill\</code></td></tr>
+</tbody></table></div>
+<h3 class="sec">分层规则：依赖方向</h3>
+<p><code>kit</code> 是叶子层：它不引用 <code>sair.v4</code> 的任何包，只依赖 JDK，所以换掉上层任何一块它都不用改。上层之间的解耦手法也一致：注入<b>接口</b>而不是具体类 —— <code>store\Libs.java</code>、<code>schedule\Dispatcher.java</code>、<code>qq\Sender.java</code>、<code>ctx\Sink.java</code>、<code>ai\DeepSeek.Stream</code> 都是这样的口子。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="boot">
-<header class="chapter-head reveal">
-<span class="chapter-tag">02 / 装配</span>
-<h2>装配流程</h2>
-<p class="chapter-desc"><code>Boot.init()</code> 顺序跑 19 个命名步骤；任何一步炸了只让该步能力缺失，装配继续走完。</p>
-</header>
+<header class="chapter-head reveal"><span class="chapter-tag">02 / 装配</span><h2>装配流程</h2><p class="chapter-desc"><code>Boot.init()</code> 顺序跑 19 个命名步骤；任何一步出错只让那一步对应的能力缺失，装配继续走完。</p></header>
 <h3 class="sec">契约</h3>
-<div class="tw reveal">
-<table>
-<thead><tr><th>行为</th><th>实现</th><th>出处</th></tr></thead>
+<div class="tw reveal"><table>
+<thead><tr><th>行为</th><th>实现</th></tr></thead>
 <tbody>
-<tr><td>只真跑一次</td><td><code>initOnce.compareAndSet(false,true)</code> 失败即 <code>return</code></td><td><code>Boot.java:337</code></td></tr>
-<tr><td>全程持 <code>initLock</code>，结束前先落 <code>initRunning=false</code> 再放锁</td><td>等待方看不到半拉状态</td><td><code>Boot.java:339</code>、<code>Boot.java:365-370</code></td></tr>
-<tr><td>就绪钩子 <code>onReady</code> 在 <code>started=true</code> <b>之前</b>跑</td><td>"看到就绪"的读者必然"看到名额已空"</td><td><code>Boot.java:358-364</code></td></tr>
-<tr><td>步骤异常收敛成台账一行</td><td><code>steps.put(name,"failed: …")</code>；只有第一个失败记进 <code>failedStep</code></td><td><code>Boot.java:804-833</code></td></tr>
-<tr><td>不向调用方抛异常</td><td>它是控制台命令路径的第一环，一炸即"不再响应"</td><td><code>Boot.java:294-303</code></td></tr>
-<tr><td>总步数常量</td><td><code>STEP_TOTAL = 19</code></td><td><code>Boot.java:55</code></td></tr>
-</tbody>
-</table>
-</div>
-<p>台账 <code>steps</code> 用 <code>LinkedHashMap</code>（顺序 = 执行顺序），读写共用一把只保护台账的短锁 <code>ledgerLock</code>（<code>Boot.java:247-256</code>）；降级时 <code>degraded()</code> 为真、<code>failureReport()</code> 给人话（<code>:1863</code>、<code>:1900</code>）。</p>
+<tr><td>只真跑一次</td><td><code>initOnce.compareAndSet(false,true)</code> 失败即 <code>return</code></td></tr>
+<tr><td>全程持 <code>initLock</code>，结束前先落 <code>initRunning=false</code> 再放锁</td><td>等待方看不到半拉状态</td></tr>
+<tr><td>就绪钩子 <code>onReady</code> 在 <code>started=true</code> <b>之前</b>跑</td><td>「看到就绪」的读者必然「看到名额已空」</td></tr>
+<tr><td>步骤异常收敛成台账一行</td><td><code>steps.put(name,"failed: …")</code>；只有第一个失败记进 <code>failedStep</code></td></tr>
+<tr><td>不向调用方抛异常</td><td>它是控制台命令路径的第一环，抛出去就没人接手了</td></tr>
+<tr><td>总步数常量</td><td><code>STEP_TOTAL = 19</code></td></tr>
+</tbody></table></div>
+<p>台账 <code>steps</code> 用 <code>LinkedHashMap</code>（顺序 = 执行顺序），读写共用一把只保护台账的短锁 <code>ledgerLock</code>；降级时 <code>degraded()</code> 为真、<code>failureReport()</code> 给人话。</p>
 <h3 class="sec">19 个命名步骤</h3>
-<div class="tw reveal">
-<table>
-<thead><tr><th>#</th><th>步骤名</th><th>建了什么</th><th>出处</th></tr></thead>
+<div class="tw reveal"><table>
+<thead><tr><th>#</th><th>步骤名</th><th>建了什么</th></tr></thead>
 <tbody>
-<tr><td>①</td><td>数据目录与配置</td><td><code>new Conf(root)</code> → <code>load()</code> → <code>ensureDefaults()</code>；建数据根前先按 ACL 判 B 类 W 位；<code>Res.dataDir(root)</code> 接线</td><td><code>Boot.java:390-421</code></td></tr>
-<tr><td>②</td><td>空数据骨架</td><td><code>ensureSkeleton</code>：只建目录与 0 字节空文件</td><td><code>Boot.java:424-430</code>、<code>Boot.java:851-876</code></td></tr>
-<tr><td>③</td><td>六库</td><td><code>new LibRegistry</code> → 登记环境库 → <code>Store.open</code> → <code>Favor</code>；<b>建表不在这里</b>；用一次真实读验"库可用"</td><td><code>Boot.java:433-457</code></td></tr>
-<tr><td>④</td><td>权限面</td><td><code>new Auth(conf, favor, out)</code> + <code>auth.init()</code></td><td><code>Boot.java:460-467</code></td></tr>
-<tr><td>⑤</td><td>提示词</td><td><code>new Prompts(conf, out)</code>；identity.md 缺失 = 空提示词，不兜底文案</td><td><code>Boot.java:470-473</code></td></tr>
-<tr><td>⑥</td><td>工具注册表</td><td><code>new Registry(auth, conf, out)</code>；<code>auth</code> 为空时不筛工具面</td><td><code>Boot.java:476-479</code></td></tr>
-<tr><td>⑦</td><td>模型客户端</td><td><code>new DeepSeek</code> + 模型调用闸门 <code>new Semaphore(modelConcurrency, true)</code>；<code>new DynCode</code></td><td><code>Boot.java:482-492</code></td></tr>
-<tr><td>⑧</td><td>NapCat 连接</td><td><code>Link</code> + 事件执行池 + <code>Api</code>（无闸门）+ <code>Relay</code> + 带闸门的 <code>guardedApi</code>（<b>最后一行</b>才交给字段）</td><td><code>Boot.java:495-543</code></td></tr>
-<tr><td>⑨</td><td>上下文装配</td><td><code>CtxBuild.Env</code> 匿名实现 + <code>ExtRegistry</code> + <code>Sinks.setExt</code> + <code>CtxBuild</code> + 识图状态载体的判定口注入</td><td><code>Boot.java:546-610</code></td></tr>
-<tr><td>⑩</td><td>外挂层装载壳</td><td>装载器 + 控制台输出端点 + 扩展点 + 库注册表 + 库落盘回调 + 钩子池</td><td><code>Boot.java:615-639</code></td></tr>
-<tr><td>⑪</td><td>回合调度器</td><td><code>new Lanes(conf, out, texts)</code>；文案缺键只报错不兜底</td><td><code>Boot.java:642-675</code></td></tr>
-<tr><td>⑫</td><td>Agent</td><td><code>new Agent(…)</code> + <code>setExt</code> + <code>setExecutor(lanes)</code>：后台回合与主回合共用同一套分道队列</td><td><code>Boot.java:678-687</code></td></tr>
-<tr><td>⑬</td><td>心跳</td><td><code>new Tick(…)</code>（库、装载器、Agent、带闸门的动作出口四样）</td><td><code>Boot.java:690-693</code></td></tr>
-<tr><td>⑭</td><td>QQ 网关</td><td><code>new QuoteCache</code>（构造不起线程）+ <code>new QqGateway</code></td><td><code>Boot.java:696-706</code></td></tr>
-<tr><td>⑮</td><td>基板工具面</td><td><code>Builtins.register(Boot.this)</code></td><td><code>Boot.java:709-712</code>、<code>Builtins.java:63</code></td></tr>
-<tr><td>⑯</td><td>外挂层扫描</td><td>装载器扫描（或按外挂层后台装载开关起后台线程）；末尾调 <code>createLibTables()</code></td><td><code>Boot.java:716-739</code></td></tr>
-<tr><td>⑰</td><td>NapCat 监听</td><td><code>link.setHandler(…)</code> → <code>gateway.onEvent</code>；按 <code>napcatEnabled</code> 决定 <code>link.start()</code></td><td><code>Boot.java:746-763</code></td></tr>
-<tr><td>⑱</td><td>文件外链中转</td><td>按 <code>relayEnabled</code> 决定 <code>relay.start()</code>；没起来就退回 <code>file:///</code></td><td><code>Boot.java:766-780</code></td></tr>
-<tr><td>⑲</td><td>心跳启动</td><td><code>tick.start()</code> + <code>mountTalkPanel()</code>；<b>本机调试口不自动起</b></td><td><code>Boot.java:783-795</code></td></tr>
-</tbody>
-</table>
-</div>
-<h3 class="sec">两处不可分割的事实</h3>
->
+<tr><td>①</td><td>数据目录与配置</td><td><code>new Conf(root)</code> → <code>load()</code> → <code>ensureDefaults()</code>；建数据根之前先按 ACL 判 B 类 W 位；<code>Res.dataDir(root)</code> 接线</td></tr>
+<tr><td>②</td><td>空数据骨架</td><td><code>ensureSkeleton</code>：只建目录与空文件</td></tr>
+<tr><td>③</td><td>六库</td><td><code>new LibRegistry</code> → 登记环境库 → <code>Store.open</code> → <code>Favor</code>；<b>建表不在这里</b>；另用一次真实读验「库可用」</td></tr>
+<tr><td>④</td><td>权限面</td><td><code>new Auth(conf, favor, out)</code> + <code>auth.init()</code></td></tr>
+<tr><td>⑤</td><td>提示词</td><td><code>new Prompts(conf, out)</code>；<code>identity.md</code> 缺失 = 空提示词，不兜底文案</td></tr>
+<tr><td>⑥</td><td>工具注册表</td><td><code>new Registry(auth, conf, out)</code>；<code>auth</code> 为空时不筛工具面</td></tr>
+<tr><td>⑦</td><td>模型客户端</td><td><code>new DeepSeek</code> + 模型调用闸门 <code>new Semaphore(modelConcurrency, true)</code>；<code>new DynCode</code></td></tr>
+<tr><td>⑧</td><td>NapCat 连接</td><td><code>Link</code> + 事件执行池 + <code>Api</code>（无闸门）+ <code>Relay</code> + 带闸门的 <code>guardedApi</code>（装配的最后一行才交给字段）</td></tr>
+<tr><td>⑨</td><td>上下文装配</td><td><code>CtxBuild.Env</code> 匿名实现 + <code>ExtRegistry</code> + <code>Sinks.setExt</code> + <code>CtxBuild</code> + 识图状态载体的判定口注入</td></tr>
+<tr><td>⑩</td><td>外挂层装载壳</td><td>装载器 + 控制台输出端点 + 扩展点 + 库注册表 + 库落盘回调 + 钩子池</td></tr>
+<tr><td>⑪</td><td>回合调度器</td><td><code>new Lanes(conf, out, texts)</code>；文案缺键只报错、不兜底</td></tr>
+<tr><td>⑫</td><td>Agent</td><td><code>new Agent(…)</code> + <code>setExt</code> + <code>setExecutor(lanes)</code>：后台回合与主回合共用同一套分道队列</td></tr>
+<tr><td>⑬</td><td>心跳</td><td><code>new Tick(…)</code>（库、装载器、Agent、带闸门的动作出口四样）</td></tr>
+<tr><td>⑭</td><td>QQ 网关</td><td><code>new QuoteCache</code>（构造不起线程）+ <code>new QqGateway</code></td></tr>
+<tr><td>⑮</td><td>基板工具面</td><td><code>Builtins.register(Boot.this)</code></td></tr>
+<tr><td>⑯</td><td>外挂层扫描</td><td>装载器扫描（或按外挂层后台装载开关起后台线程）；末尾调 <code>createLibTables()</code></td></tr>
+<tr><td>⑰</td><td>NapCat 监听</td><td><code>link.setHandler(…)</code> → <code>gateway.onEvent</code>；按 <code>napcatEnabled</code> 决定要不要 <code>link.start()</code></td></tr>
+<tr><td>⑱</td><td>文件外链中转</td><td>按 <code>relayEnabled</code> 决定要不要 <code>relay.start()</code>；没起来就退回 <code>file:///</code></td></tr>
+<tr><td>⑲</td><td>心跳启动</td><td><code>tick.start()</code> + <code>mountTalkPanel()</code>；本机调试口不在这里自动起</td></tr>
+</tbody></table></div>
 <h3 class="sec">空数据骨架：只创建、不覆盖、不写正文</h3>
-<p><code>ensureSkeleton</code>（<code>Boot.java:851</code>）用 <code>dir()</code>（<code>Boot.java:927</code>）建目录、
-<code>emptyFile()</code>（<code>Boot.java:934</code>）建 0 字节空壳。建数据根、<code>prompts</code>、外挂层目录、<code>files</code>、<code>tmp</code>
-五个目录（<code>Boot.java:861-865</code>）与 <code>identity.md</code>、<code>subagent.md</code> 两个空文件（<code>Boot.java:869-870</code>）。
-同名文件挡路不覆盖、已存在的一个字不动（<code>Boot.java:929</code>、<code>Boot.java:935</code>）；
-不写任何兜底正文 —— 空文件与"文件不存在"在加载层语义一致（<code>PromptFile.java:14-22</code>）。</p>
-<p><b>为什么建表在⑯之后</b>：业务表由用到它的插件在装载期声明，装载前注册表里还没有它们，
-所以 <code>Boot.createLibTables()</code>（<code>Boot.java:903</code>）在装载之后跑，并留了热重载回调（<code>Boot.java:629-632</code>）。</p>
+<p><code>ensureSkeleton</code> 用 <code>dir()</code> 建目录、<code>emptyFile()</code> 建空壳文件：数据根、<code>prompts</code>、外挂层目录、<code>files</code>、<code>tmp</code> 五个目录，加上 <code>identity.md</code>、<code>subagent.md</code> 两个空文件。同名文件挡路就不覆盖，已存在的一个字不动；也不写任何兜底正文 —— 空文件与「文件不存在」在加载层语义一致（<code>PromptFile.java</code>）。</p>
+<p><b>建表为什么排在装载之后</b>：业务表由用到它的插件在装载期声明，装载之前注册表里还没有它们，所以 <code>Boot.createLibTables()</code> 在装载之后跑，另外留了热重载回调，重新装载时也能把新表补出来。</p>
 <h3 class="sec">装配线程与进度</h3>
-<p><code>Boot.init()</code> 在<b>调用线程</b>上同步跑完（<code>Boot.java:301</code>）；生产入口 <code>V4Activity</code> 把它放到守护线程
-<code>v4-boot</code> 上（<code>V4Activity.java:32</code>、<code>V4Activity.java:49</code>）。
-进度由 <code>BootProgress implements Boot.InitListener</code>（<code>term\BootProgress.java:30</code>）逐行打印：
-<code>step()</code> 记最慢的一步（<code>BootProgress.java:51-59</code>）、<code>compile()</code> 记编译进度（<code>BootProgress.java:61</code>）、
-<code>finished()</code> 打汇总（<code>BootProgress.java:73</code>）。</p>
+<p><code>Boot.init()</code> 在<b>调用线程</b>上同步跑完；生产入口 <code>V4Activity</code> 把它放到守护线程 <code>v4-boot</code> 上。进度由 <code>BootProgress implements Boot.InitListener</code> 逐行打印：<code>step()</code> 记最慢的一步、<code>compile()</code> 记编译进度、<code>finished()</code> 打汇总。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="threads">
-<header class="chapter-head reveal">
-<span class="chapter-tag">03 / 并发</span>
-<h2>线程与调度</h2>
-<p class="chapter-desc">回合按会话分道、道内 FIFO、道间并行；真正并发的是 N 个工作线程，模型调用另有一道许可闸门。</p>
-</header>
+<header class="chapter-head reveal"><span class="chapter-tag">03 / 并发</span><h2>线程与调度</h2><p class="chapter-desc">回合按会话分道、道内 FIFO、道间并行；真正并发的是 N 个工作线程，模型调用另有一道许可闸门。</p></header>
 <h3 class="sec">线程清单</h3>
-<div class="tw reveal">
-<table>
+<div class="tw reveal"><table>
 <thead><tr><th>线程名</th><th>来源</th><th>数量 / 队列</th><th>满了怎么办</th></tr></thead>
 <tbody>
 <tr><td><code>v4-boot</code></td><td><code>V4Activity</code> 的装配线程</td><td>1，守护</td><td>不适用</td></tr>
 <tr><td><code>v4-turn-N</code></td><td><code>Boot.turns</code>，<b>只服务本地控制台</b></td><td>1 线程 + <code>ArrayBlockingQueue(64)</code></td><td>拒绝执行 + 一行 warn</td></tr>
 <tr><td><code>v4-lane-N</code></td><td><code>Lanes.ensurePool()</code>，懒启动</td><td><code>turnWorkers</code>（默认 2，钳 1..32）</td><td>两道硬上限：<code>turnLaneMax</code> / <code>turnQueueMax</code></td></tr>
 <tr><td><code>v4-hook-N</code></td><td><code>Pool.hooks(conf,out)</code></td><td><code>hookWorkers</code>(4) + <code>hookQueueMax</code>(64)</td><td><code>caller</code>（调用线程兜底跑）或 <code>skip</code></td></tr>
-<tr><td>事件执行池</td><td><code>Boot.newEventPool()</code>，装到 <code>Link</code></td><td><code>eventWorkers</code>(8) + <code>eventQueueMax</code>(512)</td><td>不起池 = 每事件一个裸线程（旧行为）</td></tr>
-<tr><td><code>v4-*</code></td><td><code>Th.pool()</code>：唯一一个 4 线程 <code>ScheduledExecutorService</code></td><td>4，守护</td><td>任务异常被吞，绝不杀调度</td></tr>
+<tr><td>事件执行池</td><td><code>Boot.newEventPool()</code>，装到 <code>Link</code></td><td><code>eventWorkers</code>(8) + <code>eventQueueMax</code>(512)</td><td>池没起来时每个事件单开一条线程</td></tr>
+<tr><td><code>v4-*</code></td><td><code>Th.pool()</code>：唯一一个 4 线程 <code>ScheduledExecutorService</code></td><td>4，守护</td><td>任务异常被吞掉，不杀调度</td></tr>
 <tr><td><code>v4-tick</code></td><td><code>Tick.start()</code> → <code>Th.every(…)</code></td><td>1 条周期任务，<code>tickMs</code>(20000)，下限 1000</td><td>不适用</td></tr>
 <tr><td>后台装载线程</td><td><code>Boot.startSkillsAsync()</code>（外挂层后台装载开关打开时才起）</td><td>1，守护</td><td>编译失败只让该插件停在 ERROR 态</td></tr>
-<tr><td><code>v4-quote</code></td><td><code>QuoteCache.ensureWorker()</code>，<b>第一次真入队才懒启动</b></td><td>1 专用线程 + 串行队列（64）</td><td>超预算丢弃（<code>qq\QuoteCache.java:559-609</code>）</td></tr>
-<tr><td>WS 连接线程</td><td><code>Link</code> 的 <code>ServerSocket.accept()</code> 循环</td><td>每连接一条读线程</td><td>握手超时 10000ms（<code>qq\Link.java:72</code>）</td></tr>
-</tbody>
-</table>
-</div>
-<p>出处：<code>Boot.java:216-234</code>（控制台池）、<code>Boot.java:1368-1370</code>（事件池）、<code>Boot.java:969-997</code>（后台装载线程）、
-<code>Lanes.java:281-296</code>、<code>Pool.java:74-106</code>、<code>Tick.java:52-63</code>、<code>kit\Th.java:37</code>。</p>
+<tr><td><code>v4-quote</code></td><td><code>QuoteCache.ensureWorker()</code>，<b>第一次真入队才懒启动</b></td><td>1 专用线程 + 串行队列（64）</td><td>超预算丢弃（<code>qq\QuoteCache.java</code>）</td></tr>
+<tr><td>WS 连接线程</td><td><code>Link</code> 的 <code>ServerSocket.accept()</code> 循环</td><td>每连接一条读线程</td><td>握手超时 10000ms（<code>qq\Link.java</code>）</td></tr>
+</tbody></table></div>
 <div class="note">
-<b>线程治理只有一处收口</b>：后台线程都从 <code>kit\Th.java</code> 出，<code>Boot.stop()</code> 唯一调 <code>Th.shutdown()</code>（<code>kit\Th.java:90</code>），
-它<b>只收调度池</b>。口径写在 <code>kit\Th.java:11-13</code>：只允许两类常驻后台 —— NapCat 链接服务与唯一的事件 tick；
-其余定时行为应挂在 tick 的钩子上。任务异常被吞掉，绝不杀调度（<code>kit\Th.java:60-62</code>）。
+<b>线程治理只有一处收口</b>：后台线程都从 <code>kit\Th.java</code> 出，<code>Boot.stop()</code> 唯一调 <code>Th.shutdown()</code>，而它<b>只收调度池</b>。口径写在 <code>kit\Th.java</code> 的类注释里：常驻后台只允许两类 —— NapCat 链接服务与唯一的事件 tick；其余定时行为都挂在 tick 的钩子上。任务异常被吞掉，不会把调度本身带走。
 </div>
 <h3 class="sec">分道调度器 <code>Lanes</code></h3>
-<p>实现 <code>Dispatcher</code>（<code>schedule\Dispatcher.java:11</code>）。数据模型：<code>Map&lt;String,Lane&gt; lanes</code> +
-<code>Deque&lt;Lane&gt; ready</code> + <code>List&lt;Thread&gt; pool</code>，全受一把 <code>lock</code> 保护（<code>Lanes.java:92-95</code>）。
-每道带 <code>queued</code>／<code>running</code>／<code>high</code>／<code>since</code> 四个状态位（<code>Lanes.java:48-66</code>）。</p>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\schedule\Lanes.java:147-230（提交路径）</span><button class="copy" type="button">复制</button></div>
+<p>实现 <code>Dispatcher</code>（<code>schedule\Dispatcher.java</code>）。数据模型：<code>Map&lt;String,Lane&gt; lanes</code> + <code>Deque&lt;Lane&gt; ready</code> + <code>List&lt;Thread&gt; pool</code>，全受一把 <code>lock</code> 保护。每道带 <code>queued</code>／<code>running</code>／<code>high</code>／<code>since</code> 四个状态位。</p>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\schedule\Lanes.java（提交路径）</span><button class="copy" type="button">复制</button></div>
 <pre><code>submit(session, high, job):
-  ① 先试着并进"该会话还在排队的那一条"    // 合并不占新名额，优先于一切上限判断
+  ① 先试着并进「该会话还在排队的那一条」    // 合并不占新名额，优先于一切上限判断
   ② lane.q.size() >= laneMax                        -> drop
   ③ pending.incrementAndGet() > queueMax            -> 回滚 + drop
   ④ 通过：入队；道不在 ready 且没在跑 -> enqueue（decision=start）
   锁外：打一行 [lane] session=… decision=… depth=… pending=…
-        // 回话/告警一律在锁外：job.notice 会走网络 I/O，持锁发消息 = 一个慢连接卡住所有人</code></pre>
-</div>
+        // 回话/告警一律在锁外：job.notice 会走网络 I/O，持锁发消息 = 一个慢连接卡住所有人</code></pre></div>
 <div class="grid-2">
-<div class="panel">
-<h4>选道规则（<code>master_first</code>）</h4>
+<div class="panel"><h4>选道规则（<code>master_first</code>）</h4>
 <ol>
-<li><b>老化优先</b>：等超过 <code>turnPriorityAgingMs</code>（5000ms）的普通道直接提到最前，与额度无关（<code>Lanes.java:337-347</code>）</li>
-<li><b>额度内的高优道</b>：<code>highStreak &lt; priorityBurst</code>（8）时挑高优（<code>Lanes.java:349-356</code>）</li>
-<li><b>额度用尽必须让普通道</b>：<b>不能</b> <code>peekFirst()</code>，否则排在前面的仍是高优道、额度等于没设（<code>Lanes.java:357-366</code>）</li>
-<li>都不命中才先到先得（<code>Lanes.java:368</code>）</li>
-</ol>
-</div>
-<div class="panel">
-<h4>溢出策略</h4>
+<li><b>老化优先</b>：等超过 <code>turnPriorityAgingMs</code>（5000ms）的普通道直接提到最前，与额度无关</li>
+<li><b>额度内的高优道</b>：<code>highStreak &lt; priorityBurst</code>（8）时挑高优</li>
+<li><b>额度用尽时让普通道走</b>：这时不用 <code>peekFirst()</code>，否则排在前面的仍是高优道，额度等于没设</li>
+<li>都不命中才先到先得</li>
+</ol></div>
+<div class="panel"><h4>溢出策略</h4>
 <ul>
-<li><code>coalesce</code>（默认）：并进同道还在排队的那一条（<code>Lanes.java:171-184</code>）</li>
-<li><code>drop</code>：按 <code>turnDropNotice</code> 回一句外挂文案（<code>Lanes.java:250-257</code>）</li>
-<li><b>绝不静默消失</b>：文案缺键时报错、不兜底（<code>Lanes.java:260-277</code>）</li>
-<li>合并只做整段拼接，装不下就 <code>-1</code>，<b>绝不腰斩正文</b>（<code>ChatJob.java:66-98</code>）</li>
-</ul>
+<li><code>coalesce</code>（默认）：并进同道还在排队的那一条</li>
+<li><code>drop</code>：按 <code>turnDropNotice</code> 回一句外挂文案</li>
+<li><b>不会静默消失</b>：文案缺键时报错、不兜底</li>
+<li>合并只做整段拼接，装不下就 <code>-1</code>，不腰斩正文（<code>ChatJob.java</code>）</li>
+</ul></div>
 </div>
-</div>
-<p><b>合并有一条排除项</b>：带引文事实行（前缀 <code>quote: </code>，<code>qq\QuoteCache.java:86</code>）的回合<b>不参与合并</b> ——
-合并会<b>重建</b>媒体事实串（<code>ChatJob.java:90</code>），任何非 <code>media:</code> 开头的行都会被静默丢掉
-（<code>ChatJob.java:69-73</code>、<code>ChatJob.java:117-119</code>）。判据是保守方向：宁可多跑一个回合。</p>
+<p><b>合并有一条排除项</b>：带引文事实行（前缀 <code>quote: </code>，见 <code>qq\QuoteCache.java</code>）的回合不参与合并 —— 合并会<b>重建</b>媒体事实串（<code>ChatJob.java</code>），任何非 <code>media:</code> 开头的行都会被静默丢掉。判据取的是保守方向：宁可多跑一个回合。</p>
 <h3 class="sec">模型调用闸门</h3>
-<div class="code" data-lang="java">
-<div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\Boot.java:489</span><button class="copy" type="button">复制</button></div>
-<pre><code>ai.setGate(new java.util.concurrent.Semaphore(conf.modelConcurrency(), true));</code></pre>
-</div>
-<p>主回合、定时任务、异步子 Agent 都要过它，所以"模型不并发"只有一处实现。许可数 <code>modelConcurrency</code> 默认 1
-（<code>Conf.java:162</code>、<code>Conf.java:897</code>）；<code>fair=true</code> 先到先得；
-等闸门上限 <code>modelGateWaitMs</code> 默认 180000ms，超时即放弃本次调用（<code>ai\DeepSeek.java:103</code>、<code>ai\DeepSeek.java:120-123</code>）；
-计数 <code>gateWaiting</code>／<code>gateWaits</code>／<code>gateWaitMs</code>／<code>gateTimeouts</code>／<code>gateInFlight</code> 进 <code>gateStat()</code>
-（<code>ai\DeepSeek.java:106-172</code>）。</p>
-
+<div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\Boot.java</span><button class="copy" type="button">复制</button></div>
+<pre><code>ai.setGate(new java.util.concurrent.Semaphore(conf.modelConcurrency(), true));</code></pre></div>
+<p>主回合、定时任务、异步子 Agent 都要过它，所以「模型不并发」只有一处实现。许可数 <code>modelConcurrency</code> 默认 1（<code>Conf.java</code>）；<code>fair=true</code> 先到先得；等闸门上限 <code>modelGateWaitMs</code> 默认 180000ms，超时即放弃本次调用（<code>ai\DeepSeek.java</code>）；计数 <code>gateWaiting</code>／<code>gateWaits</code>／<code>gateWaitMs</code>／<code>gateTimeouts</code>／<code>gateInFlight</code> 汇总进 <code>gateStat()</code>。</p>
 <h3 class="sec">心跳 tick：唯一周期源</h3>
-<p><code>Tick.start()</code>（<code>Tick.java:52</code>）用 <code>Th.every</code> 起一条固定间隔任务；<code>beat()</code>（<code>Tick.java:72</code>）每拍四件事，
-三个 try 各自隔断，任一块炸了不影响另外两块与下一拍（<code>Tick.java:75-95</code>）：</p>
->
-<p><code>nextFire(fireAt, repeat, now)</code>：<code>once</code> → 0（不再触发）；<code>daily</code> = 24h；<code>weekly</code> = 7d；
-<code>every:&lt;分钟&gt;</code> 下限 1 分钟；其余一律 0。<code>fireDue</code> <b>先把下一次时间写好再跑</b>（<code>Tick.java:299-305</code>），
-避免任务执行期间重复触发。</p>
+<p><code>Tick.start()</code> 用 <code>Th.every</code> 起一条固定间隔任务；<code>beat()</code> 每拍四件事，三个 try 各自隔断，任一块出错都不影响另外两块与下一拍。定时算术集中在 <code>nextFire(fireAt, repeat, now)</code>：<code>once</code> → 0（不再触发）；<code>daily</code> = 24h；<code>weekly</code> = 7d；<code>every:&lt;分钟&gt;</code> 下限 1 分钟；其余一律 0。<code>fireDue</code> <b>先把下一次时间写好再跑</b>，任务执行期间就不会重复触发。</p>
 </section>
-
 <!-- ============================================================ -->
 <section class="chapter" id="tool">
-<header class="chapter-head reveal">
-<span class="chapter-tag">04 / 工具</span>
-<h2>工具注册与调用</h2>
-<p class="chapter-desc">全进程只有一张工具表；入口判位、执行不判位；连续失败由一条"事实化"闸门收敛成一行 JSON。</p>
-</header>
-
+<header class="chapter-head reveal"><span class="chapter-tag">04 / 工具</span><h2>工具注册与调用</h2><p class="chapter-desc">全进程只有一张工具表；入口判位、执行不判位；连续失败由一条「事实化」闸门收敛成一行 JSON。</p></header>
 <h3 class="sec">唯一注册表</h3>
-<p><code>tool\Registry.java</code> 持一个 <code>ConcurrentHashMap&lt;String,Tool&gt;</code>（<code>Registry.java:38</code>），注册口只有 <code>add(Tool)</code>（<code>Registry.java:111</code>）：</p>
->
-
+<p><code>tool\Registry.java</code> 持一个 <code>ConcurrentHashMap&lt;String,Tool&gt;</code>，注册口只有 <code>add(Tool)</code>：每个工具在表里只有一条记录，重名注册走同一把钥匙，不会出现两份同名工具。</p>
 <h3 class="sec">schema 怎么生成</h3>
-<p><code>Tool</code> 不可变，用 <code>Builder</code> 造（<code>tool\Tool.java:131</code>）；<code>params</code> 为空给空对象 schema（<code>Tool.java:121-126</code>）。</p>
-<div class="code" data-lang="json">
-<div class="code-head"><span class="lang">json</span><span class="path">src\sair\v4\tool\Tool.java:84-93 / :100-116</span><button class="copy" type="button">复制</button></div>
+<p><code>Tool</code> 不可变，用 <code>Builder</code> 造（<code>tool\Tool.java</code>）；<code>params</code> 为空就给空对象 schema。</p>
+<div class="code" data-lang="json"><div class="code-head"><span class="lang">json</span><span class="path">src\sair\v4\tool\Tool.java</span><button class="copy" type="button">复制</button></div>
 <pre><code>{"type":"function",
  "function":{"name":"…","description":"&lt;desc&gt; 例：&lt;示例…&gt; 返回：&lt;returns&gt;",
              "parameters":{"type":"object","properties":{…}}}}
-// 说明串只在 Tool.fullDesc() 一处拼</code></pre>
-</div>
-<p>另有 <code>withoutHandler()</code> 给插件一份<b>去掉实现</b>的副本（<code>Tool.java:65</code>），让它绕不过入口判位；
-<code>Registry.getView(name)</code> 就是这个出口（<code>Registry.java:141</code>）。
-<code>ai\ToolSpec.fn(name,desc,params)</code> 是更轻的纯工厂（<code>ai\ToolSpec.java:21</code>）。</p>
+// 说明串只在 Tool.fullDesc() 一处拼</code></pre></div>
+<p>另有 <code>withoutHandler()</code> 给插件一份<b>去掉实现</b>的副本（<code>Tool.java</code>），让它绕不过入口判位；<code>Registry.getView(name)</code> 就是这个出口（<code>Registry.java</code>）。<code>ai\ToolSpec.fn(name,desc,params)</code> 是更轻的纯工厂（<code>ai\ToolSpec.java</code>）。</p>
 <h3 class="sec">两道门：交不交到手 / 点不点得动</h3>
-<div class="tw reveal">
-<table>
-<thead><tr><th>门</th><th>判据</th><th>出处</th></tr></thead>
+<div class="tw reveal"><table>
+<thead><tr><th>门</th><th>判据</th></tr></thead>
 <tbody>
-<tr><td>可见性（交不交到手）</td><td><code>auth.bits(c, Res.tool(名))</code> 含 <code>X</code>；判定抛异常 → <b>不交</b>（fail-closed）</td><td><code>Registry.java:180</code>、<code>Registry.java:195-203</code></td></tr>
-<tr><td>入口闸门（点不点得动）</td><td><code>auth.allowRes(c, Res.tool(名), 'X')</code>；非 <code>null</code> 即拒并把拒文原文返回</td><td><code>Registry.java:210-217</code>、<code>Registry.java:255-259</code></td></tr>
-<tr><td>资源判定（碰得到吗）</td><td>不在这里 —— 发生在工具碰资源那一刻（<code>Host.need*</code> → <code>Acl.allow</code>）</td><td><code>Registry.java:239-241</code></td></tr>
-</tbody>
-</table>
-</div>
-<p><b>不筛的两种情况</b>：<code>c == null</code>（没有调用者，诊断/控制台的全量视图）与 <code>auth == null</code>（权限面没装配 —— 基板<b>不假装</b>自己有权限面，交全量而不交空表）（<code>Registry.java:174-178</code>、<code>Boot.java:476-479</code>）。但 <code>call()</code> 里 <code>c == null</code> 且 <code>auth != null</code> 时仍走入口闸门，唯一显式放行口是 <code>Gate.deny</code> 里的 <code>c.master()</code>（<code>Boot.java:529</code>）。</p>
+<tr><td>可见性（交不交到手）</td><td><code>auth.bits(c, Res.tool(名))</code> 含 <code>X</code>；判定抛异常 → <b>不交</b>（fail-closed）</td></tr>
+<tr><td>入口闸门（点不点得动）</td><td><code>auth.allowRes(c, Res.tool(名), 'X')</code>；非 <code>null</code> 即拒，并把拒文原文返回</td></tr>
+<tr><td>资源判定（碰得到吗）</td><td>不在这里 —— 发生在工具碰资源那一刻（<code>Host.need*</code> → <code>Acl.allow</code>）</td></tr>
+</tbody></table></div>
+<p><b>不筛的两种情况</b>：<code>c == null</code>（没有调用者，诊断或控制台拿全量视图）与 <code>auth == null</code>（权限面没装配 —— 这时基板<b>不假装</b>自己有权限面，交全量而不是交空表）。不过 <code>call()</code> 里 <code>c == null</code> 且 <code>auth != null</code> 时仍走入口闸门，唯一显式放行口是 <code>Gate.deny</code> 里的 <code>c.master()</code>。</p>
 <h3 class="sec">调用路径与结果规整</h3>
-<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\tool\Registry.java:250-283</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\tool\Registry.java（call 路径）</span><button class="copy" type="button">复制</button></div>
 <pre><code>call(name, args, turn):
   查不到工具      -> miss(name, c)      // 候选 + 正确用法，跟着可见面一起筛
   入口闸门拒      -> noteDeny 后直接返回拒文（不执行 Handler）
   handler null    -> "[tool] " + name + " 没有实现"
   try: text = toText(handler.call(args, turn))
        isDenyText(text) -> noteDeny(...)        // 工具自己判位后的拒绝也记一笔
-       warn = index().argWarn(tool, args)       // 参数复核：只提示、不拦截
+       warn = index().argWarn(tool, args)       // 参数检查：只提示、不拦截
        logTool(name, ms, text, !looksFailed(text), null, turn)
        超 toolResultMax(6000) -> 截断 + "…（结果已截断，共 N 字符）"；空串 -> "(无输出)"
-  catch -> logTool(…, ok=false, …) + "[tool] &lt;名&gt; 执行异常: &lt;e&gt;" + 最多 4 行栈帧</code></pre>
-</div>
-<p>日志只打规模与成败：<code>[tool] 名 ms=… chars=… ok=0|1 [error=…] [by=main|子标签]</code>，
-正文前 120 字符只在 <code>logVerbose=true</code> 时追加（<code>Registry.java:291-307</code>）；<code>by=</code> 取自 <code>Turn</code> 的 <code>subagent</code> 状态（<code>Registry.java:310-318</code>）。
-结果规整 <code>toText</code>：String 原样、JSON 化、null 视为成功无输出（<code>Registry.java:409-415</code>）。</p>
-<h3 class="sec">参数复核与名字兜底</h3>
-<div class="tw reveal">
-<table>
-<thead><tr><th>机制</th><th>口径</th><th>出处</th></tr></thead>
+  catch -> logTool(…, ok=false, …) + "[tool] &lt;名&gt; 执行异常: &lt;e&gt;" + 最多带几行栈帧</code></pre></div>
+<p>日志只打规模与成败：<code>[tool] 名 ms=… chars=… ok=0|1 [error=…] [by=main|子标签]</code>，正文前 120 字符只在 <code>logVerbose=true</code> 时追加；<code>by=</code> 取自 <code>Turn</code> 的 <code>subagent</code> 状态。结果规整 <code>toText</code>：String 原样、JSON 化、null 视为成功无输出。</p>
+<h3 class="sec">参数检查与名字兜底</h3>
+<div class="tw reveal"><table>
+<thead><tr><th>机制</th><th>口径</th></tr></thead>
 <tbody>
-<tr><td>参数复核 <code>argWarn</code></td><td>查 <code>required</code> 必填缺没缺、<code>enum</code> 值在不在表内（大小写不敏感）；命中就返回「（参数复核：…用 tool 名 … 重试）」，由 <code>call</code> 追加在结果后。<b>不拦</b>：实现可能接受 md 里没声明的别名</td><td><code>ToolIndex.java:633-673</code>、<code>Registry.java:268-269</code></td></tr>
-<tr><td>名字归一化</td><td>小写 + 去掉分隔符/空白（<code>[_\-.\s]+</code> → 空）</td><td><code>ToolIndex.java:56</code>、<code>ToolIndex.java:678-680</code></td></tr>
-<tr><td>相似度</td><td>编辑距离，两行滚动数组</td><td><code>ToolIndex.java:683-702</code></td></tr>
-<tr><td>候选筛选</td><td>只看该调用者可见的工具；<code>候选数</code>(3) / <code>距离上限</code>(2)</td><td><code>ToolIndex.java:330</code>、<code>ToolIndex.java:151-152</code></td></tr>
-<tr><td>候选为空</td><td>回一句「当前可用：…」全清单</td><td><code>Registry.java:365-382</code></td></tr>
-</tbody>
-</table>
-</div>
+<tr><td>参数检查 <code>argWarn</code></td><td>看 <code>required</code> 里的必填项给了没有、<code>enum</code> 值在不在表内（大小写不敏感）；命中就返回一句提示，由 <code>call</code> 追加在结果后面。<b>不拦</b>：实现可能接受 md 里没声明的别名</td></tr>
+<tr><td>名字归一化</td><td>小写 + 去掉分隔符与空白（<code>[_\-.\s]+</code> → 空）</td></tr>
+<tr><td>相似度</td><td>编辑距离，两行滚动数组</td></tr>
+<tr><td>候选筛选</td><td>只看该调用者可见的工具；<code>候选数</code>(3) / <code>距离上限</code>(2)</td></tr>
+<tr><td>候选为空</td><td>回一句「当前可用：…」全清单</td></tr>
+</tbody></table></div>
 <h3 class="sec">能力索引：一行事实</h3>
-<p><code>ToolIndex.line(visible, withDesc)</code>（<code>ToolIndex.java:257</code>）把可见工具压成一行「类别 → 工具[一句话]」。
-三个开关来自 <code>data\prompts\tools-index.md</code>：<code>总预算</code> 默认 12000（<code>ToolIndex.java:53</code>）、<code>条目描述上限</code> 40、<code>默认类别</code> "其它"（<code>ToolIndex.java:133</code>）。
-<b>主 Agent 带一句话、子 Agent 只给名字</b>（<code>Registry.java:404-406</code>）省 token。
-文件缺失或解析不出类别 → <code>line()</code> 返回 <code>null</code>，事实块里就<b>没有这一行</b>（<code>ToolIndex.java:121-127</code>）。</p>
+<p><code>ToolIndex.line(visible, withDesc)</code> 把可见工具压成一行「类别 → 工具[一句话]」。三个开关来自 <code>data\prompts\tools-index.md</code>：<code>总预算</code> 默认 12000、<code>条目描述上限</code> 40、<code>默认类别</code> "其它"。<b>主 Agent 带一句话、子 Agent 只给名字</b>，省的是 token。文件缺失或解析不出类别 → <code>line()</code> 返回 <code>null</code>，事实块里就<b>没有这一行</b>。</p>
 <h3 class="sec">连续失败闸门</h3>
-<p>闸门本体在 <code>agent\Loop.java</code>，认的是<b>结构信号</b>不是关键词表：</p>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\agent\Loop.java:380-389</span><button class="copy" type="button">复制</button></div>
+<p>闸门本体在 <code>agent\Loop.java</code>，认的是<b>结构信号</b>而不是关键词表：</p>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\agent\Loop.java（失败判定）</span><button class="copy" type="button">复制</button></div>
 <pre><code>failed(tool, result):
   head = 结果首行，截断 60 字符
   以 "[tool]" 或 "[auth]" 开头            -> 失败
   deniedResult(head) 为真（权限拒绝三形态）-> 失败
   不以 "[" + tool + "]" 开头              -> 不算失败（不是它自报的结果）
-  以 "[自己名字]" 开头 -> 看 okMark(head)：ok=1 成功；ok=0 失败；没写也失败</code></pre>
-</div>
-<div class="tw reveal">
-<table>
-<thead><tr><th>环节</th><th>口径</th><th>出处</th></tr></thead>
+  以 "[自己名字]" 开头 -> 看 okMark(head)：ok=1 成功；ok=0 失败；没写也失败</code></pre></div>
+<div class="tw reveal"><table>
+<thead><tr><th>环节</th><th>口径</th></tr></thead>
 <tbody>
-<tr><td>权限拒绝三形态</td><td><code>[auth] 权限阻断</code> 开头（兼容识别）／正文<b>包含</b> <code>[权限阻断] </code>（现代判据）／以 <code>缺 R/W/X 位 —— </code> 开头（<code>Host.need*</code> 的信息性前缀）</td><td><code>Loop.java:334-342</code></td></tr>
-<tr><td><code>ok=</code> 读取</td><td>只认取值恰是 <code>0</code> 或 <code>1</code> 的形态（<code>ok=10</code> 不算命中），否则当"没写"</td><td><code>Loop.java:397-411</code></td></tr>
-<tr><td>计数</td><td><code>failStreak</code> + <code>failLast</code>（最后一次失败截断 120 字）；<b>成功即清零</b></td><td><code>Loop.java:60-75</code>、<code>Loop.java:414-424</code></td></tr>
-<tr><td>提示阈值</td><td>达到就往上下文加一条 <b>system</b> 事实行</td><td><code>Loop.java:445-473</code></td></tr>
-<tr><td>终止阈值</td><td>达到就 <code>break</code> 主循环，终止文案进 <code>Outcome.error</code></td><td><code>Loop.java:427-439</code>、<code>Loop.java:288-297</code></td></tr>
-<tr><td>缺键</td><td>报一行 err 且<b>不终止</b>；缺失清单在 <code>missingFailKeys()</code></td><td><code>Loop.java:434-437</code>、<code>ToolIndex.java:447-453</code></td></tr>
-</tbody>
-</table>
-</div>
-<p>产出文案与外挂键（<code>data\prompts\tools-index.md:96-98</code>）：<code>失败提示阈值: 2</code>、<code>失败终止阈值: 5</code>、
-<code>失败终止文案: 本轮已停止：{tool} 连续失败 {n} 次（明细见上一条 tool_failures 事实）</code>。
-达到提示阈值时注入的事实行是<b>纯 JSON、无劝导语</b>：<code>tool_failures: {"&lt;工具&gt;":n,"last_error":"…"}</code>（<code>Loop.java:465</code>），
-同一份只注入一次，计数变了才再注入（<code>Loop.java:466-467</code>）。</p>
-<p>日志面的"像不像失败"是<b>另一支</b>判据：<code>Registry.looksFailed(text)</code>（<code>Registry.java:326</code>）只看基板自己的失败/拒绝前缀，
-<b>只用于 <code>ok=</code> 那一列</b>，判不准时按成功算；它与闸门共享同一套拒绝识别面 <code>Registry.isDenyText</code>（<code>Registry.java:347</code>）。</p>
+<tr><td>权限拒绝三形态</td><td><code>[auth] 权限阻断</code> 开头（兼容识别）／正文<b>包含</b> <code>[权限阻断] </code>（现代判据）／以 <code>缺 R/W/X 位 —— </code> 开头（<code>Host.need*</code> 的信息性前缀）</td></tr>
+<tr><td><code>ok=</code> 读取</td><td>只认取值恰是 <code>0</code> 或 <code>1</code> 的形态（<code>ok=10</code> 不算命中），否则当「没写」</td></tr>
+<tr><td>计数</td><td><code>failStreak</code> + <code>failLast</code>（最后一次失败截断 120 字）；<b>成功即清零</b></td></tr>
+<tr><td>提示阈值</td><td>达到就往上下文加一条 <b>system</b> 事实行</td></tr>
+<tr><td>终止阈值</td><td>达到就 <code>break</code> 主循环，终止文案进 <code>Outcome.error</code></td></tr>
+<tr><td>缺键</td><td>报一行 err 但<b>不终止</b>；缺失清单在 <code>missingFailKeys()</code></td></tr>
+</tbody></table></div>
+<p>产出文案与外挂键（<code>data\prompts\tools-index.md</code>）：<code>失败提示阈值: 2</code>、<code>失败终止阈值: 5</code>、<code>失败终止文案: 本轮已停止：{tool} 连续失败 {n} 次（明细见上一条 tool_failures 事实）</code>。达到提示阈值时注入的事实行是<b>纯 JSON、无劝导语</b>：<code>tool_failures: {"&lt;工具&gt;":n,"last_error":"…"}</code>（<code>Loop.java</code>），同一份只注入一次，计数变了才再注入。</p>
+<p>日志面的「像不像失败」是<b>另一支</b>判据：<code>Registry.looksFailed(text)</code> 只看基板自己的失败与拒绝前缀，<b>只用于 <code>ok=</code> 那一列</b>，判不准时按成功算；它与闸门共享同一套拒绝识别面 <code>Registry.isDenyText</code>。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="store-impl">
-<header class="chapter-head reveal">
-<span class="chapter-tag">05 / 存储</span>
-<h2>存储与数据表</h2>
-<p class="chapter-desc">单连接 + 全方法 synchronized 的 SQLite；表名列名只有一份白名单；FTS5 外部内容表配 trigram 分词器。</p>
-</header>
+<header class="chapter-head reveal"><span class="chapter-tag">05 / 存储</span><h2>存储与数据表</h2><p class="chapter-desc">单连接 + 全方法 synchronized 的 SQLite；表名列名只有一份白名单；FTS5 外部内容表配 trigram 分词器。</p></header>
 <h3 class="sec">连接与 PRAGMA</h3>
-<p>纯 JDBC，<b>无 ORM、无连接池</b>（<code>store\Db.java:27</code>）。单连接 + 全方法 <code>synchronized</code>：读写走同一把锁、写操作天然串行，
-因此不会出现 "database is locked"；WAL 让读不阻塞写，<code>busy_timeout</code> 兜住跨进程短暂争用（<code>Db.java:29-31</code>）。</p>
-<div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\store\Db.java:108-139</span><button class="copy" type="button">复制</button></div>
-<pre><code>DRIVER = "org.sqlite.JDBC"（:48）   BUSY_TIMEOUT_MS = 5000L（:50）
-open():  Class.forName(DRIVER)（:115）-> 建数据目录 -> url = "jdbc:sqlite:" + 绝对路径（反斜杠转正斜杠）+ setAutoCommit(true)（:126-128）
-         PRAGMA journal_mode=WAL / busy_timeout=5000 / foreign_keys=ON / synchronous=NORMAL（:134-137）
-// 契约（:42-43）：open() 幂等、close() 可重复；异常就地吞掉并记日志，读失败返回空、写失败返回 -1/0</code></pre>
-</div>
-<p><b>"连上"不等于"能用"</b>：损坏的库照样能连上却读不了任何表，所以另有 <code>unusableReason()</code> 做一次真实读（查 <code>sqlite_master</code>），
-让装配第③步能指出"是六库这一步失败"（<code>Db.java:141-143</code>、<code>Boot.java:449-452</code>）。</p>
+<p>纯 JDBC，<b>无 ORM、无连接池</b>（<code>store\Db.java</code>）。单连接 + 全方法 <code>synchronized</code>：读写走同一把锁、写操作天然串行，因此不会出现 "database is locked"；WAL 让读不阻塞写，<code>busy_timeout</code> 兜住跨进程的短暂争用。</p>
+<div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\store\Db.java</span><button class="copy" type="button">复制</button></div>
+<pre><code>DRIVER = "org.sqlite.JDBC"          BUSY_TIMEOUT_MS = 5000L
+open():  Class.forName(DRIVER) -> 建数据目录 -> url = "jdbc:sqlite:" + 绝对路径（反斜杠转正斜杠）+ setAutoCommit(true)
+         PRAGMA journal_mode=WAL / busy_timeout=5000 / foreign_keys=ON / synchronous=NORMAL
+// 契约：open() 幂等、close() 可重复；异常就地吞掉并记日志，读失败返回空、写失败返回 -1/0</code></pre></div>
+<p><b>「连上」不等于「能用」</b>：损坏的库照样能连上，却读不了任何表，所以另有 <code>unusableReason()</code> 做一次真实读（查 <code>sqlite_master</code>），让装配第③步能指出「是六库这一步失败」。</p>
 <h3 class="sec">建表：一次幂等调用</h3>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\store\Db.java:623-643</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\store\Db.java（createTables）</span><button class="copy" type="button">复制</button></div>
 <pre><code>createTables():
   for sql in Lib.runDdl() : exec(sql)          // 基板运行表，一个字不改
-  Lib.ensureColumn(db, "alarm", "owner", …)    // 老库补列，幂等且安静
+  Lib.ensureColumn(db, "alarm", "owner", …)    // 缺列即补，先查表结构、缺了才加
   for s in reg().all():                        // 每个已注册的库
       for sql in s.ddl() : execOk(sql)         // CREATE TABLE/INDEX IF NOT EXISTS
       ensureColumns(s)                         // 缺列即补，只加列
       失败 -> 一行 "[store] 库 X 建表失败…"，只影响那一个库
-  setupFts()                                   // 虚表 + 三个同步触发器</code></pre>
-</div>
-<p><b>补列必须幂等</b>：SQLite 没有 <code>ADD COLUMN IF NOT EXISTS</code>，直接 ALTER 在补过的库上会抛
-<code>duplicate column name</code>，而 <code>Db.exec</code> 把任何失败都当错误行打红字 —— 表现为每次启动刷一条假报错。
-所以两处补列都<b>先查 <code>PRAGMA table_info</code>，缺了才加</b>（<code>Lib.java:112-131</code>、<code>Db.java:654-674</code>）。</p>
-<h3 class="sec">库里到底有哪些表（实测）</h3>
-<div class="code" data-lang="python">
-<div class="code-head"><span class="lang">python</span><span class="path">只读查询 data\v4.db 的 sqlite_master</span><button class="copy" type="button">复制</button></div>
-<pre><code>import sqlite3
-c = sqlite3.connect("file:C:/Sair/Local/AiAgent-V4/data/v4.db?mode=ro", uri=True)
-rows = c.execute("SELECT type,name FROM sqlite_master ORDER BY type,name").fetchall()
-print(len([n for t,n in rows if t=="table"]),
-      len([n for t,n in rows if t=="index"]),
-      len([n for t,n in rows if t=="trigger"]))</code></pre>
-</div>
-<p><b>实测</b>：<code>TABLES=32 INDICES=24 TRIGGERS=12</code>。32 张表 = <b>11 张真实数据表</b>
-（<code>alarm dialog favor grouplog kv memory note pref sticker task</code>，另有一张插件索引表名含保留字）
-+ <b>4 张 FTS5 虚表</b>（<code>fts_dialog fts_grouplog fts_memory fts_note</code>）
-+ <b>16 张虚表影子表</b>（每张虚表 4 个：<code>*_config *_data *_docsize *_idx</code>）+ <code>sqlite_sequence</code>。
-24 个索引里 2 个是 <code>sqlite_autoindex_*</code>（主键自动索引），其余 22 个显式命名；12 个触发器 = 4 张虚表 × 3（ai/ad/au）。</p>
-<div class="note warn">
-<b>一处实测差异</b>：源码 <code>Lib.java:99</code> 声明了出站消息台账表 <code>sent</code>，但当前这份 <code>data\v4.db</code> 的 32 张表里还没有它
-—— 说明这份数据文件是在该声明之前落盘的。<code>createTables()</code> 幂等，下一次装配会把它建出来。
+  setupFts()                                   // 虚表 + 三个同步触发器</code></pre></div>
+<p><b>补列走的是先查后加</b>：SQLite 没有 <code>ADD COLUMN IF NOT EXISTS</code>，直接 ALTER 在已经补过的库上会抛 <code>duplicate column name</code>，而 <code>Db.exec</code> 把任何失败都当错误行打红字。所以两处补列都<b>先查 <code>PRAGMA table_info</code>、缺了才加</b>，这样同一份数据目录反复装配也是安静的。</p>
+<h3 class="sec">数据表怎么组织</h3>
+<p>数据分两类。一类是<b>基板运行表</b>：闹钟、任务、键值、插件索引、出站消息台账这些由基板自己用，DDL 留在 <code>store\Lib.java</code>，列清单在 <code>RUN_COLS</code>。另一类是<b>业务数据表</b>：<code>dialog</code>、<code>grouplog</code> 这两张环境库由基板声明（消息流就是环境，基板是它们唯一的写入者），其余表由用到它的插件在装载期声明（<code>EnvLibs.java</code>）。</p>
+<p>其中 <code>dialog</code>、<code>grouplog</code>、<code>memory</code>、<code>note</code> 这几张检索型表各配一张 FTS5 外部内容虚表：虚表名是 <code>fts_</code> + 表名，本身不存正文，只索引声明的检索列；每张虚表另配 4 张影子表（<code>*_config</code>、<code>*_data</code>、<code>*_docsize</code>、<code>*_idx</code>）与 3 个同步触发器（<code>ai</code> 插入、<code>ad</code> 删除、<code>au</code> 更新），主键自动索引则由 SQLite 自己建（<code>sqlite_autoindex_*</code>）。</p>
+<div class="note">
+<b>运行表与业务表分开算</b>：<code>Lib.java</code> 声明的运行表（含出站消息台账 <code>sent</code>）由基板自己建，业务表由用到它的插件在装载期声明。两边都走 <code>CREATE … IF NOT EXISTS</code> 加「先查后补列」，所以同一份数据目录反复装配也只会核对，不会重建、不会重复报错。
 </div>
 <h3 class="sec">表名与列名（唯一白名单）</h3>
-<p><b>表名与列名是白名单的唯一来源</b>：<code>Store</code> 拼 SQL 前一律拿 <code>LibSpec.hasField</code> 校验列名
-（<code>LibSpec.java:15-17</code>、<code>LibSpec.java:169-174</code>），别处不许再有一份名单。两个来源：</p>
-<p>两个来源：<b>A. 基板运行表</b>（<code>Lib.runDdl()</code>）—— 它们不是"库"（有的没有 <code>id</code>／<code>ts</code>，有的是自定义主键），进不了注册表，DDL 留在基板（<code>Lib.java:13-21</code>），列清单在 <code>RUN_COLS</code>（<code>Lib.java:33-40</code>）共 6 张。<b>B. 可查询的库</b>（<code>LibSpec</code>）—— 基板自己只声明两张（消息流就是环境，基板是它们唯一的写入者），业务表由用到它的插件在装载期声明（<code>EnvLibs.java:9-14</code>）；声明是<b>纯数据</b>，只描述结构、不含策略（<code>LibSpec.java:7</code>）。</p>
->
-<div class="tw reveal">
-<table>
-<thead><tr><th>表</th><th>主键 / 唯一</th><th>列</th><th>索引</th><th>DDL</th></tr></thead>
+<p><b>表名与列名是白名单的唯一来源</b>：<code>Store</code> 拼 SQL 之前一律拿 <code>LibSpec.hasField</code> 校验列名（<code>LibSpec.java</code>），别处不再有第二份名单。两个来源是这样分工的：</p>
+<p><b>A. 基板运行表</b>（<code>Lib.runDdl()</code>）—— 它们不是「库」（有的没有 <code>id</code>／<code>ts</code>，有的是自定义主键），进不了注册表，DDL 留在基板 <code>Lib.java</code>。<b>B. 可查询的库</b>（<code>LibSpec</code>）—— 基板自己只声明两张，业务表由用到它的插件在装载期声明（<code>EnvLibs.java</code>）；声明是<b>纯数据</b>，只描述结构、不含策略（<code>LibSpec.java</code>）。</p>
+<div class="tw reveal"><table>
+<thead><tr><th>表</th><th>主键 / 唯一</th><th>列</th><th>索引</th><th>声明处</th></tr></thead>
 <tbody>
-<tr><td><code>favor</code></td><td><code>qq</code> INTEGER PRIMARY KEY</td>
-<td><code>value</code> REAL · <code>level</code> · <code>updated</code> · <code>note</code>（TEXT 默认空串）</td>
-<td><code>idx_favor_value(value)</code></td><td><code>Lib.java:45-51</code></td></tr>
-<tr><td><code>alarm</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT</td>
-<td><code>ts</code> NOT NULL · <code>fire_at</code> · <code>repeat</code> · <code>scope</code> · <code>target</code> · <code>task</code> · <code>prompt</code> · <code>enabled</code> · <code>state</code> · <code>owner</code></td>
-<td><code>idx_alarm_fire(fire_at)</code> · <code>idx_alarm_enabled(enabled,fire_at)</code></td><td><code>Lib.java:53-69</code></td></tr>
-<tr><td><code>task</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT</td>
-<td><code>ts</code> NOT NULL · <code>status</code> · <code>owner</code> · <code>agent</code> · <code>tools</code> · <code>task</code> · <code>result</code> · <code>ms</code></td>
-<td><code>idx_task_status(status,ts)</code></td><td><code>Lib.java:71-81</code></td></tr>
-<tr><td><code>kv</code></td><td><code>k</code> TEXT PRIMARY KEY</td><td><code>v</code> · <code>updated</code></td>
-<td>主键自动索引 <code>sqlite_autoindex_kv_1</code></td><td><code>Lib.java:83-86</code></td></tr>
-<tr><td><code>skill_index</code></td><td><code>name</code> TEXT PRIMARY KEY</td>
-<td><code>hash</code> · <code>tool</code> · <code>permission</code> · <code>hooks</code> · <code>loaded_at</code></td>
-<td>主键自动索引</td><td><code>Lib.java:88-94</code></td></tr>
-<tr><td><code>sent</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT</td>
-<td><code>ts</code> NOT NULL · <code>session</code> · <code>action</code> · <code>message_id</code> INTEGER · <code>preview</code> · <code>state</code> DEFAULT <code>'sent'</code></td>
-<td><code>idx_sent_session_ts(session,ts)</code> · <code>idx_sent_msgid(message_id)</code></td><td><code>Lib.java:99-108</code></td></tr>
-<tr><td><code>dialog</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT（基板统一补）</td>
-<td><code>ts</code> NOT NULL · <code>session</code> · <code>role</code> · <code>content</code> · <code>tokens</code> INTEGER · <code>extra</code> TEXT</td>
-<td><code>idx_dialog_session(session,ts)</code> · <code>idx_dialog_ts(ts)</code> · <code>idx_dialog_role(role)</code>；FTS 列 <code>content</code></td>
-<td><code>EnvLibs.java:35-48</code>、<code>LibSpec.java:213-225</code></td></tr>
-<tr><td><code>grouplog</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT</td>
-<td><code>ts</code> NOT NULL · <code>group_id</code> INTEGER · <code>user_id</code> INTEGER · <code>nickname</code> · <code>content</code> · <code>msg_id</code> TEXT · <code>extra</code> TEXT</td>
-<td><code>idx_grouplog_group(group_id,ts)</code> · <code>idx_grouplog_user(user_id,ts)</code> · <code>idx_grouplog_ts(ts)</code> · <code>idx_grouplog_user_group(user_id,group_id,ts)</code>；FTS 列 <code>content,nickname</code></td>
-<td><code>EnvLibs.java:51-66</code></td></tr>
-<tr><td><code>memory</code> / <code>note</code> / <code>sticker</code> / <code>pref</code></td><td>各自 <code>id</code> 自增主键</td>
-<td>由声明方给出；统一约定 <code>id</code> 自增、<code>ts</code> 毫秒 INTEGER、<code>extra</code>/<code>tags</code> 存 JSON 文本</td>
-<td>实测 11 个显式索引：<code>idx_memory_*</code> 3 个 · <code>idx_note_*</code> 2 个 · <code>idx_pref_*</code> 3 个 · <code>idx_sticker_*</code> 3 个</td>
-<td>声明在装载期（<code>LibSpec.java:18-21</code>）；约定见 <code>Lib.java:23-26</code></td></tr>
-</tbody>
-</table>
-</div>
-<p><b>形状规则</b>：<code>id</code>/<code>ts</code> 由基板统一补 —— <code>LibSpec.ddl()</code> 永远以
-<code>id INTEGER PRIMARY KEY AUTOINCREMENT</code> 起头（<code>LibSpec.java:214-218</code>）；声明里用 <code>.ts()</code> 又写一遍时<b>只算一次</b>，
-否则 DDL 里出现两个 <code>ts</code> 列。默认排序有 <code>ts</code> 就是 <code>ts DESC, id DESC</code>，否则 <code>id DESC</code>（<code>LibSpec.java:162</code>）。
-<code>extra</code>/<code>tags</code> 是 JSON 文本列，出参自动解析回对象/数组（<code>Lib.java:161-164</code>）。</p>
+<tr><td><code>favor</code></td><td><code>qq</code> INTEGER PRIMARY KEY</td><td><code>value</code> REAL · <code>level</code> · <code>updated</code> · <code>note</code>（TEXT 默认空串）</td><td><code>idx_favor_value(value)</code></td><td><code>Lib.java</code></td></tr>
+<tr><td><code>alarm</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT</td><td><code>ts</code> NOT NULL · <code>fire_at</code> · <code>repeat</code> · <code>scope</code> · <code>target</code> · <code>task</code> · <code>prompt</code> · <code>enabled</code> · <code>state</code> · <code>owner</code></td><td><code>idx_alarm_fire(fire_at)</code> · <code>idx_alarm_enabled(enabled,fire_at)</code></td><td><code>Lib.java</code></td></tr>
+<tr><td><code>task</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT</td><td><code>ts</code> NOT NULL · <code>status</code> · <code>owner</code> · <code>agent</code> · <code>tools</code> · <code>task</code> · <code>result</code> · <code>ms</code></td><td><code>idx_task_status(status,ts)</code></td><td><code>Lib.java</code></td></tr>
+<tr><td><code>kv</code></td><td><code>k</code> TEXT PRIMARY KEY</td><td><code>v</code> · <code>updated</code></td><td>主键自动索引 <code>sqlite_autoindex_kv_1</code></td><td><code>Lib.java</code></td></tr>
+<tr><td><code>skill_index</code></td><td><code>name</code> TEXT PRIMARY KEY</td><td><code>hash</code> · <code>tool</code> · <code>permission</code> · <code>hooks</code> · <code>loaded_at</code></td><td>主键自动索引</td><td><code>Lib.java</code></td></tr>
+<tr><td><code>sent</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT</td><td><code>ts</code> NOT NULL · <code>session</code> · <code>action</code> · <code>message_id</code> INTEGER · <code>preview</code> · <code>state</code> DEFAULT <code>'sent'</code></td><td><code>idx_sent_session_ts(session,ts)</code> · <code>idx_sent_msgid(message_id)</code></td><td><code>Lib.java</code></td></tr>
+<tr><td><code>dialog</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT（基板统一补）</td><td><code>ts</code> NOT NULL · <code>session</code> · <code>role</code> · <code>content</code> · <code>tokens</code> INTEGER · <code>extra</code> TEXT</td><td><code>idx_dialog_session(session,ts)</code> · <code>idx_dialog_ts(ts)</code> · <code>idx_dialog_role(role)</code>；FTS 列 <code>content</code></td><td><code>EnvLibs.java</code>、<code>LibSpec.java</code></td></tr>
+<tr><td><code>grouplog</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT</td><td><code>ts</code> NOT NULL · <code>group_id</code> INTEGER · <code>user_id</code> INTEGER · <code>nickname</code> · <code>content</code> · <code>msg_id</code> TEXT · <code>extra</code> TEXT</td><td><code>idx_grouplog_group(group_id,ts)</code> · <code>idx_grouplog_user(user_id,ts)</code> · <code>idx_grouplog_ts(ts)</code> · <code>idx_grouplog_user_group(user_id,group_id,ts)</code>；FTS 列 <code>content,nickname</code></td><td><code>EnvLibs.java</code></td></tr>
+<tr><td><code>memory</code> / <code>note</code> / <code>sticker</code> / <code>pref</code></td><td>各自 <code>id</code> 自增主键</td><td>由声明方给出；统一约定 <code>id</code> 自增、<code>ts</code> 毫秒 INTEGER、<code>extra</code>/<code>tags</code> 存 JSON 文本</td><td>由各自声明给出：<code>idx_memory_*</code> · <code>idx_note_*</code> · <code>idx_pref_*</code> · <code>idx_sticker_*</code></td><td>声明在装载期（<code>LibSpec.java</code>）；约定见 <code>Lib.java</code></td></tr>
+</tbody></table></div>
+<p><b>形状规则</b>：<code>id</code>/<code>ts</code> 由基板统一补 —— <code>LibSpec.ddl()</code> 永远以 <code>id INTEGER PRIMARY KEY AUTOINCREMENT</code> 起头；声明里用 <code>.ts()</code> 又写一遍时<b>只算一次</b>，否则 DDL 里会出现两个 <code>ts</code> 列。默认排序有 <code>ts</code> 就是 <code>ts DESC, id DESC</code>，否则 <code>id DESC</code>（<code>LibSpec.java</code>）。<code>extra</code>/<code>tags</code> 是 JSON 文本列，出参自动解析回对象或数组（<code>Lib.java</code>）。</p>
 <h3 class="sec">FTS5：外部内容表 + 触发器 + trigram</h3>
-<div class="code" data-lang="sql">
-<div class="code-head"><span class="lang">sql</span><span class="path">src\sair\v4\store\Db.java:682-737</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="sql"><div class="code-head"><span class="lang">sql</span><span class="path">src\sair\v4\store\Db.java（setupFts）</span><button class="copy" type="button">复制</button></div>
 <pre><code>CREATE VIRTUAL TABLE fts_&lt;表&gt; USING fts5(&lt;列…&gt;,
       content='&lt;表&gt;', content_rowid='id', tokenize='trigram')
 
 &lt;表&gt;_fts_ai AFTER INSERT  -> INSERT INTO fts_&lt;表&gt;(rowid,&lt;列…&gt;) VALUES (new.id,…)
 &lt;表&gt;_fts_ad AFTER DELETE  -> INSERT INTO … VALUES('delete', old.id, …)
 &lt;表&gt;_fts_au AFTER UPDATE  -> 'delete' 旧行 + 插入新行
-INSERT INTO fts_&lt;表&gt;(fts_&lt;表&gt;) VALUES('rebuild')     // 建完立刻回填</code></pre>
-</div>
-<div class="tw reveal">
-<table>
-<thead><tr><th>点</th><th>口径</th><th>出处</th></tr></thead>
+INSERT INTO fts_&lt;表&gt;(fts_&lt;表&gt;) VALUES('rebuild')     // 建完立刻回填</code></pre></div>
+<div class="tw reveal"><table>
+<thead><tr><th>点</th><th>口径</th></tr></thead>
 <tbody>
-<tr><td>分词器优先级</td><td>先 <code>trigram</code>，整体失败再退回默认 <code>unicode61</code>；两次都失败 <code>ftsState=0</code></td><td><code>Db.java:683-712</code></td></tr>
-<tr><td>为什么是 trigram</td><td>中文子串检索只有它对：unicode61 会把整串汉字当成一个 token，<code>MATCH</code> 命中不了中间片段</td><td><code>Db.java:676-680</code></td></tr>
-<tr><td>虚表名</td><td><code>fts_</code> + 表名</td><td><code>LibSpec.java:164</code></td></tr>
-<tr><td>可关闭</td><td>配置 <code>ftsOff</code> 里的库连索引带触发器都不建，检索只剩 LIKE 回退</td><td><code>Db.java:65-70</code>、<code>Db.java:688</code></td></tr>
-<tr><td>能力探测</td><td>幂等标记 <code>ftsState</code>（-1 未知 / 0 不可用 / 1 可用）；探测用 <code>temp</code> 下一张临时虚表（名字见出处）</td><td><code>Db.java:52-53</code>、<code>Db.java:756-775</code></td></tr>
-</tbody>
-</table>
-</div>
+<tr><td>分词器优先级</td><td>先 <code>trigram</code>，整体失败再退回默认 <code>unicode61</code>；两次都失败 <code>ftsState=0</code></td></tr>
+<tr><td>为什么是 trigram</td><td>中文子串检索只有它对：unicode61 会把整串汉字当成一个 token，<code>MATCH</code> 命中不了中间片段</td></tr>
+<tr><td>虚表名</td><td><code>fts_</code> + 表名（<code>LibSpec.java</code>）</td></tr>
+<tr><td>可关闭</td><td>配置 <code>ftsOff</code> 里的库连索引带触发器都不建，检索只剩 LIKE 回退（<code>Db.java</code>）</td></tr>
+<tr><td>能力探测</td><td>幂等标记 <code>ftsState</code>（-1 未知 / 0 不可用 / 1 可用）；探测用 <code>temp</code> 库下一张临时虚表，探完即删</td></tr>
+</tbody></table></div>
 <h3 class="sec">检索：三层降级</h3>
-<p><code>Store.search(lib, text, limit)</code>（<code>Store.java:217</code>）依次走三层，命中即返回：</p>
->
-<p>结果行附带 <code>_hit</code>：<code>"fts"</code> 或命中的列名（<code>Store.java:243</code>、<code>Store.java:265</code>）。
-<b>trigram 的查询项下限是 3 字符</b>（<code>FtsQuery.java:25</code>），2 字中文词只能交给 LIKE —— 这就是"三层"必须都在的原因。</p>
+<p><code>Store.search(lib, text, limit)</code>（<code>Store.java</code>）依次走三层，命中即返回：</p>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\store\Store.java（search 的三层）</span><button class="copy" type="button">复制</button></div>
+<pre><code>① FTS5 MATCH "整串短语"    —— 走索引，最快；中文靠 trigram
+② 短语 0 命中时拆词 OR      —— FtsQuery.build，仍是 FTS 索引
+③ 仍无命中 / 这个库没有 FTS -> LIKE %整串% 回退（sticker / pref 的唯一检索路径）</code></pre></div>
+<p>结果行附带 <code>_hit</code>：<code>"fts"</code> 或命中的列名。<b>trigram 的查询项下限是 3 字符</b>（<code>FtsQuery.java</code>），2 字中文词只能交给 LIKE —— 这就是三层都得在的原因。</p>
 <h3 class="sec">通用 CRUD 与维护</h3>
-<p><code>Store</code> 对所有库只暴露同一组方法：<code>list/get/put/update/delete/count/search/stat/exportJson/importJson</code>
-（<code>Store.java:123-402</code>）。表名先过注册表 <code>canon()</code>（中文别名 → 规范名，<code>Db.java:97-103</code>），
-未知表名返回 <code>null</code>，由调用方翻成一句人话、<b>不抛异常拖垮一个回合</b>（<code>Libs.java:18-19</code>）。
-注入防护：表名/列名过白名单，值一律 <code>PreparedStatement</code> 绑定（<code>Db.java:33-35</code>）。</p>
-<p>同表名被别人抢 = 报错不静默覆盖，例外是<b>同一个主人</b>重新声明自己那张表 = 原地更新（<code>Libs.java:14-16</code>）。中文别名 <code>alias("记忆","长期记忆",…)</code> 大小写不敏感（<code>LibSpec.java:180-186</code>）。保留期维护 <code>maintain(keepDays, dialogKeepDays, grouplogKeepDays, maxLowImportance)</code> 是三把独立的尺子（<code>Store.java:423</code>、<code>Conf.java:142-146</code>）；低重要度截断 <code>maxLowImportance</code> 默认 500、<code>&le;0</code> = 不截断（<code>Conf.java:107</code>、<code>:725</code>）。</p>>
+<p><code>Store</code> 对所有库只暴露同一组方法：<code>list/get/put/update/delete/count/search/stat/exportJson/importJson</code>。表名先过注册表 <code>canon()</code>（中文别名 → 规范名，<code>Db.java</code>），未知表名返回 <code>null</code>，由调用方翻成一句人话，<b>不抛异常拖垮一个回合</b>（<code>Libs.java</code>）。注入防护：表名列名过白名单，值一律 <code>PreparedStatement</code> 绑定（<code>Db.java</code>）。</p>
+<p>同表名被别人抢 = 报错、不静默覆盖；例外是<b>同一个主人</b>重新声明自己那张表，那就是原地更新（<code>Libs.java</code>）。中文别名 <code>alias("记忆","长期记忆",…)</code> 大小写不敏感（<code>LibSpec.java</code>）。保留期维护 <code>maintain(keepDays, dialogKeepDays, grouplogKeepDays, maxLowImportance)</code> 是三把独立的尺子（<code>Store.java</code>、<code>Conf.java</code>）；低重要度截断 <code>maxLowImportance</code> 默认 500、<code>&le;0</code> = 不截断（<code>Conf.java</code>）。</p>
 <h3 class="sec">人物画像：一条覆盖索引</h3>
-<p><code>store\Person.java</code> 用六库聚合出"正在说话的这个人"是谁，作为事实块的一行。按群聚合走<b>覆盖索引</b>
-<code>idx_grouplog_user_group(user_id, group_id, ts)</code> —— 只走索引不读表（<code>Person.java:35</code>）。索引名是常量
-<code>Person.COVER_INDEX</code>（<code>Person.java:50</code>），由 <code>EnvLibs.grouplog()</code> 显式声明（<code>EnvLibs.java:65</code>）。</p>
-<p>常量：<code>MAX_GROUPS = 20</code>（最多列几个群）、<code>FALLBACK_ROWS = 2000</code>（索引不存在时的退化上限），以及四条参数化的固定聚合 SQL（<code>Person.java:44-56</code>）。</p>
-<p>启动时还会查一次 <code>sqlite_master</code> 确认这条索引在不在（<code>Person.java:170</code>）—— 不在就走退化路径，而不是让聚合慢查询把回合拖住。</p>
+<p><code>store\Person.java</code> 用六库聚合出「正在说话的这个人」是谁，作为事实块的一行。按群聚合走<b>覆盖索引</b> <code>idx_grouplog_user_group(user_id, group_id, ts)</code> —— 只走索引、不读表（<code>Person.java</code>）。索引名是常量 <code>Person.COVER_INDEX</code>，由 <code>EnvLibs.grouplog()</code> 显式声明（<code>EnvLibs.java</code>）。</p>
+<p>常量：<code>MAX_GROUPS = 20</code>（最多列几个群）、<code>FALLBACK_ROWS = 2000</code>（索引不存在时的退化上限），以及四条参数化的固定聚合 SQL（<code>Person.java</code>）。启动时还会查一次 <code>sqlite_master</code> 确认这条索引在不在（<code>Person.java</code>）—— 不在就走退化路径，而不是让聚合慢查询把回合拖住。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="ai-impl">
-<header class="chapter-head reveal">
-<span class="chapter-tag">06 / 模型</span>
-<h2>模型面实现</h2>
-<p class="chapter-desc">纯 JDK 的 <code>HttpURLConnection</code> + 手写 SSE 解析；任何失败都收敛成 <code>Res.error</code>，不向调用方抛异常。</p>
-</header>
+<header class="chapter-head reveal"><span class="chapter-tag">06 / 模型</span><h2>模型面实现</h2><p class="chapter-desc">纯 JDK 的 <code>HttpURLConnection</code> + 手写 SSE 解析；任何失败都收敛成 <code>Res.error</code>，不向调用方抛异常。</p></header>
 <h3 class="sec">客户端</h3>
-<div class="tw reveal">
-<table>
-<thead><tr><th>点</th><th>实现</th><th>出处</th></tr></thead>
+<div class="tw reveal"><table>
+<thead><tr><th>点</th><th>实现</th></tr></thead>
 <tbody>
-<tr><td>端点</td><td><code>{apiUrl}/chat/completions</code>、<code>/user/balance</code>、<code>/models</code></td><td><code>ai\DeepSeek.java:27</code></td></tr>
-<tr><td>请求头</td><td><code>Authorization: Bearer &lt;key&gt;</code> + <code>Content-Type: application/json; charset=utf-8</code></td><td><code>ai\DeepSeek.java:28</code></td></tr>
-<tr><td>请求体</td><td>由 <code>Conf</code> 驱动：<code>model=resolveModel()</code>、<code>temperature</code>、<code>top_p&lt;0</code> 不发、<code>max_tokens=0</code> 不发</td><td><code>ai\DeepSeek.java:30-31</code></td></tr>
-<tr><td>模型名</td><td><code>auto</code> 已在 <code>Conf.resolveModel()</code> 里解析成默认模型（无路由）</td><td><code>ai\DeepSeek.java:80-82</code></td></tr>
-<tr><td>失败契约</td><td><b>任何失败都收敛成 <code>Res.error</code>，绝不向调用方抛异常</b></td><td><code>ai\DeepSeek.java:33</code></td></tr>
-<tr><td>流式回调</td><td><code>DeepSeek.Stream.on(delta)</code>，由 <code>Loop</code> 接到 <code>Turn.sink().stream(delta)</code></td><td><code>Loop.java:226-232</code></td></tr>
-</tbody>
-</table>
-</div>
+<tr><td>端点</td><td><code>{apiUrl}/chat/completions</code>、<code>/user/balance</code>、<code>/models</code>（<code>ai\DeepSeek.java</code>）</td></tr>
+<tr><td>请求头</td><td><code>Authorization: Bearer &lt;key&gt;</code> + <code>Content-Type: application/json; charset=utf-8</code></td></tr>
+<tr><td>请求体</td><td>由 <code>Conf</code> 驱动：<code>model=resolveModel()</code>、<code>temperature</code>、<code>top_p&lt;0</code> 不发、<code>max_tokens=0</code> 不发</td></tr>
+<tr><td>模型名</td><td><code>auto</code> 已在 <code>Conf.resolveModel()</code> 里解析成默认模型（这一层不做路由）</td></tr>
+<tr><td>失败契约</td><td><b>任何失败都收敛成 <code>Res.error</code>，不向调用方抛异常</b>（<code>ai\DeepSeek.java</code>）</td></tr>
+<tr><td>流式回调</td><td><code>DeepSeek.Stream.on(delta)</code>，由 <code>Loop</code> 接到 <code>Turn.sink().stream(delta)</code></td></tr>
+</tbody></table></div>
 <h3 class="sec">SSE：无网络、无状态、纯函数</h3>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\ai\Sse.java:40-181</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\ai\Sse.java</span><button class="copy" type="button">复制</button></div>
 <pre><code>payload(line): 空行 / 以 ':' 开头（注释心跳）/ 不以 "data:" 开头 -> null
 done(line):    载荷 equalsIgnoreCase "[DONE]"
 
@@ -558,109 +367,74 @@ merge(chunk, acc, sink):
   delta.content -> 追加 + 回调 sink（回调方异常不污染解析结果）
   delta.reasoning_content -> 只累积（部分实现叫 reasoning）
   delta.tool_calls -> mergeToolCalls：按 index 归位，arguments 字符串**拼接**；
-                      name 分片 = 重复片忽略 / 渐进片替换 / 其它拼接</code></pre>
-</div>
-<p>三处"刻意不抛"：<code>feed</code> 遇非法 JSON 静默忽略（<code>Sse.java:76</code>）；<code>sink.on</code> 被 try 包住（<code>Sse.java:120-126</code>）；
-<code>norm()</code> 把 <code>arguments</code> 统一成<b>字符串</b>（对象/数组转 JSON 文本，<code>Sse.java:231-241</code>）。
-错误对象翻成一行人话 <code>&lt;type&gt;: &lt;message&gt; (code &lt;code&gt;)</code>（<code>Sse.java:218-228</code>）。</p>
+                      name 分片 = 重复片忽略 / 渐进片替换 / 其它拼接</code></pre></div>
+<p>三处「刻意不抛」：<code>feed</code> 遇非法 JSON 静默忽略；<code>sink.on</code> 被 try 包住；<code>norm()</code> 把 <code>arguments</code> 统一成<b>字符串</b>（对象或数组转 JSON 文本）。错误对象翻成一行人话 <code>&lt;type&gt;: &lt;message&gt; (code &lt;code&gt;)</code>。</p>
 <h3 class="sec">消息与工具声明工厂</h3>
-<p><code>ai\Msg.java</code>：<code>system</code>／<code>user</code>／<code>assistant</code>／<code>tool</code> 四个朴素工厂（<code>Msg.java:21-28</code>、<code>:60-62</code>、<code>:108</code>）；<code>userWithImages(text, urls)</code> 把 <code>content</code> 变成数组，元素是 <code>{"type":"text"}</code> 与 <code>{"type":"image_url","image_url":{"url":…}}</code>（<code>Msg.java:36-57</code>）；<code>assistantToolCalls(content, calls, reasoning)</code> 保证<b>一条响应 = 一条 assistant 消息</b>，正文、<code>tool_calls</code>、思维链同条回传（<code>Msg.java:87-91</code>）。
-<code>ai\ToolSpec.java</code>：<code>fn(name, description, paramsSchema)</code> 产出 <code>{"type":"function","function":{…}}</code>（<code>ToolSpec.java:21</code>），schema 为 <code>null</code> 时用空对象 schema（<code>:33-38</code>）；与 <code>Tool.schema()</code>（<code>Tool.java:84</code>）同形，但后者走权限筛选路径。</p>>
+<p><code>ai\Msg.java</code>：<code>system</code>／<code>user</code>／<code>assistant</code>／<code>tool</code> 四个朴素工厂；<code>userWithImages(text, urls)</code> 把 <code>content</code> 变成数组，元素是 <code>{"type":"text"}</code> 与 <code>{"type":"image_url","image_url":{"url":…}}</code>；<code>assistantToolCalls(content, calls, reasoning)</code> 保证<b>一条响应 = 一条 assistant 消息</b>，正文、<code>tool_calls</code>、思维链同条回传（<code>Msg.java</code>）。</p>
+<p><code>ai\ToolSpec.java</code>：<code>fn(name, description, paramsSchema)</code> 产出 <code>{"type":"function","function":{…}}</code>，schema 为 <code>null</code> 时用空对象 schema；形状与 <code>Tool.schema()</code>（<code>Tool.java</code>）一致，区别是后者走权限筛选路径。</p>
 <div class="note bad">
-<b>思维链必须完整回传</b>：请求带 <code>tools</code> 时，历史里每条 assistant 消息的 <code>reasoning_content</code> 都要回传
-（即使该轮没有实际调用工具），漏一条就是 HTTP 400。因此该字段<b>始终写出</b>，空值写空串而不是省略键 ——
-省掉正是 400 的触发条件（<code>Msg.java:74-105</code>）。工具闭环每一轮都带 tools（<code>Loop.java:226</code>），所以每轮都得带上它。
+<b>思维链要完整回传</b>：请求带 <code>tools</code> 时，历史里每条 assistant 消息的 <code>reasoning_content</code> 都建议原样带上（即使那一轮没有实际调用工具），漏一条就是 HTTP 400。所以这个字段<b>始终写出</b>，空值写空串而不是省略键 —— 省掉它正是 400 的触发条件（<code>Msg.java</code>）。工具闭环每一轮都带 tools，所以每一轮都顺手带上它。
 </div>
 <h3 class="sec">错误收敛路径</h3>
-<p><b>协议层</b>：<code>Res.error</code> 非空 → <code>Loop</code> 立刻设上 <code>oc.error</code> 并 <code>break</code>，不再发下一次请求（<code>Loop.java:233-236</code>），已流出的正文留在 <code>t.lastText()</code>。<b>循环层</b>：整个 <code>for</code> 外套 <code>catch(Throwable)</code>，收敛成 <code>oc.error = "主循环异常: " + e</code>（<code>:306-308</code>）；<code>Outcome.ok()</code> 即 <code>error.isEmpty()</code>（<code>:45</code>），<code>Outcome</code> 带 <code>text</code>／<code>rounds</code>／<code>toolCalls</code>／<code>ms</code>／<code>error</code> 五个字段（<code>:38-46</code>）。</p>
+<p><b>协议层</b>：<code>Res.error</code> 非空 → <code>Loop</code> 立刻设上 <code>oc.error</code> 并 <code>break</code>，不再发下一次请求（<code>Loop.java</code>），已经流出来的正文留在 <code>t.lastText()</code>。<b>循环层</b>：整个 <code>for</code> 外套 <code>catch(Throwable)</code>，收敛成 <code>oc.error = "主循环异常: " + e</code>；<code>Outcome.ok()</code> 即 <code>error.isEmpty()</code>，<code>Outcome</code> 带 <code>text</code>／<code>rounds</code>／<code>toolCalls</code>／<code>ms</code>／<code>error</code> 五个字段。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="qq-impl">
-<header class="chapter-head reveal">
-<span class="chapter-tag">07 / 入站与出站</span>
-<h2>QQ 面实现</h2>
-<p class="chapter-desc">纯 <code>java.net.ServerSocket</code> + 手写 WebSocket 服务端；事件按 <code>post_type</code> 分派，动作出口只一处。</p>
-</header>
+<header class="chapter-head reveal"><span class="chapter-tag">07 / 入站与出站</span><h2>QQ 面实现</h2><p class="chapter-desc">纯 <code>java.net.ServerSocket</code> + 手写 WebSocket 服务端；事件按 <code>post_type</code> 分派，动作出口只一处。</p></header>
 <h3 class="sec">反向 WS：<code>Link</code> 的握手</h3>
-<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\qq\Link.java:147-161、:343-364、:380-440</span><button class="copy" type="button">复制</button></div>
-<pre><code>WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"   // :51
-HANDSHAKE_TIMEOUT_MS = 10000                       // :72
-start():  非回环 且 token 空 -> 拒绝启动并 ERR（:149-153）；回环 且 token 空 -> 只 WARN（:155-157）
-          new ServerSocket() -> accept 循环，每连接一条读线程（:343-364）
-handshake(sock): setSoTimeout(10000)（:385）-> 读头取 sec-websocket-key / authorization（:421-422）
-          缺 key -> WARN 并断开（:426）-> 校验 Bearer 或 ?access_token= -> 通过回 101</code></pre>
-</div>
-<p><b>安全默认</b>：日志只打印动作名与响应摘要（≤200 字符），<b>绝不打印 token / apiKey</b>（<code>Link.java:44</code>）。
-每发一条带 <code>echo</code> 的动作帧就在 <code>pending</code> 表挂一个等待位，读到同 <code>echo</code> 的响应即唤醒调用方；
-<code>stop()</code> 关闭 <code>ServerSocket</code> 与全部连接并清空 <code>pending</code>，异常一律不冒出调用方（<code>Link.java:38-42</code>）。</p>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\qq\Link.java</span><button class="copy" type="button">复制</button></div>
+<pre><code>WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+HANDSHAKE_TIMEOUT_MS = 10000
+start():  非回环 且 token 空 -> 拒绝启动并 ERR；回环 且 token 空 -> 只 WARN
+          new ServerSocket() -> accept 循环，每连接一条读线程
+handshake(sock): setSoTimeout(10000) -> 读头取 sec-websocket-key / authorization
+          缺 key -> WARN 并断开 -> 校验 Bearer 或 ?access_token= -> 通过回 101</code></pre></div>
+<p><b>安全默认</b>：日志只打印动作名与响应摘要（≤200 字符），<b>不打印 token / apiKey</b>（<code>Link.java</code>）。每发一条带 <code>echo</code> 的动作帧，就在 <code>pending</code> 表挂一个等待位，读到同 <code>echo</code> 的响应即唤醒调用方；<code>stop()</code> 关闭 <code>ServerSocket</code> 与全部连接并清空 <code>pending</code>，异常一律不冒出调用方（<code>Link.java</code>）。</p>
 <h3 class="sec">事件分派：一张 <code>post_type</code> 路由表</h3>
-<p><code>QqGateway.onEvent(raw)</code>（<code>QqGateway.java:136</code>）解析成 <code>Ev</code>，按 <code>post_type</code> 分四路，其余丢弃。</p>
-<div class="tw reveal">
-<table>
-<thead><tr><th><code>post_type</code></th><th>处理</th><th>触发回合</th><th>出处</th></tr></thead>
+<p><code>QqGateway.onEvent(raw)</code> 解析成 <code>Ev</code>，按 <code>post_type</code> 分四路，其余丢弃。</p>
+<div class="tw reveal"><table>
+<thead><tr><th><code>post_type</code></th><th>处理</th><th>触发回合</th></tr></thead>
 <tbody>
-<tr><td>心跳 / <code>meta_event</code></td><td>不解释任何路由，默认一行不打</td><td>否</td><td><code>QqGateway.java:142-146</code></td></tr>
-<tr><td><code>request</code></td><td><code>handleRequest(raw, ev)</code></td><td>否</td><td><code>QqGateway.java:147-150</code></td></tr>
-<tr><td><code>message</code></td><td><code>handleMessage(raw, ev)</code> —— 唯一会起回合的入站</td><td><b>是</b></td><td><code>QqGateway.java:151-154</code></td></tr>
-<tr><td><code>notice</code></td><td><code>handleNotice(ev)</code>：<b>只落库然后 return</b>；一行一条、与消息同表（群通知 → <code>grouplog</code>、私聊 → <code>dialog</code>）</td><td><b>否（零触发）</b></td><td><code>QqGateway.java:155-162</code>、<code>QqGateway.java:193-209</code></td></tr>
-<tr><td><code>message_sent</code></td><td><code>handleMessageSent(ev)</code>：本账号自己发出去的消息，<b>不是入站</b>；写一行自我标记后 return</td><td><b>否（零触发）</b></td><td><code>QqGateway.java:163-175</code>、<code>QqGateway.java:520-592</code></td></tr>
-<tr><td>其它</td><td><code>facts("event=… ignored")</code></td><td>否</td><td><code>QqGateway.java:176-177</code></td></tr>
-</tbody>
-</table>
-</div>
-<p><b>为什么 <code>message_sent</code> 不能当入站</b>：私聊分支对任何私聊都返回"该回"，一旦当入站，她就对自己刚发的那条再起一个回合 —— 这是"重复回答"的一条确定来源（<code>QqGateway.java:164-166</code>）。零触发纪律与 <code>notice</code> 分支逐字同一份。通知去重键前缀 <code>n:</code>，并带 <code>notice_type|sub_type|group_id|user_id|operator_id|target_id|message_id|time</code>（<code>:207-209</code>）；撤回<b>不改</b>被撤回的原行，<code>[撤回]</code> 自成一行（<code>:190</code>）。</p>
+<tr><td>心跳 / <code>meta_event</code></td><td>不解释任何路由，默认一行不打</td><td>否</td></tr>
+<tr><td><code>request</code></td><td><code>handleRequest(raw, ev)</code></td><td>否</td></tr>
+<tr><td><code>message</code></td><td><code>handleMessage(raw, ev)</code> —— 唯一会起回合的入站</td><td><b>是</b></td></tr>
+<tr><td><code>notice</code></td><td><code>handleNotice(ev)</code>：<b>只落库然后 return</b>；一行一条、与消息同表（群通知 → <code>grouplog</code>、私聊 → <code>dialog</code>）</td><td><b>否（零触发）</b></td></tr>
+<tr><td><code>message_sent</code></td><td><code>handleMessageSent(ev)</code>：本账号自己发出去的消息，<b>不是入站</b>；写一行自我标记后 return</td><td><b>否（零触发）</b></td></tr>
+<tr><td>其它</td><td><code>facts("event=… ignored")</code></td><td>否</td></tr>
+</tbody></table></div>
+<p><b><code>message_sent</code> 为什么不当入站</b>：私聊分支对任何私聊都返回「该回」，一旦把它当入站，她就会对自己刚发的那条再起一个回合 —— 那也是「重复回答」的一条来源。所以它的处理与 <code>notice</code> 分支是同一份零触发纪律。通知去重键前缀 <code>n:</code>，并带 <code>notice_type|sub_type|group_id|user_id|operator_id|target_id|message_id|time</code>；撤回<b>不改</b>被撤回的原行，<code>[撤回]</code> 自成一行。</p>
 <h3 class="sec"><code>atSelf()</code> 判定与地址判定</h3>
-<p>自身 QQ 号从事件自带的 <code>self_id</code> 取，<b>不需要外部注入</b>；缺 <code>self_id</code> 时恒为 <code>false</code>（<code>qq\Ev.java:18-19</code>）。
-链路两跳：<code>isAt(long qq)</code> 在消息段数组里找 <code>type=at</code> 且 <code>data.qq</code> 相等的段（<code>Ev.java:169</code>），
-<code>atSelf()</code> = <code>isAt(selfId())</code>（<code>Ev.java:182</code>）。</p>
-<p>地址判定两行（<code>QqGateway.java:871-875</code>）：<b>私聊一律回；群里一律要求被 @</b>。
-主人在这里<b>没有豁免</b> —— 群里的主人也一样要被 @；不被 @ 的消息只能由<b>外挂层的触发投票</b>放行 —— 投票失败按"没人表态"处理（<code>QqGateway.java:855-861</code>），接口在 <code>ext\TriggerVoter.java</code>。
-入站去重由 <code>qq\Seen.java</code> 维护时间窗，窗口取 <code>msgDedupWindowSec</code>，<code>0</code> = 关闭判重（<code>QqGateway.java:877-886</code>）；
-统计口径 <code>seen=&lt;表大小&gt; dup_hit=&lt;命中&gt; window_s=&lt;秒&gt;</code>（<code>QqGateway.java:889-891</code>）。</p>
-<p><b>触发投票</b>：按 <code>order, 插件名</code> 依次问，<b>第一个非弃权票生效</b>（不是多数决）（<code>QqGateway.java:843-850</code>、<code>ext\ExtRegistry.java:523</code>）；
-没人表态返回 <code>null</code>，网关走地址判定那条老路（<code>QqGateway.java:849</code>）；投票自己炸了按"没人表态"处理并打一行 warn ——
-<b>绝不让投票成为"这条消息消失了"的原因</b>（<code>QqGateway.java:855-860</code>）。</p>
+<p>自身 QQ 号从事件自带的 <code>self_id</code> 取，<b>不需要外部注入</b>；缺 <code>self_id</code> 时恒为 <code>false</code>（<code>qq\Ev.java</code>）。链路两跳：<code>isAt(long qq)</code> 在消息段数组里找 <code>type=at</code> 且 <code>data.qq</code> 相等的段，<code>atSelf()</code> = <code>isAt(selfId())</code>（<code>Ev.java</code>）。</p>
+<p>地址判定两行（<code>QqGateway.java</code>）：<b>私聊一律回；群里一律要求被 @</b>。主人在这一层<b>没有豁免</b> —— 群里的主人也一样要被 @；不被 @ 的消息只能由<b>外挂层的触发投票</b>放行 —— 投票没人表态时按「没人表态」处理，接口在 <code>ext\TriggerVoter.java</code>。入站去重由 <code>qq\Seen.java</code> 维护时间窗，窗口取 <code>msgDedupWindowSec</code>，<code>0</code> = 关闭判重；统计口径 <code>seen=&lt;表大小&gt; dup_hit=&lt;命中&gt; window_s=&lt;秒&gt;</code>。</p>
+<p><b>触发投票</b>：按 <code>order, 插件名</code> 依次问，<b>第一个非弃权票生效</b>（不是多数决）（<code>QqGateway.java</code>、<code>ext\ExtRegistry.java</code>）；没人表态返回 <code>null</code>，网关走地址判定那条路；投票自己出错也按「没人表态」处理并打一行 warn —— 一条消息不会因为投票失败而消失。</p>
 <h3 class="sec">动作出口：<code>Api.call</code> 一条路</h3>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\qq\Api.java:144-181、:251-273</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\qq\Api.java</span><button class="copy" type="button">复制</button></div>
 <pre><code>call(action, params):                       // 所有本地文件都在这里被统一改写
   动作名为空 -> error("动作名为空")
   rewrite(action, params, deny)             // 文件外链中转：本地路径 -> URL 或 file:///
-  文件改写层自己的读文件判定被拦 -> 直接返回拒文        // :149-156
+  文件改写层自己的读文件判定被拦 -> 直接返回拒文
   guard != null 时问 Guard.deny(action, p)   // 对外动作闸门（E 类 X 位）
   link.call(action, p)                      // 走 WS；超时/断开 -> error("Napcat 没有响应…")
   recordSent(action, p, o)                  // 台账：只有发送类动作且响应成功才记
 
-SEND_ACTIONS = {"send_group_msg","send_private_msg","send_msg"}     // :53
-ok(o)：没有 error ⇒ status=ok 且 retcode=0                          // :251
-SentTap.sent(session, action, messageId, preview, params)           // :84-96
-callQuiet(...)：同路但跳过守卫与台账 —— 给基板自己的"不打扰"读动作用   // :199-203</code></pre>
-</div>
-<p><b>两个实例，两种用途</b>：无闸门的 <code>api</code> 给基板自己的读动作（引用解析、入站落库这一类自主行为）；
-带闸门的 <code>guardedApi</code> 给模型与插件发起的动作（<code>Boot.java:499-541</code>、<code>Boot.java:699-701</code>）。
-<code>sentTap</code> 两个实例都装 —— <code>Api.call</code> 是唯一出口（<code>Boot.java:504-510</code>）。</p>
+SEND_ACTIONS = {"send_group_msg","send_private_msg","send_msg"}
+ok(o)：没有 error ⇒ status=ok 且 retcode=0
+SentTap.sent(session, action, messageId, preview, params)
+callQuiet(...)：同路但跳过守卫与台账 —— 给基板自己的「不打扰」读动作用</code></pre></div>
+<p><b>两个实例，两种用途</b>：无闸门的 <code>api</code> 给基板自己的读动作（引用解析、入站落库这一类自主行为）；带闸门的 <code>guardedApi</code> 给模型与插件发起的动作。<code>sentTap</code> 两个实例都装 —— <code>Api.call</code> 是唯一出口。</p>
 <h3 class="sec">出站：分段与渲染</h3>
->
-<p><b>工具标记识别</b>：<code>qq\ToolMarkup.java</code> 用三个正则识别模型误写出来的"工具调用标记" —— 全角/半角 <code>|</code> 管道式（<code>ToolMarkup.java:47</code>）、
-<code>&lt;|DSML|…&gt;</code> 式（<code>ToolMarkup.java:56</code>）、结构化标签式（<code>ToolMarkup.java:60</code>）；
-<code>has</code>／<code>rule</code>／<code>fact</code> 三个出口分别给判定、规则文案与事实行（<code>ToolMarkup.java:73-110</code>）。</p>
+<p>正文先过 <code>qq\Seg.java</code> 分段：<code>plan(text, maxChar, groupMax, group)</code> 是统一入口 —— 按段落与语义单元切、超长单元单独切、再按群聊与私聊各自的归并尺度 <code>humanize</code> 成几条；带标记的行由 <code>byMarker(text)</code> 拆开，分好段的事实行由 <code>fact(parts)</code> 给出。渲染面各不相同：媒体走 <code>qq\MediaRender.java</code>、通知走 <code>qq\NoticeRender.java</code>、聊天标记走 <code>qq\ChatMarkers.java</code>、纯文本走 <code>qq\PlainText.java</code>；自己发出去的消息由 <code>qq\SelfEcho.java</code> 加一个自我标记头 <code>head(msgId)</code> —— 历史去重就是按这个头来认的。分段之后、发送之前这一段还能被 <code>OutboundStage</code> 改写（见 <a href="#index">扩展点与契约面</a>）。</p>
+<p><b>工具标记识别</b>：<code>qq\ToolMarkup.java</code> 用三个正则识别模型误写出来的「工具调用标记」—— 全角或半角 <code>|</code> 管道式、<code>&lt;|DSML|…&gt;</code> 式、结构化标签式；<code>has</code>／<code>rule</code>／<code>fact</code> 三个出口分别给判定、规则文案与事实行（<code>ToolMarkup.java</code>）。</p>
 <h3 class="sec">文件外链中转</h3>
-<p><code>qq\Relay.java</code> 用 JDK 自带的 <code>com.sun.net.httpserver.HttpServer</code>（<code>Relay.java:7</code>）把本地文件变成一个 URL 交给 NapCat。
-只在 NapCat 不在同一台机器时才需要 —— 未启用时本地文件按 <code>file:///</code> 交给同机 NapCat（<code>Boot.java:770-779</code>）。</p>
+<p><code>qq\Relay.java</code> 用 JDK 自带的 <code>com.sun.net.httpserver.HttpServer</code>，把本地文件变成一个 URL 交给 NapCat。NapCat 不在同一台机器时才需要它 —— 未启用时本地文件按 <code>file:///</code> 直接交给同机 NapCat。</p>
 <h3 class="sec">引用、标记、媒体：三个小本子</h3>
-<p><b>引用</b>（<code>qq\QuoteCache.java</code>）：解析<b>本地库优先</b>，否则入队走 NapCat；网络调用只在<b>单线程 worker</b> 上，"同一 id 只解析一次"是构造性的（单线程串行 + <code>inFlight</code> 表），事实行前缀 <code>quote: </code>（<code>QuoteCache.java:52-56</code>、<code>:86</code>、<code>:377-380</code>、<code>:604-609</code>）。<b>标记</b>（<code>qq\MarkerTags.java</code>）：标记行标签的统一产出，键形状 <code>mark:&lt;session&gt;/&lt;target&gt;</code>，孤儿清理在心跳里做（<code>Tick.java:146-176</code>）。<b>媒体</b>（<code>qq\MediaAttach.java</code>）：解析媒体事实行、扫描可挂的图与总字节、剥掉已挂的图；对外常量 <code>NONE_VISION_OFF</code> / <code>NONE_VISION_RELAY</code> / <code>NONE_ATTACH_OFF</code> / <code>NONE_ALL_SKIPPED</code>（<code>CtxBuild.java:891-912</code>）。</p>
->
+<p><b>引用</b>（<code>qq\QuoteCache.java</code>）：解析<b>本地库优先</b>，否则入队走 NapCat；网络调用只在<b>单线程 worker</b> 上，「同一 id 只解析一次」是构造性的（单线程串行 + <code>inFlight</code> 表），事实行前缀 <code>quote: </code>。<b>标记</b>（<code>qq\MarkerTags.java</code>）：标记行标签的统一产出，键形状 <code>mark:&lt;session&gt;/&lt;target&gt;</code>，孤儿清理放在心跳里做（<code>Tick.java</code>）。<b>媒体</b>（<code>qq\MediaAttach.java</code>）：解析媒体事实行、挑出可挂的图（受 <code>mediaAttachMax</code> 约束）、剥掉已经挂过的图；对外常量 <code>NONE_VISION_OFF</code> / <code>NONE_VISION_RELAY</code> / <code>NONE_ATTACH_OFF</code> / <code>NONE_ALL_SKIPPED</code>（<code>CtxBuild.java</code>）。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="auth-impl">
-<header class="chapter-head reveal">
-<span class="chapter-tag">08 / 权限</span>
-<h2>权限面实现</h2>
-<p class="chapter-desc">三个位、五类资源、三类主体、一本 JSON 账本；判定只有一条函数：按类默认分配 + 例外突破默认。</p>
-</header>
+<header class="chapter-head reveal"><span class="chapter-tag">08 / 权限</span><h2>权限面实现</h2><p class="chapter-desc">三个位、五类资源、三类主体、一本 JSON 账本；判定只有一条函数：按类默认分配 + 例外突破默认。</p></header>
 <h3 class="sec">位：只有 R / W / X</h3>
-<div class="code" data-lang="java">
-<div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\auth\Bits.java:26-36</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\auth\Bits.java</span><button class="copy" type="button">复制</button></div>
 <pre><code>NONE = 0        一位都没有（显式拒绝、或上限封死）
 R = 1           读
 W = 2           写 / 改本机状态
@@ -669,50 +443,34 @@ ALL = R|W|X
 INVALID = -1    认不出来的输入：哨兵
 
 // 字面量：R W X RW RX WX RWX NONE —— 大小写不敏感、顺序不敏感（"wr" 与 "RW" 同值）
-// 认不出来一律 INVALID，绝不猜；判定链上拿到 -1 必须当"没有权限"（fail-closed）</code></pre>
-</div>
-<p><b>一个刻意的区分</b>：账本条目里的"位"字段允许写<b>空串</b>表示 <code>NONE</code>（条目层语义）；
-而 <code>Bits.parse</code> 对空串返回 <code>INVALID</code> ——「没写」≠「写了空」（<code>Bits.java:18-19</code>、<code>Bits.java:57-70</code>）。
-<code>has(mask, need)</code> 对认不出的位名、<code>NONE</code>、非法掩码一律 <code>false</code>：
-"需要什么都不需要"当成放行是个权限洞（<code>Bits.java:90-101</code>）。</p>
+// 认不出来一律 INVALID，不猜；判定链上拿到 -1 就当「没有权限」（fail-closed）</code></pre></div>
+<p><b>一个刻意的区分</b>：账本条目里的「位」字段允许写<b>空串</b>表示 <code>NONE</code>（条目层语义）；而 <code>Bits.parse</code> 对空串返回 <code>INVALID</code> —— 「没写」不等于「写了空」（<code>Bits.java</code>）。<code>has(mask, need)</code> 对认不出的位名、<code>NONE</code>、非法掩码一律 <code>false</code>：把「需要什么都不需要」当成放行，本身就是个权限洞（<code>Bits.java</code>）。</p>
 <h3 class="sec">资源：五个类</h3>
-<div class="tw reveal">
-<table>
-<thead><tr><th>类</th><th>含义</th><th>怎么造</th><th>出处</th></tr></thead>
+<div class="tw reveal"><table>
+<thead><tr><th>类</th><th>含义</th><th>怎么造</th></tr></thead>
 <tbody>
-<tr><td><code>A</code></td><td>SFW 数据根之外的任意本机磁盘路径</td><td><code>Res.path(p)</code> 落在 SFW 之外</td><td><code>Res.java:66</code>、<code>Res.java:133</code></td></tr>
-<tr><td><code>B</code></td><td>SFW 路径之内的文件</td><td>同上，落在 SFW 之内</td><td><code>Res.java:68</code></td></tr>
-<tr><td><code>C</code></td><td>她自己的运行时脚手架：库、内存状态、<code>files</code> 目录</td><td><code>Res.db(lib)</code> / <code>Res.mem(what)</code></td><td><code>Res.java:76</code>、<code>Res.java:196</code>、<code>Res.java:199</code></td></tr>
-<tr><td><code>E</code></td><td>对外交互（NapCat 动作、向 SFW 发命令）</td><td><code>Res.platform(action)</code></td><td><code>Res.java:78</code>、<code>Res.java:210</code></td></tr>
-<tr><td><code>T</code></td><td>工具（只有入口受管）</td><td><code>Res.tool(name)</code></td><td><code>Res.java:85</code>、<code>Res.java:207</code></td></tr>
-<tr><td><code>*</code></td><td>通配资源，非主人一律不给</td><td><code>Res.all()</code></td><td><code>Res.java:87</code>、<code>Res.java:213</code></td></tr>
-</tbody>
-</table>
-</div>
-<p><b><code>files</code> 树没有专有位</b>：<code>&lt;数据根&gt;/files/**</code> 是 C 类里的一个特例文件实体，位一律服从 C；
-<code>isFilesTree()</code> 只用来让路径式范围能命中它，判定侧不为它单开一档（<code>Res.java:128-133</code>、<code>Acl.java:87-88</code>、<code>Boot.java:402-404</code>）。</p>
+<tr><td><code>A</code></td><td>SFW 数据根之外的任意本机磁盘路径</td><td><code>Res.path(p)</code> 落在 SFW 之外（<code>Res.java</code>）</td></tr>
+<tr><td><code>B</code></td><td>SFW 路径之内的文件</td><td>同上，落在 SFW 之内（<code>Res.java</code>）</td></tr>
+<tr><td><code>C</code></td><td>她自己的运行时脚手架：库、内存状态、<code>files</code> 目录</td><td><code>Res.db(lib)</code> / <code>Res.mem(what)</code>（<code>Res.java</code>）</td></tr>
+<tr><td><code>E</code></td><td>对外交互（NapCat 动作、向 SFW 发命令）</td><td><code>Res.platform(action)</code>（<code>Res.java</code>）</td></tr>
+<tr><td><code>T</code></td><td>工具（只有入口受管）</td><td><code>Res.tool(name)</code>（<code>Res.java</code>）</td></tr>
+<tr><td><code>*</code></td><td>通配资源，非主人一律不给</td><td><code>Res.all()</code>（<code>Res.java</code>）</td></tr>
+</tbody></table></div>
+<p><b><code>files</code> 树没有专有位</b>：<code>&lt;数据根&gt;/files/**</code> 是 C 类里的一个特例文件实体，位一律服从 C；<code>isFilesTree()</code> 只用来让路径式范围能命中它，判定侧不为它单开一档（<code>Res.java</code>、<code>Acl.java</code>）。</p>
 <h3 class="sec">默认分配表（唯一的两张表）</h3>
-<div class="tw reveal">
-<table>
+<div class="tw reveal"><table>
 <thead><tr><th>主体</th><th>A 本机</th><th>B SFW</th><th>C 数据</th><th>E 外部交互</th><th>T 工具</th></tr></thead>
 <tbody>
-<tr><td>MASTER</td><td colspan="5">恒 <code>RWX</code>，任何条目都不影响他（<code>Acl.java:969</code>）</td></tr>
+<tr><td>MASTER</td><td colspan="5">恒 <code>RWX</code>，任何条目都不影响他（<code>Acl.java</code>）</td></tr>
 <tr><td>SYSTEM（她本人的自主行为）</td><td><code>R</code></td><td><code>RW</code></td><td><code>RWX</code></td><td><code>RWX</code></td><td><code>RWX</code></td></tr>
 <tr><td>ALLUSER（全部用户主体）</td><td><code>NONE</code></td><td><code>NONE</code></td><td><code>R</code></td><td><code>NONE</code></td><td><code>NONE</code></td></tr>
-</tbody>
-</table>
-</div>
-<p>常量 <code>DEF_A</code>／<code>DEF_B</code>／<code>DEF_C</code>／<code>DEF_E</code>／<code>DEF_T</code> 与
-<code>SYS_A</code>／<code>SYS_B</code>／<code>SYS_C</code>／<code>SYS_E</code>／<code>SYS_T</code> 全在 <code>auth\Acl.java:144-191</code>；
-取值入口 <code>defaultAlloc(char)</code>（<code>Acl.java:858</code>）与 <code>systemAlloc(char)</code>（<code>Acl.java:870</code>）。</p>
+</tbody></table></div>
+<p>常量 <code>DEF_A</code>／<code>DEF_B</code>／<code>DEF_C</code>／<code>DEF_E</code>／<code>DEF_T</code> 与 <code>SYS_A</code>／<code>SYS_B</code>／<code>SYS_C</code>／<code>SYS_E</code>／<code>SYS_T</code> 全在 <code>auth\Acl.java</code>；取值入口 <code>defaultAlloc(char)</code> 与 <code>systemAlloc(char)</code>。</p>
 <div class="note bad">
-<b>T 类默认 <code>NONE</code></b>：非主人摸不到任何工具入口 —— <code>R</code>（看工具=可见性）／<code>W</code>（改·注册）／<code>X</code>（执行）一位都不给，
-于是普通用户的回合看到的工具面是<b>空的</b>，要放开只能由主人写 <code>T["User&lt;QQ&gt;","","X"]</code> 这类例外条目（<code>Acl.java:176-181</code>、<code>Registry.java:170-172</code>）。
-<b>C 类只给 <code>R</code></b>：非主人对数据只读，<code>W</code> 与 <code>X</code> 都收回（<code>Acl.java:162-168</code>）。
+<b>T 类默认 <code>NONE</code></b>：非主人摸不到任何工具入口 —— <code>R</code>（看工具 = 可见性）／<code>W</code>（改·注册）／<code>X</code>（执行）一位都不给，于是普通用户的回合看到的工具面是<b>空的</b>；要放开某个人，由主人写 <code>T["User&lt;QQ&gt;","","X"]</code> 这类例外条目（<code>Acl.java</code>、<code>Registry.java</code>）。<b>C 类只给 <code>R</code></b>：非主人对数据只读，<code>W</code> 与 <code>X</code> 都收回（<code>Acl.java</code>）。
 </div>
 <h3 class="sec">主体层级与命中顺序</h3>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\auth\Acl.java:135-142、:913-934</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\auth\Acl.java</span><button class="copy" type="button">复制</button></div>
 <pre><code>TIER_USER = 3 / TIER_GROUP = 2 / TIER_ALLUSER = 1 / TIER_NONE = 0
 
 hit(c, r):
@@ -720,14 +478,10 @@ hit(c, r):
   for e in entries:                       // 按**行序**遍历
       类别不同 / tier(c) &lt;= 0 / 范围不命中 -> skip
       t >= bestTier -> best = e; bestTier = t    // ★ 高层级直接接管；同级后来者覆盖
-  return best                             // null = 一条都没命中，走默认分配</code></pre>
-</div>
-<p><code>SYSTEM</code> 自成一路（只对 <code>Kind.SYSTEM</code> 生效，层级 3）（<code>Acl.java:89-90</code>）。
-<b>范围的具体度不参与优先级</b> —— 只有"主体层级 + 行序"两条规则（<code>Acl.java:95</code>）。
-<code>ALLUSER</code> 不含 MASTER、也不含 SYSTEM：否则一句 <code>A["ALLUSER","",""]</code> 会把她的自主行为整个打死（<code>Acl.java:97-99</code>）。</p>
+  return best                             // null = 一条都没命中，走默认分配</code></pre></div>
+<p><code>SYSTEM</code> 自成一路（只对 <code>Kind.SYSTEM</code> 生效，层级 3）（<code>Acl.java</code>）。<b>范围的具体度不参与优先级</b> —— 只有「主体层级 + 行序」两条规则（<code>Acl.java</code>）。<code>ALLUSER</code> 不含 MASTER、也不含 SYSTEM：否则一句 <code>A["ALLUSER","",""]</code> 会把她的自主行为整个打死（<code>Acl.java</code>）。</p>
 <h3 class="sec">唯一判定：<code>bitsOf</code> 与 <code>allow</code></h3>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\auth\Acl.java:966-996</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\auth\Acl.java（判定链）</span><button class="copy" type="button">复制</button></div>
 <pre><code>bitsOf(caller, resource):
   caller 或 resource 为 null          -> NONE        // fail-closed
   MASTER                              -> ALL         // 恒全权
@@ -740,41 +494,26 @@ hit(c, r):
 allow(caller, resource, need):
   资源 null / 位名认不出（bit &lt;= 0）/ caller null  -> DENY_PREFIX + 人话原因
   Bits.has(bits, bit) -> null（放行）
-  否则 -> DENY_PREFIX + "需要 &lt;目标&gt; 的 &lt;X&gt; 位（&lt;来源&gt;，当前有效位 &lt;RWX|NONE&gt;）"</code></pre>
-</div>
-<p>拒绝文案前缀常量是 <code>Acl.DENY_PREFIX = "[权限阻断] "</code>（<code>Acl.java:125</code>）；
-括号里的"来源"由 <code>source(c,r)</code> 给出（<code>Acl.java:939-959</code>）：MASTER／例外条目原文／她自己的默认分配／默认分配。</p>
+  否则 -> DENY_PREFIX + "需要 &lt;目标&gt; 的 &lt;X&gt; 位（&lt;来源&gt;，当前有效位 &lt;RWX|NONE&gt;）"</code></pre></div>
+<p>拒绝文案前缀常量是 <code>Acl.DENY_PREFIX = "[权限阻断] "</code>（<code>Acl.java</code>）；括号里的「来源」由 <code>source(c,r)</code> 给出：MASTER／例外条目原文／她自己的默认分配／默认分配。</p>
 <h3 class="sec">两层受保护资源（例外也不开）</h3>
-<div class="tw reveal">
-<table>
-<thead><tr><th>层</th><th>内容</th><th>MASTER</th><th>SYSTEM</th><th>ALLUSER</th><th>出处</th></tr></thead>
+<div class="tw reveal"><table>
+<thead><tr><th>层</th><th>内容</th><th>MASTER</th><th>SYSTEM</th><th>ALLUSER</th></tr></thead>
 <tbody>
-<tr><td>第一层</td><td>账本自身（<code>perms.json</code> + <code>.tmp</code>）、授权动作本身（<code>mem:acl</code>）、账号凭据（<code>get_cookies</code>）</td>
-<td><code>RWX</code></td><td><b>∅</b></td><td>∅</td>
-<td><code>Acl.java:193-196</code>、<code>Acl.java:1005-1012</code></td></tr>
-<tr><td>第二层·核心档</td><td><code>&lt;数据根&gt;/prompts/**</code>、<code>config.json</code>、<code>debug-port.json</code></td>
-<td><code>RWX</code></td><td>按类默认</td><td><b>∅</b></td>
-<td><code>Acl.java:197-202</code>、<code>Acl.java:1031-1036</code></td></tr>
-<tr><td>第二层·按扩展名档</td><td><b>只对 B 类路径</b>生效的后缀清单（见下）</td>
-<td><code>RWX</code></td><td>按类默认</td><td><b>∅</b></td>
-<td><code>Acl.java:204-215</code>、<code>Acl.java:1049-1058</code></td></tr>
-</tbody>
-</table>
-</div>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\auth\Acl.java:212-215（后缀清单）</span><button class="copy" type="button">复制</button></div>
+<tr><td>第一层</td><td>账本自身（<code>perms.json</code> + <code>.tmp</code>）、授权动作本身（<code>mem:acl</code>）、账号凭据（<code>get_cookies</code>）</td><td><code>RWX</code></td><td><b>∅</b></td><td>∅</td></tr>
+<tr><td>第二层·核心档</td><td><code>&lt;数据根&gt;/prompts/**</code>、<code>config.json</code>、<code>debug-port.json</code></td><td><code>RWX</code></td><td>按类默认</td><td><b>∅</b></td></tr>
+<tr><td>第二层·按扩展名档</td><td><b>只对 B 类路径</b>生效的后缀清单（见下）</td><td><code>RWX</code></td><td>按类默认</td><td><b>∅</b></td></tr>
+</tbody></table></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\auth\Acl.java（后缀清单）</span><button class="copy" type="button">复制</button></div>
 <pre><code>.json .ini .conf .properties .yml .yaml .toml     // 受限配置
 .bat  .cmd  .ir                                    // 能改本机状态的脚本
 .xml  .env  .key .pem .p12                         // 密钥与证书材料
 
 // 匹配：大小写不敏感（toLowerCase）+ 精确到后缀（endsWith）
-// 所以 export.jsonl 不算 .json —— 导出的 .jsonl 不受影响</code></pre>
-</div>
-<p>第一层单列的理由：她若能通过工具碰账本或授权动作，任何"诱导她自己改权限"的路径都能绕过主人（<code>Acl.java:1002-1003</code>）。
-按扩展名那一档<b>只对 B 类</b>：A 类已由 <code>DEF_A</code> 兜住，不该再按后缀分档，免得让人以为"A 类换个后缀就能读"（<code>Acl.java:1041-1044</code>）。</p>
+// 所以 export.jsonl 不算 .json —— 导出的 .jsonl 不受影响</code></pre></div>
+<p>第一层单列的理由：她若能通过工具碰账本或授权动作，任何「诱导她自己改权限」的路径都能绕过主人（<code>Acl.java</code>）。按扩展名那一档<b>只对 B 类</b>：A 类已经由 <code>DEF_A</code> 兜住，不必再按后缀分档，也免得让人以为「A 类换个后缀就能读」（<code>Acl.java</code>）。</p>
 <h3 class="sec">账本：<code>perms.json</code> 的格式与落盘</h3>
-<div class="code" data-lang="json">
-<div class="code-head"><span class="lang">json</span><span class="path">src\sair\v4\auth\Acl.java:25-49（版本 3 形状）</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="json"><div class="code-head"><span class="lang">json</span><span class="path">src\sair\v4\auth\Acl.java（版本 3 形状）</span><button class="copy" type="button">复制</button></div>
 <pre><code>{"version": 3,
  "entries": ["A[\"Group123456\",\"D:/share\",\"RWX\"]",
              "A[\"User987654\",\"D:/share\",\"R\"]",
@@ -787,146 +526,95 @@ allow(caller, resource, need):
         MASTER 不接受：主人恒全权，不需要例外
 范围 := A/B → 路径（"" = 整个类）；C → 库名 / mem:xxx / files 下的路径
         E → 动作名；T → 工具名（可省 tool: 前缀）；"" = 整个类
-位   := ""（显式拒绝）| R | W | X | RW | RX | WX | RWX</code></pre>
-</div>
-<div class="tw reveal">
-<table>
-<thead><tr><th>操作</th><th>行为</th><th>出处</th></tr></thead>
+位   := ""（显式拒绝）| R | W | X | RW | RX | WX | RWX</code></pre></div>
+<div class="tw reveal"><table>
+<thead><tr><th>操作</th><th>行为</th></tr></thead>
 <tbody>
-<tr><td>条目字符串</td><td><b>原样保留、原样打印</b>（<code>Entry.raw()</code>）；<code>list()</code> 给"层级 + 原始条目 + 例外命中时生效位"三列</td><td><code>Acl.java:50-51</code>、<code>Acl.java:650</code></td></tr>
-<tr><td>授权 / 覆盖</td><td>定位键 = 主体 + 类 + <b>规范化范围</b>：同一条就地覆盖，否则追加末尾。<b>不落盘</b>，要持久化自己调 <code>save()</code></td><td><code>Acl.java:731-764</code></td></tr>
-<tr><td>撤销</td><td>删掉"主体 + 类 + 规范化范围"那一条；没有返回 <code>false</code></td><td><code>Acl.java:771-788</code></td></tr>
-<tr><td>落盘</td><td>先写 <code>&lt;file&gt;.tmp</code> 再 rename —— 原子替换，不会留半截文件</td><td><code>Acl.java:792-799</code>、<code>Acl.java:829-847</code></td></tr>
-<tr><td>范围规范化</td><td>路径式条目必须归一（<code>Res.path</code> 给的是正斜杠小写盘符）；否则条目进得去、永远命不中，<b>静默失效</b></td><td><code>Acl.java:449-460</code></td></tr>
-<tr><td>非法条目</td><td>不抛异常，收进 <code>Reject(raw, reason)</code> 列表并给人话理由</td><td><code>Acl.java:314-326</code>、<code>Acl.java:355</code></td></tr>
-</tbody>
-</table>
-</div>
-<p><b>权限面只有一件事</b>：<code>Auth</code> 是薄门面 —— <code>bits(c,r)</code> 与 <code>allowRes(c,r,need)</code> 两个出口，
-账本懒装载、进程内缓存一份，<code>reloadAcl()</code> 重读（<code>auth\Auth.java:89-119</code>）。
-<code>init()</code> 的语义是"账本已经装过就重读一次，还没装过就什么都不做"，<b>绝不写盘</b>（<code>Auth.java:65-79</code>）。</p>
-<p><b>好感度不参与权限判定</b>：<code>favor</code> 表仍在（好感度是数据，也是事实块 <code>caller.favor</code> 的来源，<code>CtxBuild.java:294</code>），
-但旧的"档位"判据已整批从源码删除 —— <code>Auth</code> 的构造器连 <code>Favor</code> 形参都不再持有（<code>Auth.java:55-63</code>）。要放开某人只能写例外条目。</p>
+<tr><td>条目字符串</td><td><b>原样保留、原样打印</b>（<code>Entry.raw()</code>）；<code>list()</code> 给「层级 + 原始条目 + 例外命中时生效位」三列（<code>Acl.java</code>）</td></tr>
+<tr><td>授权 / 覆盖</td><td>定位键 = 主体 + 类 + <b>规范化范围</b>：同一条就地覆盖，否则追加末尾。<b>不落盘</b>，要持久化自己调 <code>save()</code>（<code>Acl.java</code>）</td></tr>
+<tr><td>撤销</td><td>删掉「主体 + 类 + 规范化范围」那一条；没有就返回 <code>false</code>（<code>Acl.java</code>）</td></tr>
+<tr><td>落盘</td><td>先写 <code>&lt;file&gt;.tmp</code> 再 rename —— 原子替换，不会留半截文件（<code>Acl.java</code>）</td></tr>
+<tr><td>范围规范化</td><td>路径式条目一律归一（<code>Res.path</code> 给的是正斜杠小写盘符）；不归一就会出现条目进得去、却永远命不中的静默失效（<code>Acl.java</code>）</td></tr>
+<tr><td>非法条目</td><td>不抛异常，收进 <code>Reject(raw, reason)</code> 列表并给人话理由（<code>Acl.java</code>）</td></tr>
+</tbody></table></div>
+<p><b>权限面只有一件事</b>：<code>Auth</code> 是薄门面 —— <code>bits(c,r)</code> 与 <code>allowRes(c,r,need)</code> 两个出口，账本懒装载、进程内缓存一份，<code>reloadAcl()</code> 重读（<code>auth\Auth.java</code>）。<code>init()</code> 的语义是「账本已经装过就重读一次，还没装过就什么都不做」，它<b>不写盘</b>（<code>Auth.java</code>）。</p>
+<p><b>好感度不参与权限判定</b>：<code>favor</code> 表仍在（好感度是数据，也是事实块 <code>caller.favor</code> 的来源，<code>CtxBuild.java</code>），但它不进判定链 —— <code>Auth</code> 的构造器不持有 <code>Favor</code>（<code>Auth.java</code>）。要放开某人，写例外条目这条路就够。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="ctx-impl">
-<header class="chapter-head reveal">
-<span class="chapter-tag">09 / 上下文</span>
-<h2>上下文装配</h2>
-<p class="chapter-desc">一条固定顺序把 system、事实、历史、本轮输入拼成 <code>messages</code>；顺序即前缀缓存策略。</p>
-</header>
+<header class="chapter-head reveal"><span class="chapter-tag">09 / 上下文</span><h2>上下文装配</h2><p class="chapter-desc">一条固定顺序把 system、事实、历史、本轮输入拼成 <code>messages</code>；顺序即前缀缓存策略。</p></header>
 <h3 class="sec">装配顺序（唯一一条）</h3>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\ctx\CtxBuild.java:558-574</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\ctx\CtxBuild.java（assemble）</span><button class="copy" type="button">复制</button></div>
 <pre><code>assemble(turn, userText):
   ① system(stable)      // 系统提示词 + 偏好块，同一条 system 消息
-  ② 外挂"稳定段"块       // 每块一条 system
+  ② 外挂「稳定段」块       // 每块一条 system
   ③ system(facts)       // 基板内置事实块 —— 恒为第二条 system（不随插件数量变化）
-  ④ 外挂"易变段"块       // 每块一条 system
+  ④ 外挂「易变段」块       // 每块一条 system
   ⑤ 历史（dialog 最近 N 条）
   ⑥ 本轮 user 消息
 
-assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没有历史与本轮 user（:577-585）</code></pre>
-</div>
-<p><b>稳定段紧贴系统提示词</b>（<code>CtxBuild.java:551-556</code>、<code>CtxBuild.java:615-624</code>）：前缀缓存按 <code>messages</code> 前缀逐字节命中，
-而事实块第一行就是 <code>time:</code>（每个回合都变），排在它后面的东西一律进不了那段前缀；偏好块因而放进第一条 system。
-<b>易变段排在事实块之后</b>（<code>CtxBuild.java:555-556</code>）：让"内置事实块恒为第二条 system"不受插件数量影响，
-序号稳定，排障与断言才不会被"装了哪个插件"改变。
-<b>内置事实块刻意不走扩展点的超时与预算</b>（<code>CtxBuild.java:565-568</code>）：它是基板骨架，外挂再多也不能把它挤掉。</p>
+assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没有历史与本轮 user</code></pre></div>
+<p><b>稳定段紧贴系统提示词</b>：前缀缓存按 <code>messages</code> 前缀逐字命中，而事实块第一行就是 <code>time:</code>（每个回合都变），排在它后面的东西一律进不了那段前缀；偏好块因而放进第一条 system。<b>易变段排在事实块之后</b>：让「内置事实块恒为第二条 system」不受插件数量影响，序号稳定，看日志与日常观察都不会被「装了哪个插件」改变。<b>内置事实块刻意不走扩展点的超时与预算</b>：它是基板骨架，外挂再多也挤不掉它。</p>
 <h3 class="sec">事实块：一行一条 JSON 事实</h3>
-<p><code>CtxBuild.facts(turn)</code>（<code>CtxBuild.java:279</code>）按固定键序产出行：</p>
-<div class="tw reveal">
-<table>
-<thead><tr><th>行前缀</th><th>内容</th><th>出处</th></tr></thead>
+<p><code>CtxBuild.facts(turn)</code> 按固定键序产出行：</p>
+<div class="tw reveal"><table>
+<thead><tr><th>行前缀</th><th>内容</th></tr></thead>
 <tbody>
-<tr><td><code>time:</code></td><td>当前时间</td><td><code>CtxBuild.java:281</code></td></tr>
-<tr><td><code>caller:</code></td><td><code>entry</code>／<code>qq</code>／<code>name</code>／<code>master</code>／<code>session</code>／<code>group</code>／<code>role</code>／<code>favor</code>（非主人）／<code>kind</code>／<code>bits</code>／<code>rules</code></td><td><code>CtxBuild.java:282-305</code></td></tr>
-<tr><td><code>person:</code></td><td>六库聚合出的"正在说话的这个人"是谁（跨群同一人）；构建失败这一行就不存在</td><td><code>CtxBuild.java:306-317</code></td></tr>
-<tr><td>（媒体行）</td><td>只有媒体段的消息才有</td><td><code>CtxBuild.java:318-320</code></td></tr>
-<tr><td><code>napcat:</code></td><td><code>connected</code> / <code>disconnected</code></td><td><code>CtxBuild.java:321</code></td></tr>
-<tr><td><code>models:</code></td><td>八字段模型事实（见下）</td><td><code>CtxBuild.java:322-346</code></td></tr>
-<tr><td><code>tasks_running:</code></td><td>只有大于 0 才写</td><td><code>CtxBuild.java:350-351</code></td></tr>
-<tr><td>（能力索引行）</td><td>"类别 → 工具[一句话]"；缺配置就没有这一行</td><td><code>CtxBuild.java:352-355</code></td></tr>
-<tr><td><code>rounds:</code></td><td>第几轮 / 还剩几轮 / 上限是谁的；由 <code>Loop</code> 每回合<b>就地刷新</b></td><td><code>CtxBuild.java:356-359</code>、<code>Loop.java:158-179</code></td></tr>
-</tbody>
-</table>
-</div>
-<p><code>bits</code> 一律问账本（<code>Acl.bitsOf</code>），基板不在这里重算任何一位；<code>rules</code> 给"此人能命中的例外条目原文"，
-省去每次翻纪律文本（<code>CtxBuild.java:295-303</code>）。同一行的 JSON 也落到 <code>Turn</code> 状态（键 <code>models</code>），
-插件用现成只读口即可读到，<b>不新增扩展点接口</b>（<code>CtxBuild.java:347-349</code>）。</p>
+<tr><td><code>time:</code></td><td>当前时间</td></tr>
+<tr><td><code>caller:</code></td><td><code>entry</code>／<code>qq</code>／<code>name</code>／<code>master</code>／<code>session</code>／<code>group</code>／<code>role</code>／<code>favor</code>（非主人）／<code>kind</code>／<code>bits</code>／<code>rules</code></td></tr>
+<tr><td><code>person:</code></td><td>六库聚合出的「正在说话的这个人」是谁（跨群同一人）；构建失败这一行就不存在</td></tr>
+<tr><td>（媒体行）</td><td>只有媒体段的消息才有</td></tr>
+<tr><td><code>napcat:</code></td><td><code>connected</code> / <code>disconnected</code></td></tr>
+<tr><td><code>models:</code></td><td>八字段模型事实（见下）</td></tr>
+<tr><td><code>tasks_running:</code></td><td>只有大于 0 才写</td></tr>
+<tr><td>（能力索引行）</td><td>「类别 → 工具[一句话]」；缺配置就没有这一行</td></tr>
+<tr><td><code>rounds:</code></td><td>第几轮 / 还剩几轮 / 上限是谁的；由 <code>Loop</code> 每回合<b>就地刷新</b>（<code>Loop.java</code>）</td></tr>
+</tbody></table></div>
+<p><code>bits</code> 一律问账本（<code>Acl.bitsOf</code>），基板不在这里重算任何一位；<code>rules</code> 给「此人能命中的例外条目原文」，省去每次翻纪律文本。同一行的 JSON 也落到 <code>Turn</code> 状态（键 <code>models</code>），插件用现成的只读口就能读到，不额外新增扩展点接口。</p>
 <h3 class="sec"><code>models:</code> 的八个字段</h3>
-<div class="code" data-lang="json">
-<div class="code-head"><span class="lang">json</span><span class="path">src\sair\v4\ctx\CtxBuild.java:327-346</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="json"><div class="code-head"><span class="lang">json</span><span class="path">src\sair\v4\ctx\CtxBuild.java</span><button class="copy" type="button">复制</button></div>
 <pre><code>models: {"self":"…","self_has_vision":true,"main":"…","main_has_vision":true,
-         "vision":"…","mode":"native","recognizer":"…","recognizer_uses":0}</code></pre>
-</div>
-<div class="tw reveal">
-<table>
-<thead><tr><th>字段</th><th>语义与取值</th><th>出处</th></tr></thead>
+         "vision":"…","mode":"native","recognizer":"…","recognizer_uses":0}</code></pre></div>
+<div class="tw reveal"><table>
+<thead><tr><th>字段</th><th>语义与取值</th></tr></thead>
 <tbody>
-<tr><td><code>self</code></td><td><b>这一回合真正在跑的模型</b>。有子 Agent 带的 model 覆盖就用它，否则是配置里的主模型</td>
-<td><code>CtxBuild.java:330-331</code>、<code>CtxBuild.java:915-923</code>、常量 <code>CtxBuild.java:82</code></td></tr>
-<tr><td><code>self_has_vision</code></td><td><b>"我能不能看图"</b>——<code>self</code> 这台模型在视觉白名单里的真值。<b>不因 <code>mediaVision=no</code> 改写成 <code>false</code></b>：那是把事实编掉</td>
-<td><code>CtxBuild.java:343-345</code>、<code>CtxBuild.java:252-254</code>、<code>CtxBuild.java:192-226</code></td></tr>
-<tr><td><code>main</code></td><td><b>配置里的主模型</b>，永远是它 —— 子 Agent 覆盖不改这一格</td>
-<td><code>CtxBuild.java:328</code>、<code>CtxBuild.java:335</code></td></tr>
-<tr><td><code>main_has_vision</code></td><td>主模型能不能看图（同一套白名单判据）</td>
-<td><code>CtxBuild.java:336</code></td></tr>
-<tr><td><code>vision</code></td><td>配置里指定的<b>视觉模型</b>名字（看图时该找谁）</td>
-<td><code>CtxBuild.java:329</code>、<code>CtxBuild.java:337</code></td></tr>
-<tr><td><code>mode</code></td><td><b>这一回合允不允许把图挂上去</b>。三取值：<code>off</code> / <code>native</code> / <code>relay</code></td>
-<td><code>CtxBuild.java:349</code>、常量 <code>CtxBuild.java:279-281</code>、算法 <code>CtxBuild.java:240-271</code></td></tr>
-<tr><td><code>recognizer</code></td><td>识图组件<b>注册的工具名</b>（约定名由外挂层声明，本文档不列出；见 <code>RecognizerState.java:41</code>）；名字不在工具面就照实答 <code>off</code> —— 编一个不存在的组件与编一个不存在的次数一样是谎报</td>
-<td><code>CtxBuild.java:344</code>、<code>RecognizerState.java:41</code>、<code>RecognizerState.java:44</code>、<code>RecognizerState.java:85-92</code></td></tr>
-<tr><td><code>recognizer_uses</code></td><td><b>该工具经工具面被调用的次数（含被拒 / 失败）</b>。计的是"她伸手去用了这个工具"这个动作本身，所以那一笔记在 <code>registry.call</code> <b>之前</b>；判它成没成要读结果正文，那是耦合，这里不读</td>
-<td><code>CtxBuild.java:345</code>、<code>RecognizerState.java:95-104</code>、<code>RecognizerState.java:111-121</code>、<code>Loop.java:278-283</code></td></tr>
-</tbody>
-</table>
-</div>
-<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\ctx\CtxBuild.java:262-270（mode 唯一算法）</span><button class="copy" type="button">复制</button></div>
+<tr><td><code>self</code></td><td><b>这一回合真正在跑的模型</b>。有子 Agent 带的 model 覆盖就用它，否则是配置里的主模型（<code>CtxBuild.java</code>）</td></tr>
+<tr><td><code>self_has_vision</code></td><td><b>「我能不能看图」</b>——<code>self</code> 这台模型在视觉白名单里的真值。<b>不因 <code>mediaVision=no</code> 改写成 <code>false</code></b>：那是把事实编掉（<code>CtxBuild.java</code>）</td></tr>
+<tr><td><code>main</code></td><td><b>配置里的主模型</b>，永远是它 —— 子 Agent 覆盖不改这一格（<code>CtxBuild.java</code>）</td></tr>
+<tr><td><code>main_has_vision</code></td><td>主模型能不能看图（同一套白名单判据）</td></tr>
+<tr><td><code>vision</code></td><td>配置里指定的<b>视觉模型</b>名字（看图时该找谁）</td></tr>
+<tr><td><code>mode</code></td><td><b>这一回合允不允许把图挂上去</b>。三取值：<code>off</code> / <code>native</code> / <code>relay</code>（<code>CtxBuild.java</code>）</td></tr>
+<tr><td><code>recognizer</code></td><td>识图组件<b>注册的工具名</b>（约定名由外挂层声明，本页不列出；见 <code>RecognizerState.java</code>）；名字不在工具面就照实答 <code>off</code> —— 编一个不存在的组件，与编一个不存在的次数一样是谎报（<code>CtxBuild.java</code>、<code>RecognizerState.java</code>）</td></tr>
+<tr><td><code>recognizer_uses</code></td><td><b>该工具经工具面被调用的次数（含被拒与失败）</b>。计的是「她伸手去用了这个工具」这个动作本身，所以那一笔记在 <code>registry.call</code> <b>之前</b>；判它成没成要读结果正文，那是耦合，这里不读（<code>CtxBuild.java</code>、<code>RecognizerState.java</code>、<code>Loop.java</code>）</td></tr>
+</tbody></table></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\ctx\CtxBuild.java（mode 唯一算法）</span><button class="copy" type="button">复制</button></div>
 <pre><code>mediaVision = no/off/false -> "off"（一律不看，即使模型能看）
               yes/on/true  -> "native"（主人强制认为能看）
               relay（look 是它的别名）-> "relay"（恒中转：所有图都不再原生挂进主请求，只能过一次看图手）
               auto（以及认不出的第 4 种值，按 auto 处理）-> 能看 "native"，否则 "relay"
-// off 不等于"她不能看"：self_has_vision 仍报白名单真值 —— "我能不能"与"允不允许"是两件事</code></pre>
-</div>
-<p><b>两处都写 <code>models_self</code> 是刻意的</b>：<code>Agent.execSub</code> 那处保证"事实块装配之前"就已写好（否则子 Agent 会读到主模型的 <code>main_has_vision</code>）；
-<code>Loop.run</code> 那处保证任何"先 setModel 再 run"的路径也不漏。同一个键、同一个值 ⇒ 幂等（<code>Loop.java:80-89</code>、<code>Loop.java:194-197</code>）。
-<b>计数是内存计数</b>：<code>recognizer_uses</code> 在<b>重启后从 0 重计</b>，唯一会归零的两个时点 = 跨日与重启；不落盘、不读插件的私有 kv 键
-（<code>RecognizerState.java:25-27</code>）。工具名不在面、注册表为 <code>null</code>、取不到"今天"、并发自增 —— 全部退化成"没有这个组件"，
-<b>任何路径都不许抛</b>（<code>RecognizerState.java:28-30</code>）。探测口用<b>既有只读口</b>拼出：名字在 <code>Registry.get</code> 里活着 = 在工具面（<code>RecognizerState.java:158-169</code>）。</p>
+// off 不等于「她不能看」：self_has_vision 仍报白名单真值 —— 「我能不能」与「允不允许」是两件事</code></pre></div>
+<p><b>两处都写 <code>models_self</code> 是刻意的</b>：<code>Agent.execSub</code> 那处保证「事实块装配之前」就已经写好（否则子 Agent 会读到主模型的 <code>main_has_vision</code>）；<code>Loop.run</code> 那处保证任何「先 setModel 再 run」的路径也不漏。同一个键、同一个值 ⇒ 幂等（<code>Loop.java</code>）。</p>
+<p><b>计数是内存计数</b>：<code>recognizer_uses</code> 在<b>重启后从 0 重计</b>，会归零的时点只有跨日与重启；它不落盘、也不读插件的私有 kv 键（<code>RecognizerState.java</code>）。工具名不在面、注册表为 <code>null</code>、取不到「今天」、并发自增 —— 全部退化成「没有这个组件」，任何路径都不往外抛（<code>RecognizerState.java</code>）。探测口用<b>既有只读口</b>拼出来：名字在 <code>Registry.get</code> 里活着 = 在工具面（<code>RecognizerState.java</code>）。</p>
 <h3 class="sec">四个注入槽位</h3>
-<div class="tw reveal">
-<table>
+<div class="tw reveal"><table>
 <thead><tr><th>槽位</th><th>拼到哪里</th><th>常量</th></tr></thead>
 <tbody>
-<tr><td><code>system</code></td><td>追加进系统提示词（影响角色/规则）</td><td><code>Inject.java:30</code></td></tr>
-<tr><td><code>context</code></td><td>追加进每轮动态上下文（影响本轮事实）</td><td><code>Inject.java:31</code></td></tr>
-<tr><td><code>tool</code></td><td>补充工具描述（影响模型怎么用某个工具）</td><td><code>Inject.java:32</code></td></tr>
-<tr><td><code>arg</code></td><td>拼在用户消息之前（一次性的强提示）</td><td><code>Inject.java:33</code></td></tr>
-</tbody>
-</table>
-</div>
-<p><b>作用域</b>：<code>*</code>（<code>GLOBAL</code>，<code>Inject.java:29</code>）对所有会话生效，其余键是会话键（<code>group:123</code> / <code>qq:456</code> / <code>console</code>）；
-渲染时<b>先全局后会话</b>，同 key 会话覆盖全局（<code>Inject.java:89-96</code>）。
-<b>上限保护</b>：每槽最多 64 条（<code>MAX_PER_SLOT</code>，<code>Inject.java:36</code>），超出按 <code>ts</code> 丢最旧的（<code>Inject.java:64-77</code>）。</p>
+<tr><td><code>system</code></td><td>追加进系统提示词（影响角色与规则）</td><td><code>Inject.java</code></td></tr>
+<tr><td><code>context</code></td><td>追加进每轮动态上下文（影响本轮事实）</td><td><code>Inject.java</code></td></tr>
+<tr><td><code>tool</code></td><td>补充工具描述（影响模型怎么用某个工具）</td><td><code>Inject.java</code></td></tr>
+<tr><td><code>arg</code></td><td>拼在用户消息之前（一次性的强提示）</td><td><code>Inject.java</code></td></tr>
+</tbody></table></div>
+<p><b>作用域</b>：<code>*</code>（<code>GLOBAL</code>）对所有会话生效，其余键是会话键（<code>group:123</code> / <code>qq:456</code> / <code>console</code>）；渲染时<b>先全局后会话</b>，同 key 时会话覆盖全局（<code>Inject.java</code>）。<b>上限保护</b>：每槽最多 64 条（<code>MAX_PER_SLOT</code>），超出按 <code>ts</code> 丢最旧的（<code>Inject.java</code>）。</p>
 <h3 class="sec">历史：两把尺子 + 一次去重</h3>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\ctx\CtxBuild.java:766-778</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\ctx\CtxBuild.java（appendHistory）</span><button class="copy" type="button">复制</button></div>
 <pre><code>appendHistory(turn):
   rows = store.recentDialog(session, historyLimit())   // 最近 N 条，时间升序
   rows = trimHistory(rows, historyMaxChars())          // 按字符预算从最旧的**整条**丢
   rows = dropSelfDup(rows)                             // 去头正文相同的两条只留带头部的
-  只收 role 是 user / assistant 且正文非空的行</code></pre>
-</div>
-<p><code>historyLimit</code> 默认 60 条（<code>CtxBuild.java:273</code>、<code>Conf.java:88</code>）；<code>historyMaxChars</code> 默认 24000 字符，
-<code>&le;0</code> = 不限（<code>CtxBuild.java:276</code>、<code>Conf.java:93</code>）。裁剪策略是从尾往前累加、超预算就 <code>keepFrom = i+1</code>，
-<b>整条丢、不切半条</b>（半个历史比没有历史更容易把模型带偏，<code>CtxBuild.java:844-864</code>）。
-去重规则只有一句：<b>去头正文相同、且至少一条是自我标记行 ⇒ 留带头部的那条</b>；不修改入参（<code>trimHistory</code> 可能返回原列表的视图）
-（<code>CtxBuild.java:780-824</code>）；比较串是 <code>SelfEcho.withoutHead(oneLine(content))</code>（<code>CtxBuild.java:836-842</code>）。</p>
+  只收 role 是 user / assistant 且正文非空的行</code></pre></div>
+<p><code>historyLimit</code> 默认 60 条（<code>CtxBuild.java</code>、<code>Conf.java</code>）；<code>historyMaxChars</code> 默认 24000 字符，<code>&le;0</code> = 不限。裁剪策略是从尾往前累加、超预算就 <code>keepFrom = i+1</code>，<b>整条丢、不切半条</b>（半个历史比没有历史更容易把模型带偏）。去重规则只有一句：<b>去头正文相同、且至少一条是自我标记行 ⇒ 留带头部的那条</b>；它不改入参（<code>trimHistory</code> 可能返回原列表的视图），比较串是 <code>SelfEcho.withoutHead(oneLine(content))</code>（<code>CtxBuild.java</code>）。</p>
 <h3 class="sec">本轮 user 消息：三道闸才挂图</h3>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\ctx\CtxBuild.java:866-913</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\ctx\CtxBuild.java（user）</span><button class="copy" type="button">复制</button></div>
 <pre><code>user(turn, text):
   body = arg 槽位注入（有就拼在前面）+ text
   媒体事实里一张 image 都没有 -> 直接普通 user 消息（不产出 attach 行）
@@ -934,43 +622,32 @@ assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没�
   未过闸 -> 补一行 attach:{"state":"none","why":…}，然后退回普通 user 消息
   过闸   -> 记 ST_ATTACH 事实（由 Loop 在第 1 次请求返回后追加），content 变数组
 
-// 降级绝不静默：本来该有图却一张都没挂上时必须**现在**补那一行 ——
+// 降级不静默：本来该有图却一张都没挂上时，要**现在**补那一行 ——
 // 不能等 Loop 第 1 轮跑完：那一轮要是直接出终稿，这一行就永远送不到她眼前，
-// 她就会凭空描述图里有什么（比"没有图"更糟）</code></pre>
-</div>
-<p>挂上了的那一行由 <code>Loop</code> 追加且只做一次（<code>round == 0</code>）：<code>note</code> 是过去式（"图已在本回合第 1 次请求里看过"），
-第 1 次请求真的返回之后才成立；同一时刻还<b>把图从 messages 里剥掉</b> —— 主循环每个回合都重发整个 messages，不剥就是每个回合重发一遍图，
-成本随轮数倍增而行为上看不出来（<code>Loop.java:237-250</code>）。</p>
+// 她就会凭空描述图里有什么（比「没有图」更糟）</code></pre></div>
+<p>挂上了的那一行由 <code>Loop</code> 追加且只做一次（<code>round == 0</code>）：<code>note</code> 是过去式（「图已在本回合第 1 次请求里看过」），第 1 次请求真的返回之后才成立；同一时刻还<b>把图从 messages 里剥掉</b> —— 主循环每个回合都重发整个 messages，不剥就是每个回合重发一遍图，成本随轮数倍增，而行为上完全看不出来（<code>Loop.java</code>）。</p>
 <h3 class="sec">相关小件</h3>
->
+<p>回合材料装在 <code>ctx\Turn.java</code> 里：<code>messages</code>、<code>facts</code>、工具结果、<code>lastText</code>、<code>stopped</code> 都挂在它上面；<code>Ctx.java</code> 负责线程内的调用者绑定，<code>ctx\ChatWindow.java</code> 存群窗口快照（取最近几条由 <code>chatWindowSize</code> 决定，默认 30）。拼装顺序由 <code>CtxBuild</code> 定，这几个载体只负责装材料，不参与顺序决策。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="agent-impl">
-<header class="chapter-head reveal">
-<span class="chapter-tag">10 / 回合</span>
-<h2>Agent 与回合</h2>
-<p class="chapter-desc"><code>Agent</code> 是门面（建回合、派子 Agent、停止、台账），<code>Loop</code> 是主循环（跑到模型不再要工具为止）。</p>
-</header>
+<header class="chapter-head reveal"><span class="chapter-tag">10 / 回合</span><h2>Agent 与回合</h2><p class="chapter-desc"><code>Agent</code> 是门面（建回合、派子 Agent、停止、台账），<code>Loop</code> 是主循环（跑到模型不再要工具为止）。</p></header>
 <h3 class="sec">Agent 的出口面</h3>
-<div class="tw reveal">
-<table>
-<thead><tr><th>方法</th><th>做什么</th><th>出处</th></tr></thead>
+<div class="tw reveal"><table>
+<thead><tr><th>方法</th><th>做什么</th></tr></thead>
 <tbody>
-<tr><td><code>ask(caller, sink, text)</code></td><td>建 <code>Turn</code>、放群窗口快照、落库、走 <code>run</code>；两个重载（带 <code>mediaFact</code>）</td><td><code>Agent.java:120-133</code></td></tr>
-<tr><td><code>run(turn, onlyTools, model, noSpeak)</code></td><td><code>new Loop</code> → <code>loop.run(turn, onlyTools)</code>，前后各挂一对生命周期钩子</td><td><code>Agent.java:205-233</code>、<code>Agent.java:605-633</code></td></tr>
-<tr><td><code>submit(session, high, runnable, notice)</code></td><td>排进分道队列；调度器没装配起来时走降级路径，但<b>仍然不在这里直接跑回合</b></td><td><code>Agent.java:83-92</code>、<code>QqGateway.java:840</code></td></tr>
-<tr><td><code>spawn(…)</code></td><td>六个重载：同步等结果或异步跑；可带 brief、model、reply、指定投递会话</td><td><code>Agent.java:282-320</code>、<code>Boot.java:1373-1417</code></td></tr>
-<tr><td><code>execSub(…)</code></td><td>子 Agent 的执行体：写 <code>subagent</code> 标记、写 <code>models_self</code>、收窄工具表、跑 <code>Loop</code></td><td><code>Agent.java:432-492</code></td></tr>
-<tr><td><code>stop()</code> / <code>stop(session, master)</code></td><td>全停 / 按会话停。在跑的 <code>Loop</code> 全在 <code>Set&lt;Loop&gt; active</code> 里，逐个 <code>stop()</code></td><td><code>Agent.java:234-261</code>、<code>Agent.java:45</code></td></tr>
-<tr><td><code>wake(caller, sink, note)</code></td><td>定时唤醒用：只给"叫醒类"工具（<code>WAKE_TOOLS</code>），不与正常回合抢全部能力</td><td><code>Agent.java:492-528</code></td></tr>
-<tr><td><code>tasks(status, owner)</code></td><td>子 Agent 台账（<code>task</code> 表）</td><td><code>Agent.java:646-652</code></td></tr>
-</tbody>
-</table>
-</div>
-<p>子 Agent 计数是原子量 <code>AtomicInteger subs</code>（<code>Agent.java:49</code>），经 <code>agent.running()</code> 供事实块 <code>tasks_running</code> 读取（<code>Boot.java:560</code>）。</p>
+<tr><td><code>ask(caller, sink, text)</code></td><td>建 <code>Turn</code>、放群窗口快照、落库、走 <code>run</code>；两个重载（带 <code>mediaFact</code>）（<code>Agent.java</code>）</td></tr>
+<tr><td><code>run(turn, onlyTools, model, noSpeak)</code></td><td><code>new Loop</code> → <code>loop.run(turn, onlyTools)</code>，前后各挂一对生命周期钩子（<code>Agent.java</code>）</td></tr>
+<tr><td><code>submit(session, high, runnable, notice)</code></td><td>排进分道队列；调度器没装配起来时走降级路径，但<b>仍然不在这里直接跑回合</b>（<code>Agent.java</code>、<code>QqGateway.java</code>）</td></tr>
+<tr><td><code>spawn(…)</code></td><td>六个重载：同步等结果或异步跑；可带 brief、model、reply、指定投递会话（<code>Agent.java</code>）</td></tr>
+<tr><td><code>execSub(…)</code></td><td>子 Agent 的执行体：写 <code>subagent</code> 标记、写 <code>models_self</code>、收窄工具表、跑 <code>Loop</code>（<code>Agent.java</code>）</td></tr>
+<tr><td><code>stop()</code> / <code>stop(session, master)</code></td><td>全停 / 按会话停。在跑的 <code>Loop</code> 全在 <code>Set&lt;Loop&gt; active</code> 里，逐个 <code>stop()</code>（<code>Agent.java</code>）</td></tr>
+<tr><td><code>wake(caller, sink, note)</code></td><td>定时唤醒用：只给「叫醒类」工具（<code>WAKE_TOOLS</code>），不与正常回合抢全部能力（<code>Agent.java</code>）</td></tr>
+<tr><td><code>tasks(status, owner)</code></td><td>子 Agent 台账（<code>task</code> 表）（<code>Agent.java</code>）</td></tr>
+</tbody></table></div>
+<p>子 Agent 计数是原子量 <code>AtomicInteger subs</code>（<code>Agent.java</code>），经 <code>agent.running()</code> 供事实块 <code>tasks_running</code> 读取。</p>
 <h3 class="sec">Loop 主循环</h3>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\agent\Loop.java:182-312</span><button class="copy" type="button">复制</button></div>
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\agent\Loop.java（run）</span><button class="copy" type="button">复制</button></div>
 <pre><code>run(turn, onlyTools):
   maxRounds = maxRounds(conf, turn)     // 主/子分开计次，每回合热读
   onlyTools 为空 且 是子 Agent -> registry.visibleNames(caller) 并**移除 agent**
@@ -992,199 +669,140 @@ assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没�
       note(name, result); stop = failStop(name)
     stop != null -> oc.error = stop; oc.text = lastText; break
     injectFailFact(turn)
-    round == maxRounds-1 -> oc.text = lastText; oc.error = ""</code></pre>
-</div>
-<div class="tw reveal">
-<table>
-<thead><tr><th>机制</th><th>口径</th><th>出处</th></tr></thead>
+    round == maxRounds-1 -> oc.text = lastText; oc.error = ""</code></pre></div>
+<div class="tw reveal"><table>
+<thead><tr><th>机制</th><th>口径</th></tr></thead>
 <tbody>
-<tr><td>轮数上限（唯一算法）</td><td>主 Agent 用 <code>agentMaxRounds</code>、子 Agent 用 <code>subagentMaxRounds</code>，<b>两个键分开计次</b>，每回合热读（改完不用重启）</td><td><code>Loop.java:108-123</code></td></tr>
-<tr><td>判据只有一条</td><td><code>Turn.isSubagent()</code> —— 不靠插件或提示词自称</td><td><code>Loop.java:111-113</code>、<code>Turn.java:100-109</code></td></tr>
-<tr><td>轮数事实与掐停同源</td><td>事实块那一行 <code>rounds:</code> 与实际掐停走<b>同一个静态函数</b>，所以"她看到的上限"与"实际掐停她的那一轮"不可能对不上</td><td><code>Loop.java:115-117</code>、<code>Loop.java:135-142</code>、<code>Boot.java:578-583</code></td></tr>
-<tr><td>刷新而非追加</td><td><code>refreshRoundsFact</code> 就地替换那一行；找不到就追加一条 system —— 避免 30 个回合攒 30 行</td><td><code>Loop.java:147-179</code></td></tr>
-<tr><td>子 Agent 拿不到 <code>agent</code></td><td>显式名单那条路在 <code>Agent.subTools</code> 剔过；<code>Loop</code> 这里挡住"空名单 = 继承全部工具"那条路</td><td><code>Loop.java:202-211</code></td></tr>
-<tr><td>说话类工具</td><td>哪些工具算"说话类"由外挂层声明（本文档不列名单）；<code>setNoSpeak(true)</code> 的收尾回合只记账、不发言</td><td><code>Loop.java:314-324</code>、<code>Loop.java:345-351</code></td></tr>
-<tr><td>"已经说过话"要认三种拒绝形态</td><td><code>deniedResult</code> 同时认 <code>[auth] 权限阻断</code> 开头、正文含 <code>[权限阻断] </code>、<code>缺 R/W/X 位 —— </code> 开头。只认旧串时 ACL 面的拒绝会被当成"说过话了"，她便不再补一句正确的回复</td><td><code>Loop.java:326-342</code></td></tr>
-</tbody>
-</table>
-</div>
+<tr><td>轮数上限（唯一算法）</td><td>主 Agent 用 <code>agentMaxRounds</code>(30)、子 Agent 用 <code>subagentMaxRounds</code>(40)，<b>两个键分开计次</b>，每回合热读（改完不用重启）（<code>Loop.java</code>）</td></tr>
+<tr><td>判据只有一条</td><td><code>Turn.isSubagent()</code> —— 不靠插件或提示词自称（<code>Loop.java</code>、<code>Turn.java</code>）</td></tr>
+<tr><td>轮数事实与掐停同源</td><td>事实块那一行 <code>rounds:</code> 与实际掐停走<b>同一个静态函数</b>，所以「她看到的上限」与「实际掐停她的那一轮」不会对不上（<code>Loop.java</code>）</td></tr>
+<tr><td>刷新而非追加</td><td><code>refreshRoundsFact</code> 就地替换那一行；找不到就追加一条 system —— 避免回合多了在上下文里堆一长串行（<code>Loop.java</code>）</td></tr>
+<tr><td>子 Agent 拿不到 <code>agent</code></td><td>显式名单那条路在 <code>Agent.subTools</code> 剔过；<code>Loop</code> 这里挡住「空名单 = 继承全部工具」那条路（<code>Loop.java</code>）</td></tr>
+<tr><td>说话类工具</td><td>哪些工具算「说话类」由外挂层声明（本页不列名单）；<code>setNoSpeak(true)</code> 的收尾回合只记账、不发言（<code>Loop.java</code>）</td></tr>
+<tr><td>「已经说过话」要认三种拒绝形态</td><td><code>deniedResult</code> 同时认 <code>[auth] 权限阻断</code> 开头、正文含 <code>[权限阻断] </code>、<code>缺 R/W/X 位 —— </code> 开头。少认一种，ACL 面的拒绝就会被当成「说过话了」，她便不再补一句正确的回复（<code>Loop.java</code>）</td></tr>
+</tbody></table></div>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="hot">
-<header class="chapter-head reveal">
-<span class="chapter-tag">11 / 装载机制</span>
-<h2>外挂层加载机制</h2>
-<p class="chapter-desc">目录扫描 → front matter 解析 → 内存编译 → 每插件一个类加载器 → 注册工具 / 声明表 / 挂扩展点。</p>
-</header>
-<p class="t-cap">外挂层（技能）不在本文档范围内。</p>
+<header class="chapter-head reveal"><span class="chapter-tag">11 / 装载机制</span><h2>外挂层加载机制</h2><p class="chapter-desc">目录扫描 → front matter 解析 → 内存编译 → 每插件一个类加载器 → 注册工具 / 声明表 / 挂扩展点。</p></header>
+<p class="t-cap">外挂层里具体有哪些单元不在本页；这里只讲装载机制本身。</p>
 <h3 class="sec">装载管线</h3>
-<div class="code" data-lang="text">
-<div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\Boot.java:716-739（调用点）</span><button class="copy" type="button">复制</button></div>
-<pre><code>扫描（Boot.java:730 同步 / Boot.java:971 后台线程）
+<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\Boot.java（扫描调用点）</span><button class="copy" type="button">复制</button></div>
+<pre><code>扫描（装配第⑯步同步走，或按后台装载开关起后台线程）
   for 每个插件目录:
       loadOne(dir, name):
         ① 解析 md 的 front matter        // hot\SkMd.java
         ② 校验声明名与文件夹名一致        // 不一致 -> 该插件停在 ERROR 态
-        ③ 编译目录下的 *.java 为**内存字节码**   // hot\SkCompile.java:41
+        ③ 编译目录下的 *.java 为**内存里编译好的类**   // hot\SkCompile.java
         ④ 名字规范化（不合规范就改名）    // hot\ToolNames.java
         ⑤ 声明自己的表                   // 声明接口在契约包
         ⑥ 注册工具 + 挂钩子 + 整体注册扩展点
-  末尾: createLibTables()                  // Boot.java:737、Boot.java:915</code></pre>
-</div>
-<div class="tw reveal">
-<table>
-<thead><tr><th>组件</th><th>机制</th><th>出处</th></tr></thead>
+  末尾: createLibTables()                  // 把新声明的表建出来</code></pre></div>
+<div class="tw reveal"><table>
+<thead><tr><th>组件</th><th>机制</th></tr></thead>
 <tbody>
-<tr><td>内存编译</td><td><code>ToolProvider.getSystemJavaCompiler()</code> + <code>DiagnosticCollector</code>；classpath 由 <code>substrateClasspath()</code> 给出（宿主进程 + 本插件字节码位置 + 框架与其依赖库）。<b>插件目录不是 classpath</b></td>
-<td><code>hot\SkCompile.java:41-62</code>、<code>SkCompile.java:80-101</code></td></tr>
-<tr><td>内存输出</td><td><code>ForwardingJavaFileManager</code> + <code>SimpleJavaFileObject</code> 两个内部类，把 <code>.class</code> 收进内存而不落盘</td><td><code>SkCompile.java:190-219</code></td></tr>
-<tr><td>类加载</td><td><b>每个插件一个自己的类加载器</b> —— 不同插件的顶层类可以同名，互不冲突</td><td><code>hot\SkClassLoader.java</code>（<code>findClass</code> 从 <code>Map&lt;String,byte[]&gt;</code> 取字节后 <code>defineClass</code>）</td></tr>
-<tr><td>classpath 缓存</td><td>一次运行内不变；<code>refreshClasspath()</code> 可重算</td><td><code>SkCompile.java:135-139</code></td></tr>
-<tr><td>名字规范化</td><td>注册名与声明名分离，映射留着；不合规范时由 <code>hot\ToolNames.java</code> 给出合规名</td><td><code>Skills.java:287-291</code></td></tr>
-<tr><td>动态执行</td><td><code>hot\DynCode.java</code>：运行期把一段源码编译并执行，装配第⑦步就 new 好</td><td><code>hot\DynCode.java</code>、<code>Boot.java:490</code></td></tr>
-<tr><td>钩子声明解析</td><td>既支持 YAML 数组 <code>hooks: [on_timer, on_message]</code>，也支持逗号/空格分隔的字符串</td><td><code>Skills.java:570</code></td></tr>
-<tr><td>钩子执行池</td><td>钩子仍然"同步"跑（要等 <code>_handled</code> 才知道结果），但并发线程数不再随消息数涨</td><td><code>Boot.java:635-637</code>、<code>Pool.java:110-165</code></td></tr>
-<tr><td>库声明</td><td>装载期由实现了声明接口的顶层类登记自己的表；<b>装载器对每个顶层类都问一次</b></td><td><code>Skills.java:378-410</code>、<code>Boot.java:625-632</code></td></tr>
-<tr><td>卸载</td><td>插件没了，它挂的工具 + 钩子 + 扩展点<b>一起摘</b></td><td><code>Skills.java:175</code>、<code>Skills.java:536</code>、<code>Registry.java:130-135</code></td></tr>
-</tbody>
-</table>
-</div>
+<tr><td>内存编译</td><td><code>ToolProvider.getSystemJavaCompiler()</code> + <code>DiagnosticCollector</code>；classpath 由 <code>substrateClasspath()</code> 给出（宿主进程 + 本插件编译产物的位置 + 框架与其依赖库）。<b>插件目录不是 classpath</b>（<code>hot\SkCompile.java</code>）</td></tr>
+<tr><td>内存输出</td><td><code>ForwardingJavaFileManager</code> + <code>SimpleJavaFileObject</code> 两个内部类，把 <code>.class</code> 收进内存而不落盘（<code>SkCompile.java</code>）</td></tr>
+<tr><td>类加载</td><td><b>每个插件一个自己的类加载器</b> —— 不同插件的顶层类可以同名，互不冲突（<code>hot\SkClassLoader.java</code>：<code>findClass</code> 从 <code>Map&lt;String,byte[]&gt;</code> 取编译结果后 <code>defineClass</code>）</td></tr>
+<tr><td>classpath 缓存</td><td>一次运行内不变；<code>refreshClasspath()</code> 可以重算（<code>SkCompile.java</code>）</td></tr>
+<tr><td>名字规范化</td><td>注册名与声明名分离，映射留着；不合规范时由 <code>hot\ToolNames.java</code> 给出合规名（<code>Skills.java</code>）</td></tr>
+<tr><td>动态执行</td><td><code>hot\DynCode.java</code>：运行期把一段源码编译并执行，装配第⑦步就 new 好</td></tr>
+<tr><td>钩子声明解析</td><td>既支持 YAML 数组 <code>hooks: [on_timer, on_message]</code>，也支持逗号或空格分隔的字符串（<code>Skills.java</code>）</td></tr>
+<tr><td>钩子执行池</td><td>钩子仍然「同步」跑（要等 <code>_handled</code> 才知道结果），但并发线程数不再随消息数涨（<code>Pool.java</code>）</td></tr>
+<tr><td>库声明</td><td>装载期由实现了声明接口的顶层类登记自己的表；<b>装载器对每个顶层类都问一次</b>（<code>Skills.java</code>）</td></tr>
+<tr><td>卸载</td><td>插件没了，它挂的工具 + 钩子 + 扩展点<b>一起摘</b>（<code>Skills.java</code>、<code>Registry.java</code>）</td></tr>
+</tbody></table></div>
 <h3 class="sec">扩展点注册表：四种形状 + 两道上限</h3>
-<p><code>ext\ExtRegistry.java</code> 是"基板⑦"，装配第⑨步建好（<code>Boot.java:587-597</code>）。四种契约形状各有一张按 <code>order, 名字</code> 排序的表：</p>
->
-<p><b>两道上限</b>：单次扩展点调用超时 <code>extTimeoutMs</code> 默认 200ms（<code>&le;0</code> = 不超时，超时即放弃该次调用）（<code>ExtRegistry.java:248-252</code>、<code>Conf.java:215</code>）；
-上下文块全局字符预算 <code>ctxBudgetChars</code> 默认 6000（超预算从尾部丢块并计数 <code>budgetDrops</code>）（<code>ExtRegistry.java:257-262</code>、<code>ExtRegistry.java:481-496</code>、<code>Conf.java:223</code>）。
-<b>总开关</b> <code>on() = enabled() &amp;&amp; any()</code>：没挂任何 provider 时连 provider 都不会被调用，一个字节都不多（<code>ExtRegistry.java:270</code>、<code>CtxBuild.java:591-601</code>）。
-故障隔离两层：扩展点自己做了异常隔离，调用方再兜一层"连注册表都炸了"，同样只丢外挂块（<code>CtxBuild.java:594-600</code>、<code>QqGateway.java:855-860</code>）。</p>
+<p><code>ext\ExtRegistry.java</code> 是「基板⑦」，装配第⑨步建好。四种契约形状各有一张按 <code>order, 名字</code> 排序的表：<code>ContextProvider</code>（<code>ext\ContextProvider.java</code>）、<code>OutboundStage</code>（<code>ext\OutboundStage.java</code>）、<code>LifecycleHook</code>（<code>ext\LifecycleHook.java</code>）、<code>TriggerVoter</code>（<code>ext\TriggerVoter.java</code>）；每个扩展点具体能做什么、不能做什么，见 <a href="#index">扩展点与契约面</a>。</p>
+<p><b>两道上限</b>：单次扩展点调用超时 <code>extTimeoutMs</code> 默认 200ms（<code>&le;0</code> = 不超时；超时即放弃该次调用）（<code>ExtRegistry.java</code>、<code>Conf.java</code>）；上下文块还有全局字符预算 <code>ctxBudgetChars</code> 默认 6000，超预算从尾部丢块并计数 <code>budgetDrops</code>（<code>ExtRegistry.java</code>、<code>Conf.java</code>）。</p>
+<p><b>总开关</b> <code>on() = enabled() &amp;&amp; any()</code>：没挂任何 provider 时，连 provider 都不会被调用，开销一点都不多（<code>ExtRegistry.java</code>、<code>CtxBuild.java</code>）。故障隔离两层：扩展点自己做了异常隔离，调用方再兜一层「连注册表都炸了」，同样只丢外挂块（<code>CtxBuild.java</code>、<code>QqGateway.java</code>）。</p>
 <h3 class="sec">契约形状（只有这些，且都是只读面）</h3>
-<div class="tw reveal">
-<table>
+<div class="tw reveal"><table>
 <thead><tr><th>形状</th><th>要点</th></tr></thead>
 <tbody>
-<tr><td>入口接口 <code>call(...)</code></td><td>被识别为工具入口的类；返回值可以是 String / Map / JsonObject / List / null。也支持反射回退：有 <code>airun(...)</code> 方法的类也能被调用，便于快速写小件不必写 import</td></tr>
-<tr><td>装载期声明 <code>declare(Libs)</code></td><td>默认空实现；时机在<b>实例化入口类之后、注册工具之前</b>（表必须早于用它的工具存在）。这里给的是<b>注册表</b>而不是宿主观图 —— 装载期没有对话</td></tr>
-<tr><td>宿主 <code>Host</code></td><td>27,005 字节；一次调用期间的唯一能力面，提供工具调用、发言、派子 Agent、注入、向 SFW 发命令等，<b>改不动基板的任何判定</b></td></tr>
+<tr><td>入口接口 <code>call(...)</code></td><td>被识别为工具入口的类；返回值可以是 String / Map / JsonObject / List / null。也支持反射回退：有 <code>airun(...)</code> 方法的类同样能被调用，写小件时省掉一批 import</td></tr>
+<tr><td>装载期声明 <code>declare(Libs)</code></td><td>默认空实现；时机在<b>实例化入口类之后、注册工具之前</b>（表要早于用它的工具存在）。这里给的是<b>注册表</b>，不是宿主观图 —— 装载期没有对话</td></tr>
+<tr><td>宿主 <code>Host</code></td><td>一次调用期间的唯一能力面，提供工具调用、发言、派子 Agent、注入、向 SFW 发命令等，<b>改不动基板的任何判定</b></td></tr>
 <tr><td><code>Args</code> / <code>ConfView</code> / <code>FavorView</code></td><td>参数、配置、好感度的只读视图（好感度不参与权限判定，见 <a href="#auth-impl">#auth-impl</a>）</td></tr>
-<tr><td>工具视图 <code>ToolView</code></td><td><code>getView(name)</code> 拿到的是<b>去掉实现</b>的副本（<code>Registry.java:141-144</code>）</td></tr>
+<tr><td>工具视图 <code>ToolView</code></td><td><code>getView(name)</code> 拿到的是<b>去掉实现</b>的副本（<code>Registry.java</code>）</td></tr>
 <tr><td>钩子标记 <code>Hooked</code></td><td>声明实现了哪些钩子，被装载器按接口自动识别</td></tr>
-</tbody>
-</table>
-</div>
-<p><b>库注册表</b>：<code>store\Libs.java:22</code> 定形、<code>store\LibRegistry.java</code> 实现；装配第③步建好后<b>同一份对象</b>交给 <code>Store</code>、<code>Db</code> 与装载器（<code>Boot.java:439-441</code>、<code>:627</code>、<code>Db.java:81</code>），所以声明出来的表<b>立刻</b>进白名单与清单。具体有哪些插件、用途、参数、工具名、钩子名单都不在本页范围内 —— 见 <a href="capabilities.html">能力</a> 与 <a href="files.html#packages">文件</a>。</p>
+</tbody></table></div>
+<p><b>库注册表</b>：<code>store\Libs.java</code> 定形、<code>store\LibRegistry.java</code> 实现；装配第③步建好之后，<b>同一份对象</b>交给 <code>Store</code>、<code>Db</code> 与装载器（<code>Boot.java</code>、<code>Db.java</code>），所以声明出来的表<b>立刻</b>进白名单与清单。具体有哪些插件、用途、参数、工具名、钩子名单都不在本页范围内 —— 见 <a href="capabilities.html">能力</a> 与 <a href="files.html#packages">文件</a>。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="term-impl">
-<header class="chapter-head reveal">
-<span class="chapter-tag">12 / 控制台与界面</span>
-<h2>控制台与界面</h2>
-<p class="chapter-desc">命令面、流式捕获环形缓冲、四种输出端点、面板的 EDT 挂载规则。</p>
-</header>
+<header class="chapter-head reveal"><span class="chapter-tag">12 / 控制台与界面</span><h2>控制台与界面</h2><p class="chapter-desc">命令面、流式捕获环形缓冲、四种输出端点、面板的 EDT 挂载规则。</p></header>
 <h3 class="sec">命令面：一个入口</h3>
-<p><code>term\Cmd.java</code> 的 <code>route(func, args)</code>（<code>Cmd.java:110</code>）是唯一入口，由 <code>V4Activity.main(funcName, args)</code>（<code>V4Activity.java:104</code>）转发。
-<code>V4Activity</code> 只搭"壳"（<code>Boot</code> + <code>Cmd</code>）并起一次装配线程，立即返回；"壳已搭好"的判据是 <code>cmd != null</code> 而不是 <code>boot != null</code> ——
-装配中途失败时 <code>boot</code> 可能已存在，但命令表还没建好，那种状态下必须继续把命令表建出来（<code>V4Activity.java:163-164</code>）。</p>
-<div class="tw reveal">
-<table>
-<thead><tr><th>内部方法</th><th>职责</th><th>出处</th></tr></thead>
+<p><code>term\Cmd.java</code> 的 <code>route(func, args)</code> 是唯一入口，由 <code>V4Activity.main(funcName, args)</code> 转发。<code>V4Activity</code> 只搭「壳」（<code>Boot</code> + <code>Cmd</code>）并起一次装配线程，立即返回；「壳已搭好」的判据是 <code>cmd != null</code> 而不是 <code>boot != null</code> —— 装配中途失败时 <code>boot</code> 可能已经存在，但命令表还没建好，那种状态下继续把命令表建出来，控制台才可用（<code>V4Activity.java</code>）。</p>
+<div class="tw reveal"><table>
+<thead><tr><th>内部方法</th><th>职责</th></tr></thead>
 <tbody>
-<tr><td><code>status()</code> / <code>pendingLine()</code></td><td>装配状态与各面计数 / 加载中的排队提示</td><td><code>Cmd.java:353</code>、<code>Cmd.java:406</code></td></tr>
-<tr><td><code>chat(text)</code></td><td>本地对话：要一个 <code>Future</code> 才能等回合结束，所以走 <code>Boot.turns</code> 那条单线程队列</td><td><code>Cmd.java:490</code></td></tr>
-<tr><td><code>tools(a)</code></td><td>工具清单（带"该调用者在这把工具上的有效位"）</td><td><code>Cmd.java:440</code>、<code>Registry.java:426-436</code></td></tr>
-<tr><td><code>startCmd</code> / <code>restartCmd</code></td><td>起基板 / 重启（<code>Life</code> 接口交给壳实现）</td><td><code>Cmd.java:238</code>、<code>Cmd.java:289</code></td></tr>
-<tr><td><code>config(a)</code> / <code>aclCmd()</code></td><td>配置读写（敏感值掩码打印）与账本操作</td><td><code>Cmd.java:768</code>、<code>Cmd.java:701</code>、<code>Cmd.java:872-898</code></td></tr>
-<tr><td><code>caller()</code></td><td>控制台命令的主语一律是 MASTER</td><td><code>Cmd.java:461</code></td></tr>
-</tbody>
-</table>
-</div>
-<p><b>为什么控制台单开一条队列</b>：本地 <code>chat</code> 需要一个 <code>Future</code> 才能等回合结束，它走 <code>Boot.turns</code>（单线程 + 64 槽有界队列）；
-QQ 入站 / 闹钟 / 异步子 Agent 走 <code>Lanes</code>。旧口径把所有人排在这一条 64 槽队列上，一个慢群会堵住全部会话（<code>Boot.java:207-214</code>）。</p>
+<tr><td><code>status()</code> / <code>pendingLine()</code></td><td>装配状态与各面计数 / 加载中的排队提示（<code>Cmd.java</code>）</td></tr>
+<tr><td><code>chat(text)</code></td><td>本地对话：要一个 <code>Future</code> 才能等回合结束，所以走 <code>Boot.turns</code> 那条单线程队列（<code>Cmd.java</code>）</td></tr>
+<tr><td><code>tools(a)</code></td><td>工具清单（带「该调用者在这把工具上的有效位」）（<code>Cmd.java</code>、<code>Registry.java</code>）</td></tr>
+<tr><td><code>startCmd</code> / <code>restartCmd</code></td><td>起基板 / 重启（<code>Life</code> 接口交给壳实现）（<code>Cmd.java</code>）</td></tr>
+<tr><td><code>config(a)</code> / <code>aclCmd()</code></td><td>配置读写（敏感值掩码打印）与账本操作（<code>Cmd.java</code>）</td></tr>
+<tr><td><code>caller()</code></td><td>控制台命令的主语一律是 MASTER（<code>Cmd.java</code>）</td></tr>
+</tbody></table></div>
+<p><b>控制台为什么单开一条队列</b>：本地 <code>chat</code> 需要一个 <code>Future</code> 才能等回合结束，它走 <code>Boot.turns</code>（单线程 + 64 槽有界队列）；QQ 入站、闹钟、异步子 Agent 走 <code>Lanes</code>。两条路分开，一个慢群就不会堵住全部会话。</p>
 <h3 class="sec">控制台捕获：环形缓冲 + 游标读取</h3>
-<p><code>term\ConsoleTap.java</code> 通过 <code>SairCons.addPrintRunnable(id, runnable)</code> 注册打印代理（<code>ConsoleTap.java:26-32</code>），代理 ID 常量 <code>AiAgentV4_ConsoleTap</code>（<code>ConsoleTap.java:72</code>）。
-参数默认：环形缓冲 <b>500 条</b>（<code>ConsoleTap.java:74</code>）、<b>64 KB</b>（<code>ConsoleTap.java:75</code>）、单次读取上限 <b>4000 字符</b>（<code>ConsoleTap.java:76</code>）。
-缓冲本体是 <code>ArrayDeque&lt;Line&gt;</code> + 全局自增 <code>seq</code>，<code>read(from, n, filter)</code> 只回游标之后的部分（<code>ConsoleTap.java:89</code>、<code>ConsoleTap.java:128-134</code>）。
-转发策略三档 <code>auto</code>/<code>always</code>/<code>never</code>（<code>ConsoleTap.java:79-81</code>、<code>ConsoleTap.java:105</code>）；
-安装与注销 <code>install(conf)</code>／<code>install(conf, hold)</code>／<code>uninstall()</code>，<code>run(...)</code> 会顺手补装（<code>ConsoleTap.java:170</code>、<code>ConsoleTap.java:183</code>、<code>ConsoleTap.java:237</code>、<code>ConsoleTap.java:211-223</code>）。</p>
-<p><b>捕获器的生命周期归壳，不归基板</b>：<code>Th.shutdown()</code> <b>不再</b>注销它（<code>kit\Th.java:79-96</code>）—— 它是控制台的一部分，插件构造期就挂上；
-只有壳卸载（调试壳 <code>detach()</code> ← <code>V4Activity.exit()</code>）才注销。</p>
+<p><code>term\ConsoleTap.java</code> 通过 <code>SairCons.addPrintRunnable(id, runnable)</code> 注册打印代理，代理 ID 常量 <code>AiAgentV4_ConsoleTap</code>。参数默认：环形缓冲 500 条、单次读取上限 4000 字符。缓冲本体是 <code>ArrayDeque&lt;Line&gt;</code> + 全局自增 <code>seq</code>，<code>read(from, n, filter)</code> 只回游标之后的部分。转发策略三档 <code>auto</code>/<code>always</code>/<code>never</code>；安装与注销走 <code>install(conf)</code>／<code>install(conf, hold)</code>／<code>uninstall()</code>，<code>run(...)</code> 会顺手补装。</p>
+<p><b>捕获器的生命周期归壳</b>：<code>Th.shutdown()</code> 不碰它 —— 它是控制台的一部分，插件构造期就挂上；注销由壳负责：只有壳卸载（调试壳 <code>detach()</code> ← <code>V4Activity.exit()</code>）时才注销。</p>
 <h3 class="sec">输出去向：四种端点 + 一条出站阶段管线</h3>
-<p><code>term\Sinks.java</code> 收四个 <code>ctx\Sink</code> 实现：<code>ConsoleSink</code>（<code>Sinks.java:102</code>）、<code>QqSink</code>（<code>Sinks.java:141</code>）、
-<code>TaskSink</code>（后台任务 / 闹钟结果落点，<code>Sinks.java:238</code>）、<code>SilentSink</code>（只吞不出，<code>Sinks.java:94</code>）。
-<b>出站阶段管线只接一处</b>：<code>Sinks.setExt(ext)</code>（<code>Sinks.java:27</code>），发送前先过 <code>e.runStages(m, parts, sp).parts</code>（<code>Sinks.java:50</code>）——
-于是"分段 + 渲染 + 外挂改写"在同一位置发生，没有第二条出站路径。</p>
-<h3 class="sec">本地交流面板：窗口动作必须投到 EDT</h3>
-<div class="tw reveal">
-<table>
-<thead><tr><th>点</th><th>口径</th><th>出处</th></tr></thead>
+<p><code>term\Sinks.java</code> 收四个 <code>ctx\Sink</code> 实现：<code>ConsoleSink</code>、<code>QqSink</code>、<code>TaskSink</code>（后台任务与闹钟结果的落点）、<code>SilentSink</code>（只吞不出）。<b>出站阶段管线只接一处</b>：<code>Sinks.setExt(ext)</code>，发送前先过 <code>e.runStages(m, parts, sp).parts</code> —— 于是「分段 + 渲染 + 外挂改写」都在同一个位置发生，没有第二条出站路径。</p>
+<h3 class="sec">本地交流面板：窗口动作投到 EDT</h3>
+<div class="tw reveal"><table>
+<thead><tr><th>点</th><th>口径</th></tr></thead>
 <tbody>
-<tr><td>挂载投递到 EDT</td><td><code>SwingUtilities.invokeLater</code>；已经在 EDT 上就地做（不能再投递，会等自己）</td><td><code>TalkMount.java:41-46</code>、<code>TalkMount.java:88</code></td></tr>
-<tr><td>等待上限</td><td><code>DEF_WAIT_MS = 5000</code>；超时给出可读错误而不是静默失败</td><td><code>TalkMount.java:63</code>、<code>TalkMount.java:82-111</code></td></tr>
-<tr><td>状态载体</td><td><code>volatile TalkPanel attached</code>；挂载点只有一个，"查一下再挂"之间没人能插进来</td><td><code>TalkMount.java:57</code>、<code>TalkMount.java:115-135</code></td></tr>
-<tr><td>挂载时机</td><td>装配最后一步（<code>Boot.java:789</code>）；<code>Boot.panelLock</code> <b>绝不在持锁期间挂载</b> —— 挂载会等 EDT，而控制台命令就跑在 EDT 上，那样必假死</td><td><code>Boot.java:200-203</code>、<code>Boot.java:1250-1320</code></td></tr>
-<tr><td>面板输出</td><td><code>ui\PanelSink.java</code> 是面板侧端点；<code>ui\SfwStyle.java</code> 管风格</td><td><code>ui\PanelSink.java</code>、<code>ui\SfwStyle.java</code></td></tr>
-</tbody>
-</table>
-</div>
+<tr><td>挂载投递到 EDT</td><td><code>SwingUtilities.invokeLater</code>；已经在 EDT 上就地做（再投递会等自己）（<code>TalkMount.java</code>）</td></tr>
+<tr><td>等待上限</td><td><code>DEF_WAIT_MS = 5000</code>；超时给出可读错误而不是静默失败（<code>TalkMount.java</code>）</td></tr>
+<tr><td>状态载体</td><td><code>volatile TalkPanel attached</code>；挂载点只有一个，「查一下再挂」之间没有空隙让人插进来（<code>TalkMount.java</code>）</td></tr>
+<tr><td>挂载时机</td><td>装配最后一步；<code>Boot.panelLock</code> 的持锁期间不做挂载 —— 挂载会等 EDT，而控制台命令就跑在 EDT 上，那样会假死（<code>Boot.java</code>）</td></tr>
+<tr><td>面板输出</td><td><code>ui\PanelSink.java</code> 是面板侧端点；<code>ui\SfwStyle.java</code> 管风格</td></tr>
+</tbody></table></div>
 <h3 class="sec">调试实现</h3>
 <div class="grid-2">
-<div class="panel"><h4><code>dev\DebugPort.java</code>（57,797 字节）</h4>
+<div class="panel"><h4><code>dev\DebugPort.java</code></h4>
 <ul>
-<li>纯 <code>ServerSocket</code> 行协议；连上后第一行必须是 <code>AUTH &lt;token&gt;</code>：成功回 <code>+OK &lt;name&gt;</code>，失败回 <code>-ERR bad token</code> 并断开，每次失败记一行 warn（<code>DebugPort.java:46-47</code>）</li>
-<li><b>只绑 <code>127.0.0.1</code></b>，不监听 <code>0.0.0.0</code>（<code>DebugPort.java:67</code>）</li>
-<li><b>token 必填</b>：为空则拒绝启动并打一行 warn（<code>DebugPort.java:68</code>）</li>
-<li><b>装配不再自动起它</b>：只由控制台命令起停，端口与 token 走命令参数、不进 <code>config.json</code>（<code>Boot.java:790-793</code>）</li>
+<li>纯 <code>ServerSocket</code> 行协议；连上后第一行是 <code>AUTH &lt;token&gt;</code>：成功回 <code>+OK &lt;name&gt;</code>，失败回 <code>-ERR bad token</code> 并断开，每次失败记一行 warn</li>
+<li><b>只绑 <code>127.0.0.1</code></b>，不监听 <code>0.0.0.0</code></li>
+<li>token 留空则拒绝启动并打一行 warn</li>
+<li><b>装配不会自动起它</b>：只由控制台命令起停，端口与 token 走命令参数、不进 <code>config.json</code></li>
 </ul></div>
-<div class="panel"><h4><code>dev\DebugSimPort.java</code>（34,852 字节）</h4>
-<p>模拟口：把构造出来的事件喂进网关那条路，用来在没有真链接的情况下看路由行为；与调试口同一套"只回环 + 必带 token"口径。
-另有 <code>dev\DebugShell.java</code>（调试壳，负责挂载/卸载捕获器）与 <code>dev\DebugLog.java</code>（22,644 字节，调试日志）。</p></div>
+<div class="panel"><h4><code>dev\DebugSimPort.java</code></h4>
+<p>模拟口：把构造出来的事件喂进网关那条路，用来在没有真链接的情况下看路由行为；与调试口同一套「只回环 + 带 token」口径。另有 <code>dev\DebugShell.java</code>（调试壳，负责挂载与卸载捕获器）与 <code>dev\DebugLog.java</code>（调试日志）。</p></div>
 </div>
 <h3 class="sec">网络护栏</h3>
-<p>出站 HTTP 统一过 <code>kit\NetGuard.check(url)</code>（<code>NetGuard.java:111</code>）。挡三类：</p>
->
-<p>判定结果结构化为 <code>Verdict</code>：<code>blocked</code> + <code>code</code>（<code>scheme</code>/<code>bad_url</code>/<code>internal</code>…）+ 细分（<code>loopback</code>/<code>private</code>/<code>link_local</code>…）+ <code>host</code> + <code>ip</code>（<code>NetGuard.java:54-82</code>）。
-启动参数 <code>-Dv4.netguard.devAllow=…</code> 可放行指定主机名/IP（<b>只认字面量</b>，<code>NetGuard.java:45</code>）。</p>
-<p><code>kit\Out</code> 一族：<code>Out</code> 是接口（966 字节）；<code>PlainOut</code> 直接打，<code>GatedOut</code> 带一个 <code>Gate</code> 开关（<code>Boot.java:266-271</code> 用它按配置开关门），
-<code>term\SfwOut.java</code> 接到 SFW 控制台。<b>日志类别是一等公民</b>：默认只留"Agent 调用事件"这一类行，
-例如工具日志要先过 <code>conf.logOn("tool")</code>（<code>Registry.java:294</code>），调度决策行要先过 <code>conf.logOn("lane")</code>（<code>Lanes.java:219</code>）。</p>
+<p>出站 HTTP 统一过 <code>kit\NetGuard.check(url)</code>。它挡三类目标：协议不是 http 或 https、地址根本解析不出来、以及落在回环或内网一侧的地址（本地名、云元数据域名、私网与链路本地段）。</p>
+<p>判定结果结构化为 <code>Verdict</code>：<code>blocked</code> + <code>code</code>（<code>ok</code>/<code>empty</code>/<code>scheme</code>/<code>bad_url</code>/<code>internal</code>）+ 细分（<code>loopback</code>/<code>private</code>/<code>link_local</code>…）+ <code>host</code> + <code>ip</code>（<code>NetGuard.java</code>）。启动参数 <code>-Dv4.netguard.devAllow=…</code> 可以放行指定的主机名或 IP（<b>只认字面量</b>，不认通配；这张表在进程内第一次判定时读一次并缓存下来）。</p>
+<p><code>kit\Out</code> 一族：<code>Out</code> 是接口；<code>PlainOut</code> 直接打，<code>GatedOut</code> 带一个 <code>Gate</code> 开关（装配时用它按配置开关门），<code>term\SfwOut.java</code> 接到 SFW 控制台。<b>日志类别是一等公民</b>：默认只留「Agent 调用事件」这一类行，例如工具日志要先过 <code>conf.logOn("tool")</code>，调度决策行要先过 <code>conf.logOn("lane")</code>。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="index">
-<header class="chapter-head reveal">
-<span class="chapter-tag">13 / 索引</span>
-<h2>关键 file:line 索引</h2>
-<p class="chapter-desc">本页写到的实现事实的落点。路径相对 <code>src\sair\v4\</code>（另标者除外）。</p>
-</header>
-<div class="tw reveal">
-<table>
-<thead><tr><th>主题</th><th>位置</th></tr></thead>
+<header class="chapter-head reveal"><span class="chapter-tag">13 / 扩展</span><h2>扩展点与契约面</h2><p class="chapter-desc">四个扩展点、一组只读契约、两道上限：外挂层能做什么，做到哪一步就到此为止。</p></header>
+<p>基板对外挂层只开四个口。每个口都有明确的「能做什么 / 不能做什么」，它们共用同一套护栏：单次调用独立超时、出错只丢自己那一次、每次调用留一行 <code>[ext]</code> 诊断。</p>
+<div class="tw reveal"><table>
+<thead><tr><th>扩展点</th><th>能做什么</th><th>不能做什么</th></tr></thead>
 <tbody>
-<tr><td>装配入口 / 19 步 / 步骤包装 / 骨架 / 库落盘</td><td><code>Boot.java:336</code> · <code>:55</code> · <code>:387</code> · <code>:804</code> · <code>:851</code> · <code>:903</code></td></tr>
-<tr><td>模型闸门 / 控制台回合池 / 事件执行池 / 后台装载线程</td><td><code>Boot.java:489</code> · <code>:216-234</code> · <code>:1368-1370</code> · <code>:969-997</code></td></tr>
-<tr><td>分道：提交 / 选道 / 工作线程 / 有界池 / 钩子池</td><td><code>schedule\Lanes.java:147</code> · <code>:330</code> · <code>:281-296</code> · <code>schedule\Pool.java:74-106</code> · <code>:110</code> · <code>:126</code></td></tr>
-<tr><td>心跳与定时算术 / 线程收口</td><td><code>Tick.java:52</code> · <code>:72</code> · <code>:351</code> · <code>kit\Th.java:90</code></td></tr>
-<tr><td>工具：注册 / 可见性 / 入口闸门 / 调用 / 结果规整</td><td><code>tool\Registry.java:111</code> · <code>:180</code> · <code>:210-217</code> · <code>:250</code> · <code>:409</code></td></tr>
-<tr><td>工具：schema / 只读副本 / 参数复核 / 候选距离</td><td><code>tool\Tool.java:84</code> · <code>:65</code> · <code>tool\ToolIndex.java:633</code> · <code>:330</code> · <code>:683</code></td></tr>
-<tr><td>失败闸门：判定 / 终止 / 事实注入 / 阈值来源</td><td><code>agent\Loop.java:380</code> · <code>:427</code> · <code>:445</code> · <code>data\prompts\tools-index.md:96-98</code></td></tr>
-<tr><td>库：连接与 PRAGMA / 建表 / FTS / 同步触发器 / 补列的幂等法</td><td><code>store\Db.java:108-139</code> · <code>:623</code> · <code>:682</code> · <code>:715-737</code> · <code>store\Lib.java:120-131</code></td></tr>
-<tr><td>运行表 DDL / 库声明形状 / 环境库 / 库注册表契约</td><td><code>store\Lib.java:43-109</code> · <code>store\LibSpec.java:213</code> · <code>store\EnvLibs.java:35</code> · <code>store\Libs.java:22</code></td></tr>
-<tr><td>检索三层 / FTS 查询构造 / 覆盖索引 / 表清单（实测）</td><td><code>store\Store.java:217</code> · <code>store\FtsQuery.java:108</code> · <code>store\Person.java:50</code> · <code>data\v4.db</code> 的 <code>sqlite_master</code></td></tr>
-<tr><td>模型：端点与头 / 等闸门上限 / SSE 合并 / 分片 / 错误一行化</td><td><code>ai\DeepSeek.java:27-28</code> · <code>:103</code> · <code>ai\Sse.java:86</code> · <code>:144</code> · <code>:218</code></td></tr>
-<tr><td>思维链回传 / 原生喂图消息</td><td><code>ai\Msg.java:87-105</code> · <code>:36</code></td></tr>
-<tr><td>上下文顺序 / 事实块 / <code>models:</code> 八字段 / <code>mode</code> 三取值</td><td><code>ctx\CtxBuild.java:558</code> · <code>:279</code> · <code>:327-346</code> · <code>:240-270</code></td></tr>
-<tr><td>识图计数 / 计数调用点 / 历史裁剪 / 历史去重 / 四槽位</td><td><code>ctx\RecognizerState.java:95</code> · <code>agent\Loop.java:278-283</code> · <code>ctx\CtxBuild.java:851</code> · <code>:800</code> · <code>prompt\Inject.java:29-36</code></td></tr>
-<tr><td>Agent 回合面 / 主循环 / 轮数上限</td><td><code>agent\Agent.java:120-133</code> · <code>:432-492</code> · <code>agent\Loop.java:182</code> · <code>:119</code></td></tr>
-<tr><td>WS 握手 / 魔术串 / 启动安全默认 / 事件分派</td><td><code>qq\Link.java:384</code> · <code>:51</code> · <code>:147-158</code> · <code>QqGateway.java:136</code></td></tr>
-<tr><td>零触发纪律 / 地址判定 / <code>atSelf()</code> / 动作出口 / 台账条件</td><td><code>QqGateway.java:155-175</code> · <code>:871-875</code> · <code>qq\Ev.java:169-182</code> · <code>qq\Api.java:144</code> · <code>:251-273</code></td></tr>
-<tr><td>三段式拆分 / 自我标记头</td><td><code>qq\Seg.java:44</code> · <code>:60</code> · <code>qq\SelfEcho.java:79</code> · <code>:190</code></td></tr>
-<tr><td>位 / 资源类 / 默认位表 / 命中顺序</td><td><code>auth\Bits.java:26-36</code> · <code>auth\Res.java:66-87</code> · <code>auth\Acl.java:152-191</code> · <code>:918</code></td></tr>
-<tr><td>唯一判定 / 受保护两层 / 账本落盘 / 权限门面</td><td><code>auth\Acl.java:966</code> · <code>:982</code> · <code>:1005</code> · <code>:1025</code> · <code>:793</code> · <code>auth\Auth.java:112-119</code></td></tr>
-<tr><td>内存编译 / classpath / 类加载器 / 装载器调用点</td><td><code>hot\SkCompile.java:41</code> · <code>:47</code> · <code>:101</code> · <code>hot\SkClassLoader.java</code> · <code>Boot.java:730</code> · <code>Boot.java:971</code></td></tr>
-<tr><td>库声明调用点 / 扩展点形状表 / 出站阶段 / 投票 / 超时预算</td><td><code>Skills.java:378-410</code> · <code>ext\ExtRegistry.java:405-442</code> · <code>:568</code> · <code>:523</code> · <code>:248-262</code></td></tr>
-<tr><td>命令入口 / 控制台捕获参数 / 输出端点 / EDT 挂载</td><td><code>term\Cmd.java:110</code> · <code>term\ConsoleTap.java:74-76</code> · <code>:170</code> · <code>term\Sinks.java:94-238</code> · <code>ui\TalkMount.java:82-111</code></td></tr>
-<tr><td>调试口安全 / 网络护栏</td><td><code>dev\DebugPort.java:46-47</code> · <code>:67-68</code> · <code>kit\NetGuard.java:111</code></td></tr>
-</tbody>
-</table>
+<tr><td><code>OutboundStage</code><br>出站改写</td><td>位置在<b>分段之后、发送之前</b>（<code>QqSink</code> / <code>TaskSink</code>）。逐条三个口：<code>veto</code> 一票否决（<code>true</code> = 这一条不发）、<code>transform</code> 改正文（返回 <code>null</code> = 不改，返回空串 = 基板丢弃这一条）、<code>extra</code> 追加独立消息；另有一个整批收尾口，拿得到最终整条消息列表，可以整表改写或原样不动（<code>ext\OutboundStage.java</code>）</td><td>改不动基板判定：权限位、地址判定、闸门与台账都在这条管线之外。否决是<b>整条丢</b>，没有「改一点点再发」的中间态；<code>extra</code> 追加出来的消息不再回 stage，插件之间就不会互相追加成环</td></tr>
+<tr><td><code>ContextProvider</code><br>上下文提供者</td><td>每轮往 <code>messages</code> 里加一段，自己声明顺序（<code>order</code> + 插件名）、段位（<code>stable()</code>）与单段字符上限（<code>maxChars()</code>）：稳定段排在系统提示词之后、内置事实块之前，易变段排在内置事实块之后（<code>ext\ContextProvider.java</code>、<code>BuildContext.java</code>）</td><td>内置事实块的位置与内容、历史条数与字符预算、本轮 user 消息的位置，都由基板定，它碰不到。它拿到的是只读口 <code>BuildContext.host()</code>，要写就写自己的库或自己的 <code>kv</code></td></tr>
+<tr><td><code>LifecycleHook</code><br>生命周期钩子</td><td>主回合的三个时点：回合开始（装配完、还没跑）、真要对外说话时、回合结束（正文已发出或已失败）。用途是记账与清理：写对话历史、记调用量、清临时态、发「typing」这类副作用（<code>ext\LifecycleHook.java</code>）</td><td>不改消息内容 —— 那是 <code>OutboundStage</code> 的事，所以这里拿到的是只读 <code>BuildContext</code>，没有可改的正文。子 Agent 回合与后台收尾回合不触发，它们本来也不进对话历史</td></tr>
+<tr><td><code>TriggerVoter</code><br>触发投票</td><td>三态票：<code>ANSWER</code> 回、<code>DECLINE</code> 不回（省掉一整轮模型调用）、<code>ABSTAIN</code> 不管。按 <code>order, 插件名</code> 依次问，<b>第一个非弃权票生效</b>（不是多数决）（<code>ext\TriggerVoter.java</code>、<code>QqGateway.java</code>）</td><td>改不动地址判定本身：没人表态时网关仍走「私聊一律回、群里要求被 @」那条路。投票抛异常或超时都按 <code>ABSTAIN</code> 处理 —— 宁可不答，一条消息也不会因为投票而凭空消失</td></tr>
+</tbody></table></div>
+<div class="tw reveal"><table>
+<thead><tr><th>契约面</th><th>是什么</th></tr></thead>
+<tbody>
+<tr><td>入口接口 <code>call(...)</code></td><td>被识别为工具入口的类；返回值可以是 String / Map / JsonObject / List / null。也支持反射回退：有 <code>airun(...)</code> 方法的类同样能被调用，写小件时省掉一批 import</td></tr>
+<tr><td>装载期声明 <code>declare(Libs)</code></td><td>默认空实现；时机在<b>实例化入口类之后、注册工具之前</b>（表要早于用它的工具存在）。这里给的是<b>注册表</b>，不是宿主观图 —— 装载期没有对话</td></tr>
+<tr><td>宿主 <code>Host</code></td><td>一次调用期间的唯一能力面：调工具、发言、派子 Agent、注入、向 SFW 发命令都在这里，<b>改不动基板的任何判定</b></td></tr>
+<tr><td>只读视图 <code>Args</code> / <code>ConfView</code> / <code>FavorView</code> / <code>ToolView</code></td><td>参数、配置、好感度、工具的只读视图；<code>ToolView</code> 由 <code>getView(name)</code> 给出，拿到的是<b>去掉实现</b>的副本，绕不过入口判位（<code>Registry.java</code>）</td></tr>
+<tr><td>钩子标记 <code>Hooked</code></td><td>声明实现了哪些钩子，被装载器按接口自动识别（<code>src\sair\v4\skill\Hooked.java</code>）</td></tr>
+</tbody></table></div>
+<p><b>两道上限</b>：单次扩展点调用超时 <code>extTimeoutMs</code> 默认 200ms（<code>&le;0</code> = 不超时；超时即放弃该次调用）；上下文块还有全局字符预算 <code>ctxBudgetChars</code> 默认 6000，超预算从尾部丢块并计数 <code>budgetDrops</code>（<code>ext\ExtRegistry.java</code>、<code>Conf.java</code>）。</p>
+<p><b>总开关</b> <code>on() = enabled() &amp;&amp; any()</code>：没挂任何 provider 时，连 provider 都不会被调用，开销一点都不多。故障隔离也分两层：扩展点自己做了异常隔离，调用方再兜一层「连注册表都炸了」，两层都只丢外挂块，不影响这一轮（<code>ExtRegistry.java</code>、<code>CtxBuild.java</code>）。</p>
+<div class="note">
+<b>四个口都不通向判定层</b>：权限位、地址判定、轮数上限与失败闸门、出站台账，全部由基板定。扩展点能读到结果、改写自己要发出去的东西、往上下文里加自己那一段，但改不了基板怎么判 —— 所以装了再多外挂，判定的口径仍然是同一份。
 </div>
-<p>行号对应取材时的源码快照；改动后会漂移，以类名／方法名再定位。</p>
 </section>
 </div>
         <nav class="pager">

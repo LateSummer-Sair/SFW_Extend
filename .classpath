@@ -12,7 +12,7 @@
 	<classpathentry kind="src" path="deepseek/scq"/>
 	<classpathentry kind="src" path="deepseek/GomokuProject/src"/>
 	<classpathentry kind="src" path="deepseek/QrCode"/>
-	<classpathentry excluding="docs/samples/天气速查/" kind="src" path="deepseek/AiAgent"/>
+	<classpathentry excluding="docs/samples/天气速查/|docs/samples/" kind="src" path="deepseek/AiAgent"/>
 	<classpathentry kind="src" path="deepseek/SFW_WEB"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-1.8"/>
 	<classpathentry kind="lib" path="E:/SairFrameWork/plugins/lib/commons-compress-1.28.0.jar"/>

@@ -72,32 +72,29 @@
             <h4 class="sub" style="margin-top:0">① 跑在 SFW 宿主里，由宿主起进程</h4>
             <p>插件不是独立程序，它由 SFW 框架加载。宿主自带的启动脚本是 <code>SairFrameWork\run.bat</code>，内容就一行有效命令：</p>
             <div class="code" data-lang="bat">
-              <div class="code-head"><span class="lang">bat</span><span class="path">SairFrameWork\run.bat（60 字节）</span><button class="copy" type="button">复制</button></div>
+              <div class="code-head"><span class="lang">bat</span><span class="path">SairFrameWork\run.bat</span><button class="copy" type="button">复制</button></div>
               <pre><code>@echo off
 cd /d %~dp0
 start 8x64\bin\javaw -jar SFW.jar %*</code></pre>
             </div>
-            <p class="t-cap">同目录下 <code>SFW.jar</code> 实测 <b>1,656,514 字节</b>。</p>
+            <p class="t-cap">同目录下 <code>SFW.jar</code> 实测 。</p>
           </div>
           <div class="panel reveal d1">
-            <h4 class="sub" style="margin-top:0">② 启动目录必须固定</h4>
-            <p>敏感键（<code>apiKey</code> / <code>napcatToken</code> / <code>relayToken</code>，<code>Conf.java:57</code>）是<b>密文落盘</b>的，密钥派生包含当前工作目录。</p>
-            <p class="t-cap">派生因子 = JVM 名 / 架构 / 用户名 / 主机名 / <code>user.dir</code> / 固定尾串 的 SHA-256，取前 16 字节做 AES-128 密钥（<code>kit\Crypto.java:18</code>、<code>:130</code>、<code>:140-148</code>）。换机器、换用户名、换工作目录都解不开（<code>Crypto.java:29-31</code>）—— 这时把对应键改成明文，让它重新加密。</p>
+            <h4 class="sub" style="margin-top:0">② 启动目录建议固定</h4>
+            <p>敏感键（<code>apiKey</code> / <code>napcatToken</code> / <code>relayToken</code>，<code>Conf.java</code>）是<b>密文落盘</b>的，密钥派生包含当前工作目录。</p>
+            <p class="t-cap">派生因子 = JVM 名 / 架构 / 用户名 / 主机名 / <code>user.dir</code> / 固定尾串 的 SHA-256，取前 16 字节做 AES-128 密钥（<code>kit\Crypto.java</code>）。换机器、换用户名、换工作目录都解不开（<code>Crypto.java</code>）—— 这时把对应键改成明文，让它重新加密。</p>
           </div>
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">③ 只要一份 jar，落位固定</h4>
-            <p>线上这份是 <code>plugins\exection\ai.jar</code>：<b>675,173 字节</b>，sha256 <code>130746B0B207138004459B4E7101FA4B148BBAF15CA42946D8D3A4A22228B088</code>；仓库根的 <code>AiAgentV4.jar</code> 与它逐位相同。</p>
+            <p>线上这份是 <code>plugins\exection\ai.jar</code>：；仓库根的 <code>AiAgentV4.jar</code> 与它逐位相同。</p>
             <div class="code" data-lang="powershell">
-              <div class="code-head"><span class="lang">powershell</span><span class="path">复核命令</span><button class="copy" type="button">复制</button></div>
               <pre><code>Get-Item 'C:\Sair\SairFrameWork\plugins\exection\ai.jar' | Select-Object Length
-Get-FileHash 'C:\Sair\SairFrameWork\plugins\exection\ai.jar' -Algorithm SHA256
-Get-FileHash 'C:\Sair\Local\AiAgent-V4\AiAgentV4.jar'        -Algorithm SHA256</code></pre>
             </div>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">④ 提示词要自己准备</h4>
-            <p>冷启动只会建 <b>0 字节空壳</b> <code>prompts\identity.md</code> 与 <code>prompts\subagent.md</code> —— <b>基板不带任何提示词文案</b>（<code>Boot.java:840-843</code>、<code>:869-870</code>）。空文件与"文件不存在"在加载器里语义完全一致。</p>
-            <p class="t-cap">部署后请把提示词文件放进数据根的 <code>prompts\</code>。当前线上这三个文件是：<code>identity.md</code> 13,028 字节、<code>subagent.md</code> 1,664 字节、<code>tools-index.md</code> 11,029 字节。</p>
+            <p>冷启动只会建 <b>0 字节空壳</b> <code>prompts\identity.md</code> 与 <code>prompts\subagent.md</code> —— <b>基板不带任何提示词文案</b>（<code>Boot.java</code>）。空文件与"文件不存在"在加载器里语义完全一致。</p>
+            <p class="t-cap">部署后把提示词文件放进数据根的 <code>prompts\</code> 就可以用了。当前线上这三个文件是：<code>identity.md</code> 13,028 字节、<code>subagent.md</code> 1,664 字节、<code>tools-index.md</code> 11,029 字节。</p>
           </div>
         </div>
       </section>
@@ -131,12 +128,12 @@ Get-FileHash 'C:\Sair\Local\AiAgent-V4\AiAgentV4.jar'        -Algorithm SHA256</
               <tr><th>名字</th><th>是什么</th><th>谁建的</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>config.json</code></td><td>配置文件（已知键 94 个，见<a href="config.html#keys">配置页</a>）</td><td><code>Conf.ensureDefaults()</code>（<code>Boot.java:845</code>）</td></tr>
-              <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>（<code>Conf.java:1103</code>）；表在装配第③步落盘（<code>Boot.java:846</code>）</td><td><code>Store.open()</code>（<code>Boot.java:845-846</code>）</td></tr>
+              <tr><td><code>config.json</code></td><td>配置文件（已知键 94 个，见<a href="config.html#keys">配置页</a>）</td><td><code>Conf.ensureDefaults()</code>（<code>Boot.java</code>）</td></tr>
+              <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>（<code>Conf.java</code>）；表在装配第③步落盘（<code>Boot.java</code>）</td><td><code>Store.open()</code>（<code>Boot.java</code>）</td></tr>
               <tr><td><code>prompts\</code></td><td>提示词文件目录（<code>identity.md</code> / <code>subagent.md</code> 等）</td><td>骨架 + 你自己放文件</td></tr>
-              <tr><td><code>files\</code></td><td>下载与图片落点（库导出文件也落这里，<code>Cmd.java:1332</code>）</td><td>骨架（<code>Boot.java:858</code>、<code>:864</code>）</td></tr>
-              <tr><td><code>tmp\</code></td><td>临时文件目录</td><td>骨架（<code>Boot.java:859</code>、<code>:865</code>）</td></tr>
-              <tr><td>外挂扩展层目录</td><td>后加进来的能力存放处；内容不在本文档范围内</td><td>骨架（<code>Boot.java:857</code>、<code>:863</code>）</td></tr>
+              <tr><td><code>files\</code></td><td>下载与图片落点（库导出文件也落这里，<code>Cmd.java</code>）</td><td>骨架（<code>Boot.java</code>）</td></tr>
+              <tr><td><code>tmp\</code></td><td>临时文件目录</td><td>骨架（<code>Boot.java</code>）</td></tr>
+              <tr><td>外挂扩展层目录</td><td>后加进来的能力存放处；怎么写见 <a href="capabilities.html#skill-dev">06 · 能力</a></td><td>骨架（<code>Boot.java</code>）</td></tr>
               <tr><td><code>logs\</code> / <code>debug-port.json</code> 等</td><td>运行期落盘物（日志、调试面状态）</td><td>运行期</td></tr>
             </tbody>
           </table>
@@ -144,7 +141,7 @@ Get-FileHash 'C:\Sair\Local\AiAgent-V4\AiAgentV4.jar'        -Algorithm SHA256</
         <p class="t-cap">更细的文件地图（源码 17 个包 + 数据表落点）见<a href="files.html">文件与数据根</a>页。</p>
 
         <div class="note reveal">
-          <p><span class="n-title">命令前缀从哪来</span>：控制台命令的前缀是<b>组件名</b>（<code>V4Activity.java:185</code>、<code>:204</code>、<code>:207</code> 三处都在用 <code>getName()</code> / 安全化后的组件名去构造命令对象），线上这个组件名是 <code>ai</code>，所以命令都写成 <code>ai/start</code> 这种形式；取不到名字时代码里的兜底是 <code>ai4</code>（<code>Cmd.java:94</code>、<code>:106</code>）。</p>
+          <p><span class="n-title">命令前缀从哪来</span>：控制台命令的前缀是<b>组件名</b>（<code>V4Activity.java</code> 三处都在用 <code>getName()</code> / 安全化后的组件名去构造命令对象），线上这个组件名是 <code>ai</code>，所以命令都写成 <code>ai/start</code> 这种形式；取不到名字时代码里的兜底是 <code>ai4</code>（<code>Cmd.java</code>）。</p>
         </div>
       </section>
 
@@ -160,7 +157,7 @@ Get-FileHash 'C:\Sair\Local\AiAgent-V4\AiAgentV4.jar'        -Algorithm SHA256</
           <div class="keyrow rose reveal">
             <div class="k-head"><span class="k-name">apiKey</span><span class="k-def">默认 ""</span><span class="badge bad">密文落盘</span><span class="badge warn">与启动目录绑死</span></div>
             <dl>
-              <dt>含义</dt><dd>模型服务的访问密钥。与 <code>napcatToken</code> / <code>relayToken</code> 同属"值不许外露"的敏感键（<code>Conf.java:57-62</code>）。</dd>
+              <dt>含义</dt><dd>模型服务的访问密钥。与 <code>napcatToken</code> / <code>relayToken</code> 同属"值不许外露"的敏感键（<code>Conf.java</code>）。</dd>
               <dt>怎么配</dt><dd><code>ai/config set apiKey &lt;你的 key&gt;</code>，然后 <code>ai/start</code>（已在跑就 <code>ai/restart</code>）。也可以直接编辑文件写明文，下次保存会重新加密。</dd>
               <dt>没配会怎样</dt><dd><code>ai/chat</code> 只会回一句可读的说明并给出解决命令，不会崩基板。</dd>
             </dl>
@@ -168,23 +165,23 @@ Get-FileHash 'C:\Sair\Local\AiAgent-V4\AiAgentV4.jar'        -Algorithm SHA256</
           <div class="keyrow amber reveal">
             <div class="k-head"><span class="k-name">selfId / masterQQ</span><span class="k-def">默认 0</span><span class="badge info">身份</span></div>
             <dl>
-              <dt>含义</dt><dd>机器人自己的 QQ 号与主人的 QQ 号。<b>本地控制台 ≡ QQ 里的主人</b>（<code>Cmd.java:1358</code>）。</dd>
-              <dt>怎么配</dt><dd><code>ai/config set selfId &lt;QQ&gt;</code>、<code>ai/config set masterQQ &lt;QQ&gt;</code>；主人可以有多个（<code>masterQQs</code>，<code>Conf.java:1188</code>）。</dd>
-              <dt>注意</dt><dd>群消息的触发判定依赖事件里带的 <code>self_id</code>：<b>缺 <code>self_id</code> 就恒判为"没有被 @"</b>（<code>qq\Ev.java:18-19</code>）。</dd>
+              <dt>含义</dt><dd>机器人自己的 QQ 号与主人的 QQ 号。<b>本地控制台 ≡ QQ 里的主人</b>（<code>Cmd.java</code>）。</dd>
+              <dt>怎么配</dt><dd><code>ai/config set selfId &lt;QQ&gt;</code>、<code>ai/config set masterQQ &lt;QQ&gt;</code>；主人可以有多个（<code>masterQQs</code>，<code>Conf.java</code>）。</dd>
+              <dt>注意</dt><dd>群消息的触发判定依赖事件里带的 <code>self_id</code>：<b>缺 <code>self_id</code> 就恒判为"没有被 @"</b>（<code>qq\Ev.java</code>）。</dd>
             </dl>
           </div>
           <div class="keyrow reveal">
             <div class="k-head"><span class="k-name">napcatEnabled / napcatHost / napcatPort / napcatToken</span><span class="k-def">默认 false / 127.0.0.1 / 8082 / ""</span></div>
             <dl>
-              <dt>含义</dt><dd>是否开 NapCat 反向 WS 监听、绑哪个地址与端口、准入 token（默认值见 <code>Conf.java:128</code>、<code>:130</code>、<code>:659-666</code>）。</dd>
-              <dt>怎么配</dt><dd>见下面「把 NapCat 接进来」一节。改完必须 <code>ai/start</code> / <code>ai/restart</code> 才生效（<code>Cmd.java:1225-1228</code>）。</dd>
-              <dt>调错的后果</dt><dd>端口被占 → 监听失败，但<b>本地交互照常可用</b>（<code>Boot.java:756-760</code>）。</dd>
+              <dt>含义</dt><dd>是否开 NapCat 反向 WS 监听、绑哪个地址与端口、准入 token（默认值见 <code>Conf.java</code>）。</dd>
+              <dt>怎么配</dt><dd>见下面「把 NapCat 接进来」一节。改完要 <code>ai/start</code> / <code>ai/restart</code> 一下才生效（<code>Cmd.java</code>）。</dd>
+              <dt>调错的后果</dt><dd>端口被占 → 监听失败，但<b>本地交互照常可用</b>（<code>Boot.java</code>）。</dd>
             </dl>
           </div>
         </div>
 
         <div class="note reveal">
-          <p><span class="n-title">首次启动会自己建骨架</span>：数据根不存在或为空时，装配会先落盘目录与空壳文件，<b>只创建、不覆盖、不写正文</b>：已存在的一律不动，<code>config.json</code> 与用户数据永不被清（<code>Boot.java:840</code>、<code>:851-876</code>）。执行了什么会在控制台打一行"空数据骨架已建立 N 项"（<code>Boot.java:872-874</code>）。</p>
+          <p><span class="n-title">首次启动会自己建骨架</span>：数据根不存在或为空时，装配会先落盘目录与空壳文件，<b>只创建、不覆盖、不写正文</b>：已存在的一律不动，<code>config.json</code> 与用户数据永不被清（<code>Boot.java</code>）。执行了什么会在控制台打一行"空数据骨架已建立 N 项"（<code>Boot.java</code>）。</p>
         </div>
       </section>
 
@@ -199,13 +196,13 @@ Get-FileHash 'C:\Sair\Local\AiAgent-V4\AiAgentV4.jar'        -Algorithm SHA256</
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">谁连谁</h4>
-            <p>插件实现的是反向 WebSocket <b>服务端</b>：它绑定 <code>napcatHost:napcatPort</code> 并等 NapCat 连进来（<code>qq\Link.java:34</code>、<code>:137-138</code>、<code>:144-145</code>）。所以 NapCat 那边要配的是"反向 WS 指向这台机器"。</p>
-            <p class="t-cap">实现只用 JDK + gson：<code>java.net.ServerSocket</code> + 手写 WebSocket 握手（RFC 6455），不引第三方网络框架（<code>qq\Link.java:38-39</code>、<code>:50</code>）。</p>
+            <p>插件实现的是反向 WebSocket <b>服务端</b>：它绑定 <code>napcatHost:napcatPort</code> 并等 NapCat 连进来（<code>qq\Link.java</code>）。所以 NapCat 那边要配的是"反向 WS 指向这台机器"。</p>
+            <p class="t-cap">实现只用 JDK + gson：<code>java.net.ServerSocket</code> + 手写 WebSocket 握手（RFC 6455），不引第三方网络框架（<code>qq\Link.java</code>）。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">token 怎么带</h4>
-            <p>握手时会校验 token（配了才校验）：接受 <code>Authorization: Bearer &lt;token&gt;</code>，也接受 URL 上的 <code>?access_token=&lt;token&gt;</code>（<code>qq\Link.java:431-435</code>）。</p>
-            <p class="t-cap">安全默认：<b>绑非本机地址 + token 为空 = 拒绝启动监听</b>；绑回环但 token 为空只给一行告警（<code>qq\Link.java:148-156</code>）。日志只打动作名与响应摘要，绝不打印 token（<code>qq\Link.java:44</code>）。</p>
+            <p>握手时会校验 token（配了才校验）：接受 <code>Authorization: Bearer &lt;token&gt;</code>，也接受 URL 上的 <code>?access_token=&lt;token&gt;</code>（<code>qq\Link.java</code>）。</p>
+            <p class="t-cap">安全默认：<b>绑非本机地址 + token 为空 = 拒绝启动监听</b>；绑回环但 token 为空只给一行告警（<code>qq\Link.java</code>）。日志只打动作名与响应摘要，绝不打印 token（<code>qq\Link.java</code>）。</p>
           </div>
         </div>
 
@@ -219,10 +216,10 @@ ai/config set napcatToken &lt;自己设一个强 token&gt;
 ai/restart
 ai/napcat status</code></pre>
         </div>
-        <p class="t-cap">这些命令<b>只写配置文件</b>，生效靠 <code>ai/restart</code>（<code>Cmd.java:1225-1228</code>、<code>:1369-1370</code>）。NapCat 侧把反向 WS 指向同一地址与端口，并在请求里带上 token。<code>ai/napcat status</code> 用于确认连接状态（<code>Cmd.java:1265</code>）。</p>
+        <p class="t-cap">这些命令<b>只写配置文件</b>，生效靠 <code>ai/restart</code>（<code>Cmd.java</code>）。NapCat 侧把反向 WS 指向同一地址与端口，并在请求里带上 token。<code>ai/napcat status</code> 用于确认连接状态（<code>Cmd.java</code>）。</p>
 
         <div class="note warn reveal">
-          <p><span class="n-title">连接失败不等于基板坏了</span>：监听失败或 NapCat 没连上时，本地控制台与已有数据照常可用，只是 QQ 侧能力不可用（<code>Boot.java:756-760</code>）。排障先用 <code>ai/status</code>，它会点名失败步骤。</p>
+          <p><span class="n-title">连接失败不等于基板坏了</span>：监听失败或 NapCat 没连上时，本地控制台与已有数据照常可用，只是 QQ 侧能力不可用（<code>Boot.java</code>）。排障可以先看 <code>ai/status</code>，它会点名失败步骤。</p>
         </div>
       </section>
 
@@ -237,13 +234,13 @@ ai/napcat status</code></pre>
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">它是什么</h4>
-            <p>一个内建的 HTTP 服务：URL 形如 <code>http://host:port/&lt;token&gt;/&lt;绝对路径&gt;</code>；<b>token 不对一律 404</b>（不区分 401/403，避免被探测）（<code>qq\Relay.java:52-53</code>、<code>:441-442</code>）。</p>
-            <p class="t-cap">token 没配会自动生成并写回 <code>config.json</code> 的 <code>relayToken</code>（可复现、可手改）（<code>Relay.java:390</code>、<code>:409</code>）。端口默认 <b>2671</b>（<code>Conf.java:133</code>）。</p>
+            <p>一个内建的 HTTP 服务：URL 形如 <code>http://host:port/&lt;token&gt;/&lt;绝对路径&gt;</code>；<b>token 不对一律 404</b>（不区分 401/403，避免被探测）（<code>qq\Relay.java</code>）。</p>
+            <p class="t-cap">token 没配会自动生成并写回 <code>config.json</code> 的 <code>relayToken</code>（可复现、可手改）（<code>Relay.java</code>）。端口默认 <b>2671</b>（<code>Conf.java</code>）。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">它的权限有多大</h4>
-            <p>源码里的原话：<b>只读、只认 token 路径前缀；服务能读本机任意文件 —— 不需要时就关掉</b>（<code>Relay.java:226</code>）。</p>
-            <p class="t-cap">因此默认是关的：<code>relayEnabled=false</code>，只在跨机部署时打开，并配 <code>relayPublicHost</code> 让它生成对端能访问的地址（<code>Relay.java:262</code>、<code>:268</code>）。</p>
+            <p>源码里的原话：<b>只读、只认 token 路径前缀；服务能读本机任意文件 —— 不需要时就关掉</b>（<code>Relay.java</code>）。</p>
+            <p class="t-cap">因此默认是关的：<code>relayEnabled=false</code>，只在跨机部署时打开，并配 <code>relayPublicHost</code> 让它生成对端能访问的地址（<code>Relay.java</code>）。</p>
           </div>
         </div>
 
@@ -252,15 +249,15 @@ ai/napcat status</code></pre>
             <div class="k-head"><span class="k-name">relayEnabled</span><span class="k-def">默认 false</span><span class="badge warn">默认关</span></div>
             <dl>
               <dt>含义</dt><dd>是否开启文件外链中转。</dd>
-              <dt>怎么开</dt><dd><code>ai/config set relayEnabled true</code> + 设 <code>relayPublicHost</code>，然后 <code>ai/restart</code>（<code>Cmd.java:1288</code>、<code>:1303</code>）。</dd>
+              <dt>怎么开</dt><dd><code>ai/config set relayEnabled true</code> + 设 <code>relayPublicHost</code>，然后 <code>ai/restart</code>（<code>Cmd.java</code>）。</dd>
               <dt>调错的后果</dt><dd>同机部署时开着它，等于把本机文件的只读下载口暴露出去；不需要就关。</dd>
             </dl>
           </div>
           <div class="keyrow reveal">
             <div class="k-head"><span class="k-name">relayPort / relayPublicHost / relayToken / relayTtlMinutes</span><span class="k-def">默认 2671 / "" / "" / 见配置页</span></div>
             <dl>
-              <dt>含义</dt><dd>监听端口、对外主机名、准入 token、链接有效期（<code>Conf.java:1278-1282</code>）。</dd>
-              <dt>注意</dt><dd>日志与状态输出里的 token 一律脱敏，只留前 4 位（<code>Relay.java:665</code>、<code>:268</code>）。</dd>
+              <dt>含义</dt><dd>监听端口、对外主机名、准入 token、链接有效期（<code>Conf.java</code>）。</dd>
+              <dt>注意</dt><dd>日志与状态输出里的 token 一律脱敏，只留前 4 位（<code>Relay.java</code>）。</dd>
             </dl>
           </div>
         </div>
@@ -277,22 +274,22 @@ ai/napcat status</code></pre>
         <div class="tw scroll reveal">
           <table>
             <thead>
-              <tr><th>生成项</th><th>内容</th><th>出处</th></tr>
+              <tr><th>生成项</th><th>内容</th></tr>
             </thead>
             <tbody>
-              <tr><td>数据根目录</td><td>数据根本身</td><td><code>Boot.java:861</code></td></tr>
-              <tr><td><code>prompts\</code></td><td>目录 + <code>identity.md</code>、<code>subagent.md</code> 两个 <b>0 字节</b>空壳</td><td><code>Boot.java:862</code>、<code>:867-870</code></td></tr>
-              <tr><td><code>files\</code></td><td>附件与下载落点</td><td><code>Boot.java:864</code></td></tr>
-              <tr><td><code>tmp\</code></td><td>临时目录</td><td><code>Boot.java:865</code></td></tr>
-              <tr><td>外挂扩展层目录</td><td>能力存放处（内容不在本文档范围内）</td><td><code>Boot.java:863</code></td></tr>
-              <tr><td><code>config.json</code></td><td>由 <code>Conf.ensureDefaults()</code> 写默认值</td><td><code>Boot.java:845</code></td></tr>
-              <tr><td><code>v4.db</code></td><td>建库；表在装配第③步落盘</td><td><code>Boot.java:845-846</code></td></tr>
+              <tr><td>数据根目录</td><td>数据根本身</td></tr>
+              <tr><td><code>prompts\</code></td><td>目录 + <code>identity.md</code>、<code>subagent.md</code> 两个 空壳</td></tr>
+              <tr><td><code>files\</code></td><td>附件与下载落点</td></tr>
+              <tr><td><code>tmp\</code></td><td>临时目录</td></tr>
+              <tr><td>外挂扩展层目录</td><td>能力存放处（怎么写见 <a href="capabilities.html#skill-dev">06 · 能力</a>）</td></tr>
+              <tr><td><code>config.json</code></td><td>由 <code>Conf.ensureDefaults()</code> 写默认值</td></tr>
+              <tr><td><code>v4.db</code></td><td>建库；表在装配第③步落盘</td></tr>
             </tbody>
           </table>
         </div>
 
         <div class="note ok reveal">
-          <p><span class="n-title">幂等承诺（有出处，不是口号）</span>：<code>ensureSkeleton()</code> 的契约是"<b>只创建、不覆盖、不写正文</b>：已存在的一律不动（二次启动幂等，<code>config.json</code> 与用户数据永不被清）"（<code>Boot.java:840-841</code>）；方法只把"本次真正新建的项"计入返回列表（<code>Boot.java:849</code>、<code>:852-853</code>）。</p>
+          <p><span class="n-title">幂等承诺（有出处，不是口号）</span>：<code>ensureSkeleton()</code> 的契约是"<b>只创建、不覆盖、不写正文</b>：已存在的一律不动（二次启动幂等，<code>config.json</code> 与用户数据永不被清）"（<code>Boot.java</code>）；方法只把"本次真正新建的项"计入返回列表（<code>Boot.java</code>）。</p>
         </div>
       </section>
 
@@ -301,14 +298,14 @@ ai/napcat status</code></pre>
         <header class="chapter-head reveal">
           <span class="chapter-tag">起停</span>
           <h2>启动与关停的正确做法</h2>
-          <p class="chapter-desc">这一节两个口径必须分清：<b>启动基板</b>用 <code>ai/start</code>；<b>结束进程</b>用 <code>/exit</code> 或精确 pid。</p>
+          <p class="chapter-desc">这一节的两个口径可以分开看：<b>启动基板</b>用 <code>ai/start</code>；<b>结束进程</b>用 <code>/exit</code> 或精确 pid。</p>
         </header>
 
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">启动：<code>ai/start</code> 是唯一的"加载并运行"</h4>
-            <p>它读 <code>config.json</code> 并跑 19 步装配；已经在跑时<b>只回话、绝不重启</b>，并告诉你"要生效得用 <code>ai/restart</code>"；已经有一条装配/重启在跑时明确拒绝，不并发（<code>Cmd.java:1364</code>、<code>:1365</code>、<code>:231-236</code>）。</p>
-            <p class="t-cap">装配跑在自己的线程上，进度直接打在控制台（<code>Cmd.java:1363</code>）。</p>
+            <p>它读 <code>config.json</code> 并跑 19 步装配；已经在跑时<b>只回话、绝不重启</b>，并告诉你"要生效得用 <code>ai/restart</code>"；已经有一条装配/重启在跑时明确拒绝，不并发（<code>Cmd.java</code>）。</p>
+            <p class="t-cap">装配跑在自己的线程上，进度直接打在控制台（<code>Cmd.java</code>）。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">开机自动跑命令：<code>.ir</code> 脚本</h4>
@@ -329,18 +326,18 @@ ai/status</code></pre>
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0"><code>ai/exit</code> 只停基板</h4>
-            <p>命令表对它的说明是"框架转发到组件 <code>exit()</code>：停基板（不改配置、不卸载插件；之后可再 start）"（<code>Cmd.java:1366</code>）。</p>
+            <p>命令表对它的说明是"框架转发到组件 <code>exit()</code>：停基板（不改配置、不卸载插件；之后可再 start）"（<code>Cmd.java</code>）。</p>
             <p class="t-cap">但<b>实测行为</b>是：基板停下之后<b>调试口会随之关闭，而 JVM 进程仍然活着</b>；<b>在没有控制台的场景下，这时无法再 start</b>。这是当前实现的行为，<b>未计划修改</b>。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">要真正关停</h4>
-            <p><b>用框架控制台的 <code>/exit</code></b>（框架自带文档：<code>SairFrameWork\readme\pages\plugin-dev.html:71</code> 与 <code>:139</code>「<code>/exit</code> 退出 SFW」），<b>或者按精确 pid 结束进程</b>。</p>
-            <p class="t-cap">进程是由 <code>run.bat</code> 里的 <code>javaw -jar SFW.jar</code> 拉起的；按 pid 关停前先用系统工具确认那个 pid 就是宿主进程，不要按名字批量杀。</p>
+            <p><b>用框架控制台的 <code>/exit</code></b>（框架自带文档：<code>SairFrameWork\readme\pages\plugin-dev.html</code> 与 「<code>/exit</code> 退出 SFW」），<b>或者按精确 pid 结束进程</b>。</p>
+            <p class="t-cap">进程是由 <code>run.bat</code> 里的 <code>javaw -jar SFW.jar</code> 拉起的；按 pid 关停前先用系统工具确认那个 pid 就是宿主进程，按名字批量结束容易误伤。</p>
           </div>
         </div>
 
         <div class="note bad reveal">
-          <p><span class="n-title">不要把 <code>ai/exit</code> 当成"退出程序"</span>：它不结束 JVM。想重启基板而不是结束进程，用 <code>ai/restart</code>（先停旧基板，再读文件重新装配 19 步，不并发）（<code>Cmd.java:1365</code>）。</p>
+          <p><span class="n-title">把 <code>ai/exit</code> 和"退出程序"分开看</span>：它不结束 JVM。想重启基板而不是结束进程，用 <code>ai/restart</code>（先停旧基板，再读文件重新装配 19 步，不并发）（<code>Cmd.java</code>）。</p>
         </div>
       </section>
 
@@ -349,27 +346,27 @@ ai/status</code></pre>
         <header class="chapter-head reveal">
           <span class="chapter-tag">清单</span>
           <h2>部署核对清单</h2>
-          <p class="chapter-desc">每一条都能自己验；验不过就先别往下走。</p>
+          <p class="chapter-desc">每一条都能自己验；先验过再往下走会更稳。</p>
         </header>
 
         <div class="grid-2">
           <div class="panel reveal tight">
             <h4 class="sub" style="margin-top:0">装之前</h4>
             <ul class="plain">
-              <li>jar 是这一份吗：<b>675,173 字节</b>，sha256 <code>130746B0…B088</code></li>
+              <li>jar 是这一份吗：</li>
               <li>宿主能起：<code>run.bat</code> 与 <code>8x64\bin\javaw</code> 在位</li>
-              <li>启动目录确定不再改（密文与工作目录绑死，<code>Crypto.java:18</code>）</li>
+              <li>启动目录确定不再改（密文与工作目录绑死，<code>Crypto.java</code>）</li>
               <li>数据来自 V3 的话先看<a href="migration.html">升级页</a>：<b>V4 不读 V3 的数据</b></li>
             </ul>
           </div>
           <div class="panel reveal d1 tight">
             <h4 class="sub" style="margin-top:0">装完</h4>
             <ul class="plain">
-              <li><code>ai/status</code> 能看到装配到哪一步、有没有失败步骤（<code>Cmd.java:1373</code>）</li>
-              <li><code>ai/status</code> 的「待生效」清单为空（否则配置还没生效，<code>Conf.java:578-589</code>）</li>
-              <li><code>ai/napcat status</code> 连接状态符合预期（<code>Cmd.java:1265</code>）</li>
+              <li><code>ai/status</code> 能看到装配到哪一步、有没有失败步骤（<code>Cmd.java</code>）</li>
+              <li><code>ai/status</code> 的「待生效」清单为空（否则配置还没生效，<code>Conf.java</code>）</li>
+              <li><code>ai/napcat status</code> 连接状态符合预期（<code>Cmd.java</code>）</li>
               <li>数据根里 <code>config.json</code> 与 <code>v4.db</code> 已生成、<code>prompts\</code> 里放好了提示词</li>
-              <li>群里发一条 <b>@ 它</b>的消息，能收到回复（只 @ 才触发，<code>QqGateway.java:874</code>）</li>
+              <li>群里发一条 <b>@ 它</b>的消息，能收到回复（只 @ 才触发，<code>QqGateway.java</code>）</li>
             </ul>
           </div>
         </div>
@@ -382,10 +379,10 @@ ai/status</code></pre>
             </thead>
             <tbody>
               <tr><td>聊天不回、命令说"未装配"</td><td><code>ai/status</code></td><td>还没 <code>ai/start</code>，或某一步装配失败（会给失败步骤）</td></tr>
-              <tr><td>改了配置没反应</td><td><code>ai/status</code> 的「待生效」段</td><td><code>ai/config</code> 只写文件，要 <code>ai/restart</code>（<code>Cmd.java:1369-1371</code>）</td></tr>
-              <tr><td>QQ 侧没反应</td><td><code>ai/napcat status</code></td><td>监听失败（端口占用）或 token 不匹配；本地交互不受影响（<code>Boot.java:756-760</code>）</td></tr>
-              <tr><td>密钥解不开</td><td>密文派生提示（只含因子描述、不含密钥）</td><td>换了机器 / 用户名 / 工作目录（<code>Crypto.java:119-125</code>、<code>:29-31</code>）</td></tr>
-              <tr><td>群里不触发</td><td>消息里有没有 @ 到它</td><td>只 @ 才触发（<code>QqGateway.java:874</code>）；事件缺 <code>self_id</code> 则恒判为未 @（<code>qq\Ev.java:18-19</code>）</td></tr>
+              <tr><td>改了配置没反应</td><td><code>ai/status</code> 的「待生效」段</td><td><code>ai/config</code> 只写文件，要 <code>ai/restart</code>（<code>Cmd.java</code>）</td></tr>
+              <tr><td>QQ 侧没反应</td><td><code>ai/napcat status</code></td><td>监听失败（端口占用）或 token 不匹配；本地交互不受影响（<code>Boot.java</code>）</td></tr>
+              <tr><td>密钥解不开</td><td>密文派生提示（只含因子描述、不含密钥）</td><td>换了机器 / 用户名 / 工作目录（<code>Crypto.java</code>）</td></tr>
+              <tr><td>群里不触发</td><td>消息里有没有 @ 到它</td><td>只 @ 才触发（<code>QqGateway.java</code>）；事件缺 <code>self_id</code> 则恒判为未 @（<code>qq\Ev.java</code>）</td></tr>
             </tbody>
           </table>
         </div>

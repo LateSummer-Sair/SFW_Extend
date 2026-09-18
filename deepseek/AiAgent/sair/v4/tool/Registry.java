@@ -191,9 +191,12 @@ public final class Registry implements sair.v4.skill.ToolView {
      * <p>判据只有一条：{@code auth.bits(c, Res.tool(t.name()))} 含 {@code X}；
      * 拿不到调用者 / 拿不到权限面 → 放行（全量视图，见 {@link #visible}）；
      * 判定抛异常 → 不放行。</p>
+     *
+     * <p><b>例外：对外公开的工具</b>（{@link #PUBLIC}）谁都点得动 —— 见那个常量的说明。</p>
      */
     private boolean mayEnter(Caller c, Tool t) {
         if (t == null) return false;
+        if (PUBLIC.contains(t.name())) return true;
         if (c == null || auth == null) return true;
         try {
             return Bits.has(auth.bits(c, Res.tool(t.name())), 'X');
@@ -203,12 +206,25 @@ public final class Registry implements sair.v4.skill.ToolView {
     }
 
     /**
+     * <b>对外公开的工具</b>：入口不按 T 位筛，谁都能点（内部仍按归属 / 配额 / 资源位管）。
+     *
+     * <p>只有一把：{@code alarm}（到点的事）。理由：<b>别人委托的事必须由委托人自己记、自己查</b>
+     * —— 普通用户的回合按 D43 是"工具面为空"，如果 {@code alarm} 也被筛掉，
+     * 他既托不成事、也问不到"我托你的事办妥了没"。它的写口按 SYSTEM 判（她自己的账本），
+     * 归属按委托人 QQ 硬判（只看得到自己的、别人的一个字都看不到），另有每人/全场配额。</p>
+     */
+    private static final java.util.Set<String> PUBLIC =
+            java.util.Collections.unmodifiableSet(
+                    new java.util.HashSet<String>(java.util.Arrays.asList("alarm")));
+
+    /**
      * 入口闸门的拒文（{@code null} = 放行）—— 与 {@link #mayEnter} 同一个判据（T 类的 {@code X} 位），
      * 只是走 ACL 的正规出口，好让拒绝原文与别处<b>一字不差</b>（{@code 缺 X 位 —— [权限阻断] …}，
      * 识别面 {@link #isDenyText} 直接认）。不筛的两种情况见 {@link #call}。
      */
     private String mayEnterDeny(Caller c, String tool) {
         if (c == null || auth == null) return null;
+        if (PUBLIC.contains(tool)) return null;
         try {
             return auth.allowRes(c, Res.tool(tool), 'X');
         } catch (Throwable ignored) {

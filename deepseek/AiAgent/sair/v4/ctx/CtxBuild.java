@@ -302,7 +302,9 @@ public final class CtxBuild {
                 c.addProperty("group", t.caller().groupId());
                 if (Str.has(t.caller().groupRole())) c.addProperty("role", t.caller().groupRole());
             }
-            if (!t.caller().master()) c.addProperty("favor", (long) t.caller().favor());
+            // 好感度：**跟身份无关**地给她（主人裁 2026-09-17 —— 它不判权限、是"关系值"，
+            // 每个人都能问她"我的好感度是多少"；她得先看得到，说不说完全由她定）
+            c.addProperty("favor", (long) t.caller().favor());
             // 权限事实（ACL）：主体种类 + 这个人对五类资源的**有效位**。提示词层拿这两个判断
             // "能不能答应他"，不再看工具名（工具的可见性不再按调用者筛，见 notes/acl-design-draft.md）。
             // 位一律问账本（Acl.bitsOf），基板不在这里重算任何一位。

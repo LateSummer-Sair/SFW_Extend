@@ -254,10 +254,39 @@ public final class DeepSeek {
     public Res stream(JsonArray messages, JsonArray tools, JsonObject opts, final Stream onDelta) {
         if (!gateEnter()) return busy();
         try {
-            return stream0(messages, tools, opts, onDelta);
+            // 瞬时失败静默重试一次（真机 2026-09-19：connect timed out 让整轮泡汤，会话里冒出一句兜底话）。
+            // **只有这一轮一个字都还没吐出去时才重试** —— 已经吐过字的流重试会把同一段话说两遍。
+            final boolean[] got = new boolean[1];
+            final Stream once = onDelta == null ? null : new Stream() {
+                @Override
+                public void on(String delta) {
+                    got[0] = true;
+                    try {
+                        onDelta.on(delta);
+                    } catch (Throwable ignored) {
+                    }
+                }
+            };
+            Res r = stream0(messages, tools, opts, once);
+            if (!r.ok() && !got[0] && retryable(r.error)) {
+                logWarn("stream 瞬时失败，重试一次：" + r.error);
+                r = stream0(messages, tools, opts, once);
+            }
+            return r;
         } finally {
             gateExit();
         }
+    }
+
+    /** 这个错误值不值得重试一次：连接/读取超时、连接被掐断、HTTP 5xx 与 429。 */
+    private static boolean retryable(String err) {
+        if (Str.blank(err)) return false;
+        String s = err.toLowerCase();
+        if (s.contains("timeout") || s.contains("timed out") || s.contains("connect")
+                || s.contains("connection reset") || s.contains("broken pipe")
+                || s.contains("unexpected end") || s.contains("eof")) return true;
+        return s.contains("http 500") || s.contains("http 502") || s.contains("http 503")
+                || s.contains("http 504") || s.contains("http 429");
     }
 
     private Res stream0(JsonArray messages, JsonArray tools, JsonObject opts, final Stream onDelta) {

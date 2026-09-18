@@ -32,6 +32,10 @@ public final class Lib {
     /** 运行表（基板自用，非"库"）：表名 + 首列为表名，其余为列名。 */
     private static final String[][] RUN_COLS = {
             {"favor", "qq", "value", "level", "updated", "note"},
+            // 好感度的流水账（主人裁 2026-09-17：她自己加减、主人可直接定值 ⇒ 每一次改动都要留痕，
+            // 数值必须能说出"为什么他是朋友、谁改的、改了多少"）。列在 RUN_COLS 里 = 技能不能经
+            // store_write 直写它（与 favor 同一条保护）。
+            {"favor_event", "id", "qq", "ts", "delta", "value_after", "op", "by", "why"},
             {"alarm", "id", "ts", "fire_at", "repeat", "scope", "target", "task", "prompt", "enabled", "state", "owner"},
             {"task", "id", "ts", "status", "owner", "agent", "tools", "task", "result", "ms"},
             {"kv", "k", "v", "updated"},
@@ -49,6 +53,19 @@ public final class Lib {
                         + "updated INTEGER DEFAULT 0,"
                         + "note TEXT DEFAULT '')",
                 "CREATE INDEX IF NOT EXISTS idx_favor_value ON favor(value)",
+
+                // 好感度流水（谁、何时、加减了多少、改完是多少、什么 op、谁改的、为什么）。
+                // 表建在这里 = 走 runDdl()，老库升级时幂等补表，不需要改 favor 自己的列结构。
+                "CREATE TABLE IF NOT EXISTS favor_event ("
+                        + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                        + "qq INTEGER DEFAULT 0,"
+                        + "ts INTEGER DEFAULT 0,"
+                        + "delta REAL DEFAULT 0,"
+                        + "value_after REAL DEFAULT 0,"
+                        + "op TEXT DEFAULT '',"
+                        + "by TEXT DEFAULT '',"
+                        + "why TEXT DEFAULT '')",
+                "CREATE INDEX IF NOT EXISTS idx_favor_event_qq ON favor_event(qq, ts)",
 
                 "CREATE TABLE IF NOT EXISTS alarm ("
                         + "id INTEGER PRIMARY KEY AUTOINCREMENT,"

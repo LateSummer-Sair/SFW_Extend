@@ -95,6 +95,11 @@ public final class ToolIndex {
     /** "只 @ 一下、没带任何话"那条消息给模型的输入（缺键 = 空串 → 这一条不起回合）。 */
     private volatile String bareMentionTpl = "";
     /**
+     * 「失败回话」：这一轮没跑成（模型连接超时、接口报错…）时，对外说的那句兜底话。
+     * <p>缺键返回 null，调用方用内置的人设兜底话顶上（<b>不把内部错误发出去</b>）。</p>
+     */
+    private volatile String failNoticeTpl = "";
+    /**
      * 偏好块的三行文案（{@code ctx.CtxBuild} 每轮注入"稳定段"用）。
      * <p><b>与其余文案键的口径不同</b>：这三个键缺了<b>不能</b>"那一路就不发"——那会让
      * "偏好进上下文"整条功能静默失效（V4 之前的缺口正是没人读 {@code pref} 库）。
@@ -178,6 +183,7 @@ public final class ToolIndex {
                 if ("面板标题".equals(key)) { panelTpl = val; continue; }
                 // "只 @ 一下、没带任何话"那条消息给模型的输入（缺键 → 这一条不起回合）
                 if ("被单@时的输入".equals(key)) { bareTpl = val; continue; }
+                if ("失败回话".equals(key)) { failNoticeTpl = val; continue; }
                 // 偏好块的三行文案（缺键 → 调用方用内置默认值 + 只 warn 一次，绝不因此不注入）
                 if ("偏好标题".equals(key)) { prefTitle = val; continue; }
                 if ("偏好行".equals(key)) { prefRow = val; continue; }
@@ -486,6 +492,12 @@ public final class ToolIndex {
     public String bareMentionText() {
         load();
         return Str.blank(bareMentionTpl) ? null : bareMentionTpl;
+    }
+
+    /** 「失败回话」：这一轮没跑成时对外说的兜底话（人设口吻、不含内部错误）；缺键返回 null，调用方用内置默认顶上。 */
+    public String failNoticeText() {
+        load();
+        return Str.blank(failNoticeTpl) ? null : failNoticeTpl;
     }
 
     /**

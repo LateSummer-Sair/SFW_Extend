@@ -183,6 +183,31 @@ public final class Tick {
      */
     public JsonObject add(long fireAt, String repeat, String scope, long target,
                           String task, String prompt, Caller creator) {
+        return add(fireAt, repeat, scope, target, task, prompt, creator, false);
+    }
+
+    /**
+     * 建一个定时唤醒（带"谁定下的"）。
+     *
+     * <p>{@code mine=true} = <b>她自己定下的</b>（承诺 / 提醒）：账本上记 {@code owner.by=self}，
+     * 可以顺延、可以放弃（尽量不放弃）。{@code mine=false} = <b>别人委派的</b>：这是工作，
+     * 必须办、不许拖、不许放弃 —— 到点那一轮也会按这个身份说话。</p>
+     */
+    public JsonObject add(long fireAt, String repeat, String scope, long target,
+                          String task, String prompt, Caller creator, boolean mine) {
+        return add(fireAt, repeat, scope, target, task, prompt, creator, mine, 0L, false);
+    }
+
+    /**
+     * 建一个定时唤醒（{@code principalQq} = <b>这条是替谁记的</b>，0 = 就是当轮说话的人）。
+     *
+     * <p>为什么要分开传：一轮里可能同时有好几个人的消息（同会话合并成一回合），
+     * 当轮 {@code caller} 不一定是"委托这件事的人"。账本归属（谁能查、到点以谁的身份跑）
+     * 一律按委托人来记 —— 替谁记的就归谁；会话与群沿用"记这条时的现场"。</p>
+     */
+    public JsonObject add(long fireAt, String repeat, String scope, long target,
+                          String task, String prompt, Caller creator, boolean mine,
+                          long principalQq, boolean principalMaster) {
         JsonObject row = new JsonObject();
         row.addProperty("ts", System.currentTimeMillis());
         row.addProperty("fire_at", fireAt);
@@ -192,8 +217,19 @@ public final class Tick {
         row.addProperty("task", task == null ? "" : task);
         row.addProperty("prompt", prompt == null ? "" : prompt);
         row.addProperty("enabled", 1);
-        row.addProperty("state", "pending");
-        row.addProperty("owner", ownerJson(creator));
+        row.addProperty("state", ST_PENDING);
+        JsonObject o = J.obj(ownerJson(creator, mine));
+        if (o == null) o = new JsonObject();
+        if (principalQq > 0L) {
+            o.addProperty("qq", principalQq);
+            // 换了委托人 ⇒ 名字也换（不知道昵称就用 QQ 号，别把原说话人的名字留在这一行上）
+            if (creator == null || principalQq != creator.qq()) o.addProperty("name", String.valueOf(principalQq));
+        } else if (creator != null) {
+            o.addProperty("qq", creator.qq());
+        }
+        o.addProperty("master", principalQq > 0L ? principalMaster : (creator != null && creator.master()));
+        o.addProperty("by", mine ? "self" : "caller");
+        row.addProperty("owner", J.json(o));
         long id = store == null ? 0 : store.upsertAlarm(row);
         row.addProperty("id", id);
         return row;
@@ -201,6 +237,11 @@ public final class Tick {
 
     /** 归属信息（存进 alarm.owner 列）：会话 + QQ + 群 + 是否主人。 */
     public static String ownerJson(Caller c) {
+        return ownerJson(c, false);
+    }
+
+    /** 归属信息（带"谁定下的"）：{@code by=self} 她自己定下的 / {@code by=caller} 别人委派的。 */
+    public static String ownerJson(Caller c, boolean mine) {
         JsonObject o = new JsonObject();
         if (c == null) return "";
         o.addProperty("session", c.session());
@@ -208,6 +249,7 @@ public final class Tick {
         o.addProperty("group", c.groupId());
         o.addProperty("master", c.master());
         o.addProperty("name", c.name());
+        o.addProperty("by", mine ? "self" : "caller");
         return J.json(o);
     }
 
@@ -218,13 +260,24 @@ public final class Tick {
         return o;
     }
 
-    /** 该闹钟是否属于这个调用者（主人可见全部；无归属的旧行只对主人可见）。 */
+    /**
+     * 该闹钟是否属于这个调用者：<b>主人可见全部</b>；其他人<b>只看得见自己委派的那些</b>
+     * （按 {@code owner.qq} 判，不是按会话判 —— 同一个群里的人互相看不到对方的账）。
+     * 没有归属的老行只对主人可见。
+     */
     public static boolean ownedBy(JsonObject alarm, Caller c) {
         if (c == null) return false;
         if (c.master()) return true;
         JsonObject o = ownerOf(alarm);
+        long oq = J.l(o, "qq", 0L);
+        if (oq > 0L && c.qq() > 0L) return oq == c.qq();
         String s = J.s(o, "session", "");
         return Str.has(s) && s.equals(c.session());
+    }
+
+    /** 是不是她自己定下的（{@code owner.by=self}）；别人委派的 = 工作，必办。 */
+    public static boolean isMine(JsonObject alarm) {
+        return "self".equalsIgnoreCase(J.s(ownerOf(alarm), "by", ""));
     }
 
     public List<JsonObject> alarms() {
@@ -274,6 +327,71 @@ public final class Tick {
 
     public int clear() { return clear(null); }
 
+    // ==================== 职责台：到点的事的四态 + 顺延/放弃 ====================
+
+    /** 待办。 */
+    public static final String ST_PENDING = "pending";
+    /** 到点已触发、还在办（她还没回报）。 */
+    public static final String ST_RUNNING = "running";
+    /** 办妥了。 */
+    public static final String ST_DONE = "done";
+    /** 办了但没成（要写 why）。 */
+    public static final String ST_FAILED = "failed";
+
+    /** 按 id 找一行（并过归属判定）；找不到 / 不是他的 ⇒ null。 */
+    private JsonObject find(long id, Caller c) {
+        for (JsonObject a : alarms()) {
+            if (J.l(a, "id", 0) == id && ownedBy(a, c)) return a;
+        }
+        return null;
+    }
+
+    /**
+     * 收尾：办妥（{@link #ST_DONE}）/ 没办成（{@link #ST_FAILED}）。
+     * 谁能收尾：<b>委托人本人、主人、以及到点那一轮的她</b>（那一轮的身份就是委托人）。
+     * 结果只留一行（给"你托我的事办妥了没"用）：{@code state} + {@code owner.result}。
+     */
+    public boolean mark(long id, String state, String result, String why, Caller c) {
+        JsonObject a = find(id, c);
+        if (a == null || store == null) return false;
+        JsonObject o = ownerOf(a);
+        if (Str.has(result)) o.addProperty("result", Str.cut(Str.oneLine(result), 200));
+        if (Str.has(why)) o.addProperty("why", Str.cut(Str.oneLine(why), 200));
+        store.db().exec("UPDATE alarm SET state=?, owner=? WHERE id=?", state, J.json(o), id);
+        if (out != null) {
+            out.dim("[alarm] #" + id + " → " + state
+                    + (Str.has(result) ? "：" + Str.cut(Str.oneLine(result), 60) : ""));
+        }
+        return true;
+    }
+
+    /**
+     * 顺延：<b>只有她自己定下的</b>能拖（别人委派的是工作，不许拖），主人例外。
+     * 记一次 {@code owner.defer}（几次了看得见），并把下一次时间改掉、状态回到待办。
+     */
+    public boolean defer(long id, long newFireAt, String why, Caller c) {
+        JsonObject a = find(id, c);
+        if (a == null || store == null || newFireAt <= 0L) return false;
+        boolean master = c != null && c.master();
+        if (!isMine(a) && !master) return false;
+        JsonObject o = ownerOf(a);
+        long n = J.l(o, "defer", 0L) + 1L;
+        o.addProperty("defer", n);
+        if (Str.has(why)) o.addProperty("why", Str.cut(Str.oneLine(why), 200));
+        store.db().exec("UPDATE alarm SET fire_at=?, state=?, enabled=1, owner=? WHERE id=?",
+                newFireAt, ST_PENDING, J.json(o), id);
+        if (out != null) {
+            out.dim("[alarm] #" + id + " 顺延第 " + n + " 次" + (Str.has(why) ? "（" + Str.cut(why, 40) + "）" : ""));
+        }
+        return true;
+    }
+
+    /**
+     * （没有 abandon）主人 2026-09-19 定：不做"放弃"这个动作 —— 到点的事只有两种结局：
+     * <b>办妥（{@link #ST_DONE}）或如实说没办成（{@link #ST_FAILED}）</b>；
+     * 真不要了就走 {@link #remove}（把记录撤掉）。"自己的可顺延、别人的不许拖"由 {@link #defer} 守。
+     */
+
     /** 到点即唤起（每次 tick 调一次）。 */
     public int fireDue() {
         if (store == null) return 0;
@@ -301,17 +419,25 @@ public final class Tick {
             if (next > 0) {
                 store.db().exec("UPDATE alarm SET fire_at=?, state='pending' WHERE id=?", next, id);
             } else {
-                store.db().exec("UPDATE alarm SET enabled=0, state='fired' WHERE id=?", id);
+                store.db().exec("UPDATE alarm SET enabled=0, state='running' WHERE id=?", id);
             }
             fired++;
             final String prompt = J.s(a, "prompt", "");
-            final String text = Str.has(prompt) ? prompt + "\n" + task : task;
             // 以发起者的身份跑：非主人建的闹钟绝不以主人身份执行（否则等于远程提权）
             final JsonObject owner = ownerOf(a);
+            final boolean mine = isMine(a);
             final boolean ownerMaster = J.b(owner, "master", false);
             final String ownerSession = J.s(owner, "session", "");
             final long ownerQq = J.l(owner, "qq", 0);
             final long ownerGroup = J.l(owner, "group", 0);
+            // 到点这一轮要让她知道"这是谁的什么事、该怎么收尾"（工作必办、自己的可顺延）
+            final String who = mine ? "你自己定下的（承诺或提醒）"
+                    : (ownerMaster ? "主人委派的" : (Str.nz(J.s(owner, "name", "")) + " 委派给你的"));
+            final String text = "【到点的事 #" + id + "】" + who + (mine ? "。" : "—— 这是工作，优先办。") + "\n"
+                    + (Str.has(prompt) ? prompt + "\n" : "") + task + "\n"
+                    + "【收尾】办完用 alarm op=done id=" + id + " result=…；没办成用 alarm op=fail id=" + id + " why=…。"
+                    + (mine ? "确实办不了可以 op=defer（顺延）或 op=abandon（放弃，尽量别用）。"
+                            : "别人委派的事不能放弃：办不成也要如实回话。");
             if (out != null) out.dim("[tick] 定时唤醒 #" + id + " → " + Str.cut(Str.oneLine(text), 80));
             // 排进"按会话分道"的回合队列：以发起者的会话为道（同会话保序），
             // 主人建的闹钟走高优先级道，与用户消息一样的排队规矩（不再另起线程抢模型）
@@ -347,11 +473,15 @@ public final class Tick {
         return fired;
     }
 
-    /** 下一次触发时间；0 表示不再触发。 */
+    /** 下一次触发时间；0 表示不再触发。{@code cron:分 时 日 月 周} = 按日历规则（基板自带判定）。 */
     public static long nextFire(long fireAt, String repeat, long now) {
         if (Str.blank(repeat)) return 0;
         String r = repeat.trim().toLowerCase();
         if ("once".equals(r)) return 0;
+        if (r.startsWith("cron:")) {
+            Cron c = Cron.parse(r.substring(5));
+            return c == null ? 0L : c.next(now, 366 * 24 * 60);
+        }
         long step;
         if ("daily".equals(r)) step = 24L * 3600 * 1000;
         else if ("weekly".equals(r)) step = 7L * 24 * 3600 * 1000;

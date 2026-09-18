@@ -23,7 +23,7 @@ public final class MarkerTags {
 
     /** 控制标记白名单（标签名精确匹配；允许带属性，如 {@code <split/>}、{@code <at qq="1">}）。 */
     private static final Pattern MARKER_TAG_PATTERN = Pattern.compile(
-            "</?(?:quote|split|at|reply"
+            "</?(?:quote|split|at|reply|favor"
             + "|br|sendimage|sendrecord|sendfile|schedule|note|searchnote|stop|editprompt"
             + "|cmd|sys|eval|evaljs|download|balance|weather|skillextract"
             + "|batchrename|batchconvert|readfile|readdir|findfile|web|search|remember)\\b[^>]*>",

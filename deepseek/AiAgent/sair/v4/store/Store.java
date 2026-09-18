@@ -608,6 +608,38 @@ public final class Store {
         }
     }
 
+    /**
+     * 按人建账：这个人第一次跟她打交道就建一行（值 0），已经有了就一个字段都不动。
+     *
+     * <p>为什么要它：主人裁 2026-09-17「可以对每个交流过的人进行单独记录」——
+     * 只有每个交流过的人都有自己的行，她才能回答"我的好感度是多少"（0 也是一条记录）。
+     * {@code INSERT OR IGNORE} 保证它幂等且不覆盖已有数值；建不上（库不可用）就当没这回事，
+     * 绝不抛给调用方（入站路径不许被记账拖垮）。</p>
+     */
+    public void ensureFavor(long qq) {
+        if (qq <= 0L) return;
+        try {
+            db.exec("INSERT OR IGNORE INTO favor(qq, value, level, updated, note) VALUES(?,?,?,?,?)",
+                    qq, 0.0D, "初识", System.currentTimeMillis(), "");
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 好感度流水：记一笔（谁、加减多少、改完多少、什么 op、谁改的、为什么）。 */
+    public void favorLog(long qq, double delta, double after, String op, String by, String why) {
+        if (qq <= 0L) return;
+        try {
+            db.exec("INSERT INTO favor_event(qq, ts, delta, value_after, op, by, why) VALUES(?,?,?,?,?,?,?)",
+                    qq, System.currentTimeMillis(), delta, after, Str.nz(op), Str.nz(by), Str.nz(why));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 某人的好感度流水（新 → 旧）。 */
+    public List<JsonObject> favorEvents(long qq, int limit) {
+        return db.query("SELECT * FROM favor_event WHERE qq = ? ORDER BY ts DESC, id DESC LIMIT " + norm(limit), qq);
+    }
+
     // ---------------------------------------------------------------- KV
 
     /** 取 KV，缺失返回 def。 */

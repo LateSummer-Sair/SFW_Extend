@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>总览 · AiAgent V4 文档</title>
-<meta name="description" content="AiAgent V4 文档总览：当前线上基线、基板九项能力、11 个页面入口与上手前必知约束，每条断言都带 file:line 或可复核实测值。">
+<meta name="description" content="AiAgent V4.1 文档总览：基板九项能力、11 个页面入口与上手前要留意的约定，每条说明都能对应到实现。">
 <link rel="stylesheet" href="css/site.css">
 <noscript><style>.reveal{opacity:1 !important;transform:none !important}#bg-canvas,.scanline{display:none !important}</style></noscript>
 </head>
@@ -45,24 +45,16 @@
 
     <section class="hero">
       <span class="eyebrow">总览 · 命令使用 / 基板能力 / 技术实现</span>
-      <h1>AiAgent <span class="grad">V4</span><br>基板只做九件事</h1>
+      <h1>AiAgent <span class="grad">V4.1</span><br>基板只做九件事</h1>
       <p class="lede">
         本套文档只写三件事：<b>命令怎么用</b>、<b>基板能做什么</b>、<b>它是怎么实现的</b>。
-        关于实现的每条断言都能追到源码的 <code>file:line</code> 或一个可复核的实测值；
+        关于实现的每条说明都能在仓库里找到对应的地方；
         没有实现的东西一律标成<b>计划中／未实现</b>，不给承诺。
       </p>
       <div class="hero-actions">
         <a class="btn" href="deploy.html">① 先看怎么部署 →</a>
         <a class="btn amber" href="commands.html">控制台能用什么</a>
         <a class="btn ghost" href="capabilities.html">基板能做什么</a>
-      </div>
-      <div class="hero-grid">
-        <div class="kpi"><div class="k">线上程序</div><div class="v">675,173<small>字节</small></div></div>
-        <div class="kpi amber"><div class="k">源码</div><div class="v">110<small>个 .java</small></div></div>
-        <div class="kpi amber"><div class="k">包</div><div class="v">17</div></div>
-        <div class="kpi"><div class="k">配置键面</div><div class="v">94<small>个已知键</small></div></div>
-        <div class="kpi rose"><div class="k">装配</div><div class="v">19<small>步</small></div></div>
-        <div class="kpi"><div class="k">数据文件</div><div class="v">1<small>个（v4.db）</small></div></div>
       </div>
     </section>
 
@@ -74,7 +66,7 @@
           <span class="chapter-tag">范围</span>
           <h2>这套文档写什么，不写什么</h2>
           <p class="chapter-desc">
-            文档只覆盖基板本身：命令面、能力面、实现面。凡是不能追到 <code>file:line</code> 或可复核实测值的说法，本套文档里不会出现。
+            文档只覆盖基板本身：命令面、能力面、实现面。写不实的说法，本套文档里不会出现。
           </p>
         </header>
 
@@ -94,17 +86,16 @@
           <div class="tile reveal d2">
             <span class="t-num">C / INTERNALS</span>
             <h3><span class="dot"></span>技术实现</h3>
-            <p>包与分层、装配流程、线程与调度、工具注册与失败闸门、数据表与键、关键 <code>file:line</code> 索引。</p>
+            <p>包与分层、装配流程、线程与调度、工具注册与失败闸门、数据表与键、关键机制的实现索引。</p>
             <span class="t-meta"><span>类与文件 / 机制 / 表结构</span></span>
           </div>
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">不在范围内</span>：外挂扩展层不在本文档范围内 —— 它不写进本套文档，其加载机制只在<a href="architecture.html#hot">实现页的加载管线</a>里以"机制"的形式出现，不涉及任何具体内容。业务能力由它提供，与基板文档分层。</p>
+          <p><span class="n-title">不在范围内</span>：技能这一层可以自己长：怎么写、怎么装见 <a href="capabilities.html#skill-dev">06 · 能力</a> 里的「自己写一个技能」。它的加载机制在<a href="architecture.html#hot">实现页的加载管线</a>里以"机制"的形式出现，不涉及任何具体内容。业务能力由它提供，与基板文档分层。</p>
         </div>
 
         <div class="note reveal">
-          <p><span class="n-title">出处口径</span>：本套文档里的实现断言有两种出处 —— ① <code>src\sair\v4\...\Xxx.java:行号</code>；② 可复核的实测值（文件字节数、sha256、计数命令 + 结果）。凡是源码里没有对应实现的，写成"计划中／未实现"。</p>
         </div>
       </section>
 
@@ -114,13 +105,13 @@
           <span class="chapter-tag">能力</span>
           <h2>基板只做九件事</h2>
           <p class="chapter-desc">
-            命令表自己就是这么写的：<code>Cmd.java:1357</code> 的第一行 —— 「基板只做九件事：存储 / 热插拔 / 提示词 / Agent / 上下文 / 权限 / 模型 / NapCat / 控制台」。
+            命令表自己就是这么写的：<code>Cmd.java</code> 的第一行 —— 「基板只做九件事：存储 / 热插拔 / 提示词 / Agent / 上下文 / 权限 / 模型 / NapCat / 控制台」。
             九项都是基板职责，任何一张卡都能点到<a href="capabilities.html">能力页</a>对应的那一节。
           </p>
         </header>
 
         <div class="grid-3">
-          <a class="tile reveal" href="capabilities.html#storage"><span class="t-num">01 / STORE</span><h3><span class="dot"></span>通用存储</h3><p>单一数据文件 <code>v4.db</code>（<code>Conf.java:1103</code>），业务库 + 运行表 + 全文检索统一走一套接口。</p><span class="t-meta"><span>sair.v4.store</span><span>单文件</span></span></a>
+          <a class="tile reveal" href="capabilities.html#storage"><span class="t-num">01 / STORE</span><h3><span class="dot"></span>通用存储</h3><p>单一数据文件 <code>v4.db</code>（<code>Conf.java</code>），业务库 + 运行表 + 全文检索统一走一套接口。</p><span class="t-meta"><span>sair.v4.store</span><span>单文件</span></span></a>
           <a class="tile reveal d1" href="architecture.html#hot"><span class="t-num">02 / HOT</span><h3><span class="dot"></span>热插拔加载</h3><p>后加进来的能力不用重新打包：加载管线负责解析、编译、注册与工具面接入（机制见实现页）。</p><span class="t-meta"><span>加载管线</span><span>注册</span></span></a>
           <a class="tile reveal d2" href="capabilities.html#prompt"><span class="t-num">03 / PROMPT</span><h3><span class="dot"></span>提示词</h3><p>从数据根读提示词文件，按槽位注入到系统提示 / 每轮上下文 / 工具说明 / 用户消息前。</p><span class="t-meta"><span>sair.v4.prompt</span><span>注入</span></span></a>
           <a class="tile reveal" href="capabilities.html#agent"><span class="t-num">04 / AGENT</span><h3><span class="dot"></span>Agent 架构</h3><p>主循环 + 子 Agent + 任务台账；回合调度分道、模型调用过闸门。</p><span class="t-meta"><span>sair.v4.agent</span><span>主循环 / 子 Agent</span></span></a>
@@ -136,9 +127,8 @@
       <section class="chapter" id="facts">
         <header class="chapter-head reveal">
           <span class="chapter-tag">基线</span>
-          <h2>当前线上基线（可自己复核）</h2>
+          <h2>当前线上基线</h2>
           <p class="chapter-desc">
-            下面每个数字都能用一条命令当场复核；复核命令与结果口径都写在卡片里。文档与线上字节对不上时，以线上字节为准。
           </p>
         </header>
 
@@ -146,8 +136,8 @@
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">线上程序</h4>
             <p><code>C:\Sair\SairFrameWork\plugins\exection\ai.jar</code></p>
-            <p><b>675,173 字节</b><br><span class="dim">sha256 <code>130746B0B207138004459B4E7101FA4B148BBAF15CA42946D8D3A4A22228B088</code></span></p>
-            <p class="t-cap">同一份 jar 在仓库根目录另有 <code>AiAgentV4.jar</code>，与线上这份逐位相同（sha256 一致）。</p>
+            <p><br><span class="dim"></span></p>
+            <p class="t-cap">同一份 jar 在仓库根目录另有 <code>AiAgentV4.jar</code>，与线上这份逐位相同。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">源码</h4>
@@ -166,28 +156,28 @@ Get-ChildItem C:\Sair\Local\AiAgent-V4\src -Recurse -Filter *.java |
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">配置键面</h4>
-            <p><b>94 个已知键</b>：<code>Conf.knownKeys()</code>（<code>Conf.java:1173-1288</code>）里逐条登记，共 94 次 <code>add(out, …)</code>。</p>
-            <p class="t-cap"><code>ai/status</code> 会把「文件里是新值、跑着的基板还是旧值」的键点名列成<b>待生效</b>（<code>Conf.java:578-589</code>）。</p>
+            <p><b>94 个已知键</b>：<code>Conf.knownKeys()</code>（<code>Conf.java</code>）里逐条登记，共 94 次 <code>add(out, …)</code>。</p>
+            <p class="t-cap"><code>ai/status</code> 会把「文件里是新值、跑着的基板还是旧值」的键点名列成<b>待生效</b>（<code>Conf.java</code>）。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">提示词实物</h4>
-            <p><code>data\prompts\identity.md</code> <b>13,028 字节</b>；<code>subagent.md</code> <b>1,664 字节</b>；<code>tools-index.md</code> <b>11,029 字节</b>。</p>
-            <p class="t-cap">冷启动时基板只建 <b>0 字节空壳</b>，不带任何提示词文案（<code>Boot.java:840-843</code>、<code>:869-870</code>）。</p>
+            <p><code>data\prompts\identity.md</code> ；<code>subagent.md</code> ；<code>tools-index.md</code> 。</p>
+            <p class="t-cap">冷启动时基板只建 <b>0 字节空壳</b>，不带任何提示词文案（<code>Boot.java</code>）。</p>
           </div>
         </div>
 
         <h3 class="sec">装配是 19 步</h3>
-        <p>装配流程在 <code>Boot.init()</code> 里按 <code>step(…)</code> 顺序推进，源码里共有 <b>19</b> 处 <code>step(</code> 调用；命令表也这么写：「<code>ai/start</code> = 唯一的「加载并运行」：读 config.json + 跑 19 步装配」（<code>Cmd.java:1364</code>）。</p>
+        <p>装配流程在 <code>Boot.init()</code> 里按 <code>step(…)</code> 顺序推进，源码里共有 <b>19</b> 处 <code>step(</code> 调用；命令表也这么写：「<code>ai/start</code> = 唯一的「加载并运行」：读 config.json + 跑 19 步装配」（<code>Cmd.java</code>）。</p>
         <div class="tw scroll reveal">
           <table>
             <thead>
-              <tr><th>要点</th><th>事实</th><th>出处</th></tr>
+              <tr><th>要点</th><th>事实</th></tr>
             </thead>
             <tbody>
-              <tr><td>装配线程</td><td>装配跑在自己的线程上，进度直接打在控制台；控制台在装配期间照常可用</td><td><code>Cmd.java:1363</code>、<code>Boot.java</code> 的 <code>step()</code> 机制</td></tr>
-              <tr><td>可观测</td><td><code>ai/status</code> 未启动会说 <code>ready=0 reason=not_started</code>；失败时点名失败步骤</td><td><code>Cmd.java:1373</code></td></tr>
-              <tr><td>冷启动骨架</td><td>目录与空壳文件由 <code>ensureSkeleton()</code> 落盘：只创建、不覆盖、不写正文</td><td><code>Boot.java:851-876</code></td></tr>
-              <tr><td>数据文件</td><td>只有一个 <code>v4.db</code>；<code>config.json</code> 由 <code>Conf.ensureDefaults()</code> 落盘</td><td><code>Conf.java:1103</code>、<code>Boot.java:845</code></td></tr>
+              <tr><td>装配线程</td><td>装配跑在自己的线程上，进度直接打在控制台；控制台在装配期间照常可用</td></tr>
+              <tr><td>可观测</td><td><code>ai/status</code> 未启动会说 <code>ready=0 reason=not_started</code>；失败时点名失败步骤</td></tr>
+              <tr><td>冷启动骨架</td><td>目录与空壳文件由 <code>ensureSkeleton()</code> 落盘：只创建、不覆盖、不写正文</td></tr>
+              <tr><td>数据文件</td><td>只有一个 <code>v4.db</code>；<code>config.json</code> 由 <code>Conf.ensureDefaults()</code> 落盘</td></tr>
             </tbody>
           </table>
         </div>
@@ -198,7 +188,7 @@ Get-ChildItem C:\Sair\Local\AiAgent-V4\src -Recurse -Filter *.java |
         <header class="chapter-head reveal">
           <span class="chapter-tag">目录</span>
           <h2>十一个页面</h2>
-          <p class="chapter-desc">建议按 02 → 09 的顺序读一遍；<code>07 技术实现</code>是文档里唯一带大量 <code>file:line</code> 的页面。</p>
+          <p class="chapter-desc">建议按 02 → 09 的顺序读一遍；<code>07 技术实现</code>讲的是包与分层、装配、线程与调度这些内部机制。</p>
         </header>
 
         <div class="grid-3">
@@ -209,7 +199,7 @@ Get-ChildItem C:\Sair\Local\AiAgent-V4\src -Recurse -Filter *.java |
           <a class="tile reveal d1" href="capabilities.html"><span class="t-num">06 / CAPABILITIES</span><h3><span class="dot"></span>基板能力</h3><p>九件事、生命周期、失败降级、模型面、QQ 面、权限面、存储面、调试面、边界。</p><span class="t-meta"><span>能力面</span><span>边界</span></span></a>
           <a class="tile reveal d2" href="perms.html"><span class="t-num">07 / PERMS</span><h3><span class="dot"></span>权限管理</h3><p>ACL 模型（三主体 / 五类资源 / 三位）、<code>perms.json</code> 账本格式、<code>ai/acl</code> 与 <code>ai/perm</code> 的分工、怎么授权与撤销、默认与例外、拒绝长什么样。</p><span class="t-meta"><span>账本</span><span>授权 / 撤销</span></span></a>
           <a class="tile reveal d2" href="files.html"><span class="t-num">08 / FILES</span><h3><span class="dot"></span>文件与数据根</h3><p>17 个包各自负责什么、数据根里每个文件/目录是什么、数据表落在哪个文件。</p><span class="t-meta"><span>包结构</span><span>数据根</span></span></a>
-          <a class="tile reveal" href="architecture.html"><span class="t-num">09 / INTERNALS</span><h3><span class="dot"></span>技术实现</h3><p>分层、装配、线程与调度、工具注册与失败闸门、数据表与键、关键机制与 <code>file:line</code> 索引。</p><span class="t-meta"><span>机制</span><span>file:line</span></span></a>
+          <a class="tile reveal" href="architecture.html"><span class="t-num">09 / INTERNALS</span><h3><span class="dot"></span>技术实现</h3><p>分层、装配、线程与调度、工具注册与失败闸门、数据表与键、关键机制与 <code>实现细节</code> 索引。</p><span class="t-meta"><span>机制</span><span>实现细节</span></span></a>
           <a class="tile reveal amber d1" href="migration.html"><span class="t-num">10 / UPGRADE</span><h3><span class="dot"></span>从 V3 升级</h3><p>V4 不读 V3 的数据：会失去什么、怎么留档、哪些配置能照抄、升级后要重做哪几件事。</p><span class="t-meta"><span>数据不迁移</span><span>配置对照</span></span></a>
           <a class="tile reveal amber d2" href="changelog.html"><span class="t-num">11 / CHANGELOG</span><h3><span class="dot"></span>更新日志</h3><p>当前版本一条 + 继承下来的历史版本条目。</p><span class="t-meta"><span>当前版</span><span>历史条目</span></span></a>
         </div>
@@ -219,56 +209,56 @@ Get-ChildItem C:\Sair\Local\AiAgent-V4\src -Recurse -Filter *.java |
       <section class="chapter" id="status">
         <header class="chapter-head reveal">
           <span class="chapter-tag">须知</span>
-          <h2>上手前请先知道的七件事</h2>
+          <h2>上手前值得知道的七件事</h2>
           <p class="chapter-desc">这些都是会直接影响你怎么用、怎么排障的硬约束或行为约定，每条都给了出处。</p>
         </header>
 
         <div class="grid-2">
           <div class="panel reveal">
-            <h4 class="sub" style="margin-top:0">① 启动目录必须固定</h4>
+            <h4 class="sub" style="margin-top:0">① 启动目录建议固定</h4>
             <p>敏感键的加密密钥派生包含 <code>user.dir</code>（当前工作目录），派生因子是「JVM 名 / 架构 / 用户名 / 主机名 / 工作目录 / 固定尾串」的 SHA-256，取前 16 字节做 AES-128 密钥。</p>
-            <p class="t-cap">出处 <code>kit\Crypto.java:18</code>、<code>:29-31</code>、<code>:130</code>、<code>:140-148</code>。换机器 / 换用户名 / 换工作目录启动，密文就解不开，要改成明文让它重新加密。</p>
+            <p class="t-cap">出处 <code>kit\Crypto.java</code>。换机器 / 换用户名 / 换工作目录启动，密文就解不开，要改成明文让它重新加密。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">② 配置改完要重载才生效</h4>
             <p>除 <code>ai/start</code> 与 <code>ai/restart</code> 外，其余命令<b>只改配置文件</b>：<code>ai/config set</code> 写完文件并不生效，要看 <code>ai/status</code> 里的「待生效」清单变空才算生效。</p>
-            <p class="t-cap">出处 <code>Cmd.java:1369-1371</code>、<code>Conf.java:578-589</code>。</p>
+            <p class="t-cap">出处 <code>Cmd.java</code>、<code>Conf.java</code>。</p>
           </div>
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">③ 跨机部署才需要中转</h4>
             <p>NapCat 与插件不在同一台机器时，"发本地文件"这条路需要中转：URL 形如 <code>http://host:port/&lt;token&gt;/&lt;绝对路径&gt;</code>，token 不对一律 404。</p>
-            <p class="t-cap">出处 <code>qq\Relay.java:52-53</code>、<code>:441-442</code>。它<b>只读但能读本机任意文件</b>（<code>Relay.java:226</code>）：默认关闭，只在跨机时开。</p>
+            <p class="t-cap">出处 <code>qq\Relay.java</code>。它<b>只读但能读本机任意文件</b>（<code>Relay.java</code>）：默认关闭，只在跨机时开。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">④ 聊天记录按保留期清理</h4>
             <p>三把独立的尺子：记忆 <code>keepDays</code> 默认 <b>30</b>、对话 <code>dialogKeepDays</code> 默认 <b>180</b>、群聊 <code>grouplogKeepDays</code> 默认 <b>30</b>；<code>&lt;=0</code> = 不过期。</p>
-            <p class="t-cap">出处 <code>Conf.java:142</code>、<code>:144</code>、<code>:146</code>、<code>:1020-1030</code>。</p>
+            <p class="t-cap">出处 <code>Conf.java</code>。</p>
           </div>
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">⑤ NapCat 没连上也能用</h4>
             <p>监听失败（端口被占）或 <code>napcatEnabled=false</code> 时，<b>本地交互照常可用</b>，只是 QQ 侧能力不可用；而且"非本机监听 + 空 token"会直接拒绝启动监听。</p>
-            <p class="t-cap">出处 <code>Boot.java:756-760</code>、<code>qq\Link.java:148-156</code>。</p>
+            <p class="t-cap">出处 <code>Boot.java</code>、<code>qq\Link.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">⑥ 控制台永远有反应</h4>
             <p>命令分发整体包在兜底里：任何一条命令炸掉都不影响下一条；连装配全失败时也有一张最小命令表（<code>help / status / tools / config</code>）。</p>
-            <p class="t-cap">出处 <code>Cmd.java:220-226</code>、<code>:1389-1390</code>、<code>:1402-1407</code>。</p>
+            <p class="t-cap">出处 <code>Cmd.java</code>。</p>
           </div>
         </div>
 
         <div class="note bad reveal">
           <p><span class="n-title">⑦ 真正关停：用 <code>/exit</code>，或按精确 pid 杀进程</span>：<code>ai/exit</code> <b>只停基板</b>。基板停下之后<b>调试口会随之关闭，而 JVM 进程仍然活着</b>；在没有控制台的场景下，这时<b>无法再 start</b>。这是当前实现的行为，<b>未计划修改</b>。</p>
-          <p>正确做法：要真正结束进程，用框架控制台的 <code>/exit</code>（框架自带文档写的是「退出 SFW」，见 <code>SairFrameWork\readme\pages\plugin-dev.html:71</code>、<code>:139</code>；进程由 <code>SairFrameWork\run.bat</code> 里的 <code>javaw -jar SFW.jar</code> 拉起），或者按精确 pid 结束进程。注意：命令表里对 <code>/exit</code> 的说明是"之后可再 start"（<code>Cmd.java:1366</code>），而实测在无控制台场景下做不到 —— 以实测为准。</p>
+          <p>正确做法：要真正结束进程，用框架控制台的 <code>/exit</code>（框架自带文档写的是「退出 SFW」，见 <code>SairFrameWork\readme\pages\plugin-dev.html</code>；进程由 <code>SairFrameWork\run.bat</code> 里的 <code>javaw -jar SFW.jar</code> 拉起），或者按精确 pid 结束进程。注意：命令表里对 <code>/exit</code> 的说明是"之后可再 start"（<code>Cmd.java</code>），而实测在无控制台场景下做不到 —— 以实测为准。</p>
         </div>
 
         <h3 class="sec">两条最容易踩的坑</h3>
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">群里只 @ 才触发</h4>
-            <p>群消息的触发判定只认"被 @ 到自己"：判定点在 <code>QqGateway.java:874</code> 的 <code>return ev.atSelf();</code>（同一文件 <code>:752</code> 是同一判定的使用处，<code>:767</code> 决定是否剥掉开头的 @）。<code>atSelf()</code> 的判定本体在 <code>qq\Ev.java:182</code>。</p>
+            <p>群消息的触发判定只认"被 @ 到自己"：判定点在 <code>QqGateway.java</code> 的 <code>return ev.atSelf();</code>（同一文件  是同一判定的使用处 决定是否剥掉开头的 @）。<code>atSelf()</code> 的判定本体在 <code>qq\Ev.java</code>。</p>
           </div>
           <div class="panel reveal d1">
-            <h4 class="sub" style="margin-top:0">别把 jar 放错目录</h4>
+            <h4 class="sub" style="margin-top:0">jar 放到对的目录</h4>
             <p>插件 jar 的落位是 <code>SairFrameWork\plugins\exection\ai.jar</code>；数据根是 <code>SairFrameWork\data\AiAgent-V4\</code>。落位与目录结构见<a href="deploy.html#layout">部署页 · 文件落位</a>与<a href="files.html#datadir">文件页 · 数据根</a>。</p>
           </div>
         </div>

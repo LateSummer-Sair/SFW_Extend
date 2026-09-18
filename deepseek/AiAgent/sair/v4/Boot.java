@@ -2213,6 +2213,17 @@ public final class Boot {
 
         @Override
         public int clear() { return store.clearFavor(); }
+
+        @Override
+        public void ensure(long qq) { store.ensureFavor(qq); }
+
+        @Override
+        public void log(long qq, double delta, double after, String op, String by, String why) {
+            store.favorLog(qq, delta, after, op, by, why);
+        }
+
+        @Override
+        public List<JsonObject> events(long qq, int limit) { return store.favorEvents(qq, limit); }
     }
 
     /** 给控制台/工具用的 JSON 数组包装。 */

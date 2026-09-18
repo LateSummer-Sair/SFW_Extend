@@ -50,37 +50,660 @@
     </section>
 
     <div class="doc-body" id="doc-body">
+  <!-- ==================== 技能清单 ==================== -->
+  <section class="chapter" id="skills">
+    <div class="chapter-head">
+      <span class="chapter-tag">SKILLS</span>
+      <h2>技能清单</h2>
+    </div>
+    <p class="chapter-desc">下面这 32 个技能是随包一起装上的外挂层，装在这个基板上，业务上的事都在这一层：记事、看人、管群、看图、查资料。一句一个，先说清它是干什么的；想细看某一条，直接在对话里问她就行。</p>
+    <ul class="plain">
+      <li><b>表情包</b>：按语境挑一张表情发出去，也能收藏、整理表情库。</li>
+      <li><b>触发词</b>：说到设定的词，她就主动接一句。</li>
+      <li><b>待处理申请</b>：列出待办的好友申请与群邀请，你点头才批。</li>
+      <li><b>点名引用</b>：她自己决定 @ 谁、引用哪条消息。</li>
+      <li><b>发图片</b>：往当前会话发图，也能把一段文字渲成图片。</li>
+      <li><b>辅助识图</b>：让她看图：按消息里的图取内容描述。</li>
+      <li><b>好友管理</b>：好友列表、看资料、拉黑、点赞、改自己的昵称签名。</li>
+      <li><b>记忆</b>：长期记忆的记住、回想、忘掉（跨群同一个人）。</li>
+      <li><b>记忆召回</b>：每轮把跟她这轮相关的旧记忆翻出来。</li>
+      <li><b>经验蒸馏</b>：把做成功的做法沉淀成可复用的经验。</li>
+      <li><b>捐赠</b>：记捐赠台账、看榜单。</li>
+      <li><b>联网搜索</b>：必应搜索，给标题、链接与摘要。</li>
+      <li><b>拟人化</b>：发出去之前洗掉"AI 腔"（去头尾套话）。</li>
+      <li><b>批量处理</b>：批量改名、图片批量转格式（默认先试运行）。</li>
+      <li><b>偏好设定</b>：记"以后都这样"的偏好，分个人、群、全局三层。</li>
+      <li><b>情绪</b>：按人按群攒怒气、亲疏与情绪标签，影响说话口气。</li>
+      <li><b>群成员映射</b>：每轮告诉她这个群里谁是谁。</li>
+      <li><b>群管理</b>：群查询与群管动作：禁言、踢人、改名、退群等。</li>
+      <li><b>群审核</b>：命中违规词就禁言并警告（默认词表为空）。</li>
+      <li><b>群印象</b>：攒"这个群什么氛围"，每轮带上。</li>
+      <li><b>申请审批</b>：好友申请与群邀请到达时记账（默认不通知、不自动同意）。</li>
+      <li><b>私聊输入态</b>：私聊时显示"正在输入"。</li>
+      <li><b>天气查询</b>：查天气：温度、体感、湿度、风。</li>
+      <li><b>网页抓取</b>：抓一个网址的正文，HTML 会去标签。</li>
+      <li><b>文件</b>：读文件、列目录、找文件、下载、写文件。</li>
+      <li><b>消息标记</b>：给消息或任意键打内部标记，以后能检索。</li>
+      <li><b>消息发送</b>：统一发消息出口：群发可 @、发文件、语音、转述、撤回。</li>
+      <li><b>修正记录</b>：记下"我说错了 → 正确的是什么"。</li>
+      <li><b>印象蒸馏</b>：把某个人的发言提炼成长期印象。</li>
+      <li><b>用户画像</b>：每轮把"对这个人的印象"带上。</li>
+      <li><b>知识笔记</b>：笔记的记、查、删。</li>
+      <li><b>主动接话</b>：判断没人 @ 她的消息要不要接一句（默认保守）。</li>
+    </ul>
+  </section>
+
+  <!-- ==================== 自己写一个技能 ==================== -->
+  <section class="chapter" id="skill-dev">
+    <header class="chapter-head reveal">
+      <span class="chapter-tag">SKILLS</span>
+      <h2>自己写一个技能</h2>
+      <p class="chapter-desc">上一节说的是"已经装上的有什么"。如果你的想法不在那 32 条里，这一节就派上用场了 —— 写一个技能差不多是"一个目录、一份说明、一个类"，我们从头走一遍。</p>
+    </header>
+
+    <h3 class="sec">技能是什么：外挂层里的一个目录</h3>
+    <p>技能是外挂层的最小单位，就是 <code>data\skills\</code> 下面的一个目录。它跟基板的关系很松：基板不核对"应该有哪几个技能"，也不假设外挂层一定存在 —— 把整个 <code>data\skills\</code> 删掉，基板照样启动、照样对话，只是工具少一些、钩子没人接。</p>
+    <p>反过来说，技能也改不动基板的骨架与判定。它通过宿主拿到一个只读的能力面，用基板已经有的东西做事。一个技能能提供两样东西，也可以只给其中一样：</p>
+    <div class="grid-3">
+      <div class="panel reveal">
+        <h3>工具，给模型用</h3>
+        <p>在 md 里声明 <code>tool:</code>，再写一个入口类，模型在对话里就多了一件事可以做。它会在每轮的能力索引里出现，需要的时候模型自己调，返回值回到对话里接着往下走。</p>
+      </div>
+      <div class="panel reveal d1">
+        <h3>钩子，挂在时机上</h3>
+        <p>进站消息、出站正文、定时心跳、上下文注入、好友申请与群邀请 —— 挑一个时机挂上去，在旁边做事。这类技能可以不提供工具，模型那边完全看不到它。</p>
+      </div>
+      <div class="panel reveal d2">
+        <h3>也可以只有一份说明</h3>
+        <p>只放一个 md、不写 <code>.java</code>，它也算一个技能：出现在清单里、能被读到，只是没有可执行的部分。适合先把位置占住、把想法写下来。</p>
+      </div>
+    </div>
+
+    <h3 class="sec">目录与文件：三样东西</h3>
+    <p>以 <code>hello</code> 为例，目录名就是技能名，里面放三样东西（后面两样可选）：</p>
+    <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">data\skills\hello\</span></div><pre><code>hello.md      声明 + 说明书（文件名与目录同名）
+prompt.md     可选：写给模型的文案、这个技能自己的配置
+Hello.java    可选：实现类</code></pre></div>
+    <div class="tw reveal">
+      <table>
+        <thead><tr><th>文件</th><th>放什么</th></tr></thead>
+        <tbody>
+          <tr><td><code>&lt;技能名&gt;.md</code></td><td>开头一段 front matter 做声明，下面写给人看的说明书（<code>ai/skill read</code> 会把声明与正文一起打出来）。文件名与目录名不一致会加载失败，日志里也会说清原因。</td></tr>
+          <tr><td><code>prompt.md</code></td><td>面向模型的文案，以及这个技能自己的配置（阈值、示例、话术）。它是普通文本文件，改完保存就生效，不用重新加载技能。</td></tr>
+          <tr><td><code>*.java</code></td><td>实现类，运行期编译，不在磁盘上留 <code>.class</code>。一个目录可以放多个源文件，不写 <code>package</code>，按默认包编译。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="sec">front matter 里可以写什么</h3>
+    <div class="tw reveal">
+      <table>
+        <thead><tr><th>键</th><th>写什么</th></tr></thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>技能名，与目录名保持一致。</td></tr>
+          <tr><td><code>description</code></td><td>一句话说明它是干什么的，清单里显示的就是这一句。</td></tr>
+          <tr><td><code>tool</code></td><td>可选。给模型的工具名；不写就等于"这个技能不提供工具"。工具名建议用英文、数字与下划线，把中文留给技能名。</td></tr>
+          <tr><td><code>hooks</code></td><td>可选。要收的事件，例如 <code>on_message</code>、<code>on_timer</code>；写成数组或逗号分隔都认。</td></tr>
+          <tr><td><code>entry</code></td><td>可选。入口类的类名；不写就自动找，实现 <code>Skill</code> 的那个类优先。</td></tr>
+          <tr><td><code>airun</code></td><td>可选。工具的说明书：<code>description</code>（给模型看的说明）、<code>returns</code>（返回什么）、<code>examples</code>（用法示例）、<code>params</code>（参数表：类型、说明、是否必填、示例）。这一段写得越具体，模型填参越准。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note reveal">
+      <p><span class="n-title">扩展点不用在 md 里声明</span>：只有 <code>hooks</code> 要写出来，因为钩子名本身不带类型信息；其余扩展点靠"这个类实现了哪个接口"自动认出来。所以一个技能可以同时是工具与上下文提供者 —— 写成两个类、放进同一个目录就好，不必挤在一个类里。</p>
+    </div>
+
+    <h3 class="sec">扩展点一览：每个管一件事</h3>
+    <div class="tw reveal">
+      <table>
+        <thead><tr><th>扩展点</th><th>管什么</th></tr></thead>
+        <tbody>
+          <tr><td><code>Skill</code></td><td>提供工具：实现 <code>call(Args, Host)</code> 就是一把工具，md 里写了 <code>tool:</code> 才会注册给模型。装载期还能用 <code>declare(Libs)</code> 声明自己的库与表。</td></tr>
+          <tr><td><code>Hooked</code></td><td>收事件：<code>on_message</code> 入站消息、<code>on_timer</code> 心跳、<code>on_notice</code> 通知（戳一戳、撤回、进群这类）、<code>on_request</code> 好友申请与群邀请。通知那条路只留痕，不发言、也不起一轮。</td></tr>
+          <tr><td><code>OutboundStage</code></td><td>出站改文：发送前逐条看，可以改写正文、追加一条独立消息、一票否决；另有 <code>finish</code> 在整批收尾时拿到最终消息表，适合"@ 挂在首条""整批去重"这种要看到全局的事。</td></tr>
+          <tr><td><code>ContextProvider</code></td><td>每轮往上下文里加一段：<code>stable()</code> 把它分成稳定段与易变段 —— 稳定段排在事实块之前，内容每次都一样就能吃到前缀缓存；易变段排在事实块之后。</td></tr>
+          <tr><td><code>LifecycleHook</code></td><td>回合的开始、结束与即将发送这几个时刻，用来记账与清理（写历史、清临时态、私聊的"正在输入"）。它拿到的是只读口，改正文是出站那一段的事。</td></tr>
+          <tr><td><code>TriggerVoter</code></td><td>决定这条消息要不要起一轮：<code>ANSWER</code> 回、<code>DECLINE</code> 不回（省掉一次模型调用）、<code>ABSTAIN</code> 交给下一个投票者，都不管就回到基板的地址规则。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>这些扩展点的每一次调用都有独立超时，抛出的异常只丢它自己那一次，别的扩展点与这一条消息都不受影响；诊断信息以 <code>[ext]</code> 开头出现在日志里。</p>
+    <p>每个接口要实现的全部方法、护栏的细节与能直接落地的骨架，见下一节的 <a href="#ext-api">扩展点接口手册</a>。</p>
+
+    <h3 class="sec">最小可运行示例：hello</h3>
+    <p>先写 <code>data\skills\hello\hello.md</code>：</p>
+    <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">data\skills\hello\hello.md</span></div><pre><code>---
+name: hello
+description: 打个招呼：把传进来的名字拼成一句问候
+tool: hello
+airun:
+  description: 向某个人问好，回一句问候语
+  returns: 一句问候话
+  examples:
+    - 「跟小明打个招呼」→ hello(who="小明")
+  params:
+    who:
+      type: string
+      description: 要问候的人
+      required: true
+      example: 小明
+---
+
+# hello
+
+把参数里的名字拼成一句问候返回去。就这样，没有别的。</code></pre></div>
+    <p>再写 <code>data\skills\hello\Hello.java</code>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">data\skills\hello\Hello.java</span></div><pre><code>import sair.v4.skill.Args;
+import sair.v4.skill.Host;
+import sair.v4.skill.Skill;
+
+/** 最小技能：一把工具，读一个参数，回一句人话。 */
+public class Hello implements Skill {
+
+    @Override
+    public Object call(Args a, Host h) {
+        String who = a.str("who", "").trim();
+        if (who.isEmpty()) return "缺一个名字：参数 who 是空的";
+        return "你好，" + who + "！好久不见。";
+    }
+}</code></pre></div>
+    <p>就这样两件事。<code>Skill</code> 是唯一必要的接口，<code>call</code> 的返回值可以是字符串、对象、列表，也可以是空 —— 空就表示这次没话要说。</p>
+    <div class="note reveal">
+      <p><span class="n-title">它怎么被模型看见</span>：装载完成之后，工具面里就多了一把叫 <code>hello</code> 的工具。每轮的事实块里有一行能力索引，形状是"类别 → 工具 + 一句话"，模型就是从那里知道有这么一件事可以做的；<code>ai/tools</code> 也能看到当前工具表。参数表来自 <code>airun.params</code>，所以 md 里的说明写得具体一点，模型填参就准一点。如果 <code>tool:</code> 写的是中文或别的不合规范的名字，基板会自动转成一个可读的英文注册名，并在日志与清单里注明原来的写法 —— 不用自己纠结命名规则，但用英文会更好认。</p>
+    </div>
+
+    <h3 class="sec">怎么装载与生效</h3>
+    <ul class="plain">
+      <li>把目录放进 <code>data\skills\</code>，启动装配的「技能扫描」那一步会扫一遍并编译它，日志里出现 <code>[skills] hello → LOADED 工具=hello</code> 这样一行。</li>
+      <li>改了 <code>.java</code>，或者改了 md 的 front matter（<code>tool</code> / <code>hooks</code> / <code>entry</code> / <code>airun</code>）：敲 <code>ai/skill reload</code> 重新扫一遍就好；顺手敲 <code>ai/restart</code> 也可以，代价是基板要重装一次。</li>
+      <li>只改了 <code>prompt.md</code>：不用 reload，保存之后下一轮读到的就是新文案（按文件的修改时间失效）。</li>
+      <li>把整个目录删掉再 <code>ai/skill reload</code>，它的工具与钩子会一起摘掉，回到没有它的样子。</li>
+    </ul>
+
+    <h3 class="sec">碰资源之前，先问一句位</h3>
+    <p>技能要碰基板的资源时，先向宿主问一句"这一位我有没有"。放行时返回空，被拒时返回的是一句可以直接回给模型的人话；我们照实把它回出去就好，不用绕路，也不用另编一句。缺位本身就是答案。</p>
+    <div class="tw reveal">
+      <table>
+        <thead><tr><th>要碰什么</th><th>怎么问</th></tr></thead>
+        <tbody>
+          <tr><td>读一个库</td><td><code>h.needDb("memory", 'R')</code></td></tr>
+          <tr><td>写一个库</td><td><code>h.needDb("memory", 'W')</code></td></tr>
+          <tr><td>读文件或目录</td><td><code>h.needPath(路径, 'R')</code></td></tr>
+          <tr><td>写文件或目录</td><td><code>h.needPath(路径, 'W')</code></td></tr>
+          <tr><td>平台动作（发消息、禁言、改名片这些）</td><td><code>h.needPlatform("send_group_msg")</code>，一律问 X 位</td></tr>
+          <tr><td>她自己的自主行为（定时、收表情、维护）</td><td><code>h.selfDb(...)</code> / <code>h.selfPath(...)</code> / <code>h.selfAct(...)</code>，判定主体固定是她自己，与"谁在说话"解耦</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note reveal">
+      <p><span class="n-title">工具入口本身也是一道门</span>：工具属于 T 类，判定的是 <code>tool:</code> 那一条的 <b>X 位</b>。普通用户默认没有这一位，所以对他来说这把工具在工具面里根本不存在 —— 看不见，也就调不动。想让某个人用上，是在 <code>perms.json</code> 里给他开一条例外，而不是在技能里自己判断"这个人能不能"。</p>
+    </div>
+
+    <h3 class="sec">她自己也能写技能</h3>
+    <p>技能库那把工具（<code>skill_write</code>）平时由主人用，她自己也可以走同一条路：先用 <code>op=draft</code> 把 md 与 <code>.java</code> 落进草稿区（默认 <code>data\skills-draft\</code>）—— 草稿不参与扫描、不进工具表，写到一半不影响在跑的东西；确认之后再 <code>op=promote</code> 搬进技能库，搬完当场重扫一次；想手动再扫一遍，<code>op=reload</code> 也可以。</p>
+    <p>人也可以走同一条路（<code>draft</code> → <code>promote</code>），或者更直接一点：自己把目录放进 <code>data\skills\</code>，再 <code>ai/skill reload</code>。两条路的结果是一样的 —— 技能库里那个目录就是全部真相。</p>
+
+    <h3 class="sec">四条顺手就能避开的经验</h3>
+    <div class="grid-4">
+      <div class="panel reveal">
+        <h3>热重载换的是新类加载器</h3>
+        <p>每次重扫都会用新的类加载器重新定义你的类，上一份的静态字段不会跟过来。所以状态放在 <code>kv</code> 或自己的库里，别放在 <code>static</code> 上 —— 不然重载一次就像换了个新人。</p>
+      </div>
+      <div class="panel reveal d1">
+        <h3>周期的事交给心跳</h3>
+        <p>需要定期做的事挂在 <code>on_timer</code> 上就好，它跟着基板唯一那条心跳走；自己起线程容易在关停之后还留着，也会让"到底什么时候跑"变得不好追。</p>
+      </div>
+      <div class="panel reveal d2">
+        <h3>异常在技能里收口</h3>
+        <p>一条消息不该因为技能里的一次意外就整条垮掉。把异常就地收成一句可读的说明返回；钩子那条路是入站的同步路径，尤其值得这样做。</p>
+      </div>
+      <div class="panel reveal d3">
+        <h3>面向用户的话留在 prompt.md</h3>
+        <p>话术、阈值、示例这些放进 <code>prompt.md</code>，改文案就不用重新编译；写在 Java 里的话，下一次改一句话都得走一遍 reload。</p>
+      </div>
+    </div>
+
+    <h3 class="sec">装完怎么自查</h3>
+    <div class="tw reveal">
+      <table>
+        <thead><tr><th>命令</th><th>看什么</th></tr></thead>
+        <tbody>
+          <tr><td><code>ai/skill list</code></td><td>技能清单：每个技能的状态、工具名、钩子名，一眼看出新技能有没有进来。</td></tr>
+          <tr><td><code>ai/skill validate</code></td><td>体检：编译失败的、声明了 <code>tool</code> 却没写代码的，都会点名并给出原因。它看的是整库，不接名字。</td></tr>
+          <tr><td><code>ai/skill read 名字</code></td><td>某一个技能的声明与说明书正文 —— 确认自己写的那份 md 是不是它真正读到的那份。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>启动日志里可以盯这几行：</p>
+    <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">启动日志</span></div><pre><code>[v4]   编译技能 …/… hello … … ms          ← 编到第几个、编的是谁、花了多久
+[skills] hello → LOADED 工具=hello        ← 这个技能装上了什么（有钩子时会再带 钩子=…）
+[ext] &lt;技能名&gt; 挂了 … 条扩展点           ← 挂了扩展点的技能才会有这一行
+[skills] 当前技能 … 个（提供工具 … 个，钩子 … 个）   ← 整库收口
+[v4] 基板就绪：技能 … 个（工具 … 个），耗时 … ms   ← 装配汇总</code></pre></div>
+    <p>有 <code>[skills] … 加载异常</code>、<code>编译失败</code> 或者 <code>找不到入口类</code> 这样的行，就是那个技能没装成；它只让自己缺位，基板与别的技能照常。</p>
+  </section>
+
+  <!-- ==================== 扩展点接口手册 ==================== -->
+  <section class="chapter" id="ext-api">
+    <header class="chapter-head reveal">
+      <span class="chapter-tag">SKILLS</span>
+      <h2>扩展点接口手册</h2>
+      <p class="chapter-desc">上一节讲的是"一个目录怎么变成技能"。这一节把六个扩展点的接口逐个摊开：什么时候轮到你、要实现哪几个方法、签名照源码抄、哪些东西能动哪些不该动、在 md 里怎么声明。每个接口后面都跟一段能直接落地的骨架。</p>
+    </header>
+
+    <h3 class="sec">接口一 · Skill：给模型的一把工具</h3>
+    <p><b>什么时候被触发</b>：模型在对话里决定用这把工具的时候。它出现在每轮的能力索引里，模型把参数填好调一次，返回值回到对话里接着往下走。不写 <code>tool:</code> 的技能不进工具表，模型那边看不到它。</p>
+    <p><b>要实现的方法</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">sair.v4.skill.Skill</span></div><pre><code>Object call(Args a, Host h);          // 唯一一个抽象方法，实现它就成了工具入口
+default void declare(Libs libs) { }   // 可选：装载期声明自己的库与表</code></pre></div>
+    <p>返回值可以是 <code>String</code> / <code>Map</code> / <code>JsonObject</code> / <code>List</code> / <code>null</code>，<code>null</code> 就是"这次没话要说"。参数用 <code>Args</code> 强类型取：<code>a.str(k, def)</code>、<code>a.l(k, def)</code>、<code>a.i(k, def)</code>、<code>a.b(k, def)</code>、<code>a.obj(k)</code>、<code>a.arr(k)</code>、<code>a.strs(k)</code>；参数缺了，回一句 <code>a.missing(k)</code> 是常见的做法。</p>
+    <p><b>能改什么、不能改什么</b>：能借 <code>Host</code> 那一面调度基板已有的资源（六库与 kv、模型、NapCat、提示词、上下文注入、派子 Agent、说话、控制台、调别的工具），改不动基板的骨架与判定。工具本身是 T 类资源，判定看 <code>tool:</code> 那一条的 X 位；碰别的东西之前先问一句位 —— <code>h.needDb(库, 'R' / 'W')</code>、<code>h.needPath(路径, 'R' / 'W')</code>、<code>h.needPlatform("动作")</code>，放行返回空，被拒返回一句可以直接回给模型的话。她自己的自主动作走 <code>h.selfDb</code> / <code>h.selfPath</code> / <code>h.selfAct</code> 这一组入口，判定主体固定是她自己，与"谁在说话"解耦。</p>
+    <p><b>最少几行的骨架</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">data\skills\hello\Hello.java</span></div><pre><code>import sair.v4.skill.Args;
+import sair.v4.skill.Host;
+import sair.v4.skill.Skill;
+
+public class Hello implements Skill {
+
+    @Override
+    public Object call(Args a, Host h) {
+        String who = a.str("who", "").trim();
+        if (who.isEmpty()) return a.missing("who");
+        return "你好，" + who + "。";
+    }
+}</code></pre></div>
+    <p><b>在 md 里怎么声明</b>：写 <code>tool:</code>，再给一段 <code>airun</code> 说明书。参数表写得具体一点，模型填参就准一点：</p>
+    <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">data\skills\hello\hello.md</span></div><pre><code>---
+name: hello
+description: 打个招呼：把传进来的名字拼成一句问候
+tool: hello
+airun:
+  description: 向某个人问好，回一句问候语
+  returns: 一句问候话
+  examples:
+    - 「跟小明打个招呼」→ hello(who="小明")
+  params:
+    who:
+      type: string
+      description: 要问候的人
+      required: true
+      example: 小明
+---</code></pre></div>
+    <p>md 的文件名与目录同名。<code>entry:</code> 不写的时候，实现了 <code>Skill</code> 的类优先被挑中，所以只有一把工具的技能不必写它。</p>
+
+    <h3 class="sec">接口二 · Hooked：挂在事件上的那只手</h3>
+    <p><b>什么时候被触发</b>：基板收到事件之后、往下走之前。钩子是同步跑完的 —— 基板要看它有没有把这条消息接管掉，所以这一趟不适合做慢活。</p>
+    <p><b>要实现的方法</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">sair.v4.skill.Hooked</span></div><pre><code>void on(String hook, JsonObject payload, Host h);   // 一个方法收全部事件</code></pre></div>
+    <p><code>hook</code> 是事件名，四个都在 <code>hooks:</code> 里写：</p>
+    <div class="tw reveal">
+      <table>
+        <thead><tr><th>钩子名</th><th>什么时候来</th><th>payload 的形状</th></tr></thead>
+        <tbody>
+          <tr><td><code>on_message</code></td><td>一条入站 QQ 消息到达，网关处理这条消息的当下</td><td>NapCat 消息事件 JSON，基板再加上调用者视图与接管标记</td></tr>
+          <tr><td><code>on_timer</code></td><td>基板唯一那条心跳，周期见 <code>tickMs</code></td><td><code>{"tick":n,"ts":毫秒}</code>，只有这两个键</td></tr>
+          <tr><td><code>on_request</code></td><td>一条好友申请或群邀请到达</td><td>NapCat 请求事件 JSON</td></tr>
+          <tr><td><code>on_notice</code></td><td>一条通知：戳一戳、撤回、进群、禁言这类</td><td>NapCat 通知事件 JSON；这条路上只留痕，不发言、也起不了一轮</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><b>payload 从哪来</b>：它就是 NapCat 推上来的那份事件 JSON，原样带下来，几个常见的键是 <code>post_type</code>（事件种类）、<code>message_type</code>（group / private）、<code>self_id</code>、<code>user_id</code>、<code>group_id</code>、<code>message_id</code>、<code>raw_message</code>、<code>sender</code>；消息钩子上基板还会补一个 <code>_caller</code>（调用者视图）与一个 <code>_handled</code>（默认 <code>false</code>）。</p>
+    <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">on_message 的 payload（示意）</span></div><pre><code>{
+  "post_type": "message",        事件种类：message / notice / request
+  "message_type": "group",       群消息还是私聊
+  "self_id": 10001,              机器人自己
+  "user_id": 20002,              这条是谁发的
+  "group_id": 30003,             群号（私聊没有这一项）
+  "message_id": 456,             这条消息的号
+  "raw_message": "……",           原始文本 / CQ 串
+  "sender": { "nickname": "……" },  发送者资料
+  "_caller": { "……" },           基板补的调用者视图
+  "_handled": false              置 true = 这条我接管了
+}</code></pre></div>
+    <p>读它用 <code>Ev.parse(payload)</code> 顺手一些：<code>e.userId()</code>、<code>e.groupId()</code>、<code>e.messageId()</code>、<code>e.plainText()</code>、<code>e.rawMessage()</code>、<code>e.noticeType()</code>、<code>e.requestType()</code>，判群私聊用 <code>e.isGroup()</code>。</p>
+    <p><b>判定主体是 SYSTEM</b>：钩子里的动作属于"她自己的自动策略" —— 自动禁言、自动审批、自动清理都是这个口径。所以钩子能直接写库（<code>C</code> 类是 <code>RWX</code>），碰库之前用 <code>h.selfDb(库, 'W')</code> 问一句位就好；同时 <code>h.caller()</code> 仍然是那个真实发消息的人，两件事不要混：前者是"用谁的位判"，后者是"谁在说话"。定时那条钩子没有触发者，主体也还是她自己，所以 <code>h.spawnAs(创建者, …)</code> 这类入口在定时任务里格外顺手 —— 到点才跑的活按任务创建者的位判，而不是借走她的位。</p>
+    <p><b>能改什么、不能改什么</b>：<code>on_message</code> 这一趟可以把 <code>payload.addProperty("_handled", true)</code> 置上，意思是"这条我接管了"，基板就不再自己回一轮（触发词接话走的就是这条路）。<code>on_notice</code> 那条路不读这个标记，也不读任何投票，是只读留痕的一条路。四条路都不改基板的消息内容 —— 要动正文，那条路是 <code>OutboundStage</code>。</p>
+    <p><b>最少几行的骨架</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">data\skills\消息计数\MsgHook.java</span></div><pre><code>import com.google.gson.JsonObject;
+
+import sair.v4.qq.Ev;
+import sair.v4.skill.Host;
+import sair.v4.skill.Hooked;
+
+public class MsgHook implements Hooked {
+
+    @Override
+    public void on(String hook, JsonObject payload, Host h) {
+        if (!"on_message".equals(hook) || payload == null || h == null) return;
+        try {
+            Ev e = Ev.parse(payload);
+            if (e == null || e.userId() &lt;= 0L) return;
+            long n = Long.parseLong(h.store().kv("msg:count", "0").trim()) + 1L;
+            h.store().kvSet("msg:count", String.valueOf(n));
+        } catch (Throwable t) {
+            // 这里的一次意外只让这一笔记不上，消息照常往下走
+        }
+    }
+}</code></pre></div>
+    <p><b>在 md 里怎么声明</b>：钩子名本身不带类型信息，所以 <code>hooks:</code> 是要写出来的那一项，收事件的类用 <code>entry:</code> 点名 —— 事件只派给入口类：</p>
+    <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">data\skills\消息计数\消息计数.md</span></div><pre><code>---
+name: 消息计数
+description: 每来一条消息，在 kv 里记一笔
+hooks: on_message
+entry: MsgHook
+---</code></pre></div>
+    <p><code>hooks:</code> 写成数组（<code>hooks: [on_message, on_timer]</code>）或者逗号、空格分隔都认。入口类里放一个跟钩子同名的 <code>on_message(JsonObject payload, Host h)</code> 也在认，只是 <code>Hooked</code> 的写法一个方法就收全部事件，更省事。</p>
+
+    <h3 class="sec">接口三 · OutboundStage：出站管线的五道口</h3>
+    <p><b>什么时候被触发</b>：位置是<b>分段之后、发送之前</b>。所以它看的是<b>逐条</b>的消息 —— "这一条发不发、长什么样"，而不是"整条回复"。零 stage 时这条管线不存在，行为与没有这一层时一模一样。</p>
+    <p><b>要实现的方法</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">sair.v4.ext.OutboundStage</span></div><pre><code>int order();                                                  // 唯一一个抽象方法，小的在前，同序按插件名
+default String transform(Outbound m) { return null; }          // 改正文
+default List&lt;String&gt; extra(Outbound m) { return Collections.emptyList(); }   // 追加独立消息
+default boolean veto(Outbound m) { return false; }            // 一票否决
+default List&lt;String&gt; finish(List&lt;String&gt; parts, Outbound m) { return null; } // 整批收尾</code></pre></div>
+    <p><b>五个口的分工</b>：</p>
+    <div class="tw reveal">
+      <table>
+        <thead><tr><th>口</th><th>拿到什么</th><th>返回值的意思</th></tr></thead>
+        <tbody>
+          <tr><td><code>order()</code></td><td>不看内容</td><td>小的先跑；同序按插件名。这个值在注册时取一次，所以排序不会随后续状态抖动。</td></tr>
+          <tr><td><code>veto(m)</code></td><td>这一条当前的正文</td><td><code>true</code> = 这一条整条丢掉——否决是整条丢，不做"改一点点再发"。每条消息先问完所有 stage 的 veto，再进下一道口。</td></tr>
+          <tr><td><code>transform(m)</code></td><td>这一条当前的正文</td><td><code>null</code> = 不改（"没意见"的默认）；改成空串或全空白 = 这一条被丢掉，后面的 stage 也不再处理它。</td></tr>
+          <tr><td><code>extra(m)</code></td><td>整批的上下文（这时 index 指向本批最后一条）</td><td>返回要追加的独立消息（比如"再追一张表情包"），空表 = 不追加。只在"确实还有话要发"的时候收一次，而且追加的消息不再过 stage。</td></tr>
+          <tr><td><code>finish(parts, m)</code></td><td>最终消息表 <code>parts</code>（已含追加的那几条，元素已 trim），这时 <code>m.total()</code> 就是最终条数</td><td><code>null</code> = 不改；返回一张新表 = 整批换掉；返回空表 = 这一批一条都不发。表里的元素按原样发，不再过 stage。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>为什么要有 <code>finish</code>：有的事天然是"整条回复"级别的，逐条口做不对 —— 典型是"@ 提问者加在首条"。"首条"得是真正会发出去的那一条，而在逐条口里看不到后面哪条会被别的 stage 丢掉或洗空，"@ 挂到一条根本没发的消息上"就是这么来的。它跑在 <code>extra</code> 之后，所以追加的表情包也算在 <code>parts</code> 里。<code>extra</code> 与 <code>finish</code> 返回的消息都不再过 stage，这一条防的是插件互相追加、无限繁殖。</p>
+    <p><b>手里的 Outbound 是什么</b>：这一个对象在整趟出站里是<b>逐条复用</b>的同一个实例 —— 前一个 stage 的 <code>transform</code> 结果，就是后一个 stage 看到的 <code>m.text()</code>。它给的口有：<code>text()</code> / <code>text(String)</code>（这一条当前的正文，正式的改法是 <code>transform</code> 的返回值）、<code>session()</code> / <code>group()</code> / <code>target()</code> / <code>caller()</code> / <code>echo()</code>（落点信息，只读 —— 改"发给谁"不是扩展点的事）、<code>index()</code> / <code>total()</code> / <code>first()</code> / <code>last()</code>（这一条在本次发送里的位置）。<code>caller()</code> 在定时任务的落点上是 <code>null</code>，写插件时顺手担待一下。</p>
+    <p>出站这条路上没有回合，也就没有 <code>BuildContext</code>，所以文案与阈值从 <code>m.host()</code> 读自己目录的 <code>prompt.md</code>；<code>m.host()</code> 可能为 <code>null</code>，那时用兜底默认值就好。</p>
+    <p><b>最少几行的骨架</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">data\skills\洗标点\TrimStage.java</span></div><pre><code>import sair.v4.ext.Outbound;
+import sair.v4.ext.OutboundStage;
+
+public class TrimStage implements OutboundStage {
+
+    @Override
+    public int order() {
+        return 30;
+    }
+
+    @Override
+    public String transform(Outbound m) {
+        try {
+            String t = m.text();
+            if (t == null) return null;
+            String x = t.replace("…。", "…").trim();
+            return x.equals(t) ? null : x;      // 没变化就返回 null = 不改
+        } catch (Throwable t) {
+            return null;                        // 一次意外 = 这一口不改，这条照发
+        }
+    }
+}</code></pre></div>
+    <p><b>在 md 里怎么声明</b>：不用声明。基板装载时会扫这个目录编译出的每个顶层类，按"实现了哪个接口"自动挂上去，所以 <code>implements OutboundStage</code> 那一行就是声明本身。</p>
+
+    <h3 class="sec">接口四 · ContextProvider：每轮往上下文里加一段</h3>
+    <p><b>什么时候被触发</b>：每一轮装配上下文的时候。基板自己<b>不产生任何一条上下文内容</b>，它只负责三件事 —— 顺序、段位、预算，剩下的内容全在插件里。</p>
+    <p><b>要实现的方法</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">sair.v4.ext.ContextProvider</span></div><pre><code>boolean stable();                                            // 稳定段还是易变段
+int order();                                                 // 拼装顺序，小的在前
+default int maxChars() { return 1200; }                      // 这一段最多多少字符
+default boolean appliesTo(BuildContext b) { return true; }   // 只对哪些会话生效
+String build(BuildContext b);                                // 产出这一段</code></pre></div>
+    <p><b>稳定段与易变段</b>：<code>stable()</code> 返回 <code>true</code> 的块排在同一条系统提示词之后、事实块之前，它们一起构成可以复用的前缀 —— 模型服务的前缀缓存是按前缀逐字节命中的，所以这一段的内容在同样输入下要逐字一致：时间戳、随机数、当前消息正文放进去了，缓存就从那里断开。返回 <code>false</code> 的块排在事实块之后，每轮都可以不一样；两边的顺序都还是按 <code>order</code>、插件名定，同输入逐字节可复现。</p>
+    <div class="note reveal">
+      <p><span class="n-title">哪一段该稳定，一句话的判据</span>：内容只取决于"这个插件自己的配置"，就放稳定段；内容取决于"这一轮谁在说、说了什么、现在几点"，就放易变段。拿不准的时候放易变段更稳 —— 它不影响正确性，只是少吃一点缓存。</p>
+    </div>
+    <p><b>预算怎么裁</b>：</p>
+    <ul class="plain">
+      <li>先按这一段自己的 <code>maxChars()</code> 逐段截断，丢的是尾巴 —— 开头的信息量最大。出厂默认 <code>1200</code>。</li>
+      <li>再按全局 <code>ctxBudgetChars</code>（默认 <code>6000</code>）算总长；超了就从 <code>order</code> 最大的开始<b>整段</b>丢，并记一行 <code>[ext] budget over</code>。半截上下文比没有更坏，所以这里不截一半。</li>
+      <li><code>maxChars()</code> 返回 <code>&lt;=0</code> = 这一段不按自身预算截断，但仍然受全局预算管 —— 它不是"要多少给多少"的开关。一个 provider 把整库拉进上下文，挨罚的是同一轮的所有人。</li>
+      <li><code>build()</code> 返回空串或 <code>null</code> = 这一段这一轮不出现，这是正常结果，不算错。</li>
+      <li><code>appliesTo()</code> 返回 <code>false</code> = 这一段这一轮不出现，基板也不会记成异常。基板不按调用者权限裁定扩展点行为（否则"给某人写画像"会随权限随机失效），这里是插件自己的策略口。</li>
+    </ul>
+    <p><b>能改什么、不能改什么</b>：这一段能决定"进去的是什么" —— 也就是 <code>build()</code> 的返回值，它会被 trim 之后按"一段一条 system 消息"装配。装配骨架、消息数、顺序、预算都不在插件手里：<code>BuildContext</code> 只给只读查询口，没有消息数组，也没有回合对象。要写东西就写自己的库、自己的 kv。</p>
+    <p><b>BuildContext 给的口</b>：<code>caller()</code>（调用者）、<code>session()</code>（<code>console</code> / <code>qq:123</code> / <code>group:456</code>）、<code>text()</code>（本轮正文：装配期是用户输入，出站期是将要发出去的正文）、<code>host()</code>（只读能力面，可能为 <code>null</code>）、<code>group()</code> / <code>groupId()</code> / <code>qq()</code> / <code>master()</code> / <code>console()</code>（从调用者派生的判断）、<code>state(key, def)</code>（按 key 读本轮事实，现有的键是 <code>media</code> / <code>chat_window</code> / <code>subagent</code>）、<code>subagent()</code> 与 <code>agentLabel()</code>（这一轮是不是子 Agent 在跑，是的话"有副作用的写"更适合改成"提议"）。</p>
+    <p><b>最少几行的骨架</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">data\skills\群账本\LedgerProvider.java</span></div><pre><code>import sair.v4.ext.BuildContext;
+import sair.v4.ext.ContextProvider;
+import sair.v4.skill.Host;
+
+public class LedgerProvider implements ContextProvider {
+
+    @Override
+    public boolean stable() {
+        return false;                        // 每轮都可能变
+    }
+
+    @Override
+    public int order() {
+        return 45;
+    }
+
+    @Override
+    public int maxChars() {
+        return 400;
+    }
+
+    @Override
+    public boolean appliesTo(BuildContext b) {
+        return b != null &amp;&amp; b.group();       // 只在群里出现
+    }
+
+    @Override
+    public String build(BuildContext b) {
+        try {
+            Host h = b.host();
+            if (h == null) return "";        // 绑定不上就少做点事
+            return "【本群账本】" + h.store().kv("ledger:last:" + b.groupId(), "还没有记录");
+        } catch (Throwable t) {
+            return "";                       // 一次意外 = 这一段不出现，这一轮照常
+        }
+    }
+}</code></pre></div>
+    <p><b>在 md 里怎么声明</b>：不用声明，靠接口识别。写成顶层类就好 —— 基板扫的是这个目录编译出的每个顶层类，不是只看入口类，所以上下文这一段完全可以单独一个文件。</p>
+    <div class="note reveal">
+      <p><span class="n-title">这里不太适合打日志</span>：<code>build()</code> 每轮都会被叫到，在里面打过程行很快就把日志刷满了。诊断行交给基板：它会按 <code>[ext]</code> 前缀给每个扩展点记一行调用事实，慢的、报错的、被预算丢掉的都在里面。</p>
+    </div>
+
+    <h3 class="sec">接口五 · LifecycleHook：回合的开始与结束</h3>
+    <p><b>什么时候被触发</b>：一圈回合的几个时刻，顺序是基板保证的：</p>
+    <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">时序</span></div><pre><code>onTurnStart → 模型跑（可能多次工具闭环）→ onSend（真要说话了）→ 落点发出 → onTurnEnd</code></pre></div>
+    <p>装配完这一轮、还没跑的时候是 <code>onTurnStart</code>，那时"本轮输入、本轮事实"才齐；<code>onSend</code> 是"这一轮马上要对外说一句话了"，含失败兜底那句；正文发出（或失败）之后是 <code>onTurnEnd</code>，失败时 <code>reply</code> 是空串、<code>error</code> 非空，两种结果都会通知一次。它只管主回合 —— 子 Agent 与后台收尾回合不经过这里，因为它们是对外不可见、也不进对话历史的那些回合。</p>
+    <p><b>要实现的方法</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">sair.v4.ext.LifecycleHook</span></div><pre><code>int order();                                              // 小的在前，同序按插件名
+default void onTurnStart(BuildContext b) { }               // 回合开始（装配完、还没跑）
+default void onTurnEnd(BuildContext b, String reply, String error) { }   // 回合结束
+default void onSend(BuildContext b) { }                    // 即将把正文交给落点</code></pre></div>
+    <p><b>能改什么、不能改什么</b>：这一层的用途是记账与清理 —— 写对话历史、记调用量、清临时态、私聊的 typing。它拿到的是只读的 <code>BuildContext</code>，没有可改的正文，改正文是出站那一段的事。<code>onTurnEnd</code> 里拿到的 <code>reply</code> 是这一轮的产出，可能还没剥标记、也可能还没发出去，适合读、不适合改。</p>
+    <p><b>最少几行的骨架</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">data\skills\回合账\TurnLog.java</span></div><pre><code>import sair.v4.ext.BuildContext;
+import sair.v4.ext.LifecycleHook;
+
+public class TurnLog implements LifecycleHook {
+
+    @Override
+    public int order() {
+        return 50;
+    }
+
+    @Override
+    public void onTurnEnd(BuildContext b, String reply, String error) {
+        try {
+            if (b == null || b.host() == null) return;
+            b.host().store().kvSet("turn:last", error.isEmpty() ? "ok" : error);
+        } catch (Throwable t) {
+            // 记不上就算了，这一轮已经跑完
+        }
+    }
+}</code></pre></div>
+    <p><b>在 md 里怎么声明</b>：不用声明，靠接口识别。它和其余的基板扩展点一样是顶层类扫出来的，放在哪个文件里都行。</p>
+
+    <h3 class="sec">接口六 · TriggerVoter：这条消息要不要起一轮</h3>
+    <p><b>什么时候被触发</b>：一条入站消息到达、钩子那一趟跑完之后。基板要决定"这条要不要自动回"，就问一圈投票人。<code>DECLINE</code> 那一票能省掉一整轮模型调用，所以这条路值得就地判断。</p>
+    <p><b>要实现的方法</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">sair.v4.ext.TriggerVoter</span></div><pre><code>enum Vote { ANSWER, DECLINE, ABSTAIN }
+
+int order();                                   // 小的在前，同序按插件名
+Vote vote(Ev ev, Caller c);                    // 投票；返回 null 等同于 ABSTAIN
+default String reason() { return "plugin"; }   // 拒绝的缘由，只在 DECLINE 时有意义</code></pre></div>
+    <p><b>三态</b>：</p>
+    <div class="tw reveal">
+      <table>
+        <thead><tr><th>票</th><th>意思</th></tr></thead>
+        <tbody>
+          <tr><td><code>ANSWER</code></td><td>回。即使没被 @、也不是主人（触发词命中走的就是这个意思）。</td></tr>
+          <tr><td><code>DECLINE</code></td><td>不回，直接结束，省掉一整轮模型调用。</td></tr>
+          <tr><td><code>ABSTAIN</code></td><td>不管，交给下一个 voter；全都不管就按基板原来的地址规则走。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><b>判定口径</b>：按 <code>order</code>、插件名依次问，第一个非 <code>ABSTAIN</code> 的票生效，后面的不再问 —— 顺序确定，结果才确定，这也是它不做成"多数决"的原因。抛异常或超时 = 这一票作废当 <code>ABSTAIN</code>，记一行 <code>[ext]</code>。这条路在消息到达的当场跑，超时上限是 <code>extTimeoutMs</code>（默认 <code>200</code> 毫秒），所以宁可 <code>ABSTAIN</code>，也不在这里等网络。被拒时 <code>reason()</code> 那句话会写进 <code>[qq] skip reason=…</code> 的结构事实里，起个看得懂的名字，事后好查。</p>
+    <p><b>最少几行的骨架</b>：</p>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">data\skills\安静点\QuietVoter.java</span></div><pre><code>import sair.v4.auth.Caller;
+import sair.v4.ext.TriggerVoter;
+import sair.v4.qq.Ev;
+
+public class QuietVoter implements TriggerVoter {
+
+    @Override
+    public int order() {
+        return 60;
+    }
+
+    @Override
+    public Vote vote(Ev ev, Caller c) {
+        if (ev == null) return Vote.ABSTAIN;
+        if (ev.plainText().contains("别接话")) return Vote.DECLINE;   // 明确不接这一条
+        return Vote.ABSTAIN;                                          // 其余交给下一个
+    }
+
+    @Override
+    public String reason() {
+        return "这句话说了不用接";
+    }
+}</code></pre></div>
+    <p><b>在 md 里怎么声明</b>：不用声明，靠接口识别。这一层不是新机制，而是把原来只有技能能投的那一票升级成"插件公共"：没有任何 voter 的时候，网关走的还是"技能那一票 → 地址规则"那条老路。</p>
+
+    <h3 class="sec">六个接口共有的护栏</h3>
+    <p>这些约定对上面每一个接口都成立，写插件时按同一套习惯来就好：</p>
+    <div class="grid-4">
+      <div class="panel reveal">
+        <h3>每次调用都有独立超时</h3>
+        <p>配置 <code>extTimeoutMs</code>，默认 <code>200</code> 毫秒。超了这一条就当它这次没说话：上下文这一段不出现、出站这一口不改、这一票作废、这一次回调跳过 —— 别的扩展点与这一轮本身都照常。</p>
+      </div>
+      <div class="panel reveal d1">
+        <h3>抛出的异常只丢它自己</h3>
+        <p>一次意外只让它那一次调用失效，正文保持进来时的样子，日志里多一行 <code>[ext] error</code>。基板的承诺是"永不失联"：外挂可以慢、可以崩、可以一次吐很多字，那一轮都照常跑完、照常回话。</p>
+      </div>
+      <div class="panel reveal d2">
+        <h3>手里的对象是"这一次的视图"</h3>
+        <p><code>BuildContext</code> 与 <code>Outbound</code> 过了这一次就作废，把它们存进字段，下次读到的就不是这一轮的东西了。要留状态留在自己的库或 kv 里。<code>host()</code> 还可能为 <code>null</code>，拿不到就少做点事。</p>
+      </div>
+      <div class="panel reveal d3">
+        <h3>热重载换的是新类加载器</h3>
+        <p>每次重扫都会用新的类加载器重新定义你的类，上一份的 <code>static</code> 字段不会跟过来。状态别放在 <code>static</code> 上 —— 不然重载一次就像换了个新人。</p>
+      </div>
+    </div>
+    <div class="note reveal">
+      <p><span class="n-title">两条不显眼但常打交道的约定</span>：一个是同一个插件的扩展点调用是串行的（基板按实例加锁），所以同一个插件的两轮不会同时进它的扩展点，插件作者不用自己处理并发；另一个是扩展点在基板自己的扩展工作线程上跑，不占回合线程 —— 超时因此才有意义。诊断都带 <code>[ext]</code> 前缀：每个扩展点一行 <code>[ext] 事情=插件名:类名 chars=… ms=…</code>；<code>status.ext</code> 还能看到逐条的调用次数、出错与超时次数、贡献字符与总耗时。总开关是配置 <code>extEnabled</code>（默认开），关掉就退回"零外挂"行为；一条扩展点都没挂的时候，四个接线点一行代码都不多走。</p>
+    </div>
+
+    <h3 class="sec">一个完整的组合例子</h3>
+    <p>一个类可以同时实现多个接口 —— 基板装载时会扫这个目录编译出的每个顶层类，按"它实现了哪个接口"逐条挂上去，<code>ContextProvider</code> / <code>OutboundStage</code> / <code>TriggerVoter</code> / <code>LifecycleHook</code> 这四个各算一条。下面这个技能只写了一个类：既收 <code>on_message</code> 记账，又每轮注入一段。</p>
+    <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">data\skills\群账本\群账本.md</span></div><pre><code>---
+name: 群账本
+description: 收群消息记一笔流水，并把最近一条注入上下文
+hooks: on_message
+entry: GroupLedger
+---</code></pre></div>
+    <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">data\skills\群账本\GroupLedger.java</span></div><pre><code>import com.google.gson.JsonObject;
+
+import sair.v4.ext.BuildContext;
+import sair.v4.ext.ContextProvider;
+import sair.v4.qq.Ev;
+import sair.v4.skill.Host;
+import sair.v4.skill.Hooked;
+
+/** 一个类同时挂两个身份：收消息记账 + 每轮注入一段。 */
+public class GroupLedger implements Hooked, ContextProvider {
+
+    // ---------------- Hooked：一条入站消息记一笔 ----------------
+
+    @Override
+    public void on(String hook, JsonObject payload, Host h) {
+        if (!"on_message".equals(hook) || payload == null || h == null) return;
+        try {
+            Ev e = Ev.parse(payload);
+            if (e == null || !e.isGroup() || e.groupId() &lt;= 0L) return;
+            h.store().kvSet("ledger:last:" + e.groupId(), e.userId() + "：" + e.plainText());
+        } catch (Throwable t) {
+            // 记不上就少一条，消息照常
+        }
+    }
+
+    // ---------------- ContextProvider：每轮注入一段 ----------------
+
+    @Override
+    public boolean stable() {
+        return false;                        // 每轮都可能变，放易变段
+    }
+
+    @Override
+    public int order() {
+        return 45;
+    }
+
+    @Override
+    public int maxChars() {
+        return 400;
+    }
+
+    @Override
+    public boolean appliesTo(BuildContext b) {
+        return b != null &amp;&amp; b.group();
+    }
+
+    @Override
+    public String build(BuildContext b) {
+        try {
+            Host h = b.host();
+            if (h == null) return "";
+            String last = h.store().kv("ledger:last:" + b.groupId(), "");
+            return last.isEmpty() ? "" : "【本群最近一条】" + last;
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+}</code></pre></div>
+    <p>几点可以顺手记一下：<code>entry: GroupLedger</code> 那一行是少不了的，因为事件只派给入口类；<code>hooks: on_message</code> 也是要写的，因为钩子名不带类型信息；而 <code>ContextProvider</code> 那半身份不用写进 md —— <code>implements ContextProvider</code> 就是它的声明。这个类里没实现 <code>Skill</code>、md 里也没有 <code>tool:</code>，所以它不进工具表，模型那边完全看不到它。</p>
+    <p>启动日志里会出现这两行，第二行的数字就是这个技能挂上的基板扩展点条数（<code>Skill</code> 与 <code>Hooked</code> 走各自的老路，不在这个数里 —— 所以这里数的是上下文那一条）：</p>
+    <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">启动日志</span></div><pre><code>[skills] 群账本 → LOADED 钩子=on_message
+[ext] 群账本 挂了 1 条扩展点</code></pre></div>
+    <p>改完 <code>.java</code> 或者改了 md 的 front matter，敲 <code>ai/skill reload</code> 就重新扫一遍：先把这个插件的扩展点整体摘掉，再按类名升序挂这一次的，所以不会留下半套。只改了 <code>prompt.md</code> 的话不用 reload，保存之后下一轮读到的就是新文案。</p>
+  </section>
+
 
       <div class="note reveal">
-        <p><span class="n-title">怎么读这一页</span>：本页只回答"能做什么、边界在哪、坏掉会怎样"。命令怎么写看 <a href="commands.html">04 · 控制台命令</a>，逐层实现看 <a href="architecture.html">07 · 技术实现</a>，配置键看 <a href="config.html">03 · 配置</a>。每条断言后面都跟真实的 <code>文件:行号</code>。</p>
+        <p><span class="n-title">怎么读这一页</span>：本页只回答"能做什么、边界在哪、坏掉会怎样"。命令怎么写看 <a href="commands.html">04 · 控制台命令</a>，逐层实现看 <a href="architecture.html">07 · 技术实现</a>，配置键看 <a href="config.html">03 · 配置</a>。</p>
       </div>
 
-      <p class="t-cap">外挂层（技能）不在本文档范围内。</p>
+      <p class="t-cap">技能这一层可以自己长：怎么写、怎么装见 <a href="capabilities.html#skill-dev">06 · 能力</a> 里的「自己写一个技能」，钩子与扩展点接口见「扩展点接口手册」。</p>
 
-      <div class="grid-4">
-        <div class="kpi reveal"><div class="k">能力面</div><div class="v">9<small>存储/热插拔/提示词/Agent/上下文/权限/模型/NapCat/控制台</small></div></div>
-        <div class="kpi reveal d1"><div class="k">装配步骤</div><div class="v">19<small>Boot.java:55</small></div></div>
-        <div class="kpi reveal d2"><div class="k">配置键</div><div class="v">94<small>Conf.knownKeys()</small></div></div>
-        <div class="kpi reveal d3"><div class="k">OneBot 动作</div><div class="v">48<small>qq\Api.catalog()</small></div></div>
-      </div>
 
-      <div class="grid-4">
-        <div class="kpi reveal"><div class="k">查询库</div><div class="v">8<small>2 基板环境库 + 6 业务库</small></div></div>
-        <div class="kpi reveal d1"><div class="k">运行表</div><div class="v">6<small>Lib.RUN_COLS</small></div></div>
-        <div class="kpi reveal d2"><div class="k">数据库</div><div class="v">121,057,280<small>字节 · 单文件 v4.db</small></div></div>
-        <div class="kpi reveal d3"><div class="k">基板自带工具</div><div class="v">17<small>Builtins 注册数</small></div></div>
-      </div>
 
       <!-- ==================== 九件事 ==================== -->
       <section class="chapter" id="nine">
         <header class="chapter-head reveal">
           <span class="chapter-tag">01 / NINE</span>
           <h2>九件事的分工总览</h2>
-          <p class="chapter-desc">基板自报的范围只有九个词：存储 / 热插拔 / 提示词 / Agent / 上下文 / 权限 / 模型 / NapCat / 控制台（<code>src\sair\v4\term\Cmd.java:1357</code>）。每项只做骨架与判定，不做业务。</p>
+          <p class="chapter-desc">基板自报的范围只有九个词：存储 / 热插拔 / 提示词 / Agent / 上下文 / 权限 / 模型 / NapCat / 控制台（<code>src\sair\v4\term\Cmd.java</code>）。每项只做骨架与判定，不做业务。</p>
         </header>
 
         <div class="note reveal">
-          <p><span class="n-title">业务能力不在基板里</span>：控制台命令表只保留"对基板操作"的命令；业务能力（发图、禁言、搜索、天气、审核、主动发言等）一律不在基板与控制台命令里（<code>src\sair\v4\term\Cmd.java:20</code>、<code>:1391</code>）。</p>
+          <p><span class="n-title">业务能力不在基板里</span>：控制台命令表只保留"对基板操作"的命令；业务能力（发图、禁言、搜索、天气、审核、主动发言等）一律不在基板与控制台命令里（<code>src\sair\v4\term\Cmd.java</code>）。</p>
         </div>
 
         <h3 class="sec">九件事一览</h3>
@@ -144,52 +767,52 @@
         <h3 class="sec">每件事：能做什么 / 边界 / 失败会怎样</h3>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>能力</th><th>能做什么 · 边界 · 失败</th><th>出处</th></tr></thead>
+            <thead><tr><th>能力</th><th>能做什么 · 边界 · 失败</th></tr></thead>
             <tbody>
               <tr>
                 <td><b>存储</b></td>
                 <td><b>能</b>：按库名增删改查、检索、统计、导入导出、维护。<b>界</b>：单次查询硬上限 10000 条、默认 100 条；表名列名过注册表白名单、值走预编译绑定。<b>败</b>：非法库名返回空/0/-1 并记一行日志，绝不抛异常；读失败返回空、写失败返回 -1/0</td>
-                <td><code>store\Store.java:36-50</code>、<code>:32-33</code>；<code>store\Db.java:33-35</code>、<code>:43</code></td>
+                
               </tr>
               <tr>
                 <td><b>热插拔加载</b></td>
                 <td><b>能</b>：从 <code>data\skills\</code> 装载外挂单元；单元可声明自己的库表、注入提示词、注册工具。<b>界</b>：装载时机只剩"启动这一次扫描"与"显式重载"，目录监听已整条删除。<b>败</b>：单个单元失败只让它的能力缺位，装配继续；控制台那族命令不可用时其余能力照常</td>
-                <td><code>Boot.java:716</code>、<code>:741-743</code>、<code>:804-819</code>；<code>term\Cmd.java:1121-1124</code></td>
+                
               </tr>
               <tr>
                 <td><b>提示词</b></td>
                 <td><b>能</b>：读/写初始提示词、列出目录下的 md、按槽位注入、看统计。<b>界</b>：基板自己不写死任何正文，文件不存在就是空提示词；读取限制在提示词目录内的 md，越界/绝对路径/软链逃逸一律 null。<b>败</b>：注入条目超出每槽 64 条上限时丢最旧</td>
-                <td><code>prompt\Prompts.java:12-17</code>、<code>:80-110</code>；<code>prompt\Inject.java:35</code></td>
+                
               </tr>
               <tr>
                 <td><b>Agent</b></td>
                 <td><b>能</b>：主回合跑到模型不再要求调工具；派子 Agent（可带自己的模型与工具白名单）；异步完成后回灌主 Agent 并触发一轮收尾。<b>界</b>：子 Agent 不向下再派发；收尾回合剥掉"能对用户说话"的工具。<b>败</b>：同一工具连续失败到提示阈值就注入一行纯事实，到终止阈值停止本轮并回终止文案</td>
-                <td><code>agent\Agent.java:29-32</code>；<code>agent\Loop.java:23-33</code>、<code>:63-71</code></td>
+                
               </tr>
               <tr>
                 <td><b>上下文</b></td>
                 <td><b>能</b>：按固定骨架装配消息；产事实行（时间、调用者、人物、媒体、连接状态、模型、挂图、任务、能力索引、轮数预算、动态窗口）。<b>界</b>：只产事实不产文案，唯一例外是偏好块。<b>败</b>：任何一行事实构建失败就当它不存在，绝不把回合拖垮</td>
-                <td><code>ctx\CtxBuild.java:29-40</code>、<code>:279-359</code>、<code>:308-316</code></td>
+                
               </tr>
               <tr>
                 <td><b>权限</b></td>
                 <td><b>能</b>：对（主体，资源，位）给允许/拒绝与原因；账本条目可增删查。<b>界</b>：主人恒全权，条目管不到他；<code>MASTER</code> 甚至不被接受为主体写法。<b>败</b>：位名认不出返回哨兵，判定链上拿到它就当"没有权限"；权限面没装配时 NapCat 闸门按拒绝处理</td>
-                <td><code>auth\Acl.java:22-27</code>、<code>:401-411</code>；<code>auth\Bits.java:15-16</code>；<code>Boot.java:530-536</code></td>
+                
               </tr>
               <tr>
                 <td><b>模型</b></td>
                 <td><b>能</b>：非流式对话、流式对话（增量回调 + 分片工具调用归并）、图片理解、账户余额、模型清单、调用闸门。<b>界</b>：不做任何模型路由，<code>model=auto</code> 就是取自动档模型名。<b>败</b>：任何失败都收敛成结果里的 <code>error</code>，绝不向调用方抛异常</td>
-                <td><code>ai\DeepSeek.java:33</code>、<code>:189</code>、<code>:254</code>、<code>:350</code>、<code>:358</code>、<code>:383</code>；<code>Conf.java:23</code></td>
+                
               </tr>
               <tr>
                 <td><b>NapCat</b></td>
                 <td><b>能</b>：反向连接服务端 + 48 个动作的目录与封装；事件按 OneBot v11 形状解析；本地文件按"中转在跑→外链 URL，否则同机 URI"统一裁定。<b>界</b>：所有动作只有一个出口，改写层在那里统一处理要发出去的本地文件。<b>败</b>：未连接时统一话术；无响应/超时/非 JSON/返回码非 0 一律补一个 <code>error</code></td>
-                <td><code>qq\Link.java:32-42</code>；<code>qq\Api.java:20-25</code>、<code>:29-31</code>、<code>:34-43</code>、<code>:48</code></td>
+                
               </tr>
               <tr>
                 <td><b>控制台与界面</b></td>
                 <td><b>能</b>：命令表与分层帮助、状态查询、控制台捕获（流式/全量/游标）、命令历史、本地对话面板；AI 侧可读控制台与跑框架命令。<b>界</b>：命令表只留"对基板操作"的命令；本地控制台交互等价于 QQ 中的主人交互。<b>败</b>：路由与帮助不向框架层抛异常，任何命令炸掉都收敛成一行可读失败并允许继续输入；最底线还有一张降级命令表</td>
-                <td><code>term\Cmd.java:20-31</code>、<code>:1353-1395</code>、<code>:1402-1408</code>；<code>Builtins.java:754-757</code></td>
+                
               </tr>
             </tbody>
           </table>
@@ -205,74 +828,74 @@
         </header>
 
         <h3 class="sec">启动装配：19 步，都在自己的线程上</h3>
-        <p>装配绝不在调用线程上跑。框架的控制台回车是"界面线程上直接执行"，而装配要开库、建索引、装载外挂单元、起连接与心跳，要好几秒 —— 所以入口 <code>main</code>/<code>help</code>/<code>ensureReady</code> 一律立即返回，装配交给名为 <code>v4-boot</code> 的守护线程。<b>但装配只由 <code>ai/start</code>（已在跑则是 <code>ai/restart</code>）触发</b>：在那之前基板就是不工作的，其余命令只改配置文件（<code>src\sair\v4\V4Activity.java:26-38</code>、<code>:317-334</code>）。</p>
-        <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\Boot.java:55</span><button class="copy" type="button">复制</button></div><pre><code>public static final int STEP_TOTAL = 19;</code></pre></div>
+        <p>装配绝不在调用线程上跑。框架的控制台回车是"界面线程上直接执行"，而装配要开库、建索引、装载外挂单元、起连接与心跳，要好几秒 —— 所以入口 <code>main</code>/<code>help</code>/<code>ensureReady</code> 一律立即返回，装配交给名为 <code>v4-boot</code> 的守护线程。<b>但装配只由 <code>ai/start</code>（已在跑则是 <code>ai/restart</code>）触发</b>：在那之前基板就是不工作的，其余命令只改配置文件（<code>src\sair\v4\V4Activity.java</code>）。</p>
+        <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\Boot.java</span><button class="copy" type="button">复制</button></div><pre><code>public static final int STEP_TOTAL = 19;</code></pre></div>
 
         <p>19 个命名步骤（名称取自 <code>Boot.runSteps()</code>；其中两处与本文档范围外那一层有关，只标位置不写名称）：</p>
         <div class="grid-4">
-          <div class="panel reveal"><h3>第 1-5 步</h3><p>1 数据目录与配置 <code>Boot.java:390</code><br>2 空数据骨架 <code>:424</code><br>3 六库 <code>:433</code><br>4 权限判定层 <code>:460</code><br>5 提示词 <code>:470</code></p></div>
-          <div class="panel reveal d1"><h3>第 6-10 步</h3><p>6 工具注册表 <code>:476</code><br>7 模型客户端 <code>:482</code><br>8 NapCat 连接 <code>:495</code><br>9 上下文装配 <code>:546</code><br>10（范围外那一层的装载侧）<code>:615</code></p></div>
-          <div class="panel reveal d2"><h3>第 11-15 步</h3><p>11 回合调度器 <code>:642</code><br>12 Agent <code>:678</code><br>13 心跳 <code>:690</code><br>14 QQ 网关 <code>:696</code><br>15 基板工具面 <code>:709</code></p></div>
-          <div class="panel reveal d3"><h3>第 16-19 步</h3><p>16（范围外那一层的扫描侧）<code>:716</code><br>17 NapCat 监听 <code>:746</code><br>18 文件外链中转 <code>:766</code><br>19 心跳启动 <code>:783</code></p></div>
+          <div class="panel reveal"><h3>第 1-5 步</h3><p>1 数据目录与配置 <code>Boot.java</code><br>2 空数据骨架 <br>3 六库 <br>4 权限判定层 <br>5 提示词 </p></div>
+          <div class="panel reveal d1"><h3>第 6-10 步</h3><p>6 工具注册表 <br>7 模型客户端 <br>8 NapCat 连接 <br>9 上下文装配 <br>10（范围外那一层的装载侧）</p></div>
+          <div class="panel reveal d2"><h3>第 11-15 步</h3><p>11 回合调度器 <br>12 Agent <br>13 心跳 <br>14 QQ 网关 <br>15 基板工具面 </p></div>
+          <div class="panel reveal d3"><h3>第 16-19 步</h3><p>16（范围外那一层的扫描侧）<br>17 NapCat 监听 <br>18 文件外链中转 <br>19 心跳启动 </p></div>
         </div>
 
         <div class="grid-3">
-          <div class="panel reveal"><h3>失败只让这一步缺位</h3><p>每步都包在 <code>step(name, body)</code> 里：抛出异常就把"失败 + 原因"写进台账、记下第一个失败步骤，装配<b>继续往下走</b> <code>Boot.java:804-819</code>。"装完但缺一块"是正常结局。</p></div>
-          <div class="panel reveal d1"><h3>关键步的连带效应</h3><p>第 3 步失败 ⇒ 存储能力整体降级为不可用，其余照常 <code>Boot.java:443-453</code>；第 4 步失败 ⇒ 权限面为空，连接闸门按拒绝处理 <code>Boot.java:530-536</code>；第 6 步若权限面为空则<b>不做权限筛</b>，工具面反而更完整 <code>Boot.java:475</code>。</p></div>
-          <div class="panel reveal d2"><h3>建表在装载之后</h3><p>业务表由外挂单元声明，所以建表跑在装载完成之后（缺表即建、缺列即补，幂等）<code>store\Db.java:37-40</code>、<code>Boot.java:438</code>。</p></div>
+          <div class="panel reveal"><h3>失败只让这一步缺位</h3><p>每步都包在 <code>step(name, body)</code> 里：抛出异常就把"失败 + 原因"写进台账、记下第一个失败步骤，装配<b>继续往下走</b> <code>Boot.java</code>。"装完但缺一块"是正常结局。</p></div>
+          <div class="panel reveal d1"><h3>关键步的连带效应</h3><p>第 3 步失败 ⇒ 存储能力整体降级为不可用，其余照常 <code>Boot.java</code>；第 4 步失败 ⇒ 权限面为空，连接闸门按拒绝处理 <code>Boot.java</code>；第 6 步若权限面为空则<b>不做权限筛</b>，工具面反而更完整 <code>Boot.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>建表在装载之后</h3><p>业务表由外挂单元声明，所以建表跑在装载完成之后（缺表即建、缺列即补，幂等）<code>store\Db.java</code>、<code>Boot.java</code>。</p></div>
         </div>
 
         <h3 class="sec">装配进度：控制台一行一步</h3>
-        <p>进度由装配进度播报器打出来，行格式固定，便于按 <code>[v4]</code> 前缀检索（<code>src\sair\v4\term\BootProgress.java:23-28</code>）：</p>
-        <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">term\BootProgress.java:25-27</span><button class="copy" type="button">复制</button></div><pre><code>[v4] 3/19 提示词 … 12ms
+        <p>进度由装配进度播报器打出来，行格式固定，便于按 <code>[v4]</code> 前缀检索（<code>src\sair\v4\term\BootProgress.java</code>）：</p>
+        <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">term\BootProgress.java</span><button class="copy" type="button">复制</button></div><pre><code>[v4] 3/19 提示词 … 12ms
 [v4] 基板就绪：… 耗时 3875 ms（最慢：… 2635 ms）
 [v4] 装配结束（有失败步骤「六库」）：… —— help/status/tools/config 照常可用</code></pre></div>
-        <p>汇总行分三种：全部成功、有失败步骤（警示色 + 指出是哪一步）、后台编译中（<code>BootProgress.java:78-93</code>）。</p>
+        <p>汇总行分三种：全部成功、有失败步骤（警示色 + 指出是哪一步）、后台编译中（<code>BootProgress.java</code>）。</p>
 
         <h3 class="sec">运行期：分道调度 + 回合 + 心跳</h3>
         <div class="grid-3">
           <div class="panel reveal">
             <h3>每会话一条道</h3>
-            <p>同会话严格先进先出、同一条道同时只有一个在跑；不同会话互不相干 —— 一个慢群不再堵住别人。真正并行的是工作线程（<code>turnWorkers</code>，出厂 2）<code>schedule\Lanes.java:27-43</code>。</p>
+            <p>同会话严格先进先出、同一条道同时只有一个在跑；不同会话互不相干 —— 一个慢群不再堵住别人。真正并行的是工作线程（<code>turnWorkers</code>，出厂 2）<code>schedule\Lanes.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h3>溢出不静默</h3>
-            <p>默认把后到的消息并进该会话还在排队的那一条（合并不新增待办）；装不下或选了丢弃策略时回一句可读文案，<b>绝不静默消失</b>。另有两道硬上限保证内存有界 <code>Lanes.java:32-38</code>。</p>
+            <p>默认把后到的消息并进该会话还在排队的那一条（合并不新增待办）；装不下或选了丢弃策略时回一句可读文案，<b>绝不静默消失</b>。另有两道硬上限保证内存有界 <code>Lanes.java</code>。</p>
           </div>
           <div class="panel reveal d2">
             <h3>优先级与老化</h3>
-            <p>出厂口径是主人/私聊优先于群；道首任务带入队时刻，优先级老化保证普通道不会被高优流量饿死 <code>Lanes.java:35</code>、<code>:57-59</code>。</p>
+            <p>出厂口径是主人/私聊优先于群；道首任务带入队时刻，优先级老化保证普通道不会被高优流量饿死 <code>Lanes.java</code>。</p>
           </div>
           <div class="panel reveal">
             <h3>唯一的心跳</h3>
-            <p>全基板只有一条周期 tick，做两件事：派发周期回调；检查到点的定时唤醒任务，到点就唤起主 Agent 跑一轮并把结果送回目标会话 <code>Tick.java:20-26</code>。周期出厂 20000 ms，下限夹到 1000 ms <code>Tick.java:55</code>、<code>Conf.java:131</code>。维护与出站台账裁剪也在心跳里 <code>store\Store.java:441-443</code>。</p>
+            <p>全基板只有一条周期 tick，做两件事：派发周期回调；检查到点的定时唤醒任务，到点就唤起主 Agent 跑一轮并把结果送回目标会话 <code>Tick.java</code>。周期出厂 20000 ms，下限夹到 1000 ms <code>Tick.java</code>、<code>Conf.java</code>。维护与出站台账裁剪也在心跳里 <code>store\Store.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h3>模型调用闸门</h3>
-            <p>主回合、定时任务、异步子 Agent 都要过同一个闸门：许可数出厂 <b>1</b>（不并发），等待上限 180 s，等不到就放弃本次调用并收敛成一条失败结果 <code>Boot.java:486-489</code>、<code>DeepSeek.java:103</code>、<code>Conf.java:162</code>。</p>
+            <p>主回合、定时任务、异步子 Agent 都要过同一个闸门：许可数出厂 <b>1</b>（不并发），等待上限 180 s，等不到就放弃本次调用并收敛成一条失败结果 <code>Boot.java</code>、<code>DeepSeek.java</code>、<code>Conf.java</code>。</p>
           </div>
           <div class="panel reveal d2">
             <h3>回合与收尾</h3>
-            <p>一次回合跑到"模型不再要求调工具"为止；后台完成的任务回灌后触发一轮收尾回合，那一轮只记账不对外说话 <code>agent\Loop.java:63-71</code>。</p>
+            <p>一次回合跑到"模型不再要求调工具"为止；后台完成的任务回灌后触发一轮收尾回合，那一轮只记账不对外说话 <code>agent\Loop.java</code>。</p>
           </div>
         </div>
 
         <h3 class="sec">关停：<code>ai/exit</code> 只停基板</h3>
         <div class="note bad reveal">
-          <p><span class="n-title">必须知道的实现行为</span>：<code>ai/exit</code> 会<b>停基板 + 收掉两个调试口 + 关落盘句柄 + 注销控制台捕获器</b>，但<b>不结束进程</b>（<code>V4Activity.java:394-414</code>、<code>dev\DebugShell.java:110-136</code>、<code>dev\DebugPort.java:59-60</code>）。后果：<b>基板停下后调试口就关了，而进程仍然活着</b>；此时若没有可用的控制台，就<b>没有任何入口再敲一次 <code>ai/start</code></b>，基板起不回来。<b>这是当前实现行为，未计划修改</b>：把壳卸载当成调试面的终点是有意为之（在同一个壳里 <code>ai/start</code> 与 <code>ai/restart</code> 收的只是基板，观测面照旧）。</p>
+          <p><span class="n-title">先知道这一条实现行为</span>：<code>ai/exit</code> 会<b>停基板 + 收掉两个调试口 + 关落盘句柄 + 注销控制台捕获器</b>，但<b>不结束进程</b>（<code>V4Activity.java</code>、<code>dev\DebugShell.java</code>、<code>dev\DebugPort.java</code>）。后果：<b>基板停下后调试口就关了，而进程仍然活着</b>；此时若没有可用的控制台，就<b>没有任何入口再敲一次 <code>ai/start</code></b>，基板起不回来。<b>这是当前实现行为，未计划修改</b>：把壳卸载当成调试面的终点是有意为之（在同一个壳里 <code>ai/start</code> 与 <code>ai/restart</code> 收的只是基板，观测面照旧）。</p>
         </div>
         <div class="grid-2">
           <div class="panel reveal">
             <h3>正确关停一：<code>/exit</code></h3>
-            <p>要走框架自己的关停路径，用控制台的 <code>/exit</code>（调试口那条"关框架"的命令走的就是它）。组件 <code>ai/exit</code> 的语义是"停基板、不改配置、不卸载插件、之后可再 <code>start</code>" <code>term\Cmd.java:1366</code> —— 只有在确实还有控制台可用时它才是可逆的。</p>
+            <p>要走框架自己的关停路径，用控制台的 <code>/exit</code>（调试口那条"关框架"的命令走的就是它）。组件 <code>ai/exit</code> 的语义是"停基板、不改配置、不卸载插件、之后可再 <code>start</code>" <code>term\Cmd.java</code> —— 只有在确实还有控制台可用时它才是可逆的。</p>
           </div>
           <div class="panel reveal d1">
             <h3>正确关停二：按精确 pid 结束进程</h3>
-            <p>没有控制台、也不打算再让它工作时，直接结束<b>那个确切的 pid</b>（部署口径见 <a href="deploy.html#startstop">02 · 部署</a>）。别用"按名字批量结束"这类粗口径 —— 一台机器上可能同时跑着别的实例。</p>
+            <p>没有控制台、也不打算再让它工作时，可以直接结束<b>那个确切的 pid</b>（部署口径见 <a href="deploy.html#startstop">02 · 部署</a>）。按名字批量结束这类粗口径容易误伤 —— 一台机器上可能同时跑着别的实例。</p>
           </div>
         </div>
         <div class="note reveal">
-          <p><span class="n-title">重装 vs 重启</span>：<code>ai/start</code> 幂等，已就绪时只回"已在运行"，绝不重启；要按新配置重装只有 <code>ai/restart</code>。装配/重启同时只允许一条，重复命令会被明确拒绝 <code>V4Activity.java:316-348</code>、<code>:352</code>。</p>
+          <p><span class="n-title">重装 vs 重启</span>：<code>ai/start</code> 幂等，已就绪时只回"已在运行"，绝不重启；要按新配置重装只有 <code>ai/restart</code>。装配/重启同时只允许一条，重复命令会被明确拒绝 <code>V4Activity.java</code>。</p>
         </div>
       </section>
 
@@ -285,60 +908,60 @@
         </header>
 
         <h3 class="sec">状态分层：未启动 / 加载中 / 就绪 / 有失败步骤</h3>
-        <p><code>ai/status</code> 背后是同一套分层（<code>src\sair\v4\Boot.java:1934-1950</code>）：</p>
+        <p><code>ai/status</code> 背后是同一套分层（<code>src\sair\v4\Boot.java</code>）：</p>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>层</th><th>判据</th><th>报什么</th><th>出处</th></tr></thead>
+            <thead><tr><th>层</th><th>判据</th><th>报什么</th></tr></thead>
             <tbody>
-              <tr><td>未启动</td><td>没跑过装配</td><td><code>ready=0</code> / <code>reason=not_started</code>，另给待生效键个数（<code>-1</code> = 配置一次都没加载过）</td><td><code>Boot.java:1978-2007</code></td></tr>
-              <tr><td>加载中</td><td>装配线程在跑</td><td>轻量面：第几步/共几步/步骤名/已耗时/失败步骤 —— <b>不碰</b>存储、连接与中转（那些对象正在被初始化）</td><td><code>Boot.java:1952-1967</code></td></tr>
-              <tr><td>就绪</td><td>装配跑完</td><td>完整状态面（含各面规模）</td><td><code>Boot.java:1937-1938</code></td></tr>
-              <tr><td>有失败步骤</td><td><code>degraded()</code> 为真</td><td>失败步骤名 + 原因 + 完整步骤台账；控制台其余命令照常</td><td><code>Boot.java:1863-1874</code>、<code>:1900-1926</code>、<code>:2010-2025</code></td></tr>
+              <tr><td>未启动</td><td>没跑过装配</td><td><code>ready=0</code> / <code>reason=not_started</code>，另给待生效键个数（<code>-1</code> = 配置一次都没加载过）</td></tr>
+              <tr><td>加载中</td><td>装配线程在跑</td><td>轻量面：第几步/共几步/步骤名/已耗时/失败步骤 —— <b>不碰</b>存储、连接与中转（那些对象正在被初始化）</td></tr>
+              <tr><td>就绪</td><td>装配跑完</td><td>完整状态面（含各面规模）</td></tr>
+              <tr><td>有失败步骤</td><td><code>degraded()</code> 为真</td><td>失败步骤名 + 原因 + 完整步骤台账；控制台其余命令照常</td></tr>
             </tbody>
           </table>
         </div>
-        <p>步骤台账是"步骤名 → ok 或 失败原因"的有序表，所以"哪一步没起来"可以<b>点名</b>；人读版报告把它打成逐行清单（<code>Boot.java:254-258</code>、<code>:1914-1920</code>）。控制台层面另有"待生效键"清单：最多列 8 个键名 + 余数（<code>term\Cmd.java:1106-1117</code>）。</p>
+        <p>步骤台账是"步骤名 → ok 或 失败原因"的有序表，所以"哪一步没起来"可以<b>点名</b>；人读版报告把它打成逐行清单（<code>Boot.java</code>）。控制台层面另有"待生效键"清单：最多列 8 个键名 + 余数（<code>term\Cmd.java</code>）。</p>
 
         <h3 class="sec">模型不可用</h3>
         <div class="grid-2">
           <div class="panel reveal">
             <h3>没有密钥</h3>
-            <p>非流式与流式两条路径都返回 <code>error = "apiKey 未配置"</code> 并记一行警告，基板照常运行 <code>ai\DeepSeek.java:210-213</code>、<code>:269-272</code>。控制台对话命令在前面先挡一层，回"不可用：apiKey 未配置"并提示去看配置命令 <code>term\Cmd.java:523-524</code>。</p>
+            <p>非流式与流式两条路径都返回 <code>error = "apiKey 未配置"</code> 并记一行警告，基板照常运行 <code>ai\DeepSeek.java</code>。控制台对话命令在前面先挡一层，回"不可用：apiKey 未配置"并提示去看配置命令 <code>term\Cmd.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h3>网络与协议</h3>
-            <p>HTTP 非 2xx → <code>HTTP &lt;码&gt; + 正文前 300 字</code>；响应不是 JSON → <code>响应不是 JSON: …</code>；缺 <code>choices</code> → <code>响应缺少 choices: …</code>；流式一个有效分片都没收到 → <code>流式响应为空（未收到有效分片）</code> <code>DeepSeek.java:220-234</code>、<code>:300-328</code>。</p>
+            <p>HTTP 非 2xx → <code>HTTP &lt;码&gt; + 正文前 300 字</code>；响应不是 JSON → <code>响应不是 JSON: …</code>；缺 <code>choices</code> → <code>响应缺少 choices: …</code>；流式一个有效分片都没收到 → <code>流式响应为空（未收到有效分片）</code> <code>DeepSeek.java</code>。</p>
           </div>
         </div>
         <div class="note reveal">
-          <p><span class="n-title">闸门等不到</span>：并发闸门在 180 s 内拿不到许可，返回"模型忙：等不到调用闸门（另一路模型调用超过 N 秒）" —— 一句人话，不是超时异常 <code>DeepSeek.java:196-203</code>。</p>
+          <p><span class="n-title">闸门等不到</span>：并发闸门在 180 s 内拿不到许可，返回"模型忙：等不到调用闸门（另一路模型调用超过 N 秒）" —— 一句人话，不是超时异常 <code>DeepSeek.java</code>。</p>
         </div>
 
         <h3 class="sec">数据库不可用</h3>
         <div class="grid-2">
           <div class="panel reveal">
             <h3>开库阶段（第 3 步）</h3>
-            <p>连不上、或"连上了但读不了任何表"（比如目标不是合法的库文件），会抛出带原因的异常 ⇒ 该步记为失败、存储能力降级为不可用，<b>其余能力照常</b> <code>Boot.java:443-453</code>。判据是一次真实读，不是"连接是否打开"。</p>
+            <p>连不上、或"连上了但读不了任何表"（比如目标不是合法的库文件），会抛出带原因的异常 ⇒ 该步记为失败、存储能力降级为不可用，<b>其余能力照常</b> <code>Boot.java</code>。判据是一次真实读，不是"连接是否打开"。</p>
           </div>
           <div class="panel reveal d1">
             <h3>运行期</h3>
-            <p>异常就地吞掉并记日志：读失败返回空、写失败返回 -1/0 —— "存储故障不应该炸掉主循环" <code>store\Db.java:43</code>。上层同理：非法库名返回空表 + 一行日志 <code>store\Store.java:32-33</code>。连"本地黑名单读不出来"都按"没拉黑"处理：宁可多回一句，也不让消息静默消失 <code>QqGateway.java:898-912</code>。</p>
+            <p>异常就地吞掉并记日志：读失败返回空、写失败返回 -1/0 —— "存储故障就别去打扰主循环" <code>store\Db.java</code>。上层同理：非法库名返回空表 + 一行日志 <code>store\Store.java</code>。连"本地黑名单读不出来"都按"没拉黑"处理：宁可多回一句，也不让消息静默消失 <code>QqGateway.java</code>。</p>
           </div>
         </div>
 
         <h3 class="sec">NapCat 未连接</h3>
-        <p>抽象层只有一个统一话术：<code>NOT_CONNECTED = "Napcat 没有连接"</code>（<code>qq\Api.java:48</code>），判错统一走允许/错误两个助手 <code>Api.java:25</code>。事实层每轮都写一行连接状态 <code>napcat: connected | disconnected</code>（<code>ctx\CtxBuild.java:321</code>）。监听起不来也不影响别处：日志只说"端口被占用？本地交互照常可用"或"未启用" <code>Boot.java:756-761</code>。</p>
+        <p>抽象层只有一个统一话术：<code>NOT_CONNECTED = "Napcat 没有连接"</code>（<code>qq\Api.java</code>），判错统一走允许/错误两个助手 <code>Api.java</code>。事实层每轮都写一行连接状态 <code>napcat: connected | disconnected</code>（<code>ctx\CtxBuild.java</code>）。监听起不来也不影响别处：日志只说"端口被占用？本地交互照常可用"或"未启用" <code>Boot.java</code>。</p>
         <div class="note ok reveal">
-          <p><span class="n-title">永不失联</span>：不依赖模型 / 库 / 连接的四条命令永远可用 —— <code>help</code>、<code>status</code>、<code>config</code>、<code>tools</code>；<code>status</code> 在装配部分失败时指出是哪一步失败、因为什么 <code>term\Cmd.java:28-29</code>、<code>:1389-1390</code>。最底线还有一张静态降级命令表 <code>Cmd.java:1402-1408</code>。</p>
+          <p><span class="n-title">永不失联</span>：不依赖模型 / 库 / 连接的四条命令永远可用 —— <code>help</code>、<code>status</code>、<code>config</code>、<code>tools</code>；<code>status</code> 在装配部分失败时指出是哪一步失败、因为什么 <code>term\Cmd.java</code>。最底线还有一张静态降级命令表 <code>Cmd.java</code>。</p>
         </div>
 
         <h3 class="sec">错误收敛成可读文案</h3>
-        <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\ai\Res.java:12</span><button class="copy" type="button">复制</button></div><pre><code>// 约定：失败绝不抛异常 —— error 非空即代表失败，ok() 为 false。</code></pre></div>
-        <p>一次模型调用的结果结构本身就是"可读文案的容器"：正文、思维链、工具调用、结束原因（<code>stop</code> / <code>length</code> / <code>tool_calls</code> / <code>content_filter</code> / <code>insufficient_system_resource</code>）、用量、耗时、错误、实际使用的模型名（<code>ai\Res.java:17-33</code>）。控制台那一行只给四件事：走的哪个模型、缓存命中多少、用时多少、这次结果规模（<code>Res.java:57-94</code>）。摘要函数整体包在异常兜底里 —— "摘要永远不能成为故障点" <code>Res.java:112-114</code>。</p>
+        <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\ai\Res.java</span><button class="copy" type="button">复制</button></div><pre><code>// 约定：失败绝不抛异常 —— error 非空即代表失败，ok() 为 false。</code></pre></div>
+        <p>一次模型调用的结果结构本身就是"可读文案的容器"：正文、思维链、工具调用、结束原因（<code>stop</code> / <code>length</code> / <code>tool_calls</code> / <code>content_filter</code> / <code>insufficient_system_resource</code>）、用量、耗时、错误、实际使用的模型名（<code>ai\Res.java</code>）。控制台那一行只给四件事：走的哪个模型、缓存命中多少、用时多少、这次结果规模（<code>Res.java</code>）。摘要函数整体包在异常兜底里 —— "摘要永远不能成为故障点" <code>Res.java</code>。</p>
 
         <h3 class="sec">已登记但尚未生效的键</h3>
         <div class="note warn reveal">
-          <p><span class="n-title">计划中／未实现</span>：媒体面里有 4 个折叠转发展开的键（开关、节点数上限、深度上限、字符上限）<b>已在配置面登记，但当前没有任何代码读它们</b> —— 它们属于"同一批已登记、只登记不读"的媒体键表（<code>Conf.java:809-815</code>、<code>:852-862</code>）。同一批里真正被读的只有引用展开总开关与缓存有效期（<code>Conf.java:818-832</code>）。所以<b>把那 4 个键设成非默认值当前不会让转发内容展开</b>，该能力<b>计划中／未实现</b>。</p>
+          <p><span class="n-title">计划中／未实现</span>：媒体面里有 4 个折叠转发展开的键（开关、节点数上限、深度上限、字符上限）<b>已在配置面登记，但当前没有任何代码读它们</b> —— 它们属于"同一批已登记、只登记不读"的媒体键表（<code>Conf.java</code>）。同一批里真正被读的只有引用展开总开关与缓存有效期（<code>Conf.java</code>）。所以<b>把那 4 个键设成非默认值当前不会让转发内容展开</b>，该能力<b>计划中／未实现</b>。</p>
         </div>
       </section>
 
@@ -347,61 +970,61 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">04 / MODEL</span>
           <h2>模型面：六件事与一条铁律</h2>
-          <p class="chapter-desc">端点是 <code>{apiUrl}/chat/completions</code>、<code>{apiUrl}/user/balance</code>、<code>{apiUrl}/models</code>；头是 <code>Authorization: Bearer &lt;key&gt;</code>（<code>src\sair\v4\ai\DeepSeek.java:27-28</code>）。</p>
+          <p class="chapter-desc">端点是 <code>{apiUrl}/chat/completions</code>、<code>{apiUrl}/user/balance</code>、<code>{apiUrl}/models</code>；头是 <code>Authorization: Bearer &lt;key&gt;</code>（<code>src\sair\v4\ai\DeepSeek.java</code>）。</p>
         </header>
 
         <h3 class="sec">六件事</h3>
         <div class="grid-3">
-          <div class="panel reveal"><h3>非流式对话</h3><p>工具数组可为空；附加选项直接覆盖请求体同名键 <code>DeepSeek.java:188-189</code>。</p></div>
-          <div class="panel reveal d1"><h3>流式输出</h3><p>正文增量回调并追加，思维链只累积；工具调用是分片，按序号归并、参数字符串拼接 <code>ai\Sse.java:19-21</code>、<code>:144</code>。</p></div>
-          <div class="panel reveal d2"><h3>原生工具调用</h3><p>工具表非空才加 <code>tools</code>；流式才加流式标志；返回的工具调用会被规范化（保证参数是字符串、字段齐全）<code>DeepSeek.java:414-425</code>、<code>:452-460</code>。</p></div>
-          <div class="panel reveal"><h3>图片理解</h3><p>与对话走同一条链路，多模态消息由消息构造器造出来；<b>基板不做任何模型路由</b> <code>DeepSeek.java:346-353</code>。</p></div>
-          <div class="panel reveal d1"><h3>账户余额</h3><p>失败返回空值（不是异常），日志里记一行可读原因 <code>DeepSeek.java:357-379</code>。</p></div>
-          <div class="panel reveal d2"><h3>模型清单</h3><p>返回模型数组，失败同样返回空并记日志 <code>DeepSeek.java:382-408</code>。</p></div>
+          <div class="panel reveal"><h3>非流式对话</h3><p>工具数组可为空；附加选项直接覆盖请求体同名键 <code>DeepSeek.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>流式输出</h3><p>正文增量回调并追加，思维链只累积；工具调用是分片，按序号归并、参数字符串拼接 <code>ai\Sse.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>原生工具调用</h3><p>工具表非空才加 <code>tools</code>；流式才加流式标志；返回的工具调用会被规范化（保证参数是字符串、字段齐全）<code>DeepSeek.java</code>。</p></div>
+          <div class="panel reveal"><h3>图片理解</h3><p>与对话走同一条链路，多模态消息由消息构造器造出来；<b>基板不做任何模型路由</b> <code>DeepSeek.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>账户余额</h3><p>失败返回空值（不是异常），日志里记一行可读原因 <code>DeepSeek.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>模型清单</h3><p>返回模型数组，失败同样返回空并记日志 <code>DeepSeek.java</code>。</p></div>
         </div>
-        <p>超时是三档而非一个数：连接 15 s、普通读 180 s、流式读 300 s（<code>DeepSeek.java:43-48</code>）。请求体由配置打底、附加选项覆盖：越界的采样参数与零值长度参数不发（<code>DeepSeek.java:30-31</code>）。</p>
+        <p>超时是三档而非一个数：连接 15 s、普通读 180 s、流式读 300 s（<code>DeepSeek.java</code>）。请求体由配置打底、附加选项覆盖：越界的采样参数与零值长度参数不发（<code>DeepSeek.java</code>）。</p>
 
         <h3 class="sec">她怎么知道"这一轮跑的是哪台模型"：<code>models:</code> 事实行</h3>
-        <p>每轮事实块里有一行 <code>models: {…}</code>，键序固定，便于逐字断言（<code>src\sair\v4\ctx\CtxBuild.java:327-346</code>）。八个字段的语义：</p>
+        <p>每轮事实块里有一行 <code>models: {…}</code>，键序固定，逐字比对是稳定的（<code>src\sair\v4\ctx\CtxBuild.java</code>）。八个字段的语义：</p>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>字段</th><th>语义</th><th>出处</th></tr></thead>
+            <thead><tr><th>字段</th><th>语义</th></tr></thead>
             <tbody>
-              <tr><td><code>self</code></td><td><b>这一轮真正在跑的模型</b>。缺键时回落到配置里的主模型；子 Agent 带了自己的模型时，该键写在事实块装配之前，所以子 Agent 看到的是它自己</td><td><code>CtxBuild.java:69-82</code>、<code>:330</code></td></tr>
-              <tr><td><code>self_has_vision</code></td><td><b>这个模型自己能不能看图</b>（按配置的追加项判定的白名单真值）。<b>不因识图档位为 no 而改写成 false</b> —— 那是把事实编掉</td><td><code>CtxBuild.java:252-254</code>、<code>:343-345</code></td></tr>
-              <tr><td><code>main</code></td><td>配置里的主模型名（与"这一轮跑谁"无关；主回合下两者相同）</td><td><code>CtxBuild.java:335</code></td></tr>
-              <tr><td><code>main_has_vision</code></td><td>主模型自己能不能看图</td><td><code>CtxBuild.java:336</code></td></tr>
-              <tr><td><code>vision</code></td><td>配置里指定的具备视觉能力的模型名（需要看图时可以派一个用它的子 Agent 兜底）</td><td><code>CtxBuild.java:337</code>；<code>Conf.java:634-638</code></td></tr>
-              <tr><td><code>mode</code></td><td><b>三个取值</b>：<code>native</code>（这一轮可以把图直接挂进请求体）/ <code>relay</code>（这一轮不挂图）/ <code>off</code>（一律不看）。算法 = 识图档位 × "自己能不能看图"，档位取值<b>逐字</b>：<code>no</code>/<code>off</code>/<code>false</code> ⇒ <code>off</code>；<code>yes</code>/<code>on</code>/<code>true</code> ⇒ <code>native</code>；<b><code>relay</code>（<code>look</code> 是别名）⇒ 恒 <code>relay</code></b>；<code>auto</code>（以及认不出的值，按 auto 处理）⇒ 能看就 <code>native</code>、否则 <code>relay</code>。<b>设成 <code>relay</code> 时所有图都不再原生挂进主模型请求，只能过一次看图手。</b></td><td><code>CtxBuild.java:240-271</code></td></tr>
-              <tr><td><code>recognizer</code></td><td><b>识图组件注册的那个约定工具名在不在工具面</b>。不在面时照实答 <code>off</code>；每次现问一遍工具面（热重载后立刻变对），<b>绝不抛</b>：探测口出岔子 = 当作不在面</td><td><code>ctx\RecognizerState.java:81-92</code>、<code>:142-169</code></td></tr>
-              <tr><td><code>recognizer_uses</code></td><td><b>该工具经工具面被调用的次数（含被拒 / 失败）</b>。三条口径：只有那个约定名才计数（别的工具名一律忽略，不做前缀匹配）；是<b>内存计数</b> —— 跨日归零、进程重启后从 0 重计、不落盘；没注入 = 恒 <code>off</code>/0 且任何路径都不抛</td><td><code>RecognizerState.java:107-121</code>、<code>:25-30</code>、<code>:94-104</code></td></tr>
+              <tr><td><code>self</code></td><td><b>这一轮真正在跑的模型</b>。缺键时回落到配置里的主模型；子 Agent 带了自己的模型时，该键写在事实块装配之前，所以子 Agent 看到的是它自己</td></tr>
+              <tr><td><code>self_has_vision</code></td><td><b>这个模型自己能不能看图</b>（按配置的追加项判定的白名单真值）。<b>不因识图档位为 no 而改写成 false</b> —— 那是把事实编掉</td></tr>
+              <tr><td><code>main</code></td><td>配置里的主模型名（与"这一轮跑谁"无关；主回合下两者相同）</td></tr>
+              <tr><td><code>main_has_vision</code></td><td>主模型自己能不能看图</td></tr>
+              <tr><td><code>vision</code></td><td>配置里指定的具备视觉能力的模型名（需要看图时可以派一个用它的子 Agent 兜底）</td></tr>
+              <tr><td><code>mode</code></td><td><b>三个取值</b>：<code>native</code>（这一轮可以把图直接挂进请求体）/ <code>relay</code>（这一轮不挂图）/ <code>off</code>（一律不看）。算法 = 识图档位 × "自己能不能看图"，档位取值<b>逐字</b>：<code>no</code>/<code>off</code>/<code>false</code> ⇒ <code>off</code>；<code>yes</code>/<code>on</code>/<code>true</code> ⇒ <code>native</code>；<b><code>relay</code>（<code>look</code> 是别名）⇒ 恒 <code>relay</code></b>；<code>auto</code>（以及认不出的值，按 auto 处理）⇒ 能看就 <code>native</code>、否则 <code>relay</code>。<b>设成 <code>relay</code> 时所有图都不再原生挂进主模型请求，只能过一次看图手。</b></td></tr>
+              <tr><td><code>recognizer</code></td><td><b>识图组件注册的那个约定工具名在不在工具面</b>。不在面时照实答 <code>off</code>；每次现问一遍工具面（热重载后立刻变对），<b>绝不抛</b>：探测口出岔子 = 当作不在面</td></tr>
+              <tr><td><code>recognizer_uses</code></td><td><b>该工具经工具面被调用的次数（含被拒 / 失败）</b>。三条口径：只有那个约定名才计数（别的工具名一律忽略，不做前缀匹配）；是<b>内存计数</b> —— 跨日归零、进程重启后从 0 重计、不落盘；没注入 = 恒 <code>off</code>/0 且任何路径都不抛</td></tr>
             </tbody>
           </table>
         </div>
         <div class="note reveal">
-          <p><span class="n-title">"我能不能"与"允不允许"是两件事</span>：<code>self_has_vision</code> 说的是能力，<code>mode</code> 说的是这一轮允不允许挂图。把 <code>mode</code> 设成 <code>off</code> 不等于她失去看图能力 <code>CtxBuild.java:252-254</code>。</p>
+          <p><span class="n-title">"我能不能"与"允不允许"是两件事</span>：<code>self_has_vision</code> 说的是能力，<code>mode</code> 说的是这一轮允不允许挂图。把 <code>mode</code> 设成 <code>off</code> 不等于她失去看图能力 <code>CtxBuild.java</code>。</p>
         </div>
 
         <h3 class="sec">图片是怎么"挂"上去的</h3>
-        <p>挂图判定是一个纯函数（无模型、无网络、无时钟、不读配置、不读库、不改入参），唯一入口是三档判据的扫描函数（<code>src\sair\v4\qq\MediaAttach.java:29-40</code>）：</p>
+        <p>挂图判定是一个纯函数（无模型、无网络、无时钟、不读配置、不读库、不改入参），唯一入口是三档判据的扫描函数（<code>src\sair\v4\qq\MediaAttach.java</code>）：</p>
         <div class="grid-3">
-          <div class="panel reveal"><h3>① 段型</h3><p>必须是图片段（大小写不敏感）；表情类段不认 —— 它们没有 URL。</p></div>
-          <div class="panel reveal d1"><h3>② URL 可用</h3><p>必须是 <code>http://</code> / <code>https://</code> / <code>data:image/</code>，与入站侧<b>逐字同一口径</b>；那一处是私有方法，所以这里复制口径，并在注释里写明这是唯一需要人工同步的地方。</p></div>
-          <div class="panel reveal d2"><h3>③ 张数与体积</h3><p>图片序号必须 ≤ 上限（出厂 4；<code>≤0</code> = 一张都不挂）；体积字段缺失就放行，存在则必须 ≤ 上限（出厂 4 MiB）<code>Conf.java:846-850</code>。</p></div>
+          <div class="panel reveal"><h3>① 段型</h3><p>得是图片段（大小写不敏感）；表情类段不认 —— 它们没有 URL。</p></div>
+          <div class="panel reveal d1"><h3>② URL 可用</h3><p>得是 <code>http://</code> / <code>https://</code> / <code>data:image/</code>，与入站侧<b>逐字同一口径</b>；那一处是私有方法，所以这里复制口径，并在注释里写明这是唯一需要人工同步的地方。</p></div>
+          <div class="panel reveal d2"><h3>③ 张数与体积</h3><p>图片序号得 ≤ 上限（出厂 4；<code>≤0</code> = 一张都不挂）；体积字段缺失就放行，存在则要 ≤ 上限（出厂 4 MiB）<code>Conf.java</code>。</p></div>
         </div>
         <div class="note ok reveal">
-          <p><span class="n-title">降级必须看得见</span>：丢掉的每一张都带序号与原因（超张数 / 超体积 / URL 不可用）；一张都没挂上时产出一行状态事实，原因取值覆盖"识图关了""这一轮走 relay""挂图关了""全被丢"。绝不静默 —— 她要是不知道图没挂上来，就会凭空描述图里有什么（<code>MediaAttach.java:42-46</code>、<code>:55-67</code>）。挂上之后追加一句"图已在本轮第 1 次请求里看过，后续请求只有文字" <code>MediaAttach.java:66-67</code>。</p>
+          <p><span class="n-title">降级要看得见</span>：丢掉的每一张都带序号与原因（超张数 / 超体积 / URL 不可用）；一张都没挂上时产出一行状态事实，原因取值覆盖"识图关了""这一轮走 relay""挂图关了""全被丢"。绝不静默 —— 她要是不知道图没挂上来，就会凭空描述图里有什么（<code>MediaAttach.java</code>）。挂上之后追加一句"图已在本轮第 1 次请求里看过，后续请求只有文字" <code>MediaAttach.java</code>。</p>
         </div>
 
         <h3 class="sec">模型面的边界</h3>
         <div class="grid-2">
           <div class="panel reveal">
             <h3>没有自动路由</h3>
-            <p><code>model=auto</code> 就是取自动档模型名（出厂 <code>deepseek-flash</code>），<b>不做任何路由判断</b>；"实际调用用的模型"只有一个函数决定 <code>Conf.java:23</code>、<code>:640-645</code>。换模型只有三条路：改配置、子 Agent 指定、单轮覆盖。也<b>不新增配置键</b> <code>RecognizerState.java:60-61</code>。</p>
+            <p><code>model=auto</code> 就是取自动档模型名（出厂 <code>deepseek-flash</code>），<b>不做任何路由判断</b>；"实际调用用的模型"只有一个函数决定 <code>Conf.java</code>。换模型只有三条路：改配置、子 Agent 指定、单轮覆盖。也<b>不新增配置键</b> <code>RecognizerState.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h3>"看图"不自动发生</h3>
-            <p>图片段在事实里原本只是一行给机器看的 JSON；要真的看图得靠 <code>mode=native</code> 时把 URL 挂进请求体，或派一个会看图的子 Agent 兜底 <code>MediaAttach.java:18-22</code>、<code>CtxBuild.java:903-924</code>。</p>
+            <p>图片段在事实里原本只是一行给机器看的 JSON；要真的看图得靠 <code>mode=native</code> 时把 URL 挂进请求体，或派一个会看图的子 Agent 兜底 <code>MediaAttach.java</code>、<code>CtxBuild.java</code>。</p>
           </div>
         </div>
       </section>
@@ -411,18 +1034,18 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">05 / NAPCAT</span>
           <h2>QQ 面：反向 WebSocket 服务端 + 48 个动作</h2>
-          <p class="chapter-desc">基板是服务端，NapCat 主动连过来。只用 JDK 与 json 库：纯 <code>java.net.ServerSocket</code> + 手写 WebSocket，不引第三方网络框架（<code>src\sair\v4\qq\Link.java:38-39</code>）。</p>
+          <p class="chapter-desc">基板是服务端，NapCat 主动连过来。只用 JDK 与 json 库：纯 <code>java.net.ServerSocket</code> + 手写 WebSocket，不引第三方网络框架（<code>src\sair\v4\qq\Link.java</code>）。</p>
         </header>
 
         <h3 class="sec">连接层</h3>
         <div class="grid-3">
-          <div class="panel reveal"><h3>服务端</h3><p>反向 WebSocket 服务端 + 动作调用，端口来自配置，出厂 <code>8082</code>（<code>Link.java:32-35</code>、<code>Conf.java:128</code>）。停止时关监听与全部连接并清空待回，异常一律不冒出调用方 <code>Link.java:42</code>。</p></div>
-          <div class="panel reveal d1"><h3>握手</h3><p>读请求头 → 校验凭据（如配置）→ 回 101；接受键 = 对"客户端密钥 + 固定串"做 SHA1 再 base64，手写实现 <code>Link.java:380-457</code>。</p></div>
-          <div class="panel reveal d2"><h3>未启用</h3><p>配置里关掉时完全不监听，日志只说一句"未启用 —— 本地交互照常可用" <code>Boot.java:756-761</code>。</p></div>
+          <div class="panel reveal"><h3>服务端</h3><p>反向 WebSocket 服务端 + 动作调用，端口来自配置，出厂 <code>8082</code>（<code>Link.java</code>、<code>Conf.java</code>）。停止时关监听与全部连接并清空待回，异常一律不冒出调用方 <code>Link.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>握手</h3><p>读请求头 → 校验凭据（如配置）→ 回 101；接受键 = 对"客户端密钥 + 固定串"做 SHA1 再 base64，手写实现 <code>Link.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>未启用</h3><p>配置里关掉时完全不监听，日志只说一句"未启用 —— 本地交互照常可用" <code>Boot.java</code>。</p></div>
         </div>
 
         <h3 class="sec">动作面：48 个</h3>
-        <p>动作目录是给模型看的"能力形状"清单 —— 一条动作附一句话说明与参数名表，工具侧据此让模型选动作、填参数（<code>src\sair\v4\qq\Api.java:702-708</code>）。计数方法与结果：</p>
+        <p>动作目录是给模型看的"能力形状"清单 —— 一条动作附一句话说明与参数名表，工具侧据此让模型选动作、填参数（<code>src\sair\v4\qq\Api.java</code>）。计数方法与结果：</p>
         <div class="code" data-lang="powershell"><div class="code-head"><span class="lang">powershell</span><span class="path">计数口径（只读源码）</span><button class="copy" type="button">复制</button></div><pre><code>$t = Get-Content 'src\sair\v4\qq\Api.java' -Raw
 ([regex]::Matches($t,'c\.add\("([a-z_0-9]+)"')).Count      # =&gt; 48</code></pre></div>
         <div class="tw scroll reveal">
@@ -439,62 +1062,62 @@
             </tbody>
           </table>
         </div>
-        <p>目录之外还有一组类型化封装，落在 30 个不同动作名上，是控制台与工具面调用的便捷入口（<code>Api.java:561-700</code>）。其中"取登录态 Cookies"是<b>受保护的平台动作</b>（<code>auth\Acl.java:193-194</code>）。</p>
+        <p>目录之外还有一组类型化封装，落在 30 个不同动作名上，是控制台与工具面调用的便捷入口（<code>Api.java</code>）。其中"取登录态 Cookies"是<b>受保护的平台动作</b>（<code>auth\Acl.java</code>）。</p>
         <div class="note warn reveal">
-          <p><span class="n-title">唯一出口与强制层</span>：动作调用是所有动作的<b>唯一出口</b>。它在把参数交出去之前统一改写"要发出去的本地文件"：上传类动作的文件参数、发送类动作消息段里的文件字段与 CQ 串里的文件参数。只要值长得像本地路径（盘符路径、正斜杠路径、文件 URI）就换成中转 URL；中转没开或不是普通文件就保留原值并警告一句"跨机读不到本地路径" <code>Api.java:33-43</code>。</p>
+          <p><span class="n-title">唯一出口与强制层</span>：动作调用是所有动作的<b>唯一出口</b>。它在把参数交出去之前统一改写"要发出去的本地文件"：上传类动作的文件参数、发送类动作消息段里的文件字段与 CQ 串里的文件参数。只要值长得像本地路径（盘符路径、正斜杠路径、文件 URI）就换成中转 URL；中转没开或不是普通文件就保留原值并警告一句"跨机读不到本地路径" <code>Api.java</code>。</p>
         </div>
 
         <h3 class="sec">事件解析与"群里只有 @ 才触发"</h3>
-        <p>事件模型是只读视图，不做任何状态：原始事件包一层、字段按需读取；消息既支持消息段数组，也支持 CQ 码字符串（会被就地解析成同样的段结构）。自身账号每个事件都带，所以"是不是 @ 了我"不需要外部注入；上游缺失时该判定恒为 false（<code>qq\Ev.java:12-23</code>）。事件分类取值 <code>message</code> / <code>message_sent</code> / <code>notice</code> / <code>request</code> / <code>meta_event</code>（<code>Ev.java:52-53</code>）。</p>
-        <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\QqGateway.java:871-875</span><button class="copy" type="button">复制</button></div><pre><code>public boolean shouldAnswer(Ev ev, Caller c) {
+        <p>事件模型是只读视图，不做任何状态：原始事件包一层、字段按需读取；消息既支持消息段数组，也支持 CQ 码字符串（会被就地解析成同样的段结构）。自身账号每个事件都带，所以"是不是 @ 了我"不需要外部注入；上游缺失时该判定恒为 false（<code>qq\Ev.java</code>）。事件分类取值 <code>message</code> / <code>message_sent</code> / <code>notice</code> / <code>request</code> / <code>meta_event</code>（<code>Ev.java</code>）。</p>
+        <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\QqGateway.java</span><button class="copy" type="button">复制</button></div><pre><code>public boolean shouldAnswer(Ev ev, Caller c) {
     if (c == null) return false;
     if (ev.isPrivate()) return true;      // 私聊 = 直接找它
     return ev.atSelf();                   // 群里：只认被 @
 }</code></pre></div>
-        <p>判定是"基板最小判定"：私聊一律回，群里一律要求被 @。主人在这里<b>不再有豁免</b> —— 群里要么 @ 它、要么走另一条路由，主人也一样（<code>QqGateway.java:863-870</code>；<code>return ev.atSelf()</code> 在 <b>:874</b>）。入站去重窗口由配置决定，<code>0</code> = 关闭判重 <code>QqGateway.java:877-886</code>。</p>
+        <p>判定是"基板最小判定"：私聊一律回，群里一律要求被 @。主人在这里<b>不再有豁免</b> —— 群里要么 @ 它、要么走另一条路由，主人也一样（<code>QqGateway.java</code>；<code>return ev.atSelf()</code> 在 <b>:874</b>）。入站去重窗口由配置决定，<code>0</code> = 关闭判重 <code>QqGateway.java</code>。</p>
 
         <h3 class="sec">普通消息段：哪些有内容、哪些只有标签</h3>
-        <p>一条消息的内容段会被翻成确定性的<b>人话标签</b>（纯函数：无模型、无网络、无副作用、无随机、无时钟），"有内容段就必定非空"，未知段型也有标签（<code>src\sair\v4\qq\MediaRender.java:15-41</code>、<code>:269-287</code>）。逐类现状：</p>
+        <p>一条消息的内容段会被翻成确定性的<b>人话标签</b>（纯函数：无模型、无网络、无副作用、无随机、无时钟），"有内容段就必定非空"，未知段型也有标签（<code>src\sair\v4\qq\MediaRender.java</code>）。逐类现状：</p>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>段型</th><th>产出与识别能力</th><th>出处</th></tr></thead>
+            <thead><tr><th>段型</th><th>产出与识别能力</th></tr></thead>
             <tbody>
-              <tr><td><b>图片</b></td><td><code>[图片 猫.png 20KB]</code>（同型段 ≥2 个时才打序号）。<b>有识别能力</b>：可挂进请求体做图片理解，或用外部能力识别后按 <code>[来源·模型] 正文</code> 的形状贴回来</td><td><code>MediaRender.java:153-155</code>、<code>:314-317</code>、<code>:121-127</code>；<code>MediaAttach.java:29-40</code></td></tr>
-              <tr><td><b>语音</b></td><td><code>[语音 名 12秒 20KB]</code>；给不出文件、数据塞在段里时另给 <code>[内联音频 … data_len=…]</code>（只打长度，正文绝不进标签）。<b>只有标签，没有识别能力</b></td><td><code>MediaRender.java:156-158</code>、<code>:178-195</code></td></tr>
-              <tr><td><b>视频</b></td><td><code>[视频 名 时长 体积]</code>。<b>只有标签，没有识别能力</b></td><td><code>MediaRender.java:178-195</code></td></tr>
-              <tr><td><b>文件</b></td><td><code>[文件 名 体积]</code>。<b>只有标签，不解析文件内容</b></td><td><code>MediaRender.java:178-195</code></td></tr>
-              <tr><td><b>折叠转发</b></td><td><code>[折叠转发 id=… 未展开]</code> —— <b>只出标签、内容未展开</b>。展开那几个键已登记但没人读，属计划中／未实现</td><td><code>MediaRender.java:166-168</code>；<code>Conf.java:809-815</code></td></tr>
-              <tr><td><b>转发节点</b></td><td><code>[转发节点 张三(10001): 内容]</code>（子内容是段数组时递归渲染后去掉方括号；深度与条数都有上限）。只渲染结构，不做理解</td><td><code>MediaRender.java:197-240</code>、<code>:74-77</code></td></tr>
-              <tr><td><b>提及 / 表情 / 引用</b></td><td><code>[提及 qq=…]</code> / <code>[表情 id=… emoji_id=… summary=…]</code> / <code>[引用 msg_id=…]</code>。引用正文可由引用展开补拉（总开关出厂开）</td><td><code>MediaRender.java:150-165</code>；<code>Conf.java:817-825</code></td></tr>
-              <tr><td><b>卡片类</b></td><td><code>[卡片 type=… bizsrc=… app=… prompt=… title=… desc=… url=… text=…]</code>；载荷为空 / 无法解析 / 被截断时分三档说明。只抽字段，不做理解</td><td><code>MediaRender.java:242-267</code></td></tr>
+              <tr><td><b>图片</b></td><td><code>[图片 猫.png 20KB]</code>（同型段 ≥2 个时才打序号）。<b>有识别能力</b>：可挂进请求体做图片理解，或用外部能力识别后按 <code>[来源·模型] 正文</code> 的形状贴回来</td></tr>
+              <tr><td><b>语音</b></td><td><code>[语音 名 12秒 20KB]</code>；给不出文件、数据塞在段里时另给 <code>[内联音频 … data_len=…]</code>（只打长度，正文绝不进标签）。<b>只有标签，没有识别能力</b></td></tr>
+              <tr><td><b>视频</b></td><td><code>[视频 名 时长 体积]</code>。<b>只有标签，没有识别能力</b></td></tr>
+              <tr><td><b>文件</b></td><td><code>[文件 名 体积]</code>。<b>只有标签，不解析文件内容</b></td></tr>
+              <tr><td><b>折叠转发</b></td><td><code>[折叠转发 id=… 未展开]</code> —— <b>只出标签、内容未展开</b>。展开那几个键已登记但没人读，属计划中／未实现</td></tr>
+              <tr><td><b>转发节点</b></td><td><code>[转发节点 张三(10001): 内容]</code>（子内容是段数组时递归渲染后去掉方括号；深度与条数都有上限）。只渲染结构，不做理解</td></tr>
+              <tr><td><b>提及 / 表情 / 引用</b></td><td><code>[提及 qq=…]</code> / <code>[表情 id=… emoji_id=… summary=…]</code> / <code>[引用 msg_id=…]</code>。引用正文可由引用展开补拉（总开关出厂开）</td></tr>
+              <tr><td><b>卡片类</b></td><td><code>[卡片 type=… bizsrc=… app=… prompt=… title=… desc=… url=… text=…]</code>；载荷为空 / 无法解析 / 被截断时分三档说明。只抽字段，不做理解</td></tr>
             </tbody>
           </table>
         </div>
         <div class="note reveal">
-          <p><span class="n-title">标签里永远不出现分隔点记号</span>：基板标签只用"方括号 + 中文段型词 + 空格"；机器产出走另一套形状（<code>[来源·模型] 正文</code>）。第三方文本里的方括号被换成圆括号、分隔点记号被换成短横，所以"第三方字符串伪造不出基板标签"这条判据是构造性的 <code>MediaRender.java:43-54</code>、<code>:300-305</code>。</p>
+          <p><span class="n-title">标签里永远不出现分隔点记号</span>：基板标签只用"方括号 + 中文段型词 + 空格"；机器产出走另一套形状（<code>[来源·模型] 正文</code>）。第三方文本里的方括号被换成圆括号、分隔点记号被换成短横，所以"第三方字符串伪造不出基板标签"这条判据是构造性的 <code>MediaRender.java</code>。</p>
         </div>
 
         <h3 class="sec">通知也留痕</h3>
-        <p>通知事件被翻成一行确定性标签（例如"撤回"那类会带上操作者、群号与消息 id），与消息<b>同表</b>：群通知落群聊历史、私聊通知落对话历史。认不出的通知类型也给一行带类型与子类型的标签，绝不静默丢弃；撤回事件自成一行，不去改那条被撤回的原行（<code>qq\NoticeRender.java:14-46</code>；<code>QqGateway.java:200-244</code>）。</p>
+        <p>通知事件被翻成一行确定性标签（例如"撤回"那类会带上操作者、群号与消息 id），与消息<b>同表</b>：群通知落群聊历史、私聊通知落对话历史。认不出的通知类型也给一行带类型与子类型的标签，绝不静默丢弃；撤回事件自成一行，不去改那条被撤回的原行（<code>qq\NoticeRender.java</code>；<code>QqGateway.java</code>）。</p>
 
         <h3 class="sec">本地文件外链中转（跨机部署）</h3>
-        <p>部署事实是：NapCat 与插件<b>不一定在同一台机器</b>，而上传动作的文件参数如果是本地路径，只有同机的 NapCat 读得到。所以"把本地文件变成 URL"被算作<b>连接 NapCat</b> 这件事的一部分，不是业务能力（<code>src\sair\v4\qq\Relay.java:38-42</code>）。</p>
+        <p>部署事实是：NapCat 与插件<b>不一定在同一台机器</b>，而上传动作的文件参数如果是本地路径，只有同机的 NapCat 读得到。所以"把本地文件变成 URL"被算作<b>连接 NapCat</b> 这件事的一部分，不是业务能力（<code>src\sair\v4\qq\Relay.java</code>）。</p>
         <div class="grid-3">
           <div class="panel reveal">
             <h3>开启条件</h3>
-            <p>开关出厂 <b>false</b> 时启动直接返回失败，端口不监听 <code>Relay.java:51</code>、<code>:148-156</code>；端口出厂 <code>2671</code> <code>Conf.java:133</code>。开了之后，本地文件在唯一出口那里被统一换成外链 URL。</p>
+            <p>开关出厂 <b>false</b> 时启动直接返回失败，端口不监听 <code>Relay.java</code>；端口出厂 <code>2671</code> <code>Conf.java</code>。开了之后，本地文件在唯一出口那里被统一换成外链 URL。</p>
           </div>
           <div class="panel reveal d1">
             <h3>三道闸</h3>
-            <p>① 默认关闭；② URL 形如 <code>http://主机:端口/&lt;凭据&gt;/&lt;绝对路径&gt;</code>，凭据不对一律 404（不区分 401/403，避免探测），凭据可在配置里复现、手改；③ <b>只读</b>：只接受 GET / HEAD，别的方法 405，没有目录列举、没有写入、没有删除 <code>Relay.java:49-55</code>。</p>
+            <p>① 默认关闭；② URL 形如 <code>http://主机:端口/&lt;凭据&gt;/&lt;绝对路径&gt;</code>，凭据不对一律 404（不区分 401/403，避免探测），凭据可在配置里复现、手改；③ <b>只读</b>：只接受 GET / HEAD，别的方法 405，没有目录列举、没有写入、没有删除 <code>Relay.java</code>。</p>
           </div>
           <div class="panel reveal d2">
             <h3>风险口径（明确取舍）</h3>
-            <p>服务<b>拥有完整文件访问权</b>：任意本地绝对路径都能中转，不做目录白名单 —— 因为发送能力本身就要能从任意路径发文件。<b>能拿到链接 = 能读那台机器上的文件</b>。所以只有"NapCat 确实在别的机器上"时才开，并建议配上有效期让它到点自己关掉 <code>Relay.java:56-58</code>。日志脱敏：凭据只打前 4 位 <code>Relay.java:63</code>。</p>
+            <p>服务<b>拥有完整文件访问权</b>：任意本地绝对路径都能中转，不做目录白名单 —— 因为发送能力本身就要能从任意路径发文件。<b>能拿到链接 = 能读那台机器上的文件</b>。所以只有"NapCat 确实在别的机器上"时才开，并建议配上有效期让它到点自己关掉 <code>Relay.java</code>。日志脱敏：凭据只打前 4 位 <code>Relay.java</code>。</p>
           </div>
         </div>
         <div class="note reveal">
-          <p><span class="n-title">没开中转时</span>：本地绝对路径回退成同机的文件 URI（与既有现场验证一致），图片与语音段原样透传 —— 这两类段本来就认同机本地路径 <code>Api.java:29-31</code>、<code>:803-843</code>。中转起不来只记一行、不影响别的能力 <code>Relay.java:60-63</code>、<code>Boot.java:770-778</code>。</p>
+          <p><span class="n-title">没开中转时</span>：本地绝对路径回退成同机的文件 URI（与既有现场验证一致），图片与语音段原样透传 —— 这两类段本来就认同机本地路径 <code>Api.java</code>。中转起不来只记一行、不影响别的能力 <code>Relay.java</code>、<code>Boot.java</code>。</p>
         </div>
       </section>
 
@@ -508,67 +1131,67 @@
 
         <h3 class="sec">三个身份</h3>
         <div class="grid-3">
-          <div class="panel reveal"><h3>MASTER</h3><p>主人 / 本地控制台。五类全部全权，<b>恒定，任何条目都影响不到他</b> <code>auth\Caller.java:17</code>、<code>Acl.java:942</code>。账本甚至拒收"主人"作为主体写法 <code>Acl.java:401-411</code>。</p></div>
-          <div class="panel reveal d1"><h3>SYSTEM</h3><p>她自己的自主行为：定时任务、维护、她自己发出去的话。默认分配为 A 读、B 读写、C 与 E 与 T 全权 <code>Caller.java:18</code>、<code>Acl.java:182-191</code>。主体判定顺序是"显式自主标志 &gt; 主人 &gt; 其它" <code>Caller.java:26</code>。</p></div>
-          <div class="panel reveal d2"><h3>ALLUSER</h3><p>除主人与她之外的所有人（单人与群两种主体的底稿）：默认 A 无、B 无、C 只读、E 无、T 无 <code>Caller.java:19</code>。"其他"这个旧叫法已退休，等价于它 <code>Caller.java:21-23</code>。</p></div>
+          <div class="panel reveal"><h3>MASTER</h3><p>主人 / 本地控制台。五类全部全权，<b>恒定，任何条目都影响不到他</b> <code>auth\Caller.java</code>、<code>Acl.java</code>。账本甚至拒收"主人"作为主体写法 <code>Acl.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>SYSTEM</h3><p>她自己的自主行为：定时任务、维护、她自己发出去的话。默认分配为 A 读、B 读写、C 与 E 与 T 全权 <code>Caller.java</code>、<code>Acl.java</code>。主体判定顺序是"显式自主标志 &gt; 主人 &gt; 其它" <code>Caller.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>ALLUSER</h3><p>除主人与她之外的所有人（单人与群两种主体的底稿）：默认 A 无、B 无、C 只读、E 无、T 无 <code>Caller.java</code>。"其他"这个旧叫法已退休，等价于它 <code>Caller.java</code>。</p></div>
         </div>
 
         <h3 class="sec">五类资源</h3>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>类</th><th>是什么</th><th>怎么自动判</th><th>出处</th></tr></thead>
+            <thead><tr><th>类</th><th>是什么</th><th>怎么自动判</th></tr></thead>
             <tbody>
-              <tr><td><b>A</b></td><td>本机：所有本机文件 + 内存中的所有进程（含直接指向本机实体的网络资源）</td><td>程序资源<b>永远是 A</b>（与它落在哪无关）；路径规范化后既不在数据根的文件树、也不在框架根之下 ⇒ A</td><td><code>auth\Res.java:14</code>、<code>:27</code>、<code>:62-66</code></td></tr>
-              <tr><td><b>B</b></td><td>框架运行时目录，<b>仅文件</b>（运行实例属 A）；插件数据根里文件树以外的部分也是它</td><td>路径落在框架根之下</td><td><code>Res.java:15</code>、<code>:67</code></td></tr>
-              <tr><td><b>C</b></td><td>数据：数据库的全部内容 + 插件数据根的文件目录（后者是 C 类里的<b>特例文件实体</b>）</td><td>数据类 host 前缀；路径落在数据根的文件目录之下</td><td><code>Res.java:16-18</code>、<code>:69-76</code></td></tr>
-              <tr><td><b>E</b></td><td>外部交互：NapCat 全部输入输出动作 + 向框架发送命令及框架的输出</td><td>平台动作工厂</td><td><code>Res.java:19-20</code>、<code>:77-78</code></td></tr>
-              <tr><td><b>T</b></td><td>工具：<b>只有"入口"受管控</b>，工具执行过程不判位（碰到的每个资源各自再判）</td><td>匹配串前缀 <code>tool:</code></td><td><code>Res.java:21-22</code>、<code>:79-85</code></td></tr>
+              <tr><td><b>A</b></td><td>本机：所有本机文件 + 内存中的所有进程（含直接指向本机实体的网络资源）</td><td>程序资源<b>永远是 A</b>（与它落在哪无关）；路径规范化后既不在数据根的文件树、也不在框架根之下 ⇒ A</td></tr>
+              <tr><td><b>B</b></td><td>框架运行时目录，<b>仅文件</b>（运行实例属 A）；插件数据根里文件树以外的部分也是它</td><td>路径落在框架根之下</td></tr>
+              <tr><td><b>C</b></td><td>数据：数据库的全部内容 + 插件数据根的文件目录（后者是 C 类里的<b>特例文件实体</b>）</td><td>数据类 host 前缀；路径落在数据根的文件目录之下</td></tr>
+              <tr><td><b>E</b></td><td>外部交互：NapCat 全部输入输出动作 + 向框架发送命令及框架的输出</td><td>平台动作工厂</td></tr>
+              <tr><td><b>T</b></td><td>工具：<b>只有"入口"受管控</b>，工具执行过程不判位（碰到的每个资源各自再判）</td><td>匹配串前缀 <code>tool:</code></td></tr>
             </tbody>
           </table>
         </div>
 
         <h3 class="sec">三个位与"空位 = 拒绝"</h3>
         <div class="grid-3">
-          <div class="panel reveal"><h3>位的定义</h3><p>读 / 写（改本机状态）/ 执行（对外动作）三位。字面量 8 种写法，大小写与顺序都不敏感 <code>auth\Bits.java:8-16</code>。取反只在这三位里反 <code>Bits.java:115-119</code>。</p></div>
-          <div class="panel reveal d1"><h3>空位就是显式拒绝</h3><p>条目里的"位"字段允许写<b>空串</b>表示一位都没有，而解析函数对空串返回哨兵（"没写" ≠ "写了空"）—— 两个概念在代码里分开 <code>Bits.java:17-19</code>、<code>:55-70</code>。认不出的输入<b>绝不猜</b>，判定链上拿到哨兵就当"没有权限" <code>Bits.java:15-16</code>。</p></div>
-          <div class="panel reveal d2"><h3>拒绝文案带来源</h3><p>拒绝时能说清"这份位从哪来"：主人 / 例外条目 / 默认分配 / 受保护资源 <code>Acl.java:937-975</code>。位名认不出时文案是"需要某位的 X（位名认不出，只认 R/W/X）" <code>Acl.java:986</code>。</p></div>
+          <div class="panel reveal"><h3>位的定义</h3><p>读 / 写（改本机状态）/ 执行（对外动作）三位。字面量 8 种写法，大小写与顺序都不敏感 <code>auth\Bits.java</code>。取反只在这三位里反 <code>Bits.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>空位就是显式拒绝</h3><p>条目里的"位"字段允许写<b>空串</b>表示一位都没有，而解析函数对空串返回哨兵（"没写" ≠ "写了空"）—— 两个概念在代码里分开 <code>Bits.java</code>。认不出的输入<b>绝不猜</b>，判定链上拿到哨兵就当"没有权限" <code>Bits.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>拒绝文案带来源</h3><p>拒绝时能说清"这份位从哪来"：主人 / 例外条目 / 默认分配 / 受保护资源 <code>Acl.java</code>。位名认不出时文案是"需要某位的 X（位名认不出，只认 R/W/X）" <code>Acl.java</code>。</p></div>
         </div>
 
         <h3 class="sec">默认分配与例外突破默认</h3>
-        <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\auth\Acl.java:55-79（类注释里的模型表）</span><button class="copy" type="button">复制</button></div><pre><code>DEFAULT_BITS = { A:"",   B:"",   C:"R",   E:"",  T:"" }        # 普通用户按类默认
+        <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\auth\Acl.java（类注释里的模型表）</span><button class="copy" type="button">复制</button></div><pre><code>DEFAULT_BITS = { A:"",   B:"",   C:"R",   E:"",  T:"" }        # 普通用户按类默认
 SYSTEM_BITS  = { A:"R",  B:"RW", C:"RWX", E:"RWX", T:"RWX" }   # 她自己的默认分配
 
 MASTER   -&gt; 全权          # 任何条目都不影响他
 SYSTEM   -&gt; 她自己的表
 ALLUSER  -&gt; 例外命中就用例外声明的位，否则按类默认</code></pre></div>
-        <p>主体写法只有四种：单人（含裸号简写）/ 单群 / 自主主体 / 全体用户。主体层级 单人与单群 高于 全体用户，同级里后面的覆盖前面的；自主主体自成一路，只对自主行为生效 <code>Acl.java:42-43</code>、<code>:134-142</code>。</p>
+        <p>主体写法只有四种：单人（含裸号简写）/ 单群 / 自主主体 / 全体用户。主体层级 单人与单群 高于 全体用户，同级里后面的覆盖前面的；自主主体自成一路，只对自主行为生效 <code>Acl.java</code>。</p>
         <div class="note warn reveal">
-          <p><span class="n-title">"全体用户"不等于所有人</span>：它只匹配普通用户主体，<b>不含主人、也不含她自己</b> —— 否则一句"全体用户一位不给"会把她的自主行为整个打死 <code>Acl.java:97-99</code>。</p>
+          <p><span class="n-title">"全体用户"不等于所有人</span>：它只匹配普通用户主体，<b>不含主人、也不含她自己</b> —— 否则一句"全体用户一位不给"会把她的自主行为整个打死 <code>Acl.java</code>。</p>
         </div>
 
         <h3 class="sec">账本：<code>perms.json</code></h3>
         <div class="grid-3">
-          <div class="panel reveal"><h3>唯一判据</h3><p>账本是数据根下的 <code>perms.json</code>（带版本号与条目数组），是"主人的例外授权清单"，一条一行、写法固定，例如 <code>A["ALLUSER","",""]</code> <code>Acl.java:22</code>、<code>:121</code>；<code>Builtins.java:881</code>。</p></div>
-          <div class="panel reveal d1"><h3>懒装载、绝不写盘</h3><p>第一次判定时才读进来 <code>auth\Auth.java:69</code>。装载路径<b>绝不写盘</b>：旧路径会把"缺行"补进账本并落盘，把账本覆盖成旧格式 <code>Auth.java:74</code>；启动与加载的任何路径都写不到它 <code>Boot.java:634</code>。</p></div>
-          <div class="panel reveal d2"><h3>事实块每轮带上权限</h3><p>事实里的调用者带<b>主体种类</b>、<b>五类资源的有效位</b>、以及能命中的例外条目（原样一行一条）。位一律问账本，基板不重算任何一位 <code>ctx\CtxBuild.java:295-303</code>。</p></div>
+          <div class="panel reveal"><h3>唯一判据</h3><p>账本是数据根下的 <code>perms.json</code>（带版本号与条目数组），是"主人的例外授权清单"，一条一行、写法固定，例如 <code>A["ALLUSER","",""]</code> <code>Acl.java</code>；<code>Builtins.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>懒装载、绝不写盘</h3><p>第一次判定时才读进来 <code>auth\Auth.java</code>。装载路径<b>绝不写盘</b>：旧路径会把"缺行"补进账本并落盘，把账本覆盖成旧格式 <code>Auth.java</code>；启动与加载的任何路径都写不到它 <code>Boot.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>事实块每轮带上权限</h3><p>事实里的调用者带<b>主体种类</b>、<b>五类资源的有效位</b>、以及能命中的例外条目（原样一行一条）。位一律问账本，基板不重算任何一位 <code>ctx\CtxBuild.java</code>。</p></div>
         </div>
 
         <h3 class="sec">受保护资源（连例外都不开）</h3>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>层</th><th>内容</th><th>对谁锁</th><th>出处</th></tr></thead>
+            <thead><tr><th>层</th><th>内容</th><th>对谁锁</th></tr></thead>
             <tbody>
-              <tr><td>第一层（只有主人）</td><td>账本自身与它的临时文件、授权动作本身、登录凭据类平台动作</td><td>连她的自主行为也恒空，例外也不开</td><td><code>Acl.java:104</code>、<code>:1000-1003</code></td></tr>
-              <tr><td>第二层（外人恒空）</td><td>提示词目录、配置文件（含凭据）、调试凭据文件；另有按扩展名认定的敏感后缀（配置 / 脚本 / 密钥材料，只对 B 类资源生效）</td><td>普通用户恒空；她与主人照常</td><td><code>Acl.java:197-209</code>、<code>:964-972</code>、<code>:1023</code></td></tr>
+              <tr><td>第一层（只有主人）</td><td>账本自身与它的临时文件、授权动作本身、登录凭据类平台动作</td><td>连她的自主行为也恒空，例外也不开</td></tr>
+              <tr><td>第二层（外人恒空）</td><td>提示词目录、配置文件（含凭据）、调试凭据文件；另有按扩展名认定的敏感后缀（配置 / 脚本 / 密钥材料，只对 B 类资源生效）</td><td>普通用户恒空；她与主人照常</td></tr>
             </tbody>
           </table>
         </div>
-        <p>路径判定还带一层防逃逸：匹配串取真身路径（解开软链 / 目录联接 / 短名，叶子不存在时真实化最深的已存在祖先），统一分隔符、去尾斜杠、全小写，<code>.</code> 与 <code>..</code> 都会被折掉。规范化整条失败时退回绝对路径并<b>强制判成 A</b>（更严的那一类），绝不判成 B <code>Res.java:52-57</code>。框架根取两个基准并"取更严的那个解释"：两个基准不一致时只有同时落在两个根之下才算 B <code>Res.java:36-44</code>。</p>
+        <p>路径判定还带一层防逃逸：匹配串取真身路径（解开软链 / 目录联接 / 短名，叶子不存在时真实化最深的已存在祖先），统一分隔符、去尾斜杠、全小写，<code>.</code> 与 <code>..</code> 都会被折掉。规范化整条失败时退回绝对路径并<b>强制判成 A</b>（更严的那一类），绝不判成 B <code>Res.java</code>。框架根取两个基准并"取更严的那个解释"：两个基准不一致时只有同时落在两个根之下才算 B <code>Res.java</code>。</p>
 
         <h3 class="sec">好感度与权限的关系</h3>
-        <p>好感度子系统就是"权限档位"的数值来源：除主人（一律全放行）外，一个工具能不能用最终落到这里的数值上，判据是"好感度 ≥ N"（<code>src\sair\v4\auth\Favor.java:12-16</code>）。数值带一层内存缓存，写操作直接落库并刷新缓存 <code>Favor.java:27-49</code>。<b>数值 → 关系名只做展示，判定一律用数值</b>：≥900 挚友 / ≥600 亲近 / ≥300 朋友 / ≥200 熟人 <code>Favor.java:75-80</code>。</p>
+        <p>好感度子系统就是"权限档位"的数值来源：除主人（一律全放行）外，一个工具能不能用最终落到这里的数值上，判据是"好感度 ≥ N"（<code>src\sair\v4\auth\Favor.java</code>）。数值带一层内存缓存，写操作直接落库并刷新缓存 <code>Favor.java</code>。<b>数值 → 关系名只做展示，判定一律用数值</b>：≥900 挚友 / ≥600 亲近 / ≥300 朋友 / ≥200 熟人 <code>Favor.java</code>。</p>
         <div class="note reveal">
-          <p><span class="n-title">好感度表不进"可查询的库"</span>：它用自定义主键、没有统一行形状，进不了库注册表 —— 这也是刻意的：把好感度做成"库"就等于让达标的人绕过授权动作直接改自己的数值，权限判定当场失效 <code>store\EnvLibs.java:16-22</code>。</p>
+          <p><span class="n-title">好感度表不进"可查询的库"</span>：它用自定义主键、没有统一行形状，进不了库注册表 —— 这也是刻意的：把好感度做成"库"就等于让达标的人绕过授权动作直接改自己的数值，权限判定当场失效 <code>store\EnvLibs.java</code>。</p>
         </div>
       </section>
 
@@ -577,29 +1200,29 @@ ALLUSER  -&gt; 例外命中就用例外声明的位，否则按类默认</code><
         <header class="chapter-head reveal">
           <span class="chapter-tag">07 / STORE</span>
           <h2>存储面：单文件、库注册表、中文检索</h2>
-          <p class="chapter-desc">纯 JDBC，无 ORM、无连接池。单连接 + 全方法串行化：读写走同一把锁，写操作天然串行，于是不会出现"库被锁住" <code>store\Db.java:27-31</code>。</p>
+          <p class="chapter-desc">纯 JDBC，无 ORM、无连接池。单连接 + 全方法串行化：读写走同一把锁，写操作天然串行，于是不会出现"库被锁住" <code>store\Db.java</code>。</p>
         </header>
 
         <h3 class="sec">单文件与开会话时设的四项</h3>
         <div class="grid-2">
-          <div class="panel reveal"><h3>一个文件</h3><p>数据全在一个库文件里：<code>data\v4.db</code>，当前实测 <b>121,057,280</b> 字节（另有预写日志与共享内存两个兄弟文件；统计口径把两者一起算进"占用"，否则刚写完的数据会显得没写进去）<code>store\Store.java:286-289</code>。</p></div>
-          <div class="panel reveal d1"><h3>四项设置</h3><p>预写日志模式（读不阻塞写）、忙等超时 5 秒（兜住跨进程短暂争用）、外键约束开、同步级别普通 <code>Db.java:134-137</code>、<code>:50</code>。</p></div>
+          <div class="panel reveal"><h3>一个文件</h3><p>数据全在一个库文件里：<code>data\v4.db</code>（另有预写日志与共享内存两个兄弟文件；统计口径把两者一起算进"占用"，否则刚写完的数据会显得没写进去）<code>store\Store.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>四项设置</h3><p>预写日志模式（读不阻塞写）、忙等超时 5 秒（兜住跨进程短暂争用）、外键约束开、同步级别普通 <code>Db.java</code>。</p></div>
         </div>
 
         <h3 class="sec">有哪些库、有哪些表：8 + 6</h3>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>分组</th><th>表名</th><th>是什么</th><th>出处</th></tr></thead>
+            <thead><tr><th>分组</th><th>表名</th><th>是什么</th></tr></thead>
             <tbody>
-              <tr><td rowspan="2">基板环境库（2）</td><td><code>dialog</code></td><td>对话历史（私聊与控制台共用）。带全文索引（正文列）</td><td><code>store\EnvLibs.java:36-47</code></td></tr>
-              <tr><td><code>grouplog</code></td><td>群聊历史（群消息留痕；"谁在哪些群出现过"也读它）。带全文索引（正文与昵称两列）</td><td><code>EnvLibs.java:51-66</code></td></tr>
-              <tr><td>业务库（6）</td><td colspan="3">由各自单元在装载时注册：长期记忆 / 知识笔记 / 表情包 / 偏好设定 / 群印象 / 情绪状态。库名、中文别名、列清单、索引、是否建全文索引全部由声明方给出</td></tr>
-              <tr><td rowspan="6">基板运行表（6）</td><td><code>favor</code></td><td>好感度（自定义主键），权限判定的数据源</td><td><code>store\Lib.java:34</code>、<code>:45-51</code></td></tr>
-              <tr><td><code>alarm</code></td><td>定时唤醒（触发时刻、重复口径、作用域、目标、任务正文、启用位、状态、属主）</td><td><code>Lib.java:35</code>、<code>:53-66</code></td></tr>
-              <tr><td><code>task</code></td><td>子 Agent 台账（状态、属主、标识、工具、任务、结果、耗时）</td><td><code>Lib.java:36</code>、<code>:71-81</code></td></tr>
-              <tr><td><code>kv</code></td><td>通用键值</td><td><code>Lib.java:37</code>、<code>:83-86</code></td></tr>
-              <tr><td>单元索引表</td><td>外挂单元索引（名字、指纹、工具、权限字段、挂钩字段、装载时刻）</td><td><code>Lib.java:38</code>、<code>:88-94</code></td></tr>
-              <tr><td><code>sent</code></td><td>出站消息台账（会话、动作、消息 id、正文预览、状态）</td><td><code>Lib.java:39</code>、<code>:99-108</code></td></tr>
+              <tr><td rowspan="2">基板环境库（2）</td><td><code>dialog</code></td><td>对话历史（私聊与控制台共用）。带全文索引（正文列）</td></tr>
+              <tr><td><code>grouplog</code></td><td>群聊历史（群消息留痕；"谁在哪些群出现过"也读它）。带全文索引（正文与昵称两列）</td></tr>
+              <tr><td>业务库（6）</td></tr>
+              <tr><td rowspan="6">基板运行表（6）</td><td><code>favor</code></td><td>好感度（自定义主键），权限判定的数据源</td></tr>
+              <tr><td><code>alarm</code></td><td>定时唤醒（触发时刻、重复口径、作用域、目标、任务正文、启用位、状态、属主）</td></tr>
+              <tr><td><code>task</code></td><td>子 Agent 台账（状态、属主、标识、工具、任务、结果、耗时）</td></tr>
+              <tr><td><code>kv</code></td><td>通用键值</td></tr>
+              <tr><td>单元索引表</td><td>外挂单元索引（名字、指纹、工具、权限字段、挂钩字段、装载时刻）</td></tr>
+              <tr><td><code>sent</code></td><td>出站消息台账（会话、动作、消息 id、正文预览、状态）</td></tr>
             </tbody>
           </table>
         </div>
@@ -613,49 +1236,49 @@ $lib = Get-Content 'src\sair\v4\store\Lib.java' -Raw
 $i = $lib.IndexOf('RUN_COLS = {'); $j = $lib.IndexOf('};', $i)
 ([regex]::Matches($lib.Substring($i, $j - $i), '\{\s*"([a-z_]+)"')).Count   # =&gt; 6</code></pre></div>
         <div class="note reveal">
-          <p><span class="n-title">"有哪些库"问的是注册表</span>：基板自己的环境库 + 外挂单元装载时声明的业务表。单元没装 = 少一个库，查它是空结果、不是异常（工具面会回"未知的库"）<code>store\Store.java:34-36</code>。表名或中文别名被占用时注册返回失败且<b>不覆盖</b> <code>store\LibRegistry.java:18</code>。</p>
+          <p><span class="n-title">"有哪些库"问的是注册表</span>：基板自己的环境库 + 外挂单元装载时声明的业务表。单元没装 = 少一个库，查它是空结果、不是异常（工具面会回"未知的库"）<code>store\Store.java</code>。表名或中文别名被占用时注册返回失败且<b>不覆盖</b> <code>store\LibRegistry.java</code>。</p>
         </div>
         <div class="note reveal">
-          <p><span class="n-title">为什么消息流留在基板</span>：对话历史与群聊历史这两张是<b>环境</b>：基板是它们唯一的写入者，也是上下文装配的读者。交给外挂单元声明会出现"单元不在 ⇒ 基板自己的上下文没有历史" <code>EnvLibs.java:9-14</code>。</p>
+          <p><span class="n-title">为什么消息流留在基板</span>：对话历史与群聊历史这两张是<b>环境</b>：基板是它们唯一的写入者，也是上下文装配的读者。交给外挂单元声明会出现"单元不在 ⇒ 基板自己的上下文没有历史" <code>EnvLibs.java</code>。</p>
         </div>
 
         <h3 class="sec">中文全文检索：三元组分词 + 三层回退</h3>
-        <p>有全文索引的库走索引匹配（中文靠三元组分词器），无索引或索引无果时回退子串匹配，结果行带命中来源说明（<code>store\Store.java:41-42</code>）。建索引时先试三元组分词器、失败才退回默认分词器；每个索引表挂三个同步触发器（插入后、删除后、更新后），并立刻做一次重建 <code>Db.java:682-712</code>、<code>:714-737</code>。</p>
+        <p>有全文索引的库走索引匹配（中文靠三元组分词器），无索引或索引无果时回退子串匹配，结果行带命中来源说明（<code>store\Store.java</code>）。建索引时先试三元组分词器、失败才退回默认分词器；每个索引表挂三个同步触发器（插入后、删除后、更新后），并立刻做一次重建 <code>Db.java</code>。</p>
         <div class="grid-2">
           <div class="panel reveal">
             <h3>为什么要"拆词并联"这一层</h3>
-            <p>把整串包成一个索引短语，对单个词没问题，但对多词、带空格的自然语言查询几乎必然零命中 —— 短语要求这些词在原文里连续且同序。对拍实测（36.8 万行群聊）：8 条多词查询里 <b>6 条</b>以短语口径实得 0 行，而拆词并联能召回 1–569 行。所以检索是三层：短语 → 拆词并联 → 子串匹配 <code>store\FtsQuery.java:8-18</code>。</p>
+            <p>把整串包成一个索引短语，对单个词没问题，但对多词、带空格的自然语言查询几乎必然零命中 —— 短语要求这些词在原文里连续且同序。所以检索是三层：短语 → 拆词并联 → 子串匹配 <code>store\FtsQuery.java</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h3>切词口径</h3>
-            <p>先洗掉链接、CQ 码与图片标记（否则链接里的片段会被切成三元组、产生数万条无关命中）；中文取三字滑窗，英数词保留整词（≥4 字符，或含数字的 3 字符）；分词器要求查询项 ≥3 字符，所以 2 字中文词只能交给子串匹配 <code>FtsQuery.java:20-28</code>、<code>:53-79</code>。查询项上限 8（过多会稀释排序权重），超了均匀采样 <code>FtsQuery.java:34-35</code>、<code>:108-126</code>。</p>
+            <p>先洗掉链接、CQ 码与图片标记（否则链接里的片段会被切成三元组、产生数万条无关命中）；中文取三字滑窗，英数词保留整词（≥4 字符，或含数字的 3 字符）；分词器要求查询项 ≥3 字符，所以 2 字中文词只能交给子串匹配 <code>FtsQuery.java</code>。查询项上限 8（过多会稀释排序权重），超了均匀采样 <code>FtsQuery.java</code>。</p>
           </div>
         </div>
         <div class="note ok reveal">
-          <p><span class="n-title">拆词只对中文启用</span>：纯 ASCII 查询不启用这一层 —— 子串匹配本来就是对的口径，而拆词会把通用英文片段召回一堆无关记录。判据就是"查询里有没有中文" <code>FtsQuery.java:86-99</code>。</p>
+          <p><span class="n-title">拆词只对中文启用</span>：纯 ASCII 查询不启用这一层 —— 子串匹配本来就是对的口径，而拆词会把通用英文片段召回一堆无关记录。判据就是"查询里有没有中文" <code>FtsQuery.java</code>。</p>
         </div>
-        <p>索引也可以按库关掉：配置里列出的库连索引带触发器都不建，检索只剩子串回退 —— 用检索速度换文件体积 <code>Db.java:65-70</code>。另外"删索引"是唯一能真把索引占的空间还回去的动作，且空间要等一次整理之后才真正还给文件系统 <code>Store.java:460-480</code>。</p>
+        <p>索引也可以按库关掉：配置里列出的库连索引带触发器都不建，检索只剩子串回退 —— 用检索速度换文件体积 <code>Db.java</code>。另外"删索引"是唯一能真把索引占的空间还回去的动作，且空间要等一次整理之后才真正还给文件系统 <code>Store.java</code>。</p>
 
         <h3 class="sec">保留期清理口径</h3>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>动作</th><th>口径</th><th>旋钮与出厂值</th><th>出处</th></tr></thead>
+            <thead><tr><th>动作</th><th>口径</th><th>旋钮与出厂值</th></tr></thead>
             <tbody>
-              <tr><td>删超龄低重要度记忆</td><td>时间早于"现在减保留天数"<b>且</b>重要度 ≤ 4（低重要度的界定是常量，不是配置）</td><td>保留天数，未给时 30 天</td><td><code>Store.java:389</code>、<code>:52-56</code>、<code>:431</code></td></tr>
-              <tr><td>低重要度截断</td><td>只保留最新 N 条；<code>≤0</code> = 不截断</td><td>截断条数</td><td><code>Store.java:433-438</code></td></tr>
-              <tr><td>清超龄对话历史</td><td>删更早的对话行；<b><code>≤0</code> = 不清理</b>（0 偏向不删，不是"用默认值"）</td><td>对话保留天数</td><td><code>Store.java:413</code>、<code>:417-418</code>、<code>:439</code></td></tr>
-              <tr><td>清超龄群聊历史</td><td>删更早的群聊行；<b><code>≤0</code> = 不清理</b></td><td>群聊保留天数</td><td><code>Store.java:414</code>、<code>:440</code></td></tr>
-              <tr><td>裁剪出站台账</td><td><b>只按"最近 N 行"裁，不按时间</b>（撤回通常发生在近几天内）；每次维护裁一次</td><td>固定 2000 行</td><td><code>Store.java:441-443</code>、<code>:61-62</code>、<code>:927-930</code></td></tr>
+              <tr><td>删超龄低重要度记忆</td><td>时间早于"现在减保留天数"<b>且</b>重要度 ≤ 4（低重要度的界定是常量，不是配置）</td><td>保留天数，未给时 30 天</td></tr>
+              <tr><td>低重要度截断</td><td>只保留最新 N 条；<code>≤0</code> = 不截断</td><td>截断条数</td></tr>
+              <tr><td>清超龄对话历史</td><td>删更早的对话行；<b><code>≤0</code> = 不清理</b>（0 偏向不删，不是"用默认值"）</td><td>对话保留天数</td></tr>
+              <tr><td>清超龄群聊历史</td><td>删更早的群聊行；<b><code>≤0</code> = 不清理</b></td><td>群聊保留天数</td></tr>
+              <tr><td>裁剪出站台账</td><td><b>只按"最近 N 行"裁，不按时间</b>（撤回通常发生在近几天内）；每次维护裁一次</td><td>固定 2000 行</td></tr>
             </tbody>
           </table>
         </div>
-        <p>两条容易踩的边界：① 笔记性质的库<b>不受维护影响</b>（从不删）<code>Store.java:412</code>；② 展开类缓存的有效期会被夹到"群聊保留天数 × 24" —— 维护完全不清键值表，不夹这一刀，别人的话会活得比群聊记录还久 <code>Conf.java:827-832</code>。</p>
+        <p>两条容易踩的边界：① 笔记性质的库<b>不受维护影响</b>（从不删）<code>Store.java</code>；② 展开类缓存的有效期会被夹到"群聊保留天数 × 24" —— 维护完全不清键值表，不夹这一刀，别人的话会活得比群聊记录还久 <code>Conf.java</code>。</p>
 
         <h3 class="sec">库门面还提供什么</h3>
         <div class="grid-3">
-          <div class="panel reveal"><h3>统计与导入导出</h3><p>统计给出库文件、含预写日志的占用、各库条数、总条数、索引是否可用；导出为一行一条 JSON 的文本文件，导入逐行插入并回报行数 <code>Store.java:279-301</code>、<code>:303-377</code>。</p></div>
-          <div class="panel reveal d1"><h3>出站消息台账</h3><p>她每发出一条消息，就把拿到的消息 id 记进账本 —— 撤回只能按它定位，而这个 id 以前是用完就丢的。记账是"发后即忘"的：它<b>不可能</b>改变、吞掉或拖住动作本身的返回值 <code>qq\Api.java:72-99</code>、<code>:251-275</code>。</p></div>
-          <div class="panel reveal d2"><h3>补列幂等且安静</h3><p>老库补列先查表结构、缺了才加。SQLite 没有"加列 if not exists"，直接写会让每次启动都刷一条吓人的假报错 <code>store\Lib.java:112-131</code>。</p></div>
+          <div class="panel reveal"><h3>统计与导入导出</h3><p>统计给出库文件、含预写日志的占用、各库条数、总条数、索引是否可用；导出为一行一条 JSON 的文本文件，导入逐行插入并回报行数 <code>Store.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>出站消息台账</h3><p>她每发出一条消息，就把拿到的消息 id 记进账本 —— 撤回只能按它定位，而这个 id 以前是用完就丢的。记账是"发后即忘"的：它<b>不可能</b>改变、吞掉或拖住动作本身的返回值 <code>qq\Api.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>补列幂等且安静</h3><p>老库补列先查表结构、缺了才加。SQLite 没有"加列 if not exists"，直接写会让每次启动都刷一条吓人的假报错 <code>store\Lib.java</code>。</p></div>
         </div>
       </section>
 
@@ -668,12 +1291,7 @@ $i = $lib.IndexOf('RUN_COLS = {'); $j = $lib.IndexOf('};', $i)
         </header>
 
         <h3 class="sec">自带的三份实体文件</h3>
-        <div class="grid-3">
-          <div class="kpi reveal"><div class="k">初始提示词</div><div class="v">13,028<small>字节 · <code>data\prompts\identity.md</code></small></div></div>
-          <div class="kpi reveal d1"><div class="k">子 Agent 公共段</div><div class="v">1,664<small>字节 · <code>data\prompts\subagent.md</code></small></div></div>
-          <div class="kpi reveal d2"><div class="k">工具索引与文案</div><div class="v">11,029<small>字节 · <code>data\prompts\tools-index.md</code></small></div></div>
-        </div>
-        <p>三个数是目录枚举的实测字节数。初始提示词与子 Agent 公共段都可以在运行期重新读一遍 <code>prompt\Prompts.java:46-50</code>。子 Agent 的<b>变化部分</b>（角色、边界、输出格式）由主 Agent 在派发时生成，文件里只有公共段 <code>Prompts.java:37-42</code>。</p>
+        <p>这三份分别是 <code>prompts\identity.md</code>（初始提示词）、<code>prompts\subagent.md</code>（子 Agent 的公共段）、<code>prompts\tools-index.md</code>（工具索引）。初始提示词与子 Agent 公共段都可以在运行期重新读一遍 <code>prompt\Prompts.java</code>。子 Agent 的<b>变化部分</b>（角色、边界、输出格式）由主 Agent 在派发时生成，文件里只有公共段 <code>Prompts.java</code>。</p>
 
         <h3 class="sec">注入台：四个槽位</h3>
         <div class="tw scroll reveal">
@@ -687,12 +1305,12 @@ $i = $lib.IndexOf('RUN_COLS = {'); $j = $lib.IndexOf('};', $i)
             </tbody>
           </table>
         </div>
-        <p>全局作用域对所有会话生效；其余键是会话键（群、私聊、控制台三种），只对该会话生效。渲染时先全局后会话，同 key 会话覆盖全局；每个槽位最多保留 64 条，超出丢最旧 <code>prompt\Inject.java:12-36</code>、<code>:64-70</code>。</p>
+        <p>全局作用域对所有会话生效；其余键是会话键（群、私聊、控制台三种），只对该会话生效。渲染时先全局后会话，同 key 会话覆盖全局；每个槽位最多保留 64 条，超出丢最旧 <code>prompt\Inject.java</code>。</p>
         <div class="note warn reveal">
-          <p><span class="n-title">硬边界：路径锁在提示词目录内</span>：相对名会被解析成目录内的真实文件，<b>越界（上跳、绝对路径、软链逃逸）或非 md 一律返回空</b>。注释写明理由：曾经可以借"读某个名字"读到配置文件里的密钥 <code>Prompts.java:80-110</code>。</p>
+          <p><span class="n-title">硬边界：路径锁在提示词目录内</span>：相对名会被解析成目录内的真实文件，<b>越界（上跳、绝对路径、软链逃逸）或非 md 一律返回空</b>。注释写明理由：曾经可以借"读某个名字"读到配置文件里的密钥 <code>Prompts.java</code>。</p>
         </div>
         <div class="note reveal">
-          <p><span class="n-title">改文件不等于立即生效</span>：配置类改动只有 <code>ai/start</code> 或 <code>ai/restart</code> 才被读进生效面；提示词正文有它自己的热重载，不受那条口径影响 <code>term\Cmd.java:803-804</code>。</p>
+          <p><span class="n-title">改文件不等于立即生效</span>：配置类改动只有 <code>ai/start</code> 或 <code>ai/restart</code> 才被读进生效面；提示词正文有它自己的热重载，不受那条口径影响 <code>term\Cmd.java</code>。</p>
         </div>
       </section>
 
@@ -705,28 +1323,28 @@ $i = $lib.IndexOf('RUN_COLS = {'); $j = $lib.IndexOf('};', $i)
         </header>
 
         <h3 class="sec">主循环</h3>
-        <p>上下文每一轮都重新读系统提示词与上下文注入，因此<b>运行期注入随时生效</b> <code>agent\Loop.java:23-26</code>。一轮的结果结构是显式的：正文、轮数、工具调用次数、耗时、错误 <code>Loop.java:37-46</code>。</p>
+        <p>上下文每一轮都重新读系统提示词与上下文注入，因此<b>运行期注入随时生效</b> <code>agent\Loop.java</code>。一轮的结果结构是显式的：正文、轮数、工具调用次数、耗时、错误 <code>Loop.java</code>。</p>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>机制</th><th>口径</th><th>出处</th></tr></thead>
+            <thead><tr><th>机制</th><th>口径</th></tr></thead>
             <tbody>
-              <tr><td>连续失败闸门</td><td>同一个工具<b>连续</b>失败达到提示阈值时，下一轮往上下文加一行纯事实（工具名到次数的映射 + 最后一次错误）；达到终止阈值就停止本轮并回终止文案。判定只看<b>结构信号</b>（结果首行的前缀标记 + 自报的成败标记），没有关键词表、没有劝导语；阈值与终止文案都在 <code>data\prompts\tools-index.md</code>，缺键只报错、不兜底</td><td><code>Loop.java:28-33</code>、<code>:60-77</code></td></tr>
-              <tr><td>成功即清零</td><td>连续计数在同一工具成功时清零</td><td><code>Loop.java:60-62</code></td></tr>
-              <tr><td>收尾回合</td><td>最后一轮剥掉"能对用户说话"的工具 —— 那一轮只该记账，不该再对外说一句，否则"正常回复 + 收尾又发一条"看起来就是重复回答</td><td><code>Loop.java:63-71</code></td></tr>
-              <tr><td>失败事实不重复塞</td><td>已经注入过的失败事实值变了才重新注入</td><td><code>Loop.java:76-77</code></td></tr>
-              <tr><td>单轮模型覆盖</td><td>可以带自己的模型；这个覆盖同时决定"这一轮是谁"，与子 Agent 写的是同一个键同一个值，因此幂等</td><td><code>Loop.java:79-89</code>；<code>ctx\CtxBuild.java:69-82</code></td></tr>
+              <tr><td>连续失败闸门</td><td>同一个工具<b>连续</b>失败达到提示阈值时，下一轮往上下文加一行纯事实（工具名到次数的映射 + 最后一次错误）；达到终止阈值就停止本轮并回终止文案。判定只看<b>结构信号</b>（结果首行的前缀标记 + 自报的成败标记），没有关键词表、没有劝导语；阈值与终止文案都在 <code>data\prompts\tools-index.md</code>，缺键只报错、不兜底</td></tr>
+              <tr><td>成功即清零</td><td>连续计数在同一工具成功时清零</td></tr>
+              <tr><td>收尾回合</td><td>最后一轮剥掉"能对用户说话"的工具 —— 那一轮只该记账，不再对外说一句，否则"正常回复 + 收尾又发一条"看起来就是重复回答</td></tr>
+              <tr><td>失败事实不重复塞</td><td>已经注入过的失败事实值变了才重新注入</td></tr>
+              <tr><td>单轮模型覆盖</td><td>可以带自己的模型；这个覆盖同时决定"这一轮是谁"，与子 Agent 写的是同一个键同一个值，因此幂等</td></tr>
             </tbody>
           </table>
         </div>
 
         <h3 class="sec">子 Agent</h3>
         <div class="grid-3">
-          <div class="panel reveal"><h3>能力由主 Agent 指定</h3><p>派发时给工具白名单，<b>仍受权限筛表约束</b>；子 Agent <b>不向下再派发</b> <code>agent\Agent.java:29-32</code>。</p></div>
-          <div class="panel reveal d1"><h3>并发上限</h3><p>在跑的子 Agent 数有上限（配置项 <code>subAgentMax</code>），计数是原子量 <code>Agent.java:48-49</code>。</p></div>
-          <div class="panel reveal d2"><h3>后台回合走同一条队列</h3><p>后台回合排进"按会话分道 + 优先级"的同一套队列，<b>避免与主回合并发打模型</b> <code>Agent.java:46-47</code>、<code>:73-80</code>。</p></div>
+          <div class="panel reveal"><h3>能力由主 Agent 指定</h3><p>派发时给工具白名单，<b>仍受权限筛表约束</b>；子 Agent <b>不向下再派发</b> <code>agent\Agent.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>并发上限</h3><p>在跑的子 Agent 数有上限（配置项 <code>subAgentMax</code>），计数是原子量 <code>Agent.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>后台回合走同一条队列</h3><p>后台回合排进"按会话分道 + 优先级"的同一套队列，<b>避免与主回合并发打模型</b> <code>Agent.java</code>。</p></div>
         </div>
         <div class="note reveal">
-          <p><span class="n-title">子 Agent 看到的世界是收窄的</span>：工具索引对子 Agent 只给名字（参数表已经在工具表里，索引再带描述是重复付费）<code>Boot.java:566-571</code>；子 Agent 不带主会话历史，动态聊天窗口是它唯一能看见"刚才说了什么"的地方 <code>CtxBuild.java:62-65</code>。回合数上限主 Agent 与子 Agent 各有自己的旋钮；事实块里的轮数预算与"被掐停那一轮"用的是<b>同一个数</b> <code>Boot.java:573-583</code>、<code>Conf.java:1201-1202</code>。</p>
+          <p><span class="n-title">子 Agent 看到的世界是收窄的</span>：工具索引对子 Agent 只给名字（参数表已经在工具表里，索引再带描述是重复付费）<code>Boot.java</code>；子 Agent 不带主会话历史，动态聊天窗口是它唯一能看见"刚才说了什么"的地方 <code>CtxBuild.java</code>。回合数上限主 Agent 与子 Agent 各有自己的旋钮；事实块里的轮数预算与"被掐停那一轮"用的是<b>同一个数</b> <code>Boot.java</code>、<code>Conf.java</code>。</p>
         </div>
       </section>
 
@@ -739,36 +1357,36 @@ $i = $lib.IndexOf('RUN_COLS = {'); $j = $lib.IndexOf('};', $i)
         </header>
 
         <h3 class="sec">装配骨架</h3>
-        <p>外挂块来自扩展点，内容与文案全在单元里；基板负责顺序与段位 <code>ctx\CtxBuild.java:37-40</code>、<code>:546</code>。历史按字符预算裁剪，预算 <code>≤0</code> 或行数为 0 时原样返回（不改行为）<code>CtxBuild.java:849-857</code>。</p>
+        <p>外挂块来自扩展点，内容与文案全在单元里；基板负责顺序与段位 <code>ctx\CtxBuild.java</code>。历史按字符预算裁剪，预算 <code>≤0</code> 或行数为 0 时原样返回（不改行为）<code>CtxBuild.java</code>。</p>
 
         <h3 class="sec">每轮都会出现的事实行</h3>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>事实行</th><th>内容</th><th>出处</th></tr></thead>
+            <thead><tr><th>事实行</th><th>内容</th></tr></thead>
             <tbody>
-              <tr><td>时间</td><td>当前时间</td><td><code>CtxBuild.java:281</code></td></tr>
-              <tr><td>调用者</td><td>入口（控制台或 QQ）、账号、昵称、是不是主人、会话键、群号与群内角色、非主人时的好感度、<b>主体种类</b>、<b>五类资源的有效位</b>、能命中的例外条目</td><td><code>CtxBuild.java:282-304</code></td></tr>
-              <tr><td>人物</td><td>"正在说话的这个人"是谁：跨群同一人的客观聚合数据。只给数据不给文案</td><td><code>CtxBuild.java:306-317</code></td></tr>
-              <tr><td>媒体</td><td>本轮的媒体段元数据（只有媒体段的消息才有这一行）</td><td><code>CtxBuild.java:318-320</code></td></tr>
-              <tr><td>连接状态</td><td>已连接 / 未连接</td><td><code>CtxBuild.java:321</code></td></tr>
-              <tr><td>模型</td><td>八个字段，语义见 <a href="#model">模型面</a></td><td><code>CtxBuild.java:322-346</code></td></tr>
-              <tr><td>挂图</td><td>本轮的挂图结果（挂了几张、丢了哪些、为什么丢）</td><td><code>qq\MediaAttach.java:42-67</code></td></tr>
-              <tr><td>在跑任务</td><td>后台任务数（只在大于 0 时出现）</td><td><code>CtxBuild.java:350-351</code></td></tr>
-              <tr><td>能力索引</td><td>一行事实（类别 → 工具 + 一句话），帮模型在几十个工具里定位；子 Agent 只给名字</td><td><code>CtxBuild.java:352-355</code></td></tr>
-              <tr><td>轮数预算</td><td>第几轮 / 还剩几轮 / 这一轮的上限是谁的；值与她真正被掐停时用的上限同源</td><td><code>CtxBuild.java:356-359</code></td></tr>
-              <tr><td>动态窗口</td><td>本会话最近 N 条聊天记录（窗口一行 + 标签行 + 一行一条），事实块的最后一段</td><td><code>CtxBuild.java:51-67</code></td></tr>
+              <tr><td>时间</td><td>当前时间</td></tr>
+              <tr><td>调用者</td><td>入口（控制台或 QQ）、账号、昵称、是不是主人、会话键、群号与群内角色、非主人时的好感度、<b>主体种类</b>、<b>五类资源的有效位</b>、能命中的例外条目</td></tr>
+              <tr><td>人物</td><td>"正在说话的这个人"是谁：跨群同一人的客观聚合数据。只给数据不给文案</td></tr>
+              <tr><td>媒体</td><td>本轮的媒体段元数据（只有媒体段的消息才有这一行）</td></tr>
+              <tr><td>连接状态</td><td>已连接 / 未连接</td></tr>
+              <tr><td>模型</td><td>八个字段，语义见 <a href="#model">模型面</a></td></tr>
+              <tr><td>挂图</td><td>本轮的挂图结果（挂了几张、丢了哪些、为什么丢）</td></tr>
+              <tr><td>在跑任务</td><td>后台任务数（只在大于 0 时出现）</td></tr>
+              <tr><td>能力索引</td><td>一行事实（类别 → 工具 + 一句话），帮模型在几十个工具里定位；子 Agent 只给名字</td></tr>
+              <tr><td>轮数预算</td><td>第几轮 / 还剩几轮 / 这一轮的上限是谁的；值与她真正被掐停时用的上限同源</td></tr>
+              <tr><td>动态窗口</td><td>本会话最近 N 条聊天记录（窗口一行 + 标签行 + 一行一条），事实块的最后一段</td></tr>
             </tbody>
           </table>
         </div>
 
         <h3 class="sec">动态聊天窗口</h3>
         <div class="grid-3">
-          <div class="panel reveal"><h3>每触发一次就现取</h3><p>不再有游标、不再有"上次触发点到这次触发点"的增量、不再有落库的进度状态 —— 每一轮都重新取最近 N 条，大小只有一个旋钮，出厂 30 条，私聊与群一视同仁 <code>ctx\ChatWindow.java:23-32</code>；<code>CtxBuild.java:54-55</code>。</p></div>
-          <div class="panel reveal d1"><h3>两个源，不对称</h3><p>群读群聊历史表；私聊与控制台读对话历史表。这不是取巧：群聊表里从来没有一行群号 ≤ 0，私聊消息根本不在那张表里 <code>ChatWindow.java:39-52</code>。</p></div>
-          <div class="panel reveal d2"><h3>一条查询</h3><p>每回合就这一条查询：按主键降序取尾部 N 行，读满就停，窗口外有多少历史都不扫 <code>ChatWindow.java:54-57</code>。</p></div>
+          <div class="panel reveal"><h3>每触发一次就现取</h3><p>不再有游标、不再有"上次触发点到这次触发点"的增量、不再有落库的进度状态 —— 每一轮都重新取最近 N 条，大小只有一个旋钮，出厂 30 条，私聊与群一视同仁 <code>ctx\ChatWindow.java</code>；<code>CtxBuild.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>两个源，不对称</h3><p>群读群聊历史表；私聊与控制台读对话历史表。这不是取巧：群聊表里从来没有一行群号 ≤ 0，私聊消息根本不在那张表里 <code>ChatWindow.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>一条查询</h3><p>每回合就这一条查询：按主键降序取尾部 N 行，读满就停，窗口外有多少历史都不扫 <code>ChatWindow.java</code>。</p></div>
         </div>
         <div class="note reveal">
-          <p><span class="n-title">代价是说清楚的</span>：窗口按定义会在两次触发之间<b>重叠</b>（同一条消息可能被看两遍），消息密集时也可能<b>漏掉</b> N 条之外的部分 —— 而且它<b>不谎报</b>"还有多少条没带"（那需要第二条查询）。换来的是她一定看得见"最近发生了什么"，包括没有被放行判据选中的那些话 <code>ChatWindow.java:34-37</code>、<code>:59-60</code>。</p>
+          <p><span class="n-title">代价是说清楚的</span>：窗口按定义会在两次触发之间<b>重叠</b>（同一条消息可能被看两遍），消息密集时也可能<b>漏掉</b> N 条之外的部分 —— 而且它<b>不谎报</b>"还有多少条没带"（那需要第二条查询）。换来的是她一定看得见"最近发生了什么"，包括没有被放行判据选中的那些话 <code>ChatWindow.java</code>。</p>
         </div>
       </section>
 
@@ -782,53 +1400,53 @@ $i = $lib.IndexOf('RUN_COLS = {'); $j = $lib.IndexOf('};', $i)
 
         <h3 class="sec">命令表：永不失联</h3>
         <div class="grid-3">
-          <div class="panel reveal"><h3>分层帮助</h3><p>命令表按"对话 / 生命周期 / 基板状态 / 能力"分组自述，末尾写清两条口径：除 <code>ai/start</code> 与 <code>ai/restart</code> 外其余命令<b>只改配置文件</b>；业务能力不在控制台命令里 <code>term\Cmd.java:1356-1395</code>。</p></div>
-          <div class="panel reveal d1"><h3>不炸框架</h3><p>路由与帮助<b>不向框架层抛异常</b>：任何命令炸掉都收敛成一行可读失败 + 允许继续输入下一条 <code>Cmd.java:26-27</code>、<code>:109-113</code>。</p></div>
-          <div class="panel reveal d2"><h3>等待有上限</h3><p>对话命令有三层前置判断（装配齐备 / 密钥 / 队列未满）+ 等待上限，绝不在队列堵死时把控制台永久卡住 <code>Cmd.java:30-31</code>、<code>:37-41</code>。</p></div>
+          <div class="panel reveal"><h3>分层帮助</h3><p>命令表按"对话 / 生命周期 / 基板状态 / 能力"分组自述，末尾写清两条口径：除 <code>ai/start</code> 与 <code>ai/restart</code> 外其余命令<b>只改配置文件</b>；业务能力不在控制台命令里 <code>term\Cmd.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>不炸框架</h3><p>路由与帮助<b>不向框架层抛异常</b>：任何命令炸掉都收敛成一行可读失败 + 允许继续输入下一条 <code>Cmd.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>等待有上限</h3><p>对话命令有三层前置判断（装配齐备 / 密钥 / 队列未满）+ 等待上限，绝不在队列堵死时把控制台永久卡住 <code>Cmd.java</code>。</p></div>
         </div>
 
         <h3 class="sec">控制台捕获：三层读法</h3>
-        <p>框架自带的"取当前可见全文"有一个硬伤：一旦有人清屏、或控制台按内存预算裁掉最旧一半，那段输出就<b>再也拿不回来</b>；而且每轮把整段控制台塞进上下文既贵又重复。所以捕获器提供三层（<code>term\ConsoleTap.java:19-35</code>）：</p>
+        <p>框架自带的"取当前可见全文"有一个硬伤：一旦有人清屏、或控制台按内存预算裁掉最旧一半，那段输出就<b>再也拿不回来</b>；而且每轮把整段控制台塞进上下文既贵又重复。所以捕获器提供三层（<code>term\ConsoleTap.java</code>）：</p>
         <div class="tw scroll reveal">
           <table>
             <thead><tr><th>层</th><th>做什么</th><th>上限 / 出处</th></tr></thead>
             <tbody>
-              <tr><td>流式捕获</td><td>注册一个打印代理，每条输出（去色、带时间戳与来源线程）写进<b>有界环形缓冲</b>。缓冲在进程内独立于控制台文档，所以清屏之后仍读得到最近输出</td><td>出厂 500 条 / 64 KB <code>ConsoleTap.java:26-29</code>、<code>:74-75</code></td></tr>
-              <tr><td>全量读取</td><td>取当前可见全文（带长度上限与截断）。这是补充，不是主路径</td><td>单次出厂 4000 字符 <code>ConsoleTap.java:76</code></td></tr>
-              <tr><td>游标读取</td><td>每条缓冲带自增序号，只回"比上次序号更大"的新增部分 —— 调用方记住游标即可，不会每轮重复吃同一段输出</td><td><code>ConsoleTap.java:32-34</code></td></tr>
+              <tr><td>流式捕获</td><td>注册一个打印代理，每条输出（去色、带时间戳与来源线程）写进<b>有界环形缓冲</b>。缓冲在进程内独立于控制台文档，所以清屏之后仍读得到最近输出</td><td>出厂 500 条 / 64 KB <code>ConsoleTap.java</code></td></tr>
+              <tr><td>全量读取</td><td>取当前可见全文（带长度上限与截断）。这是补充，不是主路径</td><td>单次出厂 4000 字符 <code>ConsoleTap.java</code></td></tr>
+              <tr><td>游标读取</td><td>每条缓冲带自增序号，只回"比上次序号更大"的新增部分 —— 调用方记住游标即可，不会每轮重复吃同一段输出</td><td><code>ConsoleTap.java</code></td></tr>
             </tbody>
           </table>
         </div>
         <div class="note warn reveal">
-          <p><span class="n-title">打印代理的硬约束</span>：框架的实现是"只要注册了任意一个代理，框架自己就不再打印"，而是把输出交给每个代理、由代理负责真正写进控制台。所以捕获器必须转发，否则控制台会被弄空。转发档位出厂是自动：<b>只在自己是唯一代理时转发</b>，若还挂着别的代理就只捕获、不重复打印，避免同一行出现两次 <code>ConsoleTap.java:42-53</code>。</p>
+          <p><span class="n-title">打印代理的硬约束</span>：框架的实现是"只要注册了任意一个代理，框架自己就不再打印"，而是把输出交给每个代理、由代理负责真正写进控制台。所以捕获器要转发，不然控制台会被弄空。转发档位出厂是自动：<b>只在自己是唯一代理时转发</b>，若还挂着别的代理就只捕获、不重复打印，避免同一行出现两次 <code>ConsoleTap.java</code>。</p>
         </div>
         <div class="note ok reveal">
-          <p><span class="n-title">无界面环境不报错</span>：控制台窗体是类加载即建窗体的单例，无界面环境里它静态初始化会失败。捕获器所有入口都包在异常兜底里：装不上就标记未安装，读返回空、写返回一句可读原因，<b>绝不把异常抛给基板</b> <code>ConsoleTap.java:55-59</code>。</p>
+          <p><span class="n-title">无界面环境不报错</span>：控制台窗体是类加载即建窗体的单例，无界面环境里它静态初始化会失败。捕获器所有入口都包在异常兜底里：装不上就标记未安装，读返回空、写返回一句可读原因，<b>绝不把异常抛给基板</b> <code>ConsoleTap.java</code>。</p>
         </div>
 
         <h3 class="sec">输出分流</h3>
-        <p>输出落点有四种，各自独立实现：静默、控制台、QQ（群与私聊）、定时任务（<code>term\Sinks.java:10</code>、<code>:94</code>、<code>:102</code>、<code>:141</code>、<code>:238</code>）。发送前还有两道：</p>
+        <p>输出落点有四种，各自独立实现：静默、控制台、QQ（群与私聊）、定时任务（<code>term\Sinks.java</code>）。发送前还有两道：</p>
         <div class="grid-2">
-          <div class="panel reveal"><h3>出站改写管线</h3><p>分段之后、发送之前跑一遍。注入口默认是空的 —— 没人注入过就等于零改写，行为与加这一层之前逐字节一致；改写层自己炸了这一条按原样发（"改不动的东西，不能因为它坏了就丢话"）<code>Sinks.java:15-55</code>。</p></div>
-          <div class="panel reveal d1"><h3>出站最后一道闸</h3><p>拦"正文里混进了模型的工具调用标记"这一种情况：判据是<b>结构</b>（标签形状 + 结构词），不是关键词表；命中就<b>整条不发</b>，绝不"正则删字符后照发"（半剥的残留比一条都不发更像乱码，还会把残缺内容写进聊天记忆）。要拦的那一条丢了，其余条照发 <code>Sinks.java:57-68</code>。</p></div>
+          <div class="panel reveal"><h3>出站改写管线</h3><p>分段之后、发送之前跑一遍。注入口默认是空的 —— 没人注入过就等于零改写，行为与加这一层之前逐字节一致；改写层自己炸了这一条按原样发（"改不动的东西，不能因为它坏了就丢话"）<code>Sinks.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>出站最后一道闸</h3><p>拦"正文里混进了模型的工具调用标记"这一种情况：判据是<b>结构</b>（标签形状 + 结构词），不是关键词表；命中就<b>整条不发</b>，绝不"正则删字符后照发"（半剥的残留比一条都不发更像乱码，还会把残缺内容写进聊天记忆）。要拦的那一条丢了，其余条照发 <code>Sinks.java</code>。</p></div>
         </div>
-        <p>分段的段位口径：显式分段标记优先 → 按长度分段 → 群聊再压短一档；长度切点依次找换行、句末标点、次级标点，尽量不把句子劈成两半 <code>qq\Seg.java:16-27</code>、<code>:141-178</code>。</p>
+        <p>分段的段位口径：显式分段标记优先 → 按长度分段 → 群聊再压短一档；长度切点依次找换行、句末标点、次级标点，尽量不把句子劈成两半 <code>qq\Seg.java</code>。</p>
 
         <h3 class="sec">本地对话面板</h3>
         <div class="grid-3">
-          <div class="panel reveal"><h3>它解决什么</h3><p>本地控制台就是主人对话。流式正文与结构性日志混在同一个输出流里，正文会被装配、工具、统计行冲散。面板把对话单独承载到一块面板上，再按框架<b>现成</b>的控件输出协议挂进控制台的选项卡隔离区，从而主输出框只留结构性日志 <code>ui\TalkPanel.java:33-39</code>。</p></div>
-          <div class="panel reveal d1"><h3>怎么挂上去</h3><p>公开入口只有"打印一个组件"这一个方法，它按类型分派：画布类会新开一个选项卡进隔离区；标题取组件自己的名字。隔离区是主窗口中心面板右侧的停靠区，与文本流<b>完全隔离</b> —— 进选项卡的东西不写进主输出框 <code>ui\TalkMount.java:8-23</code>。</p></div>
-          <div class="panel reveal d2"><h3>线程纪律（不是洁癖）</h3><p>任一线程都可以追加内容，但<b>它们只动账本</b>；真正的文档写入由界面线程上的一次落盘统一做。理由写在注释里：富文本文档的插入会派发文档事件，其中"元素结构变化"是异步排进界面线程的，非界面线程写入会与正在跑的视图更新打架，实测会把界面线程打死 —— 窗口留着最后一帧、事件再也没人处理 <code>TalkPanel.java:46-58</code>。挂载动作也投递到界面线程上做 <code>TalkMount.java:40-46</code>。界面元素建不起来就退化为内存记录，绝不把异常抛给基板 <code>TalkPanel.java:75-77</code>。</p></div>
+          <div class="panel reveal"><h3>它解决什么</h3><p>本地控制台就是主人对话。流式正文与结构性日志混在同一个输出流里，正文会被装配、工具、统计行冲散。面板把对话单独承载到一块面板上，再按框架<b>现成</b>的控件输出协议挂进控制台的选项卡隔离区，从而主输出框只留结构性日志 <code>ui\TalkPanel.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>怎么挂上去</h3><p>公开入口只有"打印一个组件"这一个方法，它按类型分派：画布类会新开一个选项卡进隔离区；标题取组件自己的名字。隔离区是主窗口中心面板右侧的停靠区，与文本流<b>完全隔离</b> —— 进选项卡的东西不写进主输出框 <code>ui\TalkMount.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>线程纪律（不是洁癖）</h3><p>任一线程都可以追加内容，但<b>它们只动账本</b>；真正的文档写入由界面线程上的一次落盘统一做。理由写在注释里：富文本文档的插入会派发文档事件，其中"元素结构变化"是异步排进界面线程的，非界面线程写入会与正在跑的视图更新打架，会把界面线程打死 —— 窗口留着最后一帧、事件再也没人处理 <code>TalkPanel.java</code>。挂载动作也投递到界面线程上做 <code>TalkMount.java</code>。界面元素建不起来就退化为内存记录，绝不把异常抛给基板 <code>TalkPanel.java</code>。</p></div>
         </div>
 
         <h3 class="sec">AI 读控制台 / 跑框架命令（仅主人）</h3>
-        <p>基板工具面里有一把控制台工具，说明第一句就写明是<b>仅主人</b>：支持读最近输出（游标式）、执行一条框架命令并回它打出来的新输出、看最近的框架命令、打印一行、清屏、看控制台规模 <code>Builtins.java:754-757</code>。</p>
-        <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\Builtins.java:764-769</span><button class="copy" type="button">复制</button></div><pre><code>// ACL：整把工具都判 E 类 —— 契约就是"控制台（仅主人）"，
+        <p>基板工具面里有一把控制台工具，说明第一句就写明是<b>仅主人</b>：支持读最近输出（游标式）、执行一条框架命令并回它打出来的新输出、看最近的框架命令、打印一行、清屏、看控制台规模 <code>Builtins.java</code>。</p>
+        <div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\Builtins.java</span><button class="copy" type="button">复制</button></div><pre><code>// ACL：整把工具都判 E 类 —— 契约就是"控制台（仅主人）"，
 // 而且 print/clear 是往主人机位写（非主人可借它打出伪造的框架输出去骗主人）。
 // 统一用 X 而不是 R：自主主体的 E 默认只有 X，用 R 会把她自己挡在外面。
 String aclDeny = needRes(auth, conf, sair.v4.auth.Res.platform("sfw.run"), 'X');
 if (aclDeny != null) return aclDeny;</code></pre></div>
-        <p>也就是说：入口按 <b>E 类资源的执行位</b>判定，而不是按"工具可见性"另开一套。E 类的上限是"主人全权 / 她的自主行为执行 / 其余人无"，所以普通用户拿不到、她自己读得到 <code>auth\Acl.java:169-175</code>、<code>:188-189</code>。清屏那一格还会说明缓冲语义：清的是控制台文档与命令历史，捕获缓冲照旧留着最近输出 <code>Builtins.java:807-813</code>。</p>
+        <p>也就是说：入口按 <b>E 类资源的执行位</b>判定，而不是按"工具可见性"另开一套。E 类的上限是"主人全权 / 她的自主行为执行 / 其余人无"，所以普通用户拿不到、她自己读得到 <code>auth\Acl.java</code>。清屏那一格还会说明缓冲语义：清的是控制台文档与命令历史，捕获缓冲照旧留着最近输出 <code>Builtins.java</code>。</p>
       </section>
 
       <!-- ==================== 调试面 ==================== -->
@@ -840,37 +1458,37 @@ if (aclDeny != null) return aclDeny;</code></pre></div>
         </header>
 
         <div class="note bad reveal">
-          <p><span class="n-title">分量先说清</span>：拿到调试输入口凭据的本机进程，等价于「能以任意 QQ 身份（含主人）造一条入站消息」＋「能在框架控制台敲任意命令」。它不进普通帮助表（隐藏能力），只在文档里写明给扩展开发者使用 <code>dev\DebugSimPort.java:53-55</code>。</p>
+          <p><span class="n-title">分量先说清</span>：拿到调试输入口凭据的本机进程，等价于「能以任意 QQ 身份（含主人）造一条入站消息」＋「能在框架控制台敲任意命令」。它不进普通帮助表（隐藏能力），只在文档里写明给扩展开发者使用 <code>dev\DebugSimPort.java</code>。</p>
         </div>
 
         <h3 class="sec">四样东西的分工</h3>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>东西</th><th>能做什么</th><th>起停 / 权限要求</th><th>出处</th></tr></thead>
+            <thead><tr><th>东西</th><th>能做什么</th><th>起停 / 权限要求</th></tr></thead>
             <tbody>
               <tr>
                 <td><b>控制台捕获</b></td>
                 <td>把控制台每一行收进有界环形缓冲（去色 + 时间戳 + 来源线程），支持流式、全量、游标三种读法</td>
                 <td>与壳同生共死（不是可开关的端口）；它的注册与注销也归壳层管</td>
-                <td><code>term\ConsoleTap.java:19-35</code>；<code>dev\DebugShell.java:138-147</code></td>
+                
               </tr>
               <tr>
                 <td><b>调试输出口</b></td>
                 <td>在进程外"看框架输出、像敲控制台一样下命令"。命令表：连通性探测、状态摘要、增量读控制台（游标式）、读最近 N 条、看框架命令历史、帮助、按框架那条路关框架、只关这条连接；<b>其它任何一行都当框架控制台命令执行</b>，回它的输出</td>
                 <td>端口固定 <code>127.0.0.1:2660</code>；<b>只绑回环</b>，外部网卡够不着；<b>凭据必填</b>，为空直接拒绝启动；<b>只有</b> <code>ai/debug on|off</code> 能起停它</td>
-                <td><code>dev\DebugPort.java:44-63</code>、<code>:65-82</code>、<code>:499-507</code>；<code>Conf.java:284</code>；<code>term\Cmd.java:906-1010</code></td>
+                
               </tr>
               <tr>
                 <td><b>调试落盘</b></td>
                 <td>内存里的两路捕获都是有界环形缓冲，回答不了"从起实例到现在一共发生了什么"。落盘把每一行同时写进文件，于是"一次取全部输出"成为可能</td>
                 <td>落点在数据根下的日志目录，两个文件：控制台日志与对话日志；<b>按天 + 按大小滚动</b>（单片段超 8 MB 就改名封存，另开新的当天片段）；<b>只增不删</b>，要清理只能人工删</td>
-                <td><code>dev\DebugLog.java:24-42</code>、<code>:69-81</code></td>
+                
               </tr>
               <tr>
                 <td><b>调试输入口</b></td>
                 <td>就两件事：① 以任意 QQ 身份（含主人）造一条入站消息（私聊或群聊，或原样的任意事件）—— 落点与真实帧走的<b>同一个入口</b>，去重、黑名单、路由、调度、回合、权限判定一样都不少；② 以框架控制台的身份下一条框架命令（与工具面那条命令是<b>同一条路</b>，没有第二条实现）</td>
                 <td>端口固定 <code>127.0.0.1:2661</code>；只绑回环；凭据必填且与输出口<b>共用同一个</b>；关掉仿真开关时端口照常监听、认证照常能过，但每个动作回"仿真已关"—— <b>绝不表现成"连不上"</b></td>
-                <td><code>dev\DebugSimPort.java:23-77</code>、<code>:44-52</code>；<code>Conf.java:294-300</code></td>
+                
               </tr>
             </tbody>
           </table>
@@ -878,36 +1496,36 @@ if (aclDeny != null) return aclDeny;</code></pre></div>
 
         <h3 class="sec">凭据怎么给</h3>
         <div class="grid-3">
-          <div class="panel reveal"><h3>不开裸口</h3><p>两个口都不允许无凭据裸开：凭据为空就拒绝启动并打一行可读原因（两个口一起拒绝）。命令不带凭据时<b>现场生成一个</b>，写进运行现场凭据文件 <code>dev\DebugPort.java:451-456</code>、<code>:509</code>。</p></div>
-          <div class="panel reveal d1"><h3>凭据文件</h3><p>运行现场凭据文件是唯一真源（名字、主机、端口、进程号、两个口共用的凭据与指纹、时间戳）。指纹用于诊断，<b>绝不回显凭据本身</b> <code>DebugPort.java:563-598</code>、<code>:652</code>、<code>:704-707</code>。</p></div>
-          <div class="panel reveal d2"><h3>不归配置管</h3><p>本机调试口的四个键<b>已整条撤出配置面</b>：它们不再是配置文件里的键，起停只看 <code>ai/debug on|off|status</code> <code>Conf.java:1166-1168</code>、<code>dev\DebugPort.java:70-72</code>。</p></div>
+          <div class="panel reveal"><h3>不开裸口</h3><p>两个口都不允许无凭据裸开：凭据为空就拒绝启动并打一行可读原因（两个口一起拒绝）。命令不带凭据时<b>现场生成一个</b>，写进运行现场凭据文件 <code>dev\DebugPort.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>凭据文件</h3><p>运行现场凭据文件是唯一真源（名字、主机、端口、进程号、两个口共用的凭据与指纹、时间戳）。指纹用于诊断，<b>绝不回显凭据本身</b> <code>DebugPort.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>不归配置管</h3><p>本机调试口的四个键<b>已整条撤出配置面</b>：它们不再是配置文件里的键，起停只看 <code>ai/debug on|off|status</code> <code>Conf.java</code>、<code>dev\DebugPort.java</code>。</p></div>
         </div>
 
         <h3 class="sec">壳层与基板层的分界（这条容易搞错）</h3>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>层</th><th>管什么</th><th>什么时候收</th><th>出处</th></tr></thead>
+            <thead><tr><th>层</th><th>管什么</th><th>什么时候收</th></tr></thead>
             <tbody>
-              <tr><td>壳层</td><td>绑定"当前基板在哪"这个稳定宿主引用 + 装调试落盘 + 控制台捕获的注销</td><td>随壳存在而存在；<b>只有壳卸载</b>才收（停两个口 + 关落盘句柄 + 解绑宿主，且绝不删日志）</td><td><code>dev\DebugShell.java:27-36</code>、<code>:110-136</code></td></tr>
-              <tr><td>命令层</td><td>只管两个端口</td><td><code>off</code> 只停端口，<b>不停落盘、不删任何日志文件</b></td><td><code>DebugShell.java:33-34</code></td></tr>
-              <tr><td>基板层</td><td>什么都不碰调试面</td><td>停基板不等于停观测面</td><td><code>DebugShell.java:35</code></td></tr>
+              <tr><td>壳层</td><td>绑定"当前基板在哪"这个稳定宿主引用 + 装调试落盘 + 控制台捕获的注销</td><td>随壳存在而存在；<b>只有壳卸载</b>才收（停两个口 + 关落盘句柄 + 解绑宿主，且绝不删日志）</td></tr>
+              <tr><td>命令层</td><td>只管两个端口</td><td><code>off</code> 只停端口，<b>不停落盘、不删任何日志文件</b></td></tr>
+              <tr><td>基板层</td><td>什么都不碰调试面</td><td>停基板不等于停观测面</td></tr>
             </tbody>
           </table>
         </div>
         <div class="note warn reveal">
-          <p><span class="n-title">两个口"现取"活基板，绝不缓存</span>：口是在 <code>ai/debug on</code> 时起的，而那条命令故意允许在 <code>ai/start</code> 之前敲（那时只有一个空壳）。真正的基板是 <code>ai/start</code>/<code>ai/restart</code> 时另建的一台。所以两个口每次要用基板都现问现取，<code>ai/start</code> 之前如实报"未启动"，而不是拿着过期的壳 <code>dev\DebugPort.java:128-138</code>、<code>dev\DebugShell.java:45-49</code>。</p>
+          <p><span class="n-title">两个口"现取"活基板，绝不缓存</span>：口是在 <code>ai/debug on</code> 时起的，而那条命令故意允许在 <code>ai/start</code> 之前敲（那时只有一个空壳）。真正的基板是 <code>ai/start</code>/<code>ai/restart</code> 时另建的一台。所以两个口每次要用基板都现问现取，<code>ai/start</code> 之前如实报"未启动"，而不是拿着过期的壳 <code>dev\DebugPort.java</code>、<code>dev\DebugShell.java</code>。</p>
         </div>
 
         <h3 class="sec">调试口自己的硬防护</h3>
         <div class="grid-4">
-          <div class="panel reveal"><h3>单条长度</h3><p>入站单行超过 8192 字符就断开，不让一行把内存撑爆 <code>DebugPort.java:92-93</code>。</p></div>
-          <div class="panel reveal d1"><h3>连接数</h3><p>并发连接上限 4，超了直接拒（回一行忙就关），不让连接堆积 <code>DebugPort.java:95-96</code>。</p></div>
-          <div class="panel reveal d2"><h3>空闲超时</h3><p>一条连接 120 秒内一个字节都没来就自己断，防止连接挂死 <code>DebugPort.java:98-99</code>。</p></div>
-          <div class="panel reveal d3"><h3>认证比对</h3><p>认证用常量时间比对；失败日志限流（同一来源 10 秒内最多一行），防重试把控制台刷爆 <code>DebugPort.java:123-126</code>、<code>:799-805</code>。</p></div>
+          <div class="panel reveal"><h3>单条长度</h3><p>入站单行超过 8192 字符就断开，不让一行把内存撑爆 <code>DebugPort.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>连接数</h3><p>并发连接上限 4，超了直接拒（回一行忙就关），不让连接堆积 <code>DebugPort.java</code>。</p></div>
+          <div class="panel reveal d2"><h3>空闲超时</h3><p>一条连接 120 秒内一个字节都没来就自己断，防止连接挂死 <code>DebugPort.java</code>。</p></div>
+          <div class="panel reveal d3"><h3>认证比对</h3><p>认证用常量时间比对；失败日志限流（同一来源 10 秒内最多一行），防重试把控制台刷爆 <code>DebugPort.java</code>。</p></div>
         </div>
-        <p>调试口自身<b>绝不能</b>让基板起不来或停不下来：一条接受线程 + 每连接一条守护线程，全部包在异常兜底里 <code>DebugPort.java:84-85</code>。它下命令有执行上限（60 秒），等不到就回超时（命令本身可能还在界面上跑）<code>DebugPort.java:101-102</code>。</p>
+        <p>调试口自身<b>不会</b>让基板起不来或停不下来：一条接受线程 + 每连接一条守护线程，全部包在异常兜底里 <code>DebugPort.java</code>。它下命令有执行上限（60 秒），等不到就回超时（命令本身可能还在界面上跑）<code>DebugPort.java</code>。</p>
         <div class="note reveal">
-          <p><span class="n-title">装配不再自动起调试口</span>：装配最后一步只在日志里写一句"本机调试口未自动启动：要看调试面就敲 <code>ai/debug on</code>"，连"读配置试着起一次"都没有 <code>src\sair\v4\Boot.java:782-794</code>。也就是说端口什么时候开只有一个出处，也只有一条能关掉它的路。</p>
+          <p><span class="n-title">装配不再自动起调试口</span>：装配最后一步只在日志里写一句"本机调试口未自动启动：要看调试面就敲 <code>ai/debug on</code>"，连"读配置试着起一次"都没有 <code>src\sair\v4\Boot.java</code>。也就是说端口什么时候开只有一个出处，也只有一条能关掉它的路。</p>
         </div>
       </section>
 
@@ -922,34 +1540,34 @@ if (aclDeny != null) return aclDeny;</code></pre></div>
         <h3 class="sec">不做的十一件事</h3>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>不做</th><th>口径</th><th>出处</th></tr></thead>
+            <thead><tr><th>不做</th><th>口径</th></tr></thead>
             <tbody>
-              <tr><td>没有"通道"这一层抽象</td><td>会话键只有三种形状：群 / 私聊 / 控制台。入站按消息类型直接分流到群聊或对话两张表，没有"适配器 / 通道 / 平台"这些中间抽象，也没有可注册的第二种平台</td><td><code>QqGateway.java:242-244</code>、<code>:414-415</code>、<code>:527-538</code>；<code>ctx\ChatWindow.java:41-48</code></td></tr>
-              <tr><td>不做模型自动路由</td><td><code>model=auto</code> 就是取自动档模型名，"实际调用用的模型"只有一个函数决定：<b>无路由、无分类</b>。视觉对话也走同一条链路</td><td><code>Conf.java:23</code>、<code>:640-645</code>；<code>ai\DeepSeek.java:346-353</code></td></tr>
-              <tr><td>不做业务能力</td><td>控制台命令表只保留"对基板操作"的命令；业务能力一律不在基板与控制台命令里</td><td><code>term\Cmd.java:20-22</code>、<code>:1391-1392</code></td></tr>
-              <tr><td>不做目录监听</td><td>装载时机只剩"启动这一次扫描"与"显式重载"两种；曾经有过的"按修改时间轮询自动重扫"已整条删除</td><td><code>Boot.java:741-743</code></td></tr>
-              <tr><td>不识别媒体内容</td><td>语音 / 视频 / 文件只出标签，不做识别；折叠转发只出标签，内容未展开（展开那几个键已登记但没人读）</td><td><code>qq\MediaRender.java:156-158</code>、<code>:166-168</code>、<code>:178-195</code>；<code>Conf.java:809-815</code></td></tr>
-              <tr><td>默认拒绝</td><td>三个身份里只有主人恒全权；普通用户对 A/B/E/T 一位都没有、对 C 只有读。位名认不出返回哨兵，判定链上拿到它就当"没有权限"。权限面没装配时，连接闸门按<b>拒绝</b>处理</td><td><code>Acl.java:145-181</code>；<code>Bits.java:15-16</code>；<code>Boot.java:530-536</code></td></tr>
-              <tr><td>不给运行表开后门</td><td>好感度、定时表、子 Agent 台账、通用键值、单元索引、出站台账这六张运行表<b>不进可查询库</b>；把好感度做成"库"就等于让达标的人绕过授权动作直写自己的数值</td><td><code>store\EnvLibs.java:16-22</code>；<code>store\Lib.java:11-26</code></td></tr>
-              <tr><td>不自动清日志</td><td>调试落盘只增不删，连最旧的分片也只改名归档；长期运行日志目录会持续变大，清理是人工动作</td><td><code>dev\DebugLog.java:39-40</code></td></tr>
-              <tr><td>不做静默失败</td><td>队列溢出要回一句可读文案；合并装不下也要回；丢掉的图要带序号与原因；通知认不出也要留一行标签；黑名单读不出来按"没拉黑"处理（宁可多回一句，也不让消息静默消失）</td><td><code>schedule\Lanes.java:32-34</code>；<code>qq\MediaAttach.java:42-46</code>；<code>qq\NoticeRender.java:35-37</code>；<code>QqGateway.java:898-912</code></td></tr>
-              <tr><td>不做"停基板 = 停观测面"</td><td>停基板一个字节都不碰调试面；调试落盘随壳存在而存在，只有壳卸载才收，而且绝不删日志</td><td><code>dev\DebugShell.java:27-36</code>、<code>:110-116</code></td></tr>
-              <tr><td>不结束进程</td><td><code>ai/exit</code> 只停基板、不改配置、不卸载插件；它<b>不结束进程</b>，而壳卸载恰恰是调试面的终点 —— 所以无控制台场景下这条路不可逆，见 <a href="#lifecycle">生命周期 · 关停</a></td><td><code>V4Activity.java:394-414</code>；<code>dev\DebugPort.java:59-60</code>；<code>term\Cmd.java:1366</code></td></tr>
+              <tr><td>没有"通道"这一层抽象</td><td>会话键只有三种形状：群 / 私聊 / 控制台。入站按消息类型直接分流到群聊或对话两张表，没有"适配器 / 通道 / 平台"这些中间抽象，也没有可注册的第二种平台</td></tr>
+              <tr><td>不做模型自动路由</td><td><code>model=auto</code> 就是取自动档模型名，"实际调用用的模型"只有一个函数决定：<b>无路由、无分类</b>。视觉对话也走同一条链路</td></tr>
+              <tr><td>不做业务能力</td><td>控制台命令表只保留"对基板操作"的命令；业务能力一律不在基板与控制台命令里</td></tr>
+              <tr><td>不做目录监听</td><td>装载时机只剩"启动这一次扫描"与"显式重载"两种；曾经有过的"按修改时间轮询自动重扫"已整条删除</td></tr>
+              <tr><td>不识别媒体内容</td><td>语音 / 视频 / 文件只出标签，不做识别；折叠转发只出标签，内容未展开（展开那几个键已登记但没人读）</td></tr>
+              <tr><td>默认拒绝</td><td>三个身份里只有主人恒全权；普通用户对 A/B/E/T 一位都没有、对 C 只有读。位名认不出返回哨兵，判定链上拿到它就当"没有权限"。权限面没装配时，连接闸门按<b>拒绝</b>处理</td></tr>
+              <tr><td>不给运行表开后门</td><td>好感度、定时表、子 Agent 台账、通用键值、单元索引、出站台账这六张运行表<b>不进可查询库</b>；把好感度做成"库"就等于让达标的人绕过授权动作直写自己的数值</td></tr>
+              <tr><td>不自动清日志</td><td>调试落盘只增不删，连最旧的分片也只改名归档；长期运行日志目录会持续变大，清理是人工动作</td></tr>
+              <tr><td>不做静默失败</td><td>队列溢出要回一句可读文案；合并装不下也要回；丢掉的图要带序号与原因；通知认不出也要留一行标签；黑名单读不出来按"没拉黑"处理（宁可多回一句，也不让消息静默消失）</td></tr>
+              <tr><td>不做"停基板 = 停观测面"</td><td>停基板一个字节都不碰调试面；调试落盘随壳存在而存在，只有壳卸载才收，而且绝不删日志</td></tr>
+              <tr><td>不结束进程</td><td><code>ai/exit</code> 只停基板、不改配置、不卸载插件；它<b>不结束进程</b>，而壳卸载恰恰是调试面的终点 —— 所以无控制台场景下这条路不可逆，见 <a href="#lifecycle">生命周期 · 关停</a></td></tr>
             </tbody>
           </table>
         </div>
 
         <h3 class="sec">"计划中／未实现"清单</h3>
         <div class="note warn reveal">
-          <p><span class="n-title">这些键现在写进配置也不会改变行为</span>：折叠转发展开的四个键（开关、节点数上限、深度上限、字符上限）已在配置面登记，但当前<b>没有任何代码读它们</b> <code>Conf.java:809-815</code>、<code>:852-862</code>；同一批里只有引用展开总开关与缓存有效期被真正读取 <code>Conf.java:818-832</code>。所以"转发内容自动展开"这项能力<b>计划中／未实现</b>，现状是一行 <code>[折叠转发 id=… 未展开]</code> 标签 <code>qq\MediaRender.java:166-168</code>。</p>
+          <p><span class="n-title">这些键现在写进配置也不会改变行为</span>：折叠转发展开的四个键（开关、节点数上限、深度上限、字符上限）已在配置面登记，但当前<b>没有任何代码读它们</b> <code>Conf.java</code>；同一批里只有引用展开总开关与缓存有效期被真正读取 <code>Conf.java</code>。所以"转发内容自动展开"这项能力<b>计划中／未实现</b>，现状是一行 <code>[折叠转发 id=… 未展开]</code> 标签 <code>qq\MediaRender.java</code>。</p>
         </div>
         <div class="note reveal">
-          <p><span class="n-title">另外两条已知的能力边界</span>：① 识图组件的计数是<b>内存计数</b> —— 跨日归零、进程重启后从 0 重计、不落盘，不要把它当持久账本用，也不要拿它算"历史总量" <code>ctx\RecognizerState.java:25-27</code>；② 动态聊天窗口<b>不报</b>"还有多少条更早的"，因为那要额外一条统计查询 —— 她看到的是"窗口里有几行、多少字符" <code>ctx\ChatWindow.java:54-60</code>。</p>
+          <p><span class="n-title">另外两条已知的能力边界</span>：① 识图组件的计数是<b>内存计数</b> —— 跨日归零、进程重启后从 0 重计、不落盘，别把它当持久账本用，也别拿它算"历史总量" <code>ctx\RecognizerState.java</code>；② 动态聊天窗口<b>不报</b>"还有多少条更早的"，因为那要额外一条统计查询 —— 她看到的是"窗口里有几行、多少字符" <code>ctx\ChatWindow.java</code>。</p>
         </div>
 
         <h3 class="sec">一条判据：找不到那个抽象，就是真的没有</h3>
         <div class="note ok reveal">
-          <p><span class="n-title">怎么自己复核</span>：本页每一条"不做 X"都对应"代码里搜不到 X 的实现"——去仓库里搜那个词与它可能的名字，搜不到任何读它的调用点，它就只是"登记过"，不是"生效中"。反过来，每一条"能做 Y"都给了 <code>文件:行号</code>，打开就能看见那段代码。</p>
+          <p><span class="n-title">边界怎么读</span>：本页每一条"不做 X"都对应"代码里搜不到 X 的实现"。反过来，每一条"能做 Y"都标了出处（类名或文件名），照着就能找到那段实现。</p>
         </div>
 
         <div class="grid-3">

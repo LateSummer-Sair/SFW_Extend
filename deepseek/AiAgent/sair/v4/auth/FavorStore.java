@@ -14,4 +14,13 @@ public interface FavorStore {
     List<JsonObject> top(int limit);
 
     int clear();
+
+    /** 按人建账（首次打交道建一行，已有则不动）。 */
+    void ensure(long qq);
+
+    /** 记一笔流水（谁、加减多少、改完多少、什么 op、谁改的、为什么）。 */
+    void log(long qq, double delta, double after, String op, String by, String why);
+
+    /** 某人的好感度流水（新 → 旧）。 */
+    List<JsonObject> events(long qq, int limit);
 }
