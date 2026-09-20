@@ -18,8 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import sair.sys.SairCons;
 import sair.v4.Boot;
 import sair.v4.Conf;
-import sair.v4.auth.Auth;
-import sair.v4.auth.Caller;
+import sair.v4.auth.Acl;
 import sair.v4.ctx.Sink;
 import sair.v4.kit.Fs;
 import sair.v4.kit.Out;
@@ -51,7 +50,8 @@ import sair.v4.term.SfwOut;
  *   [debug:end]                    ← 结束哨（正文里出现同名字符串会被加一个前导空格转义）
  * 命令表：
  *   ping                      → pong
- *   status                    → 一行摘要（就绪/技能数/工具面/ext/六库/napcat/最近错误行数）
+ *   status                    → 一行摘要（就绪/技能数/工具面/ext/六库/napcat/最近错误行数）+ 事实行
+ *                               （事实行含 [acl] 技能管控表：N 条（Run x / Ban y）、覆盖 op k 个）
  *   read [sinceSeq] [maxChars]→ 增量读控制台捕获（游标式）；sinceSeq 省略=从最旧
  *   tail [N]                  → 读最近 N 条（N 省略=50）
  *   hist [N]                  → 框架命令历史最近 N 条
@@ -611,17 +611,9 @@ public final class DebugPort {
             File root = boot == null ? new File(".") : boot.root();
             File f = new File(root, "debug-port.json");
             runtimeRoot = root;
-            // 写前判定（防御性）：debug-port.json 是 B 类受保护资源；她自己（SYSTEM）写 B 类放行。
-            long mq = 0L;
-            Auth a = null;
-            try {
-                if (boot != null && boot.conf() != null) { mq = boot.conf().masterQQ(); a = boot.auth(); }
-            } catch (Throwable ignored) { }
-            String deny = Conf.needWrite(a, Caller.systemActor(mq), f);
-            if (deny != null) {
-                warn(out, "写运行现场凭据文件被拦：" + deny);
-                return;
-            }
+            // 写前**没有权限判定**（新口径：权限只管控技能 / op，资源不再有位、不再按路径判）。
+            // 这一笔是基板内部动作（写自己的运行现场凭据），不是技能调用 —— 所以没有可判的 op，
+            // 也不该借身份去"临时放行一次资源写"（旧口径那句 B 类受保护资源的 needWrite 已随资源位一起退休）。
             Fs.write(f, sair.v4.kit.J.pretty(o));
         } catch (Throwable t) {
             warn(out, "写运行现场凭据文件失败（调试口照常可用，但客户端要显式给 token）：" + t);
@@ -980,6 +972,7 @@ public final class DebugPort {
                 }
             }
             sb.append("\n").append(facts());
+            sb.append("\n").append(aclFact(boot));
             sb.append("\n").append(sair.v4.dev.DebugLog.facts());
             sb.append("\n").append(sair.v4.dev.DebugSimPort.facts());
         } catch (Throwable e) {
@@ -1001,6 +994,26 @@ public final class DebugPort {
 
     /** 缓冲事实行（{@code [console] lines=… seq_head=…}）。 */
     private String facts() { return ConsoleTap.facts(SfwOut.cursor()); }
+
+    /**
+     * 权限表事实行（{@code status} 里带一行，新口径：权限只剩"身份 × op → Ban/Run/空"，
+     * 读的是<b>合并后</b>的整张表：core + 每个技能自己的 {@code perms.jsonc}）。
+     *
+     * <p>数字一律问账本自己（{@link Acl#stat()}，形如
+     * {@code 3 条（Run 2 / Ban 1），覆盖 op 3 个}）—— 调试面只转述，不自己数、不编兜底值：
+     * 权限面没装 / 账本读不到就照实说"未装配 / 没能装载"，那本身就是要看的事实。</p>
+     */
+    private String aclFact(Boot boot) {
+        try {
+            if (boot == null || boot.auth() == null) return "[acl] 权限表：权限面未装配";
+            Acl a = boot.auth().acl();
+            if (a == null) return "[acl] 权限表：没能装载（" + Acl.CORE_FILE_NAME + " / "
+                    + Acl.SKILL_FILE_NAME + "）";
+            return "[acl] 权限表：" + a.stat() + "；" + a.sourceStat();
+        } catch (Throwable t) {
+            return "[acl] 权限表：读取异常（" + oneLine(String.valueOf(t)) + "）";
+        }
+    }
 
     /** 最近 N 条捕获输出（不是增量，是"现在往回看 N 条"）。 */
     private String tail(int n) {
@@ -1117,6 +1130,7 @@ public final class DebugPort {
                     + Conf.DEF_DEBUG_SIM_PORT + "，客户端 _sim.ps1）\n"
           + "  ping                        连通性\n"
           + "  status                      一行摘要（ready/loading/degraded/skills/tools/ext/napcat/tap/lines/seq/err_lines）+ 事实行\n"
+          + "                              （事实行含 [acl] 技能管控表：N 条（Run x / Ban y）、覆盖 op k 个）\n"
           + "  read [sinceSeq] [maxChars]  增量读控制台捕获（**内存窗口**，游标式）：把上次回的 seq 当 sinceSeq 传回来只拿新增\n"
           + "  tail [N]                    读最近 N 条捕获输出（默认 50，上限 1000）\n"
           + "  dump [sinceSeq]             **一次取全部**控制台输出（从落盘 logs\\console-<yyyyMMdd>.log 读，不受内存窗口限制）\n"

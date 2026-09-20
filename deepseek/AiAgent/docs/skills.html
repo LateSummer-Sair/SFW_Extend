@@ -1,0 +1,1758 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>技能开发 · AiAgent V4 文档</title>
+<meta name="description" content="AiAgent V4 技能开发手册：一个技能文件夹怎么摆（同名 md / prompt.md / .java / perms.jsonc）、md 的 front matter 每个键怎么填、Skill 与 Args 与 Host 接口怎么用、perms.jsonc 的格式与语义、Hooked 与四个扩展点接口逐条讲、从零到一个能用的技能、常见坑与怎么查。">
+<link rel="stylesheet" href="css/site.css">
+<noscript><style>.reveal{opacity:1 !important;transform:none !important}#bg-canvas,.scanline{display:none !important}</style></noscript>
+</head>
+<body data-page="skills">
+
+<canvas id="bg-canvas" aria-hidden="true"></canvas>
+<div class="scanline" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="brand-mark">V4</span>
+    <span class="brand-text"><b>AiAgent V4</b><span>SFW PLUGIN DOCS</span></span>
+  </a>
+    <nav class="nav" aria-label="页面导航">
+    <a href="index.html"><span class="n">01</span>总览</a>
+    <a href="usage.html"><span class="n">02</span>使用</a>
+    <a href="deploy.html"><span class="n">03</span>部署</a>
+    <a href="config.html"><span class="n">04</span>配置</a>
+    <a href="commands.html"><span class="n">05</span>命令</a>
+    <a href="capabilities.html"><span class="n">06</span>能力</a>
+    <a href="perms.html"><span class="n">07</span>权限</a>
+    <a href="files.html"><span class="n">08</span>文件</a>
+    <a href="architecture.html"><span class="n">09</span>实现</a>
+    <a href="migration.html"><span class="n">10</span>升级</a>
+    <a href="skills.html"><span class="n">11</span>技能开发</a>
+    <a href="changelog.html"><span class="n">12</span>更新日志</a>
+  </nav>
+  <div class="topbar-meta">
+    <span class="chip live">纯静态</span>
+    <span class="chip">无外链资源</span>
+  </div>
+  <button class="burger" type="button" aria-label="展开导航" aria-expanded="false">☰</button>
+</header>
+<div class="progress" id="progress" aria-hidden="true"></div>
+
+<main class="shell">
+  <div class="doc">
+
+<section class="hero">
+      <span class="eyebrow">技能开发 · 从零写一个</span>
+      <h1>一个文件夹<br><span class="grad">就是一个能力</span></h1>
+      <p class="lede">
+        技能是外挂层：一个<b>文件夹</b> + 一份<b>同名 md</b>，再加任意几份 <code>.java</code>，就是一个能力。
+        基板启动时把它编进内存、注册成工具、挂上事件钩子与扩展点；文件夹删掉，这个能力就彻底消失。
+        这一页把每一样东西该怎么写讲到底 —— <b>目录怎么摆</b>、<b>md 的每个键填什么</b>、
+        <b>代码里 <code>call</code> 与 <code>Host</code> 怎么用</b>、<b><code>perms.jsonc</code> 怎么填</b>、
+        <b>钩子与四个扩展点接口各管什么</b>，最后给一份从零到能用的清单。
+      </p>
+      <div class="hero-actions">
+        <a class="btn" href="#layout">先看目录怎么摆 →</a>
+        <a class="btn amber" href="#full">直接照做一遍</a>
+        <a class="btn ghost" href="#pitfalls">踩坑了怎么查</a>
+      </div>
+    </section>
+
+    <div class="doc-body" id="doc-body">
+
+      <!-- ============ 1 ============ -->
+      <section class="chapter" id="layout">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">01 / 布局</span>
+          <h2>一个技能长什么样：目录与每个文件</h2>
+          <p class="chapter-desc">技能的最小单位是<b>一个文件夹</b>。文件夹名字就是技能名，文件夹里那份<b>同名 md</b> 是它的身份证 —— 少了那份 md，这个文件夹等于不存在。剩下的东西按需要放：要提供工具就放 <code>.java</code>，要给模型一句更清楚的话就写 <code>airun</code>，要存文案与阈值就放 <code>prompt.md</code>，要让别人也能用就放 <code>perms.jsonc</code>。</p>
+        </header>
+
+        <h3 class="sec">目录长这样（把每个位置都标出来）</h3>
+        <div class="code" data-lang="text">
+          <div class="code-head"><span class="lang">text</span><span class="path">&lt;数据根&gt;\skills\例子\ 的完整形状</span><button class="copy" type="button">复制</button></div>
+          <pre><code>&lt;数据根&gt;\                              数据根出厂是 SairFrameWork\data\AiAgent-V4\
+└─ skills\                             技能库：这一层下面每个文件夹就是一个技能
+   └─ 例子\                            技能名 = 文件夹名（可用中文）
+      ├─ 例子.md                      必需：与文件夹同名的 md（front matter 声明 + 正文说明书）
+      ├─ Example.java                 可选：工具入口类，几个都行
+      ├─ Helper.java                  可选：同一个技能里的其它类，一起编译
+      ├─ prompt.md                    可选：文案 / 阈值 / 词表，技能运行时自己读
+      ├─ perms.jsonc                  可选：权限表（谁能用这个技能的工具）
+      └─ assets\                      可选：自带的图片、词典、模板等，基板不读，技能自己读
+         └─ hi.png</code></pre>
+        </div>
+        <p class="t-cap">技能名 = 文件夹名 = <code>Host.skillName()</code> 的返回值；md 名也要与它逐字一致。中文技能名可以照用（真技能几乎都是中文名），只有工具名那一项要合接口规范，见下面「技能名带中文会怎样」。</p>
+
+        <h3 class="sec">每个位置放什么、少了会怎样</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>位置</th><th>必需吗</th><th>它是干什么的</th><th>少了 / 写错了会怎样</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>&lt;技能名&gt;.md</code></td>
+                <td><b>必需</b></td>
+                <td>这个名字的 md 是技能身份。开头的 <code>---</code> 之间是 <b>front matter</b>（机器读的声明），下面的正文是给人看的说明书。</td>
+                <td>找不到 → 这个技能状态 <code>ERROR</code>，错误是「缺少同名文档 <code>&lt;技能名&gt;.md</code>」，它在工具面里不存在。</td>
+              </tr>
+              <tr>
+                <td><code>*.java</code></td>
+                <td>可选</td>
+                <td>技能的可执行代码。运行期编译到内存里，磁盘上不留 <code>.class</code> 文件。</td>
+                <td>一份都没有 → 这个技能是<b>纯文档 / 纯钩子</b>状态：md 里的 <code>tool:</code> 声明了工具也不会注册（没代码可跑）。</td>
+              </tr>
+              <tr>
+                <td><code>prompt.md</code></td>
+                <td>可选</td>
+                <td>两件事：① 技能运行时用 <code>Host.skillDir()</code> 读它，把文案、阈值、词表放在里面（改完即时生效，不用重编译）；② md 里写了 <code>inject:</code> 时，装载期把整篇注入到那个槽位。</td>
+                <td>不写也能跑，但技能里就得把文案硬写在 java 里；声明了 <code>inject:</code> 却没有这份文件 → 什么也不注入（不会报错）。</td>
+              </tr>
+              <tr>
+                <td><code>perms.jsonc</code></td>
+                <td>可选</td>
+                <td>这个技能提供的工具<b>给谁用</b>。与 md 同级放在技能目录里。</td>
+                <td>不写 → 这个技能的全部 op 对 <code>ALLUSER</code> 一律不授权（默认拒绝），工具只有主人与她本人用得到。详见<a href="#perms">第 04 节</a>。</td>
+              </tr>
+              <tr>
+                <td>图片、词典、模板等</td>
+                <td>可选</td>
+                <td>技能自己的数据。基板不解析它们，也不会因为多一个文件而多做一件事。</td>
+                <td>没影响。技能用 <code>h.skillDir()</code> 拿到自己的目录再去读。</td>
+              </tr>
+              <tr>
+                <td><code>*.class</code> / <code>*.jar</code></td>
+                <td>不要放</td>
+                <td>—</td>
+                <td>技能目录不是 classpath：编译在内存里做，磁盘上的类文件不会被加载，放了也没有作用。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">扫描只认这些名字：md 是 <code>文件夹名 + ".md"</code>，代码是 <code>.java</code>，两者之外的扩展名基板都不看。目录里可以再建子目录，<b>技能目录本身以及它下面两级子目录</b>里的 <code>.java</code> 都会被编进去。</p>
+
+        <h3 class="sec">md 名要不要跟目录名一致：要，而且 <code>name:</code> 也要一致</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">md 名要与目录名逐字相同</h4>
+            <p>装载器直接按 <code>目录名 + ".md"</code> 找文件，所以 <code>data\skills\天气查询\天气查询.md</code> 是唯一会被读到的路径；叫 <code>weather.md</code> 就等于这个技能没有 md。</p>
+            <p>front matter 里如果写了 <code>name:</code>，它的值也要与目录名逐字相同。不同 → 状态 <code>ERROR</code>，错误文案会同时点名声明名与文件夹名（<code>front matter name</code> 与 <code>文件夹名</code> 不一致）。中文、数字、下划线都行，差一个空格也算不一致。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">真技能是怎么写的</h4>
+            <p>真技能一律让三者对齐：目录 <code>天气查询\</code>、md <code>天气查询.md</code>、front matter 里 <code>name: 天气查询</code>。<code>name:</code> 这一行其实可以不写（不写就不做校验），但写上以后，技能名在 md 里一眼可见，改动时不容易错。</p>
+            <p><code>tool:</code> 与技能名是两件事：技能叫<code>天气查询</code>，工具可以叫 <code>weather</code>。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">放几个 <code>.java</code>、类名有没有要求</h3>
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">份数</span><span class="k-def">零到任意多份</span><span class="badge info">一起编译</span></div>
+            <dl>
+              <dt>怎么摆</dt><dd>同一个技能目录里的所有 <code>.java</code> 一起编译、共用一个类加载器，类和类之间可以互相引用（<code>情绪</code> 这个技能就是 7 份 java 放一起）。</dd>
+              <dt>一句话说明</dt><dd>工具入口放一个类，扩展点放另一个类是最自然的写法；基板会扫这个技能的<b>每个顶层类</b>，谁实现了接口就注册谁，不用把两件事硬塞进一个类。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">类名与包名</span><span class="k-def">类名不限，不写 package</span><span class="badge mute">真技能都是这样</span></div>
+            <dl>
+              <dt>怎么写</dt><dd>类名随你起，<b>不写 <code>package</code></b>，类的全名就是类名本身（<code>WeatherSkill</code>）。要用基板的类就 <code>import sair.v4.skill.Skill;</code> 这样引进来。</dd>
+              <dt>入口类怎么定</dt><dd>按这个次序找：① md 里写了 <code>entry:</code> 就用它（写短名或全名都认）；② 第一份实现了 <code>Skill</code> 接口的顶层类；③ 带 <code>airun</code> 方法的顶层类；④ 第一个顶层类。同一批类名按字母序，所以每次装出来的入口都是同一个。</dd>
+              <dt>找不到入口</dt><dd>有 java 却没找到任何顶层类 → 状态 <code>ERROR</code>，错误是「找不到入口类」。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">内部类</span><span class="k-def">可以写，但不当身份</span><span class="badge warn">跳过</span></div>
+            <dl>
+              <dt>规则</dt><dd>名字里带 <code>$</code> 的内部类、匿名类不会被当成插件身份（不拿来当入口类，也不拿去注册扩展点），但可以被自己的外部类正常使用。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <h3 class="sec">技能名带中文会怎样：目录与 md 保持中文，工具名自动英文化</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">能带中文的部分</h4>
+            <p>文件夹名、md 名、front matter 的 <code>name:</code>、<code>description:</code>、正文、<code>prompt.md</code> 全都可以是中文，真技能几乎全是中文名。</p>
+            <p>可执行代码里的中文也一样正常，源码按 UTF-8 编译。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">不能带中文的那一处：<code>tool:</code></h4>
+            <p>模型接口对函数名只收 <code>[a-zA-Z0-9_-]</code> 且不超过 64 个字符。技能 md 的 <code>tool:</code> 是手写的，写成中文（<code>tool: 发表情包</code>）不是「这个工具不可用」，而是服务端直接拒掉<b>整条请求</b>。</p>
+            <p>基板的做法不是报错，而是<b>自动英文化注册</b>：把声明名转成 <code>tp_</code> 前缀的名字 —— 名字里的 ASCII 字母数字保留，再加一段由声明名算出来的稳定短后缀（同一份 md 每次算出来都一样，重启也不变）；纯中文名就是 <code>tp_</code> 加那段后缀。撞车时按确定规则让位（<code>-2</code>、<code>-3</code>）。<b>目录名与 md 名保持中文不动</b>。</p>
+          </div>
+        </div>
+        <div class="note warn reveal">
+          <p><span class="n-title">注册名才是能用在各处的那个名字</span>：权限表里的 op、<code>ai/perm run</code> 敲的参数、代码里 <code>h.need("…")</code> 传的名字，用的都是<b>注册名</b>。声明名与注册名的对照，启动时打一行 <code>[skills]</code> 日志，技能列表里也带 <code>tool_declared</code> 与 <code>tool_note</code> 两句说明。所以新技能最省事的写法就是一开始就把 <code>tool:</code> 写成 ASCII 名字，别让基板替你改名。</p>
+        </div>
+        <div class="note bad reveal">
+          <p><span class="n-title">工具名与基板内置工具重名 = 直接失败</span>：基板自己那批工具名是保留名（<code>napcat</code>、<code>console</code>、<code>exec</code>、<code>prompt</code>、<code>model</code>、<code>perm</code>、<code>store</code>、<code>tools</code>、<code>skill</code>、<code>ctx</code>、<code>config</code>、<code>agent</code>、<code>alarm</code>、<code>sendimage</code> 这一类）。技能声明的工具名撞上它们 → 状态 <code>ERROR</code>，错误是「与基板工具重名（基板工具名是保留名，请改名）」，这个技能整条不装。</p>
+        </div>
+
+        <h3 class="sec">一个技能提供几把工具</h3>
+        <div class="panel reveal">
+          <p><b>一个技能最多一把工具</b>：<code>tool:</code> 是单个名字，不是数组。工具里的「多个功能」靠一个选择子参数（真技能里习惯叫 <code>op</code>）分动作，权限按 <code>工具名.动作名</code> 一条条分开写 —— 这样「允许他记一笔」与「允许他删别人的」在表里就是两行，而不是一个开关。</p>
+          <p>另一种技能干脆<b>不提供工具</b>：md 里不写 <code>tool:</code>，只写 <code>hooks:</code> 与 java 里实现的扩展点接口。这种技能在 <code>ai/tools</code> 里看不到，模型也不能调它，它的能力全挂在事件与回合上（<code>私聊输入态</code>、<code>情绪</code> 都是这一种）。</p>
+        </div>
+
+        <h3 class="sec">最小可用技能 与 完整技能</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">最小可用：一个文件夹 + 两份文件</h4>
+            <p>只做一件事、只给一个动作、不需要配置与权限口子：</p>
+            <div class="code" data-lang="text">
+              <div class="code-head"><span class="lang">text</span><span class="path">data\skills\例子\（最小可用）</span><button class="copy" type="button">复制</button></div>
+              <pre><code>例子\
+├─ 例子.md          写死工具名与参数表
+└─ Example.java     implements Skill，call() 里先判 op 再干活</code></pre>
+            </div>
+            <p>这样就能被 <code>ai/tools</code> 看到、被模型调用；<code>perms.jsonc</code> 不写就是「只有主人与她本人能用」。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">完整技能：该有的都摆上</h4>
+            <p>多动作、要配置、要别人也能用、还挂一个回合钩子：</p>
+            <div class="code" data-lang="text">
+              <div class="code-head"><span class="lang">text</span><span class="path">data\skills\例子\（完整）</span><button class="copy" type="button">复制</button></div>
+              <pre><code>例子\
+├─ 例子.md          声明 tool / hooks / airun（说明、返回值、参数表）
+├─ Example.java     implements Skill, Hooked：工具入口 + 消息钩子
+├─ ExampleProvider.java  implements ContextProvider：每轮注入一段
+├─ prompt.md        全部文案、阈值、词表（运行时读，改完即时生效）
+├─ perms.jsonc      这个技能的工具与它的数据给谁用（可选）
+└─ assets\hi.png    技能自己的素材</code></pre>
+            </div>
+            <p>两个类各管一件事、一起编译，基板两个都会注册。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">改完什么时候生效</h3>
+        <div class="note reveal">
+          <p><span class="n-title">基板不监听目录</span>：加载时机只有两个 —— <b>启动时扫一次</b>，以及<b>显式重载</b>（控制台 <code>ai/skill reload</code>，或模型侧 <code>skill</code> 工具的 <code>op=reload</code>）。改了 md、java、prompt.md 之后不重载，就看不出任何变化。</p>
+          <p>重载会不会重编，看这个技能目录的内容有没有变（md 的修改时间与大小、每个 <code>.java</code> 的修改时间与大小、<code>prompt.md</code> 的修改时间与大小）。只改了技能自己读的素材文件（比如 <code>assets</code> 里的图片）不在这个判断里，但那种文件本来就是运行时现读的，不影响。</p>
+        </div>
+      </section>
+
+      <!-- ============ 2 ============ -->
+      <section class="chapter" id="md">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">02 / 文档</span>
+          <h2>同名 md 怎么写：front matter 逐键讲解</h2>
+          <p class="chapter-desc">md 分两半。<b>上半</b>是夹在两行 <code>---</code> 之间的 front matter，机器只读这一半：工具叫什么、给模型看什么话、参数表长什么样、挂哪些钩子。<b>下半</b>是正文说明书，给人看的，基板一个字都不喂给模型。这一节把上半能认的每个键都列出来，并给一份能直接抄的模板。</p>
+        </header>
+
+        <h3 class="sec">先认边界：front matter 从哪开始、到哪结束</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">认边界的三条规则</h4>
+            <ul class="plain">
+              <li>文件<b>第一处非空行</b>要是 <code>---</code>（前后空格随便），它才是起始行；第一处非空行是别的内容，整个文件按「没有 front matter」处理，于是所有声明键都不生效 —— 这时候 md 只是一份说明书，技能不提供工具。</li>
+              <li>再往下找到<b>下一个</b> <code>---</code>，它是结束行。两行之间的内容才是声明区。</li>
+              <li>结束行下面的全部内容就是正文说明书，<code>ai/skill read &lt;技能名&gt;</code> 会把它原样打出来。</li>
+            </ul>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">声明区认的语法（一个很小的 YAML 子集）</h4>
+            <div class="code" data-lang="text">
+              <div class="code-head"><span class="lang">text</span><span class="path">声明区能写的四种形状</span><button class="copy" type="button">复制</button></div>
+              <pre><code>key: value              一行一个键，冒号后面是值
+key: [a, b, c]          行内数组，按逗号切开
+key:                    冒号后面留空 = 下面是个子块
+  sub: value            子块（缩进决定层级）
+list:
+  - a                   子块也可以是一串列表项
+  - b</code></pre>
+            </div>
+            <p>除此之外还有两件小事：整行以 <code>#</code> 开头的行是注释（跳过）；值两端成对的单引号或双引号会被剥掉。锚点、多行块、引号转义这些高级写法都不认。</p>
+          </div>
+        </div>
+        <div class="note warn reveal">
+          <p><span class="n-title">缩进只用空格，一行一个冒号</span>：认缩进时只数行首的空格数，<b>Tab 不算</b> —— 一个 Tab 会被当成第零层。缩进比上一层更深的行如果不在子块位置上，会被整行跳过，于是那个键就像没写过一样。声明区里也只看每行<b>第一个</b>冒号：值是 <code>时间: 12:30</code> 这种带冒号的东西时，键会被切错，把值整体加引号也救不回来（引号是在切分之后才剥的）。</p>
+        </div>
+
+        <h3 class="sec">每个键：名字、取值范围、默认值、写错的后果</h3>
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">name</span><span class="k-def">字符串，默认空</span><span class="badge info">技能名</span></div>
+            <dl>
+              <dt>它是干嘛的</dt><dd>技能名，字符上要与文件夹名逐字相同。</dd>
+              <dt>怎么写</dt><dd><code>name: 天气查询</code>。可以不写；写了就参与校验。</dd>
+              <dt>写错的后果</dt><dd>与文件夹名不一致 → 这个技能状态 <code>ERROR</code>，整条不装，错误文案点名两个名字。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">description</span><span class="k-def">字符串，默认空</span><span class="badge mute">一句话</span></div>
+            <dl>
+              <dt>它是干嘛的</dt><dd>一句话概括这个技能。它有两个用处：技能列表里显示的那一句；以及当 <code>airun.description</code> 没写时，<b>顶上来当工具说明</b>给模型看。</dd>
+              <dt>怎么写</dt><dd>一句短话，说清「提供什么能力」，不要在这里讲权限、不要写长段落。</dd>
+              <dt>写错的后果</dt><dd>写空不报错，但模型看不到这把工具是干什么的，容易猜错用法。真要给模型看的说明写在 <code>airun.description</code> 里更准确（那里的写法要求不同，见下）。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">tool</span><span class="k-def">字符串，默认空</span><span class="badge ok">决定有没有工具</span></div>
+            <dl>
+              <dt>它是干嘛的</dt><dd>这把工具给模型看、给模型调用的名字。<b>不写 <code>tool:</code> 就没有工具</b>：即使 java 里实现了 <code>Skill</code>，也只在事件钩子与扩展点上生效，模型看不到它。</dd>
+              <dt>取值范围</dt><dd>只收 <code>a-z A-Z 0-9 _ -</code>，1 到 64 个字符。中文名会被自动英文化成 <code>tp_</code> 前缀的注册名（见<a href="#layout">第 01 节</a>）。基板内置工具名是保留名，撞上就是 <code>ERROR</code>。</dd>
+              <dt>写错的后果</dt><dd>不合规范 → 改名注册，权限表与 <code>h.need(...)</code> 里要跟着用<b>注册名</b>；与基板工具重名 → 整条不装。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">hooks</span><span class="k-def">数组，默认空</span><span class="badge info">事件钩子</span></div>
+            <dl>
+              <dt>它是干嘛的</dt><dd>声明这个技能想接哪些事件。取值只有四个：<code>on_timer</code>（基板唯一心跳）、<code>on_message</code>（一条入站 QQ 消息）、<code>on_request</code>（好友申请 / 群邀请）、<code>on_notice</code>（通知类事件：戳一戳、撤回、进群、禁言这类，只读留痕）。</dd>
+              <dt>怎么写</dt><dd>行内数组 <code>hooks: [on_message, on_timer]</code>，或逗号（空格也行）分隔的一行 <code>hooks: on_message, on_timer</code>。两者都认。</dd>
+              <dt>写错的后果</dt><dd>名字写错 → 这个钩子永远不会被派到这个技能，启动日志里会有一行说明「声明了钩子 X，但入口类里没有匹配的方法」只有在名字对而上层没实现时才会出现；名字拼错时连这一行都没有，只能靠 <code>ai/skill list</code> 里显示的 <code>hooks=</code> 去对。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">inject</span><span class="k-def">字符串，默认空</span><span class="badge warn">配 prompt.md 用</span></div>
+            <dl>
+              <dt>它是干嘛的</dt><dd>把同目录 <code>prompt.md</code> 的<b>整篇文字</b>注入到某一类提示词槽位里，让每轮模型都看得到。槽位四个：<code>system</code>、<code>context</code>、<code>tool</code>、<code>arg</code>。</dd>
+              <dt>怎么写</dt><dd><code>inject: context</code> 这一类。注进的是全局作用域，键是 <code>skill:&lt;技能名&gt;</code>。</dd>
+              <dt>写错的后果</dt><dd>槽位名写错 → 那一串不会被任何地方读到（等于没注入）。没有 <code>prompt.md</code>，或者文件是空的 → 什么也不注入，不报错。改过 <code>inject</code> 或删掉这一行时，这个技能以前占过的四个槽都会被清一遍，不会留下旧内容。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">entry</span><span class="k-def">字符串，默认空</span><span class="badge mute">可选</span></div>
+            <dl>
+              <dt>它是干嘛的</dt><dd>直接指定哪个类是工具入口，跳过自动挑选。</dd>
+              <dt>怎么写</dt><dd>写短类名（<code>WeatherSkill</code>）或全名都认。</dd>
+              <dt>写错的后果</dt><dd>写了一个不存在的类名 → 自动挑选取代它（挑不到才 <code>ERROR</code>）。一个技能有多个类、又想让某个特定类当入口时，用它最省事。</dd>
+            </dl>
+          </div>
+          <div class="keyrow rose reveal">
+            <div class="k-head"><span class="k-name">airun</span><span class="k-def">子块，默认空</span><span class="badge bad">给模型看的那一份</span></div>
+            <dl>
+              <dt>它是干嘛的</dt><dd>工具的名片：说明、返回值说明、参数表、用法示例、实例复用口径。模型的工具清单就是从这里生成的。</dd>
+              <dt>子键</dt><dd>
+                <code>description</code>（工具说明，空则退回顶层 <code>description</code>）、
+                <code>returns</code>（返回值说明）、
+                <code>params</code>（参数表，见下一段）、
+                <code>examples</code>（用法示例）、
+                <code>state</code>（<code>per_call</code> 默认，每次调用新建实例；<code>shared</code> 表示整个进程复用同一个实例）。
+              </dd>
+              <dt>写错的后果</dt><dd>整块不写 → 工具仍会被注册，但参数表是空的（模型只能瞎填），说明退回顶层 <code>description</code>。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">permission</span><span class="k-def">不读，写它没有效果</span><span class="badge mute">已退休</span></div>
+            <dl>
+              <dt>现在的口径</dt><dd>旧「权限档位」那一套已经整批退休。技能列表里那个 <code>permission</code> 字段恒为空串，装载时被固定清空；写任何值都不会生效，只会让下一个人以为档位还活着。</dd>
+              <dt>权限现在写在哪</dt><dd>技能目录里的 <code>perms.jsonc</code>，见<a href="#perms">第 04 节</a>。</dd>
+            </dl>
+          </div>
+        </div>
+        <p class="t-cap">除上面这些之外的键，解析器一律收进声明区但没人读它们（不报错、不生效）。键名区分大小写。</p>
+
+        <h3 class="sec">参数表 <code>airun.params</code> 怎么写</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">一个参数一个子块</h4>
+            <p>参数名就是键，值是一个子块，里面每个字段决定模型看到的 JSON Schema 长什么样。字段与它们的别名（两套写法都认）：</p>
+            <ul class="plain">
+              <li><code>type</code> / <code>类型</code>：<code>string</code>（不写时的默认值）、<code>integer</code>、<code>number</code>、<code>boolean</code>、<code>array</code>、<code>object</code>；</li>
+              <li><code>description</code> / <code>说明</code> / <code>desc</code>：给模型看的那句解释，写得越具体，模型填得越准；</li>
+              <li><code>example</code> / <code>示例</code>：会以「示例：…」的形式拼到说明后面；</li>
+              <li><code>enum</code> / <code>取值</code>：行内数组，把可选值钉死（多动作技能的 <code>op</code> 参数就靠它）；</li>
+              <li><code>default</code> / <code>默认</code>：默认值；</li>
+              <li><code>required</code> / <code>必填</code>：写成 <code>true</code>（也认 <code>1</code>、<code>yes</code>、<code>on</code>、<code>是</code>）；</li>
+              <li><code>type: array</code> 时再加两个：<code>items</code> / <code>元素</code>（元素类型，默认 <code>string</code>）与 <code>items_description</code> / <code>元素说明</code>（元素说明）。</li>
+            </ul>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">掺平写法与漏写的兜底</h4>
+            <p>参数值直接写一句话（不是子块）时，就当成「类型 <code>string</code>，这句话是说明」。所以 <code>city: 城市名</code> 这种偷懒写法能用，但拿不到 <code>required</code> 与 <code>enum</code>。</p>
+            <p>写进 <code>required</code> 列表的参数，模型不给就会被服务端拦一次；<b>代码里仍然要判</b> —— 模型可能不遵守，也可能别的技能直接调你。参数缺失时用 <code>a.missing("参数名")</code> 拿到一句现成的说明（内容是「缺少参数 参数名」），把这句话原样返回给模型，它下一轮就会自己补。</p>
+            <p>类型标 <code>integer</code> 的参数，代码里用 <code>a.l("名字", 0L)</code> 或 <code>a.i("名字", 0)</code> 取，不要用 <code>a.str(...)</code> 再自己转 —— 参数的强类型取法就是为了躲开「字符串带引号」这类坑。</p>
+          </div>
+        </div>
+        <div class="code" data-lang="text">
+          <div class="code-head"><span class="lang">text</span><span class="path">参数表的两种写法（推荐左边那种）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>params:                           params:
+  op:                               city: 城市名，不填按出口 IP 定位
+    type: string
+    required: true
+    enum: [one, two]
+    description: 操作：one=做第一件事，two=做第二件事
+    example: one
+  text:
+    type: string
+    description: 要处理的文本
+  tags:
+    type: array
+    items: string
+    items_description: 每个标签一个词</code></pre>
+        </div>
+
+        <h3 class="sec">说话的那几个键：给模型看的话怎么写</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>键</th><th>谁看</th><th>写什么</th><th>写法要点</th></tr></thead>
+            <tbody>
+              <tr><td><code>description</code></td><td>技能列表 + 工具说明的兜底</td><td>一句概括</td><td>短。这里是给人扫列表用的，不是给模型挑工具用的。</td></tr>
+              <tr><td><code>airun.description</code></td><td><b>模型</b>（工具说明）</td><td>「什么时候该用它 + 它做什么 + 别拿它干什么」</td><td>可以写长一点，把触发场景写进去（「问天气 / 要不要带伞 / 冷热时用」）。多动作工具在这里把每个动作点名一遍，模型才知道该给哪个 <code>op</code>。</td></tr>
+              <tr><td><code>airun.returns</code></td><td><b>模型</b></td><td>成功时返回什么形状、失败时返回什么形状</td><td>把失败前缀也写进去（真技能都写「失败返回以 <code>[weather]</code> 开头的说明」），模型才知道那不是在骂它。</td></tr>
+              <tr><td><code>airun.examples</code></td><td><b>模型</b>（拼进工具说明）</td><td>一行一条「用户这么说 → 走哪个 op」</td><td>行内数组或逗号分隔的一行都认。写 2 到 4 条就够，覆盖最容易搞混的那几个动作。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">正文那半是给人看的：讲清楚动作、返回、失败形态、边界。它不会进模型上下文 —— 想让模型每轮都看到一段固定的话，用 <code>inject:</code> 加 <code>prompt.md</code>，或者在扩展点里每轮产一段（见<a href="#ext">第 05 节</a>）。</p>
+
+        <h3 class="sec">分类与顺序：没有这种键</h3>
+        <div class="note reveal">
+          <p><span class="n-title">md 里没有分类键，也没有排序键</span>：技能表、工具表、权限表里的顺序都不是从 md 来的。工具清单按名字排序（大小写不敏感）；权限表的分组与顺序来自装载期声明的 op 清单，同一个工具下的动作按名字排序；技能列表按技能名排序。所以想让工具在清单里靠前或者归到某一类，办法不在 md 里 —— 唯一的表达位置是 <code>description</code> 那句话和 <code>declareOps</code> 里每个 op 后面那句中文释义。</p>
+          <p>权限表里那些中文释义（<code>// ── 查天气</code> 这类注释行）就是 <code>declareOps</code> 的第三个参数；工具分组上那一句括注来自工具自己的说明（技能不用自己补，注册时基板会取）。工具级的那条键只覆盖它<b>已经注册的动作</b>：没声明过的动作不会被旧授权顺手放行。</p>
+        </div>
+
+        <h3 class="sec">扩展点在 md 里怎么声明：不声明，靠 implements</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">钩子要写 <code>hooks:</code></h4>
+            <p><code>on_message</code> 这种名字本身不带类型信息，所以要在 md 里点名。声明了却没人实现，启动时会有一行说明。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">四个扩展点接口不用写</h4>
+            <p><code>ContextProvider</code> / <code>OutboundStage</code> / <code>LifecycleHook</code> / <code>TriggerVoter</code> 这四个，类上写了 <code>implements</code> 就已经表明了意图。基板装载时扫这个技能的<b>每一个顶层类</b>，谁的接口对得上就注册谁 —— 再在 md 里抄一遍接口名，只会多出一个「抄错了就静默不生效」的坑。</p>
+            <p>另外一条容易踩：<b>钩子只派给入口类</b>。扩展点扫每个顶层类，<code>Hooked</code> 却只在入口类上找。所以 <code>Hooked</code> 要写在入口类那一份 java 里（<code>TriggerSkill</code> 就是 <code>implements Skill, Hooked</code>），扩展点可以另开一个类。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">能直接抄的完整模板</h3>
+        <div class="code" data-lang="text">
+          <div class="code-head"><span class="lang">text</span><span class="path">data\skills\例子\例子.md</span><button class="copy" type="button">复制</button></div>
+          <pre><code>---
+name: 例子                                  # 技能名，要与文件夹名逐字相同（不写就不校验）
+description: 一句话说清这个技能提供什么能力    # 技能列表里显示；也是工具说明的兜底
+tool: example                               # 工具名（只收字母数字下划线短横）；这一行不写 = 不提供工具
+hooks: [on_message]                         # 要接的事件；不接事件就整行删掉
+inject: context                             # 可选：把 prompt.md 整篇注入哪个槽位
+entry: Example                              # 可选：指定哪个类是入口
+airun:
+  description: 给模型看的说明。写清什么时候用它：用户要你做某某事时用；一次只做一件事。（多动作时在这里把每个 op 点名）
+  returns: 成功返回什么形状；失败返回以 [example] 开头的一句说明。   # 给模型看的返回值说明
+  state: per_call                           # per_call = 每次调用新建实例（默认）；shared = 全进程复用一个实例
+  examples:                                 # 一行一条「用户这么说 → 走哪个 op」
+    - 「用户这么说」→ op=one
+    - 「那种说法」→ op=two
+  params:                                   # 参数表：决定模型怎么填参
+    op:                                     # 多动作工具的选择子，习惯叫 op
+      type: string
+      required: true
+      enum: [one, two]                      # 把可选值钉死，模型不会自创动作
+      description: 操作：one=做第一件事，two=做第二件事
+      example: one
+    text:
+      type: string
+      description: 要处理的文本
+    limit:
+      type: integer
+      description: 返回条数
+      default: 10
+    tags:
+      type: array
+      items: string
+      items_description: 每个标签一个词
+      required: false
+---
+# 例子（工具 example）
+
+正文从这里开始，全部是给人看的说明书。`ai/skill read 例子` 会把这一段原样打出来。
+
+## 两个动作
+- `one`：做第一件事。写清它需要哪些参数、返回什么。
+- `two`：做第二件事。写清它和 `one` 的区别，免得用混。
+
+## 失败长什么样
+- `[example] 缺少参数 text` —— 参数没给够，模型看到这句会自己补。
+
+## 权限
+这个技能提供 `example` 一把工具，两个动作各是一个 op（`example.one` / `example.two`），
+放行写在同目录的 `perms.jsonc` 里。</code></pre>
+        </div>
+
+        <h3 class="sec">写作规范（照这几条写就不会出怪事）</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>项</th><th>怎么写</th><th>为什么</th></tr></thead>
+            <tbody>
+              <tr><td>缩进</td><td>只用空格，一层两个空格，同一个子块的兄弟键对齐</td><td>认缩进只数空格；Tab 会被当成第零层，子块整段失效</td></tr>
+              <tr><td>冒号</td><td>键后面紧跟冒号，再空一格写值</td><td>只看每行第一个冒号；键名本身不能带冒号</td></tr>
+              <tr><td>引号</td><td>可省。值里有逗号、方括号或前后空格时，用引号包起来更稳</td><td>行内数组与行内子块按逗号和花括号切分，引号是在切分之后才剥掉的</td></tr>
+              <tr><td>中文</td><td>值里随便用中文，参数名建议用 ASCII</td><td>参数名就是模型看到的字段名，ASCII 更不容易出岔子</td></tr>
+              <tr><td>注释</td><td>声明区里整行以 <code>#</code> 开头的行是注释；行尾注释没有（行尾的 <code>#</code> 会被当成值的一部分）</td><td>只跳过整行注释</td></tr>
+              <tr><td>一个 md 声明几个工具</td><td><b>只能一个</b>。要提供两把工具就建两个技能目录</td><td><code>tool:</code> 是单个字符串，一个技能只注册一把工具</td></tr>
+              <tr><td>多动作怎么写</td><td>一把工具 + 一个选择子参数 + <code>declareOps</code> 里一个动作一条</td><td>权限、清单、<code>ai/perm</code> 的分组都按这些 op 名走</td></tr>
+              <tr><td>正文</td><td>用 Markdown 写，怎么排版都行</td><td>正文不参与解析，只被原样打印给人看</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note reveal">
+          <p><span class="n-title">别把 <code>airun:</code> 块和 <code>airun</code> 方法搞混</span>：<code>airun:</code> 是 md 里的名片块，只填说明与参数表；另外还有一条<b>反射回退</b>的路 —— 入口类如果没实现 <code>Skill</code> 接口，但它有一个叫 <code>airun</code> 的方法，基板会去调那个方法（形参按能不能接受实参匹配，依次尝试 <code>airun(Map, Map)</code>、<code>airun(Map, JSON)</code>、<code>airun(Args, Host)</code>、<code>airun(JSON, Map)</code>、<code>airun(JSON, JSON)</code>、<code>airun(Map)</code>、<code>airun(JSON)</code>、<code>airun(Args)</code>、<code>airun()</code>）。这条路是给「不想写 import 的小技能」用的，跟 <code>airun:</code> 块没有关系；两者都存在也不会互相影响。真技能走的是 <code>Skill</code> 接口那条路。</p>
+        </div>
+      </section>
+
+      <!-- ============ 3 ============ -->
+      <section class="chapter" id="java">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">03 / 代码</span>
+          <h2>java 怎么写：Skill、Args、Host 三个面</h2>
+          <p class="chapter-desc">技能代码只有三条边：<b>实现 <code>Skill</code></b>（工具入口）、<b>从 <code>Args</code> 取参数</b>、<b>通过 <code>Host</code> 调度基板资源</b>。加一条规矩：每个动作分支开头用 <code>h.need("工具.动作")</code> 自查一次权限。这一节把三个面逐条讲完，最后给两个骨架 —— 一个最小的，一个带参数校验、多动作、用业务库、会拒错的。</p>
+        </header>
+
+        <h3 class="sec">装载一次都发生了什么（知道顺序就不容易懵）</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>步</th><th>基板做的事</th><th>对你的代码意味着什么</th></tr></thead>
+            <tbody>
+              <tr><td>①</td><td>读同名 md，解析 front matter</td><td>键写错在这一步就暴露：名字不一致、工具名撞保留名，都会停在 <code>ERROR</code>。</td></tr>
+              <tr><td>②</td><td>把这个目录里的 <code>.java</code> 一起编译到内存里</td><td>编译不过 → 状态 <code>ERROR</code>，这个技能的<b>全部</b>能力都不在（工具、钩子、扩展点一起没有），别的技能不受影响。</td></tr>
+              <tr><td>③</td><td>挑出入口类，建立类加载器与 <code>Class</code></td><td>入口类要有一个公开的无参构造函数。</td></tr>
+              <tr><td>④</td><td>对<b>每个实现了 <code>Skill</code> 的顶层类</b>各调一次 <code>declare(Libs)</code> 与 <code>declareOps(OpList)</code></td><td>表要在这里声明，op 要在这里点名；这一步在注册工具之前，所以表一定比用它的工具先存在。</td></tr>
+              <tr><td>⑤</td><td>注册扩展点 → 注册工具 → 挂事件钩子 → 装注入片段</td><td>扩展点扫每个顶层类；钩子只在入口类上找；<code>inject</code> 要配 <code>prompt.md</code>。</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sec">Skill 接口：三个方法</h3>
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">Object call(Args a, Host h)</span><span class="k-def">唯一的抽象方法</span><span class="badge ok">工具入口</span></div>
+            <dl>
+              <dt>拿到什么</dt><dd><code>a</code> 是这一次调用的参数包（模型填的），<code>h</code> 是这一轮的基板能力面。实现这个接口，这个类就被当成技能的工具入口。</dd>
+              <dt>返回什么</dt><dd>返回的东西会被<b>规整成文本</b>再交给模型：<code>String</code> 原样、<code>JsonObject</code> / <code>JsonArray</code> / <code>Map</code> / <code>List</code> 转成 JSON 文本、<code>null</code> 等于「成功但没有输出」、其它类型走 <code>String.valueOf</code>。所以最省事的做法是<b>返回一句话</b>：给模型看的成功结果，或者失败原因。</dd>
+              <dt>失败怎么写</dt><dd>返回的文本第一行如果是 <code>[&lt;工具名&gt;] ok=0 …</code> 这个形状，主循环会把它认成一次失败。抛异常也一样算失败，但基板接住后拼出来的文本会带上调用栈，模型看到更懵 —— 自己拼一句说明更好。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">void declare(Libs libs)</span><span class="k-def">默认空实现</span><span class="badge info">声明自己的表</span></div>
+            <dl>
+              <dt>它是干嘛的</dt><dd>装载期声明这个技能要用到的业务表。表结构由用到它的技能声明，基板只给注册表、按声明建表补列（幂等）。</dd>
+              <dt>什么时候调</dt><dd>入口类实例化之后、注册工具之前，只调一次。表要比用它的工具先存在。</dd>
+              <dt>谁会被问</dt><dd>这个技能编译出来的<b>每个实现了 <code>Skill</code> 的顶层类</b>都会被问一次，谁实现谁声明；同一个技能声明两次同一张表是幂等的。所以纯行为插件（只挂扩展点、不提供工具）想建表时，加一个只写 <code>declare</code>、<code>call</code> 直接 <code>return null</code> 的壳类就行（md 里不写 <code>tool:</code> 就不会注册任何工具）。</dd>
+              <dt>出错的后果</dt><dd>入口类的声明失败 → 这个技能整条 <code>ERROR</code>（其余技能照常）；非入口类声明失败 → 只一行提示、跳过那个类。表名或别名被别的技能占了 → 这个技能声明失败。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">void declareOps(OpList ops)</span><span class="k-def">默认空实现</span><span class="badge warn">管控表的骨架</span></div>
+            <dl>
+              <dt>它是干嘛的</dt><dd>声明这个技能有哪些 op（动作）。权限表按这些名字放行或封禁，<code>ai/perm</code> 的分组与释义也从这里来。不声明也能跑，但管控表里这个工具就只有工具名那一层，动作分不开。</dd>
+              <dt>怎么写</dt><dd>单动作工具：<code>ops.add("example", "", "做一件事")</code>（动作名传空串，op 就是工具名）。多动作工具：每个动作一条 <code>ops.add("memory", "remember", "记一件事")</code>。第三个参数是一句中文说明，只用于列表展示。</dd>
+              <dt>还可以写</dt><dd><code>ops.tool("example", "这把工具是干什么的")</code> 登记工具分组上那句括注。一般不写 —— 工具注册时基板会从工具说明里自动补一句。</dd>
+              <dt>出错的后果</dt><dd>声明过程抛异常 → 只让这个技能的 op 退化成「工具名一个 op」，技能照常可用，判定与权限表都还认工具名那一层。</dd>
+            </dl>
+          </div>
+        </div>
+        <div class="code" data-lang="java">
+          <div class="code-head"><span class="lang">java</span><span class="path">data\skills\例子\Example.java（声明部分的形状）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>@Override
+public void declare(Libs libs) {
+    libs.register(new LibSpec("example_note", "例子便签", "例子")
+            .ts()                                  // 常用组合：ts INTEGER NOT NULL DEFAULT 0
+            .col("content", "TEXT", "''")           // 列名 / 类型 / 默认值
+            .col("owner_qq", "TEXT", "''")
+            .fts("content")                         // 参与全文检索的列
+            .alias("例子便签", "便签")                // 中文别名：模型可以用中文指这个库
+            .idx("idx_example_note_ts", "ts"));     // 索引名显式给，不靠推导
+}
+
+@Override
+public void declareOps(sair.v4.auth.OpList ops) {
+    ops.add("example", "add", "记一条便签");
+    ops.add("example", "list", "看自己的便签");
+    ops.add("example", "drop", "删自己的一条便签");
+}</code></pre>
+        </div>
+        <p class="t-cap"><code>id</code> 与 <code>ts</code> 两列由基板统一补，声明里不用重复写（<code>ts()</code> 是写法糖）。列名与表名是 SQL 白名单的唯一来源，写 SQL 之前基板按声明校验列名。表名、列名、索引名一旦上线就不能改 —— 改结构等于迁移。</p>
+
+        <h3 class="sec">Args：取参数的每个方法</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>方法</th><th>给你什么</th><th>什么时候用它</th></tr></thead>
+            <tbody>
+              <tr><td><code>tool()</code></td><td>本次被调用的工具名（注册名）</td><td>要在日志或错误文本里带上工具名时。</td></tr>
+              <tr><td><code>raw()</code></td><td>原始的 <code>JsonObject</code> 参数包</td><td>要遍历模型给的所有键、或者要原样再传给别的工具时。</td></tr>
+              <tr><td><code>has(k)</code></td><td>这个键在不在（值是 <code>null</code> 也算不在）</td><td>要区分「没给」与「给了空值」时。</td></tr>
+              <tr><td><code>str(k, def)</code> / <code>str(k)</code></td><td>字符串；后者缺省是空串</td><td>取文本参数。拿到之后一般再 <code>Str.trim(...)</code> 一次。</td></tr>
+              <tr><td><code>l(k, def)</code></td><td><code>long</code></td><td>取 id、QQ、群号这类大整数。</td></tr>
+              <tr><td><code>i(k, def)</code></td><td><code>int</code></td><td>取条数、上限这类小整数。</td></tr>
+              <tr><td><code>d(k, def)</code></td><td><code>double</code></td><td>取阈值、权重这类小数。</td></tr>
+              <tr><td><code>b(k, def)</code></td><td><code>boolean</code></td><td>取开关类参数。</td></tr>
+              <tr><td><code>obj(k)</code></td><td>子对象 <code>JsonObject</code></td><td>参数本身是一小块结构化数据时。</td></tr>
+              <tr><td><code>arr(k)</code></td><td>数组 <code>JsonArray</code></td><td>要自己逐个元素处理时。</td></tr>
+              <tr><td><code>strs(k)</code></td><td><code>List&lt;String&gt;</code></td><td>参数是字符串数组、只要一串词时最省事。</td></tr>
+              <tr><td><code>map()</code></td><td><code>Map&lt;String, Object&gt;</code></td><td>把参数包摊成 map。<code>airun</code> 反射回退那条路用的就是它。</td></tr>
+              <tr><td><code>missing(k)</code></td><td>一句现成的说明：<code>缺少参数 k</code></td><td>参数没给够时直接 <code>return a.missing("text");</code> —— 模型看到这句会自己补参。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">取值一律走这些强类型方法，不要 <code>String.valueOf</code> 一个 JSON 元素再自己转 —— 那会把引号一起带进来，也会把 <code>null</code> 拼成四个字母。</p>
+
+        <h3 class="sec">Host：能力面逐个讲</h3>
+        <p class="t-cap">下面这些是 <code>Host</code> 接口上的全部方法。它是一个<b>只读能力面</b>：能调度基板已有的资源，改不动权限判定、也改不动基板骨架。</p>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>身份与会话</th><th>给你什么</th><th>什么时候用它</th></tr></thead>
+            <tbody>
+              <tr><td><code>caller()</code></td><td>真实发送者：谁在说话、在哪个会话、好感度多少</td><td>做策略判断（熟人优先、群规、称呼）。<b>不要拿它判权限</b> —— 判定主体是下面那个 <code>subject()</code>。</td></tr>
+              <tr><td><code>subject()</code></td><td>这一次调用的<b>判定主体</b></td><td>要自己问权限面「他能用这个吗」时。<code>h.need()</code> 内部用的就是它。</td></tr>
+              <tr><td><code>skillName()</code></td><td>技能名（= 文件夹名）</td><td>写日志前缀、拼自己的默认值。</td></tr>
+              <tr><td><code>toolName()</code></td><td>注册后的英文工具名</td><td>要在反馈里告诉模型「你用哪个名字调我」，或者拼 op 名时。</td></tr>
+              <tr><td><code>skillDir()</code></td><td>技能自己的文件夹</td><td>读同目录的 <code>prompt.md</code> 与素材文件 —— 文案与阈值外挂在这里，改完即时生效。</td></tr>
+              <tr><td><code>session()</code></td><td>会话键：<code>console</code> / <code>qq:123</code> / <code>group:456</code></td><td>按会话存东西（冷却、上次说的、投递目标）。</td></tr>
+              <tr><td><code>scopeKey()</code></td><td>记忆作用域键：群内是群号，私聊是 QQ</td><td>要一个「这条消息属于哪一层」的键，又不想自己拼时。</td></tr>
+              <tr><td><code>subagent()</code></td><td>这一轮是不是子 Agent 在跑</td><td>子 Agent 看不到会话消息流，所以「对某条消息做有副作用的标记」这类事只能提议、不能直写。</td></tr>
+              <tr><td><code>agentLabel()</code></td><td>子 Agent 的标签（<code>sub-1</code> 这种）；主回合是空串</td><td>要把一行数据的归属记成「哪个子 Agent 写的」时。</td></tr>
+              <tr><td><code>selfIsGroupAdmin(groupId)</code></td><td>机器人在这个群是不是管理员 / 群主</td><td>审核、禁言这类动作出手前先看有没有执法权。NapCat 没连上时返回 <code>false</code>。</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>权限</th><th>给你什么</th><th>什么时候用它</th></tr></thead>
+            <tbody>
+              <tr><td><code>need(op)</code></td><td>放行返回 <code>null</code>，否则是可直接回给模型的拒绝原文</td><td><b>每个动作分支开头一次</b>，见下一段。</td></tr>
+              <tr><td><code>acl()</code></td><td>基板装配的权限面；没装配时是 <code>null</code></td><td>要把「谁能用这个 op」列出来展示时（例如把清单回给模型）。拿不到就按拒绝处理，别自己造一套。</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>库与数据</th><th>给你什么</th><th>什么时候用它</th></tr></thead>
+            <tbody>
+              <tr><td><code>store()</code></td><td>六库的通用读写口</td><td>存自己的数据：<code>put</code> / <code>get</code> / <code>list</code> / <code>search</code> / <code>update</code> / <code>delete</code> / <code>count</code>，以及 <code>kv</code> / <code>kvSet</code> 这种小键值。跨调用要记的东西都放这里（<b>不要放 static</b>）。</td></tr>
+              <tr><td><code>libs()</code></td><td>库注册表：「世界上有哪些表」的唯一答案</td><td>要确认某张表在不在、有哪些列（比如目标库得有 <code>scope</code> 与 <code>scope_id</code> 才可用）。查不到返回 <code>null</code>，不是异常。</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>模型与平台</th><th>给你什么</th><th>什么时候用它</th></tr></thead>
+            <tbody>
+              <tr><td><code>ai()</code></td><td>模型客户端</td><td>技能里要直接问一次模型（分类、摘要、改写）时。</td></tr>
+              <tr><td><code>napcat()</code></td><td>NapCat 动作接口，<b>带权限闸门</b></td><td>要发 QQ 动作（拒绝申请、改名片、禁言）时。动作名就是 op（<code>napcat.set_group_ban</code> 这种），没授权会被拒。NapCat 没连上时每个动作返回 <code>error=Napcat 没有连接</code>。</td></tr>
+              <tr><td><code>napcatConnected()</code></td><td>连接状态</td><td>要决定「走平台还是只回一句说明」时。</td></tr>
+              <tr><td><code>inboundImageUrl(file)</code></td><td>最近入站消息里某个图片值对应的直连 URL</td><td>跨机部署时本地路径读不到，这条 URL 是取到图的线索。查不到返回空串。</td></tr>
+              <tr><td><code>recentInboundImageUrls(limit)</code></td><td>最近几条入站图片的直连 URL（新的在前）</td><td>要处理「刚才发的那张图」时。</td></tr>
+              <tr><td><code>conf()</code></td><td>只读配置视图（数据根、模型名、主人 QQ、技能目录…）</td><td>要知道数据根在哪、当前模型是谁。改配置没有口子，那是控制台命令的事。</td></tr>
+              <tr><td><code>prompts()</code></td><td>提示词面（初始提示词与各文件）</td><td>极少用到；拼提示词片段一般走 <code>inject()</code>。</td></tr>
+              <tr><td><code>inject()</code></td><td>往某个会话的某个槽位写一行文本 / 撤掉一行</td><td>要留一句「上一轮发生了什么，下一轮你该知道」的提示时（情绪那个技能就用它把「出站被拦」写回会话）。</td></tr>
+              <tr><td><code>favor()</code></td><td>好感度视图（只读）</td><td>技能想按亲疏调整行为时。<b>好感度不参与权限判定</b>，改不了也不该拿它当门槛。</td></tr>
+              <tr><td><code>out()</code></td><td>控制台输出口</td><td>打诊断行（<code>out.dim("[你的技能名] …")</code>）。过程行不要刷屏，那是给人排错看的。</td></tr>
+              <tr><td><code>tools()</code></td><td>工具视图（看清单、调别的工具，不可注册）</td><td>要看现在有哪些工具对某个人可见时；调用还是走下面的 <code>call</code>。</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>说话、派活、控制台</th><th>给你什么</th><th>什么时候用它</th></tr></thead>
+            <tbody>
+              <tr><td><code>call(tool, args)</code></td><td>调另一把工具的返回文本</td><td>技能想站在同一个身份上调用别的能力（会走权限判定，调不动就是调不动）。</td></tr>
+              <tr><td><code>say(text)</code></td><td>往当前会话说一段话（控制台→控制台，QQ→群 / 私聊）</td><td>技能自己要主动说一句时（通报、接话）。这条属于机器人自己说话，不走发送工具的门禁。NapCat 没连上就只进控制台。</td></tr>
+              <tr><td><code>inject(slot, key, text)</code></td><td>往当前会话的槽位注入文本（<code>system</code> / <code>context</code> / <code>tool</code> / <code>arg</code>）</td><td>要给「下一轮」留一句话时；同一个 key 再写一次就是覆盖。</td></tr>
+              <tr><td><code>spawn(task, tools, async)</code></td><td>派一个子 Agent，返回任务票</td><td>把一段活交给子 Agent 跑。还有三个重载：加 <code>brief</code>（这段任务自己的提示词）、加 <code>model</code>（换一个模型）、加 <code>reply</code>（<code>true</code> 表示子 Agent 写成的那句话由宿主替它发到当前会话）。</td></tr>
+              <tr><td><code>spawnAs(caller, task, tools, async, brief, model, reply)</code></td><td>同上，但显式指定子 Agent 的主体</td><td>「到点才跑」的派发（定时任务）用它：主体换成任务创建者，普通人建的任务就按他自己的位判，不会借定时任务升权。</td></tr>
+              <tr><td><code>spawnAs(…, session)</code></td><td>同上，再指定投递到哪个会话</td><td>定时任务没有自己的会话，默认落到控制台；把建任务时记下的会话键交下来，才能说回原来的群 / 私聊。认不出来时宿主回落控制台，不丢任务。</td></tr>
+              <tr><td><code>sfwAvailable()</code></td><td>SFW 控制台可用吗</td><td>要决定走不走控制台那条路时（无界面环境返回 <code>false</code>）。</td></tr>
+              <tr><td><code>sfwCursor()</code></td><td>当前控制台输出游标</td><td>配合下面的 <code>sfwRead</code>：下次把它传回去，只拿新增输出。</td></tr>
+              <tr><td><code>sfwRead(sinceSeq, maxChars)</code></td><td>控制台最近输出的正文 + 一行事实行</td><td>技能想知道「我刚跑的东西在控制台上打出了什么」时。读不到也给一行说明，不抛异常。</td></tr>
+              <tr><td><code>sfwRun(cmd)</code></td><td>跑一条 SFW 框架命令，回它新打出来的输出</td><td>技能要代替人敲一条控制台命令时。判定与 <code>console</code> 工具的 <code>run</code> 是同一个 op（<code>console.run</code>），主人短路在判定之前。</td></tr>
+              <tr><td><code>typing(on)</code></td><td>私聊「正在输入」开关</td><td>私聊里要让对方看到机器人在打字时。这是机器人自己的状态，<b>不按调用者权限裁决</b>；群里是 no-op，NapCat 没连上也是 no-op，不抛异常。</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sec"><code>host.need("工具.动作")</code> 这道自查门</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">为什么每个动作分支都要先判一次</h4>
+            <p>工具入口只判一次「这把工具交不交给他」：<b>整把工具放行，或者它任一动作放行</b>，这把工具就会出现在他的调用清单里。所以一个只被放行了 <code>example.list</code> 的人，照样点得动 <code>example</code> 这把工具。</p>
+            <p>这时候如果 <code>drop</code> 分支不自己判一次，他就把 <code>drop</code> 干成了 —— 权限表里那一行的「没给」等于白写。每个分支开头各判自己的 op，「允许他记一笔」与「允许他删别人的」才是两件事。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">判完怎么用</h4>
+            <p>放行返回 <code>null</code>，否则返回一句能直接回给模型的拒绝原文：<code>[权限阻断] 「example.drop」没有授权给你（未列到 = 未授权）</code>。命中黑名单时那句是 <code>[权限阻断] 「example.drop」在技能管控表的黑名单里</code>；这一行写出来了却给了空数组，那句是 <code>[权限阻断] 「example.drop」没有授权给你（列出来了，但谁都没给）</code>。权限面没装配时是 <code>[权限阻断] 权限面没有装配（auth == null），按拒绝处理：example.drop</code>。这几句的尾部都会说明是哪一层挡的。</p>
+            <p>把这句话<b>原样</b>返回给模型，别改写、别删掉 <code>[权限阻断]</code> 这个标记：识别面认它，主循环的连续失败闸门也靠它把这一次算成失败。</p>
+          </div>
+        </div>
+        <div class="code" data-lang="java">
+          <div class="code-head"><span class="lang">java</span><span class="path">每个动作分支开头的三行</span><button class="copy" type="button">复制</button></div>
+          <pre><code>private static String drop(Args a, Host h, Store s) {
+    String deny = h == null ? null : h.need("example.drop");   // 这个动作自己的 op
+    if (deny != null) return deny;                             // 原样回给模型
+    // …过了这道门，才轮到"这是不是你的数据"那类归属判断…
+}</code></pre>
+        </div>
+        <p class="t-cap">判定用的主体是 <code>h.subject()</code>：工具调用时是触发者（「她能替这个人碰什么」看这个人），钩子与扩展点调用时是她自己（自动禁言、自动审批这类是她的自动策略，按触发者判会被陌生人的默认状态当场拒掉）。主人与她本人恒全权，不受表影响。所以判权限不要拿 <code>h.caller()</code> 去问别的地方，统一走 <code>need</code>。</p>
+
+        <h3 class="sec">异常、超时、返回值：把话说清楚</h3>
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">抛异常</span><span class="k-def">基板会接住</span><span class="badge bad">算一次失败</span></div>
+            <dl>
+              <dt>会发生什么</dt><dd>基板接住并回给模型一段 <code>[&lt;工具名&gt;] ok=0 &lt;技能名&gt; 执行异常: &lt;原因&gt;</code>，后面跟最多 5 行调用栈。这一次会被算作失败，连续失败闸门靠它计数。</dd>
+              <dt>怎么写更好</dt><dd>把可预期的坏情况翻译成一句人能读的说明返回（「没找到这个城市」「返回里没有观测数据」），真正的意外才让异常抛上去。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">超时</span><span class="k-def">工具调用没有基板层超时</span><span class="badge warn">扩展点有</span></div>
+            <dl>
+              <dt>工具这条路</dt><dd>技能的 <code>call(...)</code> 本身没有基板给的超时。要发网络请求就自己给超时（真技能里 <code>Http.get(url, headers, 12000)</code> 这样，12 秒），别让一次调用挂住不放。</dd>
+              <dt>钩子与扩展点那条路</dt><dd>每次调用都有独立超时，配置键 <code>extTimeoutMs</code>，出厂 200 毫秒。超时只丢这一次调用，打一行 <code>[ext] timeout name=… ms=…</code>，其余照常。所以钩子里不要做慢活：等网络、扫全库这类事放别的路上去做。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">返回值</span><span class="k-def">String / JSON / null</span><span class="badge info">模型看到的样子</span></div>
+            <dl>
+              <dt>约定</dt><dd>成功就把要说的话拼好返回；没有话可说返回 <code>null</code>（模型看到的是空结果，那不等于失败）。返回对象或列表时基板转成 JSON 文本，模型看到的就是那段 JSON。</dd>
+              <dt>长度</dt><dd>工具结果会被配置里的上限截断（<code>toolResultMax</code>）。所以别把整库倒给模型：先筛、先截、先归纳，再返回十几行。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">static 状态</span><span class="k-def">重载后一定丢</span><span class="badge bad">别用它记状态</span></div>
+            <dl>
+              <dt>为什么</dt><dd>热重载会把技能重新编译一遍，并换上一个<b>新的类加载器</b>：旧类连同它的 static 字段一起作废，新实例看到的是全新的初值。所以「把计数、缓存、锁表放在 static 里」在重载之后就是空的 —— 计数归零、缓存没了、锁也换了一把。</dd>
+              <dt>那放哪</dt><dd>跨调用要记住的东西放 <code>h.store()</code>（六库或 kv）里；只在一次调用内部用的临时量放局部变量。同一次装载里 static 是共享的，多条会话会同时读写它，要用就得自己加锁 —— 这一条也是「能不用就不用」的理由。</dd>
+              <dt>跟实例的关系</dt><dd>默认每次都新建实例（<code>airun.state: per_call</code>），实例字段活不过一次调用；写成 <code>shared</code> 时整个进程复用一个实例，同一个技能同一时刻只跑一个调用，但实例字段在重载后同样是新的。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <h3 class="sec">骨架一：最小技能（单动作）</h3>
+        <div class="code" data-lang="java">
+          <div class="code-head"><span class="lang">java</span><span class="path">data\skills\例子\Example.java（最小：单动作，op 就是工具名）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>import sair.v4.kit.Str;
+import sair.v4.skill.Args;
+import sair.v4.skill.Host;
+import sair.v4.skill.Skill;
+
+/** 最小技能：一个动作，op 就是工具名 example。 */
+public class Example implements Skill {
+
+    /** 装载期声明 op：单动作工具，动作名传空串。 */
+    @Override
+    public void declareOps(sair.v4.auth.OpList ops) {
+        ops.add("example", "", "做一件事");
+    }
+
+    @Override
+    public Object call(Args a, Host h) {
+        if (h != null) {
+            String deny = h.need("example");        // 动作分支开头先判自己的 op
+            if (deny != null) return deny;          // 拒文原样回给模型
+        }
+        String text = Str.trim(a.str("text"));
+        if (text.isEmpty()) return a.missing("text");
+        return "收到：" + text;
+    }
+}</code></pre>
+        </div>
+        <p class="t-cap">配上 md 里的 <code>tool: example</code> 与 <code>airun</code> 那一块（<code>params</code> 里声明 <code>text</code>），这个技能就能被模型调用。权限上它默认只有主人与她本人可用 —— 想让别人也能用，放一份 <code>perms.jsonc</code>。</p>
+
+        <h3 class="sec">骨架二：完整技能（多动作 + 参数校验 + 业务库 + 拒错）</h3>
+        <div class="code" data-lang="java">
+          <div class="code-head"><span class="lang">java</span><span class="path">data\skills\例子\Example.java（完整：三个动作、自己的表、归属硬判）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>import com.google.gson.JsonObject;
+
+import java.util.List;
+
+import sair.v4.kit.J;
+import sair.v4.kit.Out;
+import sair.v4.kit.Str;
+import sair.v4.skill.Args;
+import sair.v4.skill.Host;
+import sair.v4.skill.Skill;
+import sair.v4.store.LibSpec;
+import sair.v4.store.Libs;
+import sair.v4.store.Store;
+
+/** 完整技能：三个动作各判自己的 op，数据落自己的表，非主人的越权访问一律拒。 */
+public class Example implements Skill {
+
+    private static final String TOOL = "example";
+    private static final String NAME = "例子";
+    private static final String LIB = "example_note";
+
+    /** 装载期：声明自己那张表（谁写入、谁声明）。 */
+    @Override
+    public void declare(Libs libs) {
+        libs.register(new LibSpec(LIB, "例子便签", NAME)
+                .ts()
+                .col("content", "TEXT", "''")
+                .col("owner_qq", "TEXT", "''")
+                .fts("content")
+                .alias("例子便签", "便签")
+                .idx("idx_example_note_ts", "ts"));
+    }
+
+    /** 装载期：三个动作各声明一个 op。 */
+    @Override
+    public void declareOps(sair.v4.auth.OpList ops) {
+        ops.add(TOOL, "add", "记一条便签");
+        ops.add(TOOL, "list", "看自己的便签");
+        ops.add(TOOL, "drop", "删自己的一条便签");
+    }
+
+    @Override
+    public Object call(Args a, Host h) {
+        if (h == null || h.store() == null) return "[" + TOOL + "] ok=0 数据层不可用";
+        Store s = h.store();
+        String op = Str.trim(a.str("op")).toLowerCase();
+        if (op.isEmpty()) op = "list";
+        try {
+            if ("add".equals(op)) return add(a, h, s);
+            if ("list".equals(op)) return list(a, h, s);
+            if ("drop".equals(op)) return drop(a, h, s);
+            return "[" + TOOL + "] ok=0 未知 op：" + op;
+        } catch (Throwable t) {
+            log(h, "op=" + op + " 出错：" + t);
+            return "[" + TOOL + "] ok=0 执行异常：" + t;      // 兜住意外，别把栈丢给模型
+        }
+    }
+
+    // ---------------------------------------------------------------- 三个动作
+
+    private static String add(Args a, Host h, Store s) {
+        String deny = h.need(TOOL + ".add");                 // ① 这个动作的 op
+        if (deny != null) return deny;
+        String content = Str.trim(a.str("content"));         // ② 参数校验
+        if (content.isEmpty()) return a.missing("content");
+        if (content.length() &gt; 200) return "[" + TOOL + "] 内容太长（上限 200 字）";
+        JsonObject row = new JsonObject();                   // ③ 归属写进自己的行里
+        row.addProperty("content", content);
+        row.addProperty("owner_qq", String.valueOf(qq(h)));
+        long id = s.put(LIB, row);
+        return id &gt; 0L ? "已记下 #" + id : "[" + TOOL + "] ok=0 写入失败";
+    }
+
+    private static String list(Args a, Host h, Store s) {
+        String deny = h.need(TOOL + ".list");
+        if (deny != null) return deny;
+        int limit = a.i("limit", 10);
+        if (limit &lt;= 0) limit = 10;
+        JsonObject f = new JsonObject();
+        f.addProperty("owner_qq", String.valueOf(qq(h)));    // 只看自己的
+        List&lt;JsonObject&gt; rows = s.list(LIB, f, limit, "ts DESC");
+        if (rows == null || rows.isEmpty()) return "还没有便签。";
+        StringBuilder sb = new StringBuilder();
+        for (JsonObject r : rows) {
+            sb.append('#').append(J.l(r, "id", 0L)).append(' ')
+              .append(Str.cut(Str.oneLine(J.s(r, "content", "")), 80)).append('\n');
+        }
+        return sb.toString().trim();
+    }
+
+    private static String drop(Args a, Host h, Store s) {
+        String deny = h.need(TOOL + ".drop");
+        if (deny != null) return deny;
+        long id = a.l("id", 0L);
+        if (id &lt;= 0L) return a.missing("id");
+        JsonObject row = s.get(LIB, id);
+        if (row == null) return "[" + TOOL + "] 没有这条便签";
+        // 归属硬判：op 过了之后，"这条是不是你的"仍然要自己判一遍。
+        // 主人与她本人不受限；别人只能删自己的行。
+        if (!master(h) &amp;&amp; !String.valueOf(qq(h)).equals(J.s(row, "owner_qq", ""))) {
+            return "[权限阻断] 只能删自己的便签。";
+        }
+        return s.delete(LIB, id) ? "已删掉 #" + id : "[" + TOOL + "] ok=0 删除失败";
+    }
+
+    // ---------------------------------------------------------------- 小工具
+
+    private static long qq(Host h) {
+        try { return h == null || h.caller() == null ? 0L : h.caller().qq(); }
+        catch (Throwable t) { return 0L; }
+    }
+
+    private static boolean master(Host h) {
+        try { return h != null &amp;&amp; h.caller() != null &amp;&amp; h.caller().master(); }
+        catch (Throwable t) { return false; }
+    }
+
+    private static void log(Host h, String msg) {
+        try {
+            Out o = h == null ? null : h.out();
+            if (o != null) o.dim("[" + NAME + "] " + msg);
+        } catch (Throwable ignored) { }
+    }
+}</code></pre>
+        </div>
+        <div class="note reveal">
+          <p><span class="n-title">这道骨架里有两层判定，别混在一起</span>：<code>h.need(op)</code> 回答的是「这个动作给不给他用」，判据是权限表；<code>owner_qq</code> 那次比较回答的是「这一条数据是不是他的」，判据是代码里的归属。第二层跟权限表无关，权限表全放行也照样要有 —— 否则「允许所有人多看一条」会变成「允许所有人看别人的」。</p>
+          <p>归属判据本身也要念一遍：<code>MASTER</code> 与 <code>SYSTEM</code> 不受限，受限的只有普通用户；拿不到身份时按受限处理。</p>
+        </div>
+      </section>
+
+      <!-- ============ 4 ============ -->
+      <section class="chapter" id="perms">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">04 / 权限</span>
+          <h2>权限表 <code>perms.jsonc</code> 怎么填</h2>
+          <p class="chapter-desc">技能目录里那份权限文件回答的是：<b>这个技能提供的工具，谁能用</b>；如果这个技能还带着自己的数据，它也能在这里声明<b>它管的数据谁能改、谁能读</b>。文件放在技能目录里、与 md 同级，文件名固定 <code>perms.jsonc</code>。规则写在三个域里 —— <b>技能</b>（op）、<b>数据</b>（数据类别）、<b>文件</b>（路径）；每个域各有自己的层，没列到的按该域的默认值走（技能不能、数据能读不能改、文件不能碰）。一份都没有的技能，默认只有主人与她本人用得到。</p>
+        </header>
+
+        <h3 class="sec">文件放哪、谁写它、不写会怎样</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">放哪</h4>
+            <p>技能目录里，与同名 md 同级：<code>&lt;数据根&gt;\skills\&lt;技能名&gt;\perms.jsonc</code>。技能目录里没有这份文件 = 这个技能的<b>全部</b> op 对普通用户一律不授权（未列到 = 未授权）。</p>
+            <p>它只写<b>这个技能自己提供的工具</b>的 op，以及<b>属于这个技能的数据键</b>；路径块<b>不写在这里</b>（详见下面「越界条目会被忽略」）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">谁写它</h4>
+            <p>三条写入路径：主人在控制台敲 <code>ai/perm</code> 那一族命令 —— 这一族里才有 <code>db</code> / <code>file</code> 两条改数据与路径的命令；她手上那个内置的 <code>perm</code> 工具管的是授权、封禁、撤回、重排这几支，<b>没有</b> <code>db</code> / <code>file</code>。两条入口都只对主人开放。或者主人直接手改文件再敲一次 <code>ai/perm reload</code>。它们都会当场落盘，落盘用「先写临时文件再改名」的原子替换。</p>
+            <p><b>技能自己写不了它</b>：技能写入的那条路（新增、覆盖、草稿、草稿提升）碰到 <code>perms.jsonc</code> 会跳过或挡回，回的原话是「拒绝写入 <code>perms.jsonc</code>：… —— 权限文件（谁能用这个技能）只能由主人用控制台 <code>ai/perm</code> 写，技能不能给自己开口子」。所以技能拿不到给自己授权的能力。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">完整格式（照这个写就不会错）</h3>
+        <div class="code" data-lang="json">
+          <div class="code-head"><span class="lang">json</span><span class="path">&lt;数据根&gt;\skills\&lt;技能名&gt;\perms.jsonc</span><button class="copy" type="button">复制</button></div>
+          <pre><code>{
+  "version": 6,
+  "_readme": "技能管控表（以 // 开头的整行是注释，只给人看，基板读之前整行丢掉）。三个域：Skill = 谁能用哪些 op；DB = 谁能改 / 谁能读哪类数据；File = 谁能碰哪些路径。规则层的键一律写成中括号数组。",
+
+  "Skill": {
+    // ── 查某城市（weather）
+    "Run": {
+      ["weather"]: ["ALLUSER"]
+    },
+    "Ban": { }
+  },
+
+  "DB": { },
+  "File": { }
+}</code></pre>
+        </div>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>层</th><th>长什么样</th><th>基板怎么读</th></tr></thead>
+            <tbody>
+              <tr><td><code>version</code></td><td><code>"version": 6</code></td><td>读到上一版的 5 会按旧语义读并给一行提示；比这一版新也给一行提示，认得的字段照读。</td></tr>
+              <tr><td><code>_readme</code></td><td>一段给人看的用法说明</td><td>不参与任何判定。</td></tr>
+              <tr><td>域</td><td><code>Skill</code> / <code>DB</code> / <code>File</code></td><td>拼错的域名整块忽略并点名。技能文件里写 <code>File</code> 块属于越界，整块不生效。</td></tr>
+              <tr><td>层</td><td><code>Run</code> / <code>Read</code> / <code>Ban</code></td><td>技能只有 <code>Run</code> / <code>Ban</code>；数据与文件三个都有。在某一域里写它没有的那一层、或者把层名拼错，整层忽略并点名。</td></tr>
+              <tr><td>规则键</td><td><code>["memory.remember", "memory.recall"]: ["ALLUSER"]</code></td><td><b>一律带中括号</b>；只有一个键时也带（<code>["weather"]</code> 与裸写 <code>"weather"</code> 等价）。一次可以并列几个键。</td></tr>
+              <tr><td>身份数组</td><td><code>["ALLUSER", "user:123"]</code></td><td>数组里有这个身份就算命中。<b>字面空数组是一条“谁都不给”的决定</b>，不再回落到更宽的键：数据与路径两域照写（写成空表的读侧就是不能读）；技能域里它与「没列到」等效，重排后不再保留。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note warn reveal">
+          <p><span class="n-title">注释怎么写</span>：以 <code>//</code> 开头的<b>整行</b>是注释，写在被注释内容的前一行，读之前整行丢掉。<b>行尾注释没有</b> —— 一行 JSON 后面直接跟 <code>// 说明</code>，会让这一份文件整份读不出来（当成空表 = 一切未授权，并打一行提示）。所以释义单独占一行：域上面一行 <code>// ── 技能：谁能用哪些 op</code>，层上面一行 <code>// ── 谁能用（没列到 = 未授权）</code>，键上面一行 <code>// 记一件事</code>，键本身是纯名字。</p>
+          <p>整份文件不是合法 JSON 时，这一份按空处理（它管的 op 一律未授权），并打一行提示；认不出的身份写法会被原样留着并点名，不会被「猜着用」。</p>
+        </div>
+
+        <h3 class="sec">三域各自的默认值与优先级</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>域</th><th>改 / 用</th><th>读</th></tr></thead>
+            <tbody>
+              <tr><td><code>Skill</code></td><td><code>Ban</code> &gt; <code>Run</code> &gt; <b>没列到 = 不能用</b></td><td>不设（读归数据与路径两域）</td></tr>
+              <tr><td><code>DB</code></td><td><code>Ban</code> &gt; <code>Run</code> &gt; <b>没列到 = 不能改</b></td><td><code>Ban</code> &gt; <code>Read</code> &gt; <b>没列到 = 能读</b>（全表唯一默认放开的一处）</td></tr>
+              <tr><td><code>File</code></td><td><code>Ban</code> &gt; <code>Run</code> &gt; <b>没列到 = 不能改</b></td><td><code>Ban</code> &gt; <code>Read</code> &gt; <b>没列到 = 不能读</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">三句要记住的规矩</h4>
+            <ul class="plain">
+              <li><b><code>Ban</code> 压过允许</b>：同一把键上，只要这个身份命中任何一条 <code>Ban</code> 就拒 —— 数据与路径两域连 <code>Read</code> 也一起压。</li>
+              <li><b>更具体的键优先</b>：<code>pref.donation</code> 比 <code>pref</code> 具体；路径按最长优先，子目录里的禁止压过父目录里的允许。</li>
+              <li><b>同一个键写多处 = 取并集</b>：要收窄只能用 <code>Ban</code>，这是设计如此。</li>
+            </ul>
+            <p>判定时<b>更具体的键没给这个身份任何决定，才落到更宽的键</b>。两种宽键别混：<b>技能这一域</b>写工具名的那条只覆盖<b>装载时这把工具已经注册的动作</b>（新加的动作不会被旧授权顺手放行）；<b>数据与文件两域</b>的宽键按它自己的身份表命中，连表里没一一列出的那层子键也照它判。只有“完全没有决定、而且没有被任何已知宽键覆盖”的键才会得到一个专门的拒绝说明（就是装载时点过名的那些认不出的键）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">数据那一层还要看“这一行归谁”</h4>
+            <p><code>DB</code> 的 <code>Run</code> 命中之后<b>还要过行归属</b>：那一行的归属主体必须等于调用者（自己那一份 / 自己所在的群）。要让某个人改别人的行，必须把<b>他本人</b>指名写进 <code>Run</code>；靠 <code>ALLUSER</code> 命中的只动得了自己那一份。没有归属的共享行，也只有被指名的身份动得了。</p>
+            <p>想给某个技能的数据开口子，就在那个技能目录里的文件里写它<b>自己的</b>数据键；不属它的数据键（以及全部 <code>kv.*</code> 抽屉）归基板，要开得写到基板那份里。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">身份写法逐个</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>写法</th><th>是谁</th><th>怎么用</th></tr></thead>
+            <tbody>
+              <tr><td><code>ALLUSER</code></td><td>除主人与她之外的所有人</td><td>放开给所有人时写它。它是 <code>user:</code> 与 <code>group:</code> 的底稿（写它就等于给每个人、每个群都放行）。</td></tr>
+              <tr><td><code>user:&lt;QQ号&gt;</code></td><td>某一个具体的人</td><td>给单个用户开口子时最常用。</td></tr>
+              <tr><td><code>group:&lt;群号&gt;</code></td><td>某一个群里的所有人</td><td>把同一件事放开给整个群时用。</td></tr>
+              <tr><td>裸 QQ 号</td><td>同 <code>user:&lt;QQ号&gt;</code></td><td>纯数字就是人，不用加前缀。数字要是纯数字，带别的字符会被拒收。</td></tr>
+              <tr><td><code>MASTER</code> / <code>SYSTEM</code></td><td>—</td><td><b>不用写</b>：两人恒全权。手写进文件里的那几行整行忽略 —— 不报错、不生效，也不占「已经声明过」的位置；在控制台写命令里这两个身份会被直接回绝。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">表里还认几个中文写法（<code>全体</code> / <code>所有人</code> / <code>全部</code> 等于 <code>ALLUSER</code>，<code>群号…</code> / <code>群…</code> 等于 <code>group:</code>，<code>用户…</code> 等于 <code>user:</code>，另外 <code>qq:</code> 前缀也认）。控制台敲命令时按最规范的那三种写最省心：<code>ALLUSER</code> / <code>user:123456</code> / <code>group:123456</code>。</p>
+
+        <h3 class="sec">工具名与动作名怎么写</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">工具级与动作级</h4>
+            <p><code>["weather"]: ["ALLUSER"]</code> —— 整把工具一条，覆盖它<b>已经注册的</b>全部动作。</p>
+            <p><code>["memory.remember"]: ["ALLUSER"]</code> —— 只放开这一个动作；同一把工具别的动作照旧没给。几个动作可以并在一行里写：<code>["memory.remember", "memory.recall"]: ["ALLUSER"]</code>。</p>
+            <p>上一版那种「工具里再嵌一层动作」的写法（<code>"memory": { "remember": [...] }</code>）与动作键写 <code>*</code> 的老写法<b>照旧能读</b>，但装载时会提示建议敲一次 <code>ai/perm gen</code> 重排 —— 重排只产出中括号键那种形态，不写 <code>*</code>，也不给技能域留空身份表的占位行。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">名字用哪一个</h4>
+            <p>用<b>注册名</b>：md 里 <code>tool:</code> 声明的名字如果合规范就是它本身；中文名会被自动英文化（<code>tp_</code> 前缀那一套），那么表里的键、<code>ai/perm run</code> 敲的 op、代码里 <code>h.need(...)</code> 传的名字都要用注册名。</p>
+            <p>拿不准的时候看 <code>ai/tools</code>：它列出的就是当前工具面里真实存在的名字。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">越界条目会被忽略</h3>
+        <div class="note bad reveal">
+          <p><span class="n-title">技能文件里只写它自己的</span>：读到技能目录里的 <code>perms.jsonc</code> 时，基板会拿 op 的工具名去问「这个工具归哪个技能」，也会拿数据键去问「这类数据归哪个技能」。三条越界都<b>不生效</b>，并在启动时点名一行：</p>
+          <ul class="plain">
+            <li>写了别人的、或者基板内置工具的 op —— 形如 <code>[acl] 越界忽略：技能「天气查询」的 perms.jsonc 里写了不属于它的 op「send.group」（属技能「消息发送」）—— 这一条不生效</code>；认不出归属时那一行写的是「不是任何技能提供的工具」。</li>
+            <li>写了不属它的数据键 —— 同一句话的另一种形态，末尾点明这类数据归基板还是属别的技能，那一条不生效。</li>
+            <li>写了 <code>File</code> 块 —— <b>整块不生效</b>（路径属于部署，不属于某个技能），原句形如「…里写了 File 块（路径属于部署，只许写在基板那份 <code>perms-core.jsonc</code> 里）—— 整块不生效」。</li>
+          </ul>
+          <p>所以要给某个能力开口子，就写到那个能力归属的那份文件里：技能自己的工具与自己的数据写到自己的 <code>perms.jsonc</code>，基板内置工具、其余数据键与全部路径写到数据根下的 <code>perms-core.jsonc</code>。用 <code>ai/perm run</code> 敲的时候不用操心这件事 —— 它按归属自己选文件，回执里会写明写到了哪一份。</p>
+        </div>
+        <div class="note warn reveal">
+          <p><span class="n-title">还有一条更早的门槛</span>：装载权限表要问「哪把工具归哪个技能」，而这份归属来自工具面。工具面还没装配好时读到技能权限文件，那一轮技能文件一律不读，并打一行「拿不到工具归属（注册表还没装配）—— 技能权限文件本次一律不读：ALLUSER 按未授权处理」。这种情况在装配完成后再敲一次 <code>ai/perm reload</code> 就好。</p>
+        </div>
+
+        <h3 class="sec">用控制台改表：八条子命令</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>命令</th><th>干什么</th><th>看什么 / 写什么</th></tr></thead>
+            <tbody>
+              <tr><td><code>ai/perm</code></td><td>看合并后的整张表</td><td>逐条打印 + 一行摘要（几 <code>Run</code>、几 <code>Ban</code>、覆盖多少 op）+ 数据与路径两个域的规则行 + 一行「未声明 Read、按默认能读的类别」+ 装载汇总一行 + 来源汇总（core 几条、技能几份共几条）+ 一行「另有 N 个动作没在表里（= 未授权）」。</td></tr>
+              <tr><td><code>ai/perm list [op]</code></td><td>按 op 看谁能用</td><td>不给 op 就逐行列全；给一个 op 就只看它那一条。还会写出这个 op 归属的权限文件在不在（不在的话提示敲 <code>ai/perm run</code> 会创建它）。</td></tr>
+              <tr><td><code>ai/perm run &lt;op&gt; &lt;身份…&gt;</code></td><td>授权（写进 <code>Skill</code> 的 <code>Run</code>）</td><td>可以一次给几个身份。写入该 op <b>归属</b>的那份文件：技能 op → 那个技能的 <code>perms.jsonc</code>（不存在就创建），其余 → 数据根下的 <code>perms-core.jsonc</code>。回执形如 <code>已授权：weather ← ALLUSER（已写入 …）</code>。</td></tr>
+              <tr><td><code>ai/perm ban &lt;op&gt; &lt;身份…&gt;</code></td><td>封禁（写进 <code>Skill</code> 的 <code>Ban</code>）</td><td>同一把键上 <code>Ban</code> 压过 <code>Run</code>。</td></tr>
+              <tr><td><code>ai/perm db run|read|ban &lt;数据键&gt; &lt;身份…&gt;</code></td><td>数据那一域：谁能改 / 谁能读 / 谁都不能</td><td>数据键要在已知的那几类里（先敲 <code>ai/perm</code> 看表），认不出的键会被当场拒掉，不会静默写成别的块。</td></tr>
+              <tr><td><code>ai/perm file run|read|ban &lt;路径&gt; &lt;身份…&gt;</code></td><td>路径那一域：谁能碰哪个路径</td><td>目录末尾带斜杠 = 整棵子树；不带通配符；路径含空格时整段用一对双引号包起来（<code>"D:/a b/"</code>），没配对会直接拒。</td></tr>
+              <tr><td><code>ai/perm revoke &lt;键&gt; &lt;身份&gt;</code></td><td>撤掉这个身份在这个键上的全部条目</td><td>键会<b>自动认它属于哪一块</b>（op / 数据 / 路径），一次摘干净；一行里若因此一个人都不剩，整条被删掉。</td></tr>
+              <tr><td><code>ai/perm gen</code></td><td>重排已有权限文件：按域、层、键排好</td><td><b>只在已有的文件里重排，不新建文件</b>；还会列出「这些 op 还没有权限文件（= 不授权）」。手改乱的排版会被它排回来，每一层里哪些身份原样保留。它不给宽身份新增授权，技能文件里也不会写出路径块。</td></tr>
+              <tr><td><code>ai/perm reload</code></td><td>重新合并装载</td><td>外面手改了权限文件之后敲它（顺手重新取一次工具归属）。用 <code>run</code> / <code>ban</code> / <code>db</code> / <code>file</code> / <code>revoke</code> / <code>gen</code> 改的当场生效，不用 reload。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">写命令（<code>run</code> / <code>ban</code> / <code>db</code> / <code>file</code> / <code>revoke</code> / <code>gen</code>）只有主人能跑；<code>ai/perm</code> 与 <code>ai/perm list</code> 是只读的。身份写法认不出来时一个字都不写盘 —— 先全验、再动文件。任何一次写都会把已有的权限文件按这一版的形状重排一遍，重排结果与文件里现有内容逐字节相同时就跳过写。</p>
+
+        <h3 class="sec">两段能直接抄的例子</h3>
+        <div class="code" data-lang="json">
+          <div class="code-head"><span class="lang">json</span><span class="path">data\skills\例子\perms.jsonc（授权：所有人可以用 add 与 list，drop 谁都不给）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>{
+  "version": 6,
+  "_readme": "例子这个技能提供的工具给谁用。没列到的 = 不授权。",
+  "Skill": {
+    "Run": {
+      // 记一条
+      ["example.add"]: ["ALLUSER"],
+      // 看自己的
+      ["example.list"]: ["ALLUSER"],
+      // 删自己的一条（列出来了但没给谁 = 谁都不能用）
+      ["example.drop"]: []
+    },
+    "Ban": { }
+  }
+}</code></pre>
+        </div>
+        <p class="t-cap">生效之后：任何人在群里 / 私聊里都能让她记一条便签、看自己的便签；<code>drop</code> 这一条谁点都是 <code>[权限阻断] 「example.drop」没有授权给你（列出来了，但谁都没给）</code>，只有主人与她本人删得动（他们不看表）。技能域里那个空数组与「没列到」等效，所以重排一次之后这一行就不再保留了。</p>
+
+        <div class="code" data-lang="json">
+          <div class="code-head"><span class="lang">json</span><span class="path">data\skills\例子\perms.jsonc（封禁：先对所有人放开，再把两个人挡掉）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>{
+  "version": 6,
+  "_readme": "例子这个技能提供的工具给谁用。Ban 压过 Run：同一把键上只要命中一条 Ban 就不可用。",
+  "Skill": {
+    "Run": {
+      // ── 便签（example）
+      ["example"]: ["ALLUSER"]
+    },
+    "Ban": {
+      // 这两个人在这个 op 上一律不可用（哪怕 Run 里写着 ALLUSER）
+      ["example.drop"]: ["user:100001", "group:200002"]
+    }
+  }
+}</code></pre>
+        </div>
+        <p class="t-cap">生效之后：所有人都能用 <code>example.drop</code>，除了 <code>user:100001</code> 这个人、以及 <code>group:200002</code> 这个群里的所有人 —— 他们拿到的是 <code>[权限阻断] 「example.drop」在技能管控表的黑名单里</code>。主人与她本人照旧不受影响。</p>
+
+        <div class="code" data-lang="json">
+          <div class="code-head"><span class="lang">json</span><span class="path">data\skills\例子\perms.jsonc（这个技能带着自己的数据时：只写属于自己的那些键）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>{
+  "version": 6,
+  "_readme": "这个技能管的数据：谁能改、谁能读。改命中之后还要看那一行是不是他自己的。",
+  "Skill": {
+    "Run": {
+      ["example.add"]: ["ALLUSER"]
+    },
+    "Ban": { }
+  },
+  "DB": {
+    "Run": {
+      // 只有属于这个技能的数据键能写在这里；别的键归基板
+      ["example_box"]: ["ALLUSER"]
+    },
+    "Read": {
+      ["example_box"]: ["ALLUSER"]
+    },
+    "Ban": { }
+  }
+}</code></pre>
+        </div>
+        <p class="t-cap">这一段示范的是：技能目录里的文件<b>可以</b>写属于它自己的数据键，<b>不能</b>写路径块。某个键到底属不属于这个技能，看<a href="perms.html">权限管理</a>那一页的「数据键」表；写错了不会被收下，启动时会点名一行。</p>
+
+        <div class="note reveal">
+          <p><span class="n-title">权限模型、命令细节与排错在另一页</span>：这一节只讲技能这一个角度 —— 文件放哪、格式怎么填、越界会怎样。整套权限模型（三域、三域各自的默认值、三道闸门）、<code>ai/perm</code> 的全部输出形态与排错顺序见<a href="perms.html">权限管理</a>那一页。</p>
+        </div>
+      </section>
+
+      <!-- ============ 5 ============ -->
+      <section class="chapter" id="ext">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">05 / 钩子与扩展点</span>
+          <h2>六件套：接口挂上去，能力就长出来</h2>
+          <p class="chapter-desc">技能能被基板调用的方式一共六种：<code>Skill</code>（模型点得动的工具）、<code>Hooked</code>（事件钩子）、以及四个<b>扩展点</b> —— <code>ContextProvider</code>（每轮往上下文里加一段）、<code>OutboundStage</code>（发送前改正文）、<code>LifecycleHook</code>（回合开始 / 发送 / 结束）、<code>TriggerVoter</code>（这条消息要不要自动回）。<code>Skill</code> 与 <code>Hooked</code> 在<a href="#java">第 03 节</a>讲过，这一节把剩下五个按同一套问题逐个讲清楚。</p>
+        </header>
+        <div class="note reveal">
+          <p><span class="n-title">先记住两条识别规则</span>：<b>钩子</b>要在 md 里写 <code>hooks:</code>，而且实现要写在入口类上（只在入口类上找）。<b>四个扩展点</b>不用在 md 里写任何东西 —— 类上写了 <code>implements ContextProvider</code> 就是声明，基板扫这个技能的<b>每个顶层类</b>，谁的接口对得上就注册谁。一个类同时实现两个接口也行，那样它一个人挂两条。</p>
+        </div>
+
+        <h3 class="sec">Hooked：事件钩子</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>问题</th><th>答案</th></tr></thead>
+            <tbody>
+              <tr><td>它是干什么的</td><td>把基板的事件交给你。基板只提供<b>事件</b>，怎么处理完全在技能里 —— 钩子在，这个能力就在；技能删掉，能力彻底消失。</td></tr>
+              <tr><td>要写哪几个方法</td><td><code>void on(String hook, JsonObject payload, Host h)</code>。一个方法接全部四个钩子，用第一个参数分辨是哪一个。</td></tr>
+              <tr><td>在 md 里怎么声明</td><td><code>hooks: [on_timer]</code> 或 <code>hooks: on_message, on_timer</code>。取值只有四个：<code>on_timer</code> / <code>on_message</code> / <code>on_request</code> / <code>on_notice</code>。</td></tr>
+              <tr><td>什么时候轮到你</td><td><code>on_timer</code>：基板唯一心跳，周期是配置键 <code>tickMs</code>（出厂 20 秒）。<code>on_message</code>：一条入站 QQ 消息。<code>on_request</code>：一条好友申请 / 群邀请。<code>on_notice</code>：一条通知事件（戳一戳、撤回、进群、禁言这类）。</td></tr>
+              <tr><td>payload 长什么样</td><td><code>on_timer</code> 是基板自己造的：<code>{"tick":n,"ts":毫秒}</code>。<code>on_message</code> / <code>on_request</code> / <code>on_notice</code> 就是那条事件的 JSON 原文，常用键有 <code>post_type</code>、<code>message_type</code>、<code>sub_type</code>、<code>user_id</code>、<code>group_id</code>、<code>message_id</code>、<code>raw_message</code>、<code>sender</code>；申请类还带 <code>request_type</code>、<code>flag</code>、<code>comment</code>；通知类还带 <code>notice_type</code>、<code>target_id</code>、<code>operator_id</code>。取键用 <code>J.s(payload, "raw_message", "")</code> 这种带默认值的取法。</td></tr>
+              <tr><td>判定主体是谁</td><td>钩子里的动作按<b>她自己</b>（<code>SYSTEM</code>）算 —— 自动禁言、自动审批这类是她的自动策略，按触发者判会被陌生人的默认状态当场拒掉。所以钩子里 <code>h.need(op)</code> 恒放行。而 <code>h.caller()</code> 仍然是<b>真实发送者</b>（谁在说话），做策略判断用那个。</td></tr>
+              <tr><td>能改什么</td><td>消息类钩子里可以接管这一轮：把 <code>payload</code> 的 <code>_handled</code> 置 <code>true</code>，表示「这条我接管了」，基板就不再自己回一轮；也可以投一票「回 / 不回」（<code>_reply</code> 为 <code>true</code> / <code>false</code>，理由是 <code>_reply_reason</code>）。<b>通知类那条路上不读这两个键</b>，置了没有效果：那条路只记账，不能发言、也起不了一轮。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note warn reveal">
+          <p><span class="n-title">钩子是同步跑完的</span>：基板要等它返回才知道 <code>_handled</code> 是什么，所以钩子会跑在一个有界执行池里（池满时就地在调用线程跑）。结论是：钩子里别做慢活，等网络、扫全库这类事交出去做（派子 Agent，或者记一笔等下一次心跳处理）。</p>
+        </div>
+        <div class="code" data-lang="java">
+          <div class="code-head"><span class="lang">java</span><span class="path">data\skills\例子\Example.java（入口类上的钩子）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>import com.google.gson.JsonObject;
+
+import sair.v4.kit.J;
+import sair.v4.skill.Host;
+import sair.v4.skill.Hooked;
+import sair.v4.skill.Skill;
+
+/** 入口类同时是工具入口与钩子入口：implements 两个接口即可。 */
+public class Example implements Skill, Hooked {
+
+    @Override
+    public Object call(sair.v4.skill.Args a, Host h) {
+        return null;                                  // 这个技能不给工具也行，md 里不写 tool: 就不会注册
+    }
+
+    @Override
+    public void on(String hook, JsonObject payload, Host h) {
+        try {
+            if ("on_message".equals(hook)) {
+                String text = J.s(payload, "raw_message", "");
+                if (text.contains("羊")) {            // 命中就接管这一条
+                    payload.addProperty("_handled", true);
+                    if (h != null) h.spawn("有人提到羊了，接一句", null, true, null, null, true);
+                }
+            } else if ("on_timer".equals(hook)) {
+                long tick = J.l(payload, "tick", 0L);
+                if (h != null) h.out().dim("[例子] 心跳 " + tick);
+            }
+        } catch (Throwable ignored) {
+            // 钩子里抛出去只会被记一行；自己吞掉更清楚
+        }
+    }
+}</code></pre>
+        </div>
+        <p class="t-cap">还有一条兼容路径：入口类里直接写一个与钩子同名的方法（<code>on_message(JsonObject payload, Host h)</code>、<code>on_message(JsonObject)</code>，甚至无参的）也能被调到。新技能走 <code>Hooked</code> 这一个方法更整齐。</p>
+
+        <h3 class="sec">OutboundStage：发送前改正文</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>问题</th><th>答案</th></tr></thead>
+            <tbody>
+              <tr><td>它是干什么的</td><td>管「发出去的东西」：洗 AI 味、给提问者加 @、追加一张表情包、剥离不该外泄的标记。位置在<b>分段之后、发送之前</b>，所以看到的是已经分好的一条条消息。</td></tr>
+              <tr><td>要写哪几个方法</td><td><code>int order()</code>（抽象方法，要写）；<code>String transform(Outbound m)</code>、<code>List&lt;String&gt; extra(Outbound m)</code>、<code>boolean veto(Outbound m)</code>、<code>List&lt;String&gt; finish(List&lt;String&gt; parts, Outbound m)</code> 四个都有默认实现，按需要覆盖。</td></tr>
+              <tr><td>什么时候轮到你</td><td>每一次要往外发话（群、私聊、定时任务的落点）都会走一遍。逐条口会对<b>每一条</b>各调用一次。</td></tr>
+              <tr><td>每个口的分工</td><td><b><code>veto</code></b>：一票否决，<code>true</code> = 这一条不发（整条丢，不做「改一点点再发」）。<b><code>transform</code></b>：改正文，返回 <code>null</code> = 不改（这是「没意见」的默认），返回空串或全空白 = 这一条会被丢掉。<b><code>extra</code></b>：追加独立消息（再追一张表情包这种），只在还有话要发的时候收一次，追加的消息<b>不再过 stage</b>（否则插件之间会互相追加、无限繁殖）。<b><code>finish</code></b>：整批收尾，拿到最终的整条消息表（已含追加的消息），返回新表就整表替换，返回 <code>null</code> = 不改；返回空表 = 这一批一条都不发。</td></tr>
+              <tr><td>顺序</td><td>按 <code>order</code> 小的在前，同序按插件名。一轮下来是：逐条 veto → 逐条 transform → extra → finish。同一批里前一个 stage 的 <code>transform</code> 结果就是后一个 stage 看到的正文。</td></tr>
+              <tr><td>能改什么、不能改什么</td><td>能改正文、能决定这一条发不发、能追加消息。不能改「发给谁」—— 落点是调度与会话的事。</td></tr>
+              <tr><td>在 md 里怎么声明</td><td>不用声明，<code>implements OutboundStage</code> 就够了。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0"><code>Outbound</code> 上有什么</h4>
+            <p><code>text()</code> 这一条当前的正文；<code>session()</code> 会话键；<code>group()</code> / <code>target()</code> 群还是私聊、目标号；<code>caller()</code> 调用者（定时任务的落点上是 <code>null</code>，要容忍）；<code>echo()</code> 这一条会不会也打进控制台；<code>host()</code> 当前 stage 所属技能的只读能力面（<b>可能为 <code>null</code></b>）。</p>
+            <p>位置三件：<code>index()</code> 本次发送里第几条（0 起）、<code>total()</code> 一共几条、<code>first()</code> / <code>last()</code> 是不是首条 / 末条。逐条阶段的下标是分段结果里的位置；<code>extra</code> 与 <code>finish</code> 阶段指向本批最后一条，<code>total</code> 是含追加消息的最终条数。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">为什么要有 <code>finish</code></h4>
+            <p>有些事天然是「整条回复」级别的，逐条口做不对。典型是<b>把 @ 提问者加在首条</b>：首条要是<b>真正会发出去</b>的那一条，而在逐条口里看不到后面哪条会被别的 stage 丢掉或者洗空 —— 结果 @ 挂到了一条根本没发的消息上。「末条补个标点」「整批去重」也只有在这里才准。</p>
+            <p>注意：<code>finish</code> 返回空表就是这个能力（等于整批不发），用的时候心里有数；表里的元素按原样发，不再过 stage。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">ContextProvider：每轮往上下文里加一段</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>问题</th><th>答案</th></tr></thead>
+            <tbody>
+              <tr><td>它是干什么的</td><td>每一轮装配上下文时往里面加一段（情绪状态、用户画像、群成员映射这类）。内容与文案全在你的插件里，基板只负责三件事：顺序、段位、预算。基板自己不产生任何一条上下文内容。</td></tr>
+              <tr><td>要写哪几个方法</td><td><code>boolean stable()</code>（抽象方法，要写）、<code>int order()</code>（抽象方法，要写）、<code>String build(BuildContext b)</code>（抽象方法，要写）；<code>int maxChars()</code>（默认 1200）、<code>boolean appliesTo(BuildContext b)</code>（默认 <code>true</code>，返回 <code>false</code> 就是这一段这一轮不出现，不算异常）。</td></tr>
+              <tr><td>什么时候轮到你</td><td>每一次装配上下文（主回合、后台收尾回合）都会问一遍。</td></tr>
+              <tr><td>稳定段与前缀缓存</td><td><code>stable()</code> 返回 <code>true</code> 的块排在同一条系统提示词<b>之后、事实块之前</b>，它们一起构成可复用的前缀。模型服务的前缀缓存按前缀一字不差地命中，所以稳定块的内容要「同输入一字不差」—— 时间戳、随机数、当前消息正文都别放进去。返回 <code>false</code> 的块排在事实块之后（每轮都可能变），顺序仍按 <code>order</code> 与插件名确定。</td></tr>
+              <tr><td>两级预算裁剪</td><td>先按 <code>maxChars()</code> 逐段截断（丢尾巴，保留开头），再按全局预算 <code>ctxBudgetChars</code>（出厂 6000）<b>从 order 最大的开始整段丢</b>，并打一行 <code>[ext] budget over …</code>。所以 order 大的段先被丢：重要的段要给小号，同时把 <code>maxChars()</code> 收紧到够用就好。</td></tr>
+              <tr><td>能改什么、不能改什么</td><td>只能通过返回值产出这一段。拿到的 <code>BuildContext</code> 是只读口：<b>不暴露回合对象，也不暴露消息数组</b> —— 拿到消息数组就能往这一轮里塞任意内容，等于绕过装配骨架的顺序与预算。要写东西就写自己的库 / 自己的 kv。</td></tr>
+              <tr><td>在 md 里怎么声明</td><td>不用声明，<code>implements ContextProvider</code> 就够了。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0"><code>BuildContext</code> 上有什么</h4>
+            <p><code>caller()</code> 调用者（出站路径上可能为 <code>null</code>）；<code>session()</code> 会话键；<code>text()</code> 本轮正文（装配期是用户输入，出站期是将要发出去的正文）；<code>host()</code> 只读能力面（可能为 <code>null</code>）；<code>group()</code> / <code>groupId()</code> / <code>qq()</code> / <code>master()</code> / <code>console()</code> 从调用者派生出来的一组判断；<code>state(key, def)</code> 按 key 读本轮事实；<code>subagent()</code> / <code>agentLabel()</code> 这一轮是不是子 Agent。</p>
+            <p>本轮事实的既有键：<code>media</code>（媒体段）、<code>chat_window</code>（本会话最近若干条聊天记录）、<code>subagent</code>（子 Agent 标签）。出站路径上没有回合，<code>state(...)</code> 一律返回你给的默认值 —— 落点信息在 <code>Outbound</code> 上。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">产出怎么落地</h4>
+            <p>返回值会被去掉首尾空白，然后按「一段一条系统消息」装配。返回空串或 <code>null</code> 就是这一段不出现（正常，不是错）。<code>appliesTo</code> 说不适用时同样不出现，而且不会被记成异常。</p>
+            <p>每轮都会调用，所以不要在这里打日志刷屏 —— 诊断行基板自己会打（一行 <code>[ext] provider=… chars=… ms=…</code>）。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">LifecycleHook：回合的开始、发送、结束</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>问题</th><th>答案</th></tr></thead>
+            <tbody>
+              <tr><td>它是干什么的</td><td>「记账与清理」：写对话历史、记调用量、清临时态、私聊「正在输入」。<b>不是改内容</b> —— 改内容那条路是 <code>OutboundStage</code>，所以这里拿到的是只读的 <code>BuildContext</code>，根本没有可改的正文。</td></tr>
+              <tr><td>要写哪几个方法</td><td><code>int order()</code>（抽象方法，要写）；<code>void onTurnStart(BuildContext b)</code>、<code>void onSend(BuildContext b)</code>、<code>void onTurnEnd(BuildContext b, String reply, String error)</code> 三个都有默认空实现，按需要覆盖。</td></tr>
+              <tr><td>时序</td><td><code>onTurnStart</code>（装配完、还没跑）→ 模型跑（可能多次工具闭环）→ <code>onSend</code>（真要说话了）→ 落点发出 → <code>onTurnEnd</code>。</td></tr>
+              <tr><td>每个口的时机</td><td><code>onTurnStart</code> 在装配完之后、跑之前触发（那时「本轮输入、本轮事实」才齐）；<code>onSend</code> 是<b>这一轮马上要对外说一句话了</b>，含失败兜底那一句 —— 只挂在成功分支上会让「失败了也要做点什么」的插件永远收不到通知；<code>onTurnEnd</code> 在正文发出（或失败）之后触发，失败时 <code>reply</code> 是空串、<code>error</code> 非空，<b>两种结果都会通知一次</b>。</td></tr>
+              <tr><td>管哪些回合</td><td>只管主回合，以及后台收尾回合（那一类会触发 <code>onTurnStart</code> 与 <code>onTurnEnd</code>，但不派 <code>onSend</code>）。<b>子 Agent 不触发</b>生命周期钩子。</td></tr>
+              <tr><td>在 md 里怎么声明</td><td>不用声明，<code>implements LifecycleHook</code> 就够了。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap"><code>reply</code> 是这一轮产出的正文 —— 那一刻还没剥标记、也可能还没发出去。要读「最终发出去的样子」，那条路在 <code>OutboundStage</code>。</p>
+
+        <h3 class="sec">TriggerVoter：这条消息要不要自动回</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>问题</th><th>答案</th></tr></thead>
+            <tbody>
+              <tr><td>它是干什么的</td><td>给「这条消息要不要自动回」投一票。它不是一个新机制，而是把原来只有技能能投的那一票升级成插件公共：三态、有顺序、有缘由。</td></tr>
+              <tr><td>要写哪几个方法</td><td><code>int order()</code>；<code>Vote vote(Ev ev, Caller c)</code>；<code>String reason()</code>（默认 <code>plugin</code>，只在投「不回」时有意义，会写进跳过那一行的 <code>reason=</code> 里）。</td></tr>
+              <tr><td>三态</td><td><code>ANSWER</code> = 回（即使没被 @、也不是主人，例如触发词命中）；<code>DECLINE</code> = 不回（直接结束，省掉一整轮模型调用）；<code>ABSTAIN</code> = 不管（交给下一个）。返回 <code>null</code> 等同于 <code>ABSTAIN</code>。</td></tr>
+              <tr><td>谁先投谁生效</td><td>按 <code>order</code> 小的在前、同序按插件名依次问，<b>第一个非 <code>ABSTAIN</code> 的票生效</b>，后面的不再问。不是多数决 —— 改成投票制会让「谁回谁不回」依赖插件数量；顺序确定，结果才确定。全都不管时，基板按原有的地址规则走。</td></tr>
+              <tr><td>超时与异常</td><td>投票抛异常或超时 = 这一票作废（当 <code>ABSTAIN</code>），打一行 <code>[ext] timeout|error …</code>。<b>别阻塞</b>：宁可不管，也别在这里等网络 —— 超时上限就是 <code>extTimeoutMs</code>，超了这一条消息就按「没人表态」处理。</td></tr>
+              <tr><td>在 md 里怎么声明</td><td>不用声明，<code>implements TriggerVoter</code> 就够了。</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sec">五个接口共用的护栏（每条都能省一次排错）</h3>
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">单次调用超时</span><span class="k-def">extTimeoutMs，出厂 200 毫秒</span><span class="badge warn">丢一次，不丢一轮</span></div>
+            <dl>
+              <dt>怎么表现</dt><dd>超时只让那一次调用作废（provider 的那一段不出现、stage 的那一条保持原样、钩子这一票作废），打一行 <code>[ext] timeout</code>，其余照常。</dd>
+              <dt>怎么用</dt><dd>钩子与扩展点里只做轻活。真要等网络，交给子 Agent 或者下一次心跳。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">异常只影响它自己那一次</span><span class="k-def">一行 <code>[ext] error name=… err=…</code></span><span class="badge info">基板照常回话</span></div>
+            <dl>
+              <dt>意味着什么</dt><dd>插件崩了不会拖垮这一轮对话，也不会影响别的插件。但插件不该依赖这层护栏：自己 catch 住、少做点事，比让基板替你收尾更清楚。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">实例是长活的</span><span class="k-def">装载时建一次</span><span class="badge mute">调用被串行化</span></div>
+            <dl>
+              <dt>意味着什么</dt><dd>扩展点实例在装载期创建一次，之后每轮复用；同一个插件实例的扩展点调用被串行化（同一时刻只跑一个），所以插件作者不用自己处理并发。<b>代价</b>：同一个插件的两轮不能同时用它 —— 这比「读-改-写互相覆盖」划算得多。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">视图不要存起来</span><span class="k-def"><code>BuildContext</code> / <code>Outbound</code></span><span class="badge bad">只在这一次有效</span></div>
+            <dl>
+              <dt>为什么</dt><dd>这两个对象是「这一轮 / 这一条」的视图，出站路径上连回合都没有。要留状态就留在自己的库或 kv 里，别抓住对象不放。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name"><code>host()</code> 可能为 null</span><span class="k-def">绑不上就是没有</span><span class="badge warn">容忍它</span></div>
+            <dl>
+              <dt>什么时候会 null</dt><dd>宿主没绑定到这个插件（例如外部直接注册的合成实现、插件已经被卸载）。写法是「拿不到就少做点事」，绝不抛异常；<code>Outbound.host()</code> 同理。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">热重载别用 static</span><span class="k-def">换类加载器</span><span class="badge bad">状态会丢</span></div>
+            <dl>
+              <dt>后果</dt><dd>重载会把技能重新编译并换一个新的类加载器，static 字段随旧类一起作废 —— 计数、缓存、时间戳全归零。跨轮要记住的东西放 <code>store</code> 或 kv 里。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">总开关</span><span class="k-def">配置键 <code>extEnabled</code></span><span class="badge mute">零开销</span></div>
+            <dl>
+              <dt>怎么表现</dt><dd>没有任何扩展点（或总开关关掉）时，装配、出站、投票、生命周期这四个接线点一行代码都不多走 —— 行为与没有这一层时一字不差。让插件全部失效的开关在这里，不在插件里。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <h3 class="sec">一个类同时挂两个接口</h3>
+        <p class="t-cap">下面这个类既是入口（<code>Skill</code>）又挂 <code>Hooked</code> 与 <code>ContextProvider</code>：钩子从事件累积状态，provider 每轮把状态读出来拼一行。两个身份写在同一个类里，是因为这个技能的事就是一件（<code>Hooked</code> 只认入口类），扩展点身份顺路带上。</p>
+        <div class="code" data-lang="java">
+          <div class="code-head"><span class="lang">java</span><span class="path">data\skills\例子\Example.java（一个类挂两条）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>import com.google.gson.JsonObject;
+
+import sair.v4.ext.BuildContext;
+import sair.v4.ext.ContextProvider;
+import sair.v4.kit.J;
+import sair.v4.kit.Str;
+import sair.v4.skill.Args;
+import sair.v4.skill.Host;
+import sair.v4.skill.Hooked;
+import sair.v4.skill.Skill;
+import sair.v4.store.Store;
+
+/** 入口 + 钩子 + 上下文提供者：一个类挂三条身份。 */
+public class Example implements Skill, Hooked, ContextProvider {
+
+    // ---------------- 工具入口（md 里没写 tool: 时不会注册，写个空实现即可）
+
+    @Override
+    public Object call(Args a, Host h) {
+        return null;
+    }
+
+    // ---------------- 钩子：每来一条消息就把次数记进 kv
+
+    @Override
+    public void on(String hook, JsonObject payload, Host h) {
+        if (!"on_message".equals(hook) || h == null) return;
+        try {
+            Store s = h.store();
+            if (s == null) return;
+            long qq = h.caller() == null ? 0L : h.caller().qq();
+            if (qq &lt;= 0L) return;
+            String key = "example:count:" + qq;
+            int n = 0;
+            try { n = Integer.parseInt(Str.trim(s.kv(key, "0"))); } catch (Throwable ignored) { }
+            s.kvSet(key, String.valueOf(n + 1));
+        } catch (Throwable ignored) {
+            // 钩子不向外抛
+        }
+    }
+
+    // ---------------- 上下文：每轮把那行状态加进去（易变段）
+
+    @Override
+    public boolean stable() {
+        return false;                 // 每轮都可能变，别放进稳定前缀
+    }
+
+    @Override
+    public int order() {
+        return 80;                    // 数字越大越靠后；预算不够时也越先被整段丢掉
+    }
+
+    @Override
+    public int maxChars() {
+        return 200;                   // 这一段自己能有多长；基板还会按全局预算再裁一次
+    }
+
+    @Override
+    public boolean appliesTo(BuildContext b) {
+        return b != null &amp;&amp; b.qq() &gt; 0L;      // 没有具体的人就没有这一段
+    }
+
+    @Override
+    public String build(BuildContext b) {
+        try {
+            if (b == null || b.host() == null) return "";
+            Store s = b.host().store();
+            if (s == null) return "";
+            int n = 0;
+            try { n = Integer.parseInt(Str.trim(s.kv("example:count:" + b.qq(), "0"))); } catch (Throwable ignored) { }
+            return n &gt; 0 ? "这个人今天已经说了 " + n + " 次话。" : "";
+        } catch (Throwable t) {
+            return "";                // 插件绝不拖垮一轮对话
+        }
+    }
+}</code></pre>
+        </div>
+
+        <h3 class="sec">真技能里长什么样（名字都可以去目录里对）</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>技能目录</th><th>文件与类</th><th>挂了什么</th><th>做法上值得抄的一点</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>data\skills\私聊输入态\</code></td>
+                <td><code>PrivateTypingHook.java</code>：<code>implements LifecycleHook</code>，<code>order()</code> 给 50</td>
+                <td>只挂生命周期，不给工具（md 里只有 <code>name</code> 与 <code>description</code>）</td>
+                <td>回合开始打开、结束收起，一开一关正好一对；群聊与控制台在<b>读配置之前</b>就返回，连 <code>host()</code> 都不碰。它刻意<b>不记状态</b>：没有计数器，就不会因为漏了一次结束而把「正在输入」永久卡住。</td>
+              </tr>
+              <tr>
+                <td><code>data\skills\情绪\</code></td>
+                <td><code>EmotionSkill.java</code>（<code>implements Skill, Hooked</code>）、<code>EmotionProvider.java</code>（<code>implements ContextProvider</code>）、<code>MoodStage.java</code>（<code>implements OutboundStage</code>，<code>order()</code> 给 90）、<code>MoodLifecycle.java</code>（<code>implements LifecycleHook</code>）</td>
+                <td>一个技能同时挂了钩子与三个扩展点，全都不给工具</td>
+                <td>同一件事的四种时机拆成四个类，各自只管一段；provider 是<b>只读</b>的（不写库、不取时间戳、不用随机数），所以「同一状态同一轮两次产出一字不差」永远成立 —— 前缀缓存与排错都靠这一条。</td>
+              </tr>
+              <tr>
+                <td><code>data\skills\表情包\</code></td>
+                <td><code>StickerSkill.java</code>（入口 + 钩子）、<code>StickerCollect.java</code>（收集那一路）</td>
+                <td><code>tool: sticker</code> + <code>hooks: [on_timer]</code></td>
+                <td>钩子里只登记队列，真正下载与入库放到心跳里批量做一次 —— 钩子要及时返回，重活搬走。</td>
+              </tr>
+              <tr>
+                <td><code>data\skills\触发词\</code></td>
+                <td><code>TriggerSkill.java</code>：<code>implements Skill, Hooked</code>，<code>op</code> 三个动作</td>
+                <td><code>tool: trigger</code> + <code>hooks: on_message</code></td>
+                <td>命中后自己不发消息：把活派给子 Agent（并声明「由宿主替它发到当前会话」），再把 <code>_handled</code> 置真接管这一条 —— 这样基板不会在同一轮里再自动回一次。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 6 ============ -->
+      <section class="chapter" id="full">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">06 / 全流程</span>
+          <h2>一个完整的技能：从零到能用</h2>
+          <p class="chapter-desc">先把「完整」这个词摊开：一个技能可以只有两份文件，也可以有十来样东西。这一节先给一张清单（每项少了的后果都写清楚），再给一次端到端的走法 —— 建目录、写 md、写 java、写权限表、放进去、重载、看清单、授权、试用，每一步都写「做完应该看到什么」。</p>
+        </header>
+
+        <h3 class="sec">清单：一个「完整」技能具备哪些东西</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>东西</th><th>作用</th><th>少了它会怎样</th></tr></thead>
+            <tbody>
+              <tr><td>一个文件夹，名字就是技能名</td><td>技能的身份与容器</td><td>没有它就没有技能 —— 技能的最小单位就是这个文件夹</td></tr>
+              <tr><td>同名 md（<code>&lt;技能名&gt;.md</code>）</td><td>身份校验 + front matter 声明 + 给人看的说明书</td><td>状态 <code>ERROR</code>，错误是「缺少同名文档」；这个技能在工具面里不存在</td></tr>
+              <tr><td>md 里的 <code>tool:</code></td><td>决定这把工具叫什么、有没有这把工具</td><td>不写 = 不注册工具：模型看不到也调不动，只剩钩子与扩展点</td></tr>
+              <tr><td>md 里的 <code>airun</code>（说明 / 返回值 / 参数表 / 示例）</td><td>模型挑工具与填参数的全部依据</td><td>工具仍在，但说明为空、参数表为空，模型只能瞎猜</td></tr>
+              <tr><td>至少一份 <code>.java</code>，里面有实现 <code>Skill</code> 的类</td><td>工具入口：真正干活的代码</td><td>声明了 <code>tool:</code> 却没有代码 = 不注册工具（<code>ai/skill validate</code> 会点名这种技能）</td></tr>
+              <tr><td><code>declareOps</code> 里把每个动作声明一条</td><td>权限表与 <code>ai/perm</code> 的骨架：动作能分开管</td><td>不声明也能跑，但管控表里只有工具名那一层，动作分不开</td></tr>
+              <tr><td>每个动作分支开头 <code>h.need("工具.动作")</code></td><td>权限判定真正生效的地方</td><td>入口那道门放行任一动作就够，不细判 = 权限表里那些「没给」形同虚设</td></tr>
+              <tr><td><code>prompt.md</code></td><td>文案、阈值、词表放这里，改完即时生效</td><td>不写就要把文案硬写在 java 里，改一句话也要重载；声明了 <code>inject:</code> 时它还是注进上下文的那一段</td></tr>
+              <tr><td><code>perms.jsonc</code></td><td>这个技能的工具给谁用</td><td>不写 = 全部 op 对普通用户不授权（默认拒绝），只有主人与她本人用得到</td></tr>
+              <tr><td>库声明 <code>declare(Libs)</code>（用到业务表时）</td><td>表结构由用到它的技能声明，基板按声明建表补列</td><td>没声明就直接用那张表 → 报「没有这个库」，工具每次调用都失败</td></tr>
+              <tr><td><code>hooks:</code> + <code>Hooked</code>（要接事件时）</td><td>在事件上干活：定时维护、消息累积、申请审批</td><td>基板只提供事件，不接就永远不会被叫醒（例如没有任何钩子的技能不会自己跑）</td></tr>
+              <tr><td>四个扩展点接口（要插进管线时）</td><td>每轮加一段上下文 / 发送前改正文 / 回合时序 / 触发投票</td><td>不挂就没有这些时机，能力只能靠模型主动调用工具来触发</td></tr>
+              <tr><td>归属硬判（多用户数据时）</td><td>回答「这一条是不是他的」</td><td>权限表全放行时会变成「允许所有人看别人的」，这是比权限本身更严重的一类问题</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">真技能里最小的一份是 <code>data\skills\天气查询\</code>（md + 一份 java，不给权限表），最丰富的一份是 <code>data\skills\情绪\</code>（7 份 java：入口、状态、注入、出站、生命周期、配置）。两者都是合法技能 —— 完整不等于文件多，而是「该有的都有」。</p>
+
+        <h3 class="sec">走一遍：从建目录到在群里用起来</h3>
+        <div class="note reveal">
+          <p><span class="n-title">第 0 步：先想清楚三件事</span>① 技能名（文件夹名，可以中文）；② 工具名（<code>tool:</code>，用 ASCII，别撞基板内置工具名）；③ 有哪些动作（每个动作将来就是一个 op）。这三样定下来，后面每一步都只是把它们写下来。</p>
+        </div>
+
+        <h3 class="sec">第 1 步：建目录</h3>
+        <div class="code" data-lang="text">
+          <div class="code-head"><span class="lang">text</span><span class="path">在技能库里建一个文件夹</span><button class="copy" type="button">复制</button></div>
+          <pre><code>&lt;数据根&gt;\skills\例子\</code></pre>
+        </div>
+        <p class="t-cap">做完应该看到：<code>skills</code> 下面多了一个空文件夹 <code>例子</code>。这时候控制台敲 <code>ai/skill list</code> 还看不到它 —— 目录要先重载才会被扫（空目录也会被扫成 <code>ERROR</code>：「缺少同名文档 例子.md」）。</p>
+
+        <h3 class="sec">第 2 步：写同名 md</h3>
+        <p class="t-cap">建 <code>例子\例子.md</code>，把<a href="#md">第 02 节</a>的模板抄进来，改成自己的三件事：工具名、动作、参数。最小可以只有这几行：</p>
+        <div class="code" data-lang="text">
+          <div class="code-head"><span class="lang">text</span><span class="path">data\skills\例子\例子.md</span><button class="copy" type="button">复制</button></div>
+          <pre><code>---
+name: 例子
+description: 便签：记一条、看自己的、删自己的（多动作，各判自己的 op）
+tool: example
+airun:
+  description: 便签。用户让你记一件事时用 add；问你都记了什么时用 list；说删掉某一条时用 drop。
+  returns: add 返回新便签的编号；list 返回便签清单；drop 返回删除结果
+  examples: [「帮我记一下明天带伞」→ op=add,「你都记了什么」→ op=list,「把第 3 条删了」→ op=drop]
+  params:
+    op:
+      type: string
+      required: true
+      enum: [add, list, drop]
+      description: 操作：add=记一条，list=看自己的，drop=删自己的一条
+      example: add
+    content:
+      type: string
+      description: add 必填：要记的内容
+    id:
+      type: integer
+      description: drop 必填：要删的便签编号
+    limit:
+      type: integer
+      description: list 返回条数，默认 10
+---
+# 例子（工具 example）
+
+三个动作各判自己的 op。数据落在自己声明的 example_note 表里，非主人只能碰自己的行。</code></pre>
+        </div>
+        <p class="t-cap">做完应该看到：文件在技能目录里，且<b>文件名与文件夹名逐字一致</b>。这一步只写文件，还不生效。</p>
+
+        <h3 class="sec">第 3 步：写 java</h3>
+        <p class="t-cap">建 <code>例子\Example.java</code>，用<a href="#java">第 03 节</a>的骨架二。三处要对上：类名与 <code>entry</code>（不写 <code>entry</code> 就自动认第一个实现 <code>Skill</code> 的类）、<code>declareOps</code> 里的工具名与 md 的 <code>tool:</code> 一致、<code>h.need(...)</code> 里的 op 与 <code>declareOps</code> 一致。</p>
+        <p class="t-cap">做完应该看到：目录里有一份 <code>.java</code>，没有 <code>package</code> 行，类里有一个公开的无参构造函数（不写构造函数时默认就有）。</p>
+
+        <h3 class="sec">第 4 步：写权限表（想给别人用的时候）</h3>
+        <div class="code" data-lang="json">
+          <div class="code-head"><span class="lang">json</span><span class="path">data\skills\例子\perms.jsonc</span><button class="copy" type="button">复制</button></div>
+          <pre><code>{
+  "version": 6,
+  "_readme": "例子这个技能提供的工具给谁用。没列到的 = 不授权。",
+  "Skill": {
+    "Run": {
+      // 记一条
+      ["example.add"]: ["ALLUSER"],
+      // 看自己的
+      ["example.list"]: ["ALLUSER"]
+    },
+    "Ban": { }
+  }
+}</code></pre>
+        </div>
+        <p class="t-cap">做完应该看到：<code>例子</code> 目录里有三份文件。这时 <code>add</code> 与 <code>list</code> 对所有人放行，<code>drop</code> 因为没列到而谁都不给（主人与她本人不受影响）。</p>
+
+        <h3 class="sec">第 5 步：重载，看它有没有装进去</h3>
+        <div class="code" data-lang="text">
+          <div class="code-head"><span class="lang">text</span><span class="path">控制台</span><button class="copy" type="button">复制</button></div>
+          <pre><code>ai/skill reload       已重扫：技能 N 个，提供工具 M 个
+ai/skill list         技能 N 个（工具 M，钩子 K）
+                        例子      LOADED   tool=example
+ai/skill validate     技能库无问题（共 N 个）
+ai/skill read 例子    （打印这个技能的 JSON 概览与 md 正文）</code></pre>
+        </div>
+        <p class="t-cap">做完应该看到：<code>例子</code> 那一行状态是 <code>LOADED</code>，右边写着 <code>tool=example</code>。状态是 <code>ERROR</code> 时，行内不显示工具名，<code>ai/skill validate</code> 会把它的问题原话打出来（编译失败、名字不一致、工具名重名都在这里）。状态 <code>MD_ONLY</code> 表示只有 md 没有代码。<code>工具名被自动英文化</code>时，启动日志里另有一行说明声明名与注册名的对照。</p>
+
+        <h3 class="sec">第 6 步：看工具面</h3>
+        <div class="code" data-lang="text">
+          <div class="code-head"><span class="lang">text</span><span class="path">控制台</span><button class="copy" type="button">复制</button></div>
+          <pre><code>ai/tools
+  example  [Run · 技能:例子]  便签。用户让你记一件事时用 add；问你都记了什么时用 list；…</code></pre>
+        </div>
+        <p class="t-cap">方括号里是这个工具<b>对当前调用者</b>的管控状态：<code>Run</code> 可用、<code>Ban</code> 封禁、<code>-</code> 未授权或没在判。控制台的调用者是主人，所以他恒全权、永远看到 <code>Run</code>。用小号或别的身份看时才会变成 <code>-</code>。工具面没装配起来时这条命令会给一句说明（最常见的原因是还没开始装配）。</p>
+
+        <h3 class="sec">第 7 步：敲一次授权命令（可选，看回执）</h3>
+        <div class="code" data-lang="text">
+          <div class="code-head"><span class="lang">text</span><span class="path">控制台</span><button class="copy" type="button">复制</button></div>
+          <pre><code>ai/perm run example.add ALLUSER
+  已授权：example.add ← ALLUSER（已写入 …\data\skills\例子\perms.jsonc）
+
+ai/perm run example.list ALLUSER
+  已授权：example.list ← ALLUSER（已写入 …\data\skills\例子\perms.jsonc）
+
+ai/perm list example.add
+  [Run] example.add（记一条便签）← ALLUSER
+  这个 op 归属的权限文件：…\data\skills\例子\perms.jsonc</code></pre>
+        </div>
+        <p class="t-cap">做完应该看到：回执里写明写进了哪一份文件（技能自己的 op 就落在技能目录里的 <code>perms.jsonc</code>，不存在会被创建）。同一个 op 上同一个身份只留最后写的那一条 —— 重复敲同一条命令不会堆出两行。op 还不在注册表里时，命令会多一句提示「这个 op 不在当前注册表里（装上新技能后才会出现）—— 条目先留着无妨」；那句话在<b>基板那份</b>里是准的（写精确键 = 预先给一个将来才注册的动作授权），但在<b>技能那份</b>里落不下来：注册表里没有的动作会被整条丢弃并点名，所以技能自己的动作要先声明、再授权。</p>
+        <p class="t-cap">想整把工具一条放行也可以（<code>ai/perm run example ALLUSER</code>），那样它的<b>每个动作</b>都可用；要让某个动作单独关着，就按动作级的 op 一条条写。</p>
+
+        <h3 class="sec">第 8 步：真的用一下</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">在群里 / 私聊里</h4>
+            <p>用一个<b>普通 QQ</b>（不是主人）对她说「帮我记一下明天带伞」。她应该调 <code>example</code>（<code>op=add</code>）并回一句「已记下 #1」。</p>
+            <p>再让它「删掉第 1 条」：因为 <code>drop</code> 没在表里放行，她会拿到 <code>[权限阻断] 「example.drop」没有授权给你（未列到 = 未授权）</code> 并据此回一句说明。这一句就是权限生效的证据。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">在控制台</h4>
+            <p>控制台的调用者是主人，恒全权，所以三个动作都能用 —— 想验证「普通用户拿不到」，就换小号或者让别人试，别用主人试。</p>
+            <p>想看她实际收到了什么、回了什么，看 <code>ai/status</code> 与日志里的 <code>[example]</code>（技能自己打的诊断行）、<code>[tool]</code>（工具调用的结果与失败）。</p>
+          </div>
+        </div>
+
+        <h3 class="sec">装好之后，一分钟体检</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>看哪里</th><th>期望</th><th>不对时说明什么</th></tr></thead>
+            <tbody>
+              <tr><td><code>ai/skill list</code></td><td>这个技能一行，状态 <code>LOADED</code>，右边有 <code>tool=</code> 或 <code>hooks=</code></td><td><code>ERROR</code> = 装不上（看 <code>ai/skill validate</code> 的原话）；<code>MD_ONLY</code> = 没有可执行代码</td></tr>
+              <tr><td><code>ai/tools</code></td><td>工具名出现在清单里，括注里写着它的来源技能</td><td>没有这一行 = md 里没写 <code>tool:</code>、或代码没编过、或工具名被改成了别的名字（看启动日志那一行对照）</td></tr>
+              <tr><td><code>ai/perm list &lt;工具名&gt;</code></td><td>能看到这个 op 以及放行了哪些身份</td><td>一条都没有 = 权限文件没读到（路径 / 文件名 / 是否重载）</td></tr>
+              <tr><td>启动日志</td><td><code>[skills]</code> 里有这个技能的装载行，工具名与钩子都列出来</td><td><code>[acl] 越界忽略</code> = 权限文件里写了不属于它的 op；<code>[ext] …不能用作扩展点</code> = 扩展点实例化失败；<code>[store] 库名冲突</code> = 表名或别名被别人占了</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 7 ============ -->
+      <section class="chapter" id="pitfalls">
+        <header class="chapter-head reveal">
+          <span class="chapter-tag">07 / 排错</span>
+          <h2>常见坑与怎么查</h2>
+          <p class="chapter-desc">技能这一层的毛病，绝大多数落在四件事上：<b>文件没被读到</b>（名字不对、没重载）、<b>声明没被解析</b>（键写错、缩进不对）、<b>权限没给</b>（默认拒绝）、<b>代码里的判定漏了一层</b>（只判了入口，没判动作）。下面按「先看什么」的顺序排，照着走一般都能定位。</p>
+        </header>
+
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>现象</th><th>先看什么</th><th>原因与怎么处理</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>技能装了，但普通人用不了，主人自己能用</td>
+                <td>技能目录里有没有 <code>perms.jsonc</code></td>
+                <td><b>默认拒绝</b>：没有这份文件 = 这个技能的全部 op 对普通用户一律不授权，这是出厂口径，不是坏掉。<code>ai/perm list &lt;工具名&gt;</code> 会显示一条都没有；敲一次 <code>ai/perm run &lt;op&gt; &lt;身份&gt;</code> 就会顺手把它建起来。</td>
+              </tr>
+              <tr>
+                <td>权限文件里明明写了，还是不生效</td>
+                <td>启动日志里那一行 <code>[acl] 越界忽略：…</code></td>
+                <td><b>越界条目整条不生效</b>：技能文件只认它自己提供的工具与它自己的数据键，写了别人的、或者基板内置工具的 op，那一条被忽略并点名一行；写了 <code>File</code> 块则整块不生效。要开就写到那个键归属的那份文件里（技能自己的 → 技能目录，基板工具、其余数据键与全部路径 → <code>perms-core.jsonc</code>）。用 <code>ai/perm run</code> 写不会踩这一条：它自己按归属选文件。</td>
+              </tr>
+              <tr>
+                <td>技能里想给自己开权限，被挡住</td>
+                <td><code>skill_write</code> 的返回</td>
+                <td>技能写入的那些动作（新增 / 覆盖 / 草稿 / 草稿提升）碰到 <code>perms.jsonc</code> 会跳过或挡回，回一句「权限文件（谁能用这个技能）只能由主人用控制台 <code>ai/perm</code> 写，技能不能给自己开口子」。这是刻意的：技能拿不到给自己授权的口子。</td>
+              </tr>
+              <tr>
+                <td>昨天还好好的，重载之后计数器 / 缓存清零了</td>
+                <td>代码里有没有 static 字段存状态</td>
+                <td><b>热重载会换一个新的类加载器</b>，旧类连同它的 static 字段一起作废，新实例看到的是全新的初值 —— 计数归零、缓存没了、锁也换了一把。跨调用要记住的东西放 <code>store</code>（六库或 kv）里。</td>
+              </tr>
+              <tr>
+                <td>md 里写了 <code>tool:</code>，但工具面里没有这把工具</td>
+                <td><code>ai/skill list</code> 那一行的状态，以及启动日志里的工具名对照行</td>
+                <td>四种常见原因：① 名字不合规范被自动英文化了 —— 表里与代码里的 op 名要用<b>注册名</b>，对照看启动日志那一行或技能列表里的 <code>tool_declared</code> / <code>tool_note</code>；② 名字撞上基板内置工具（保留名）→ 状态 <code>ERROR</code>；③ 目录里没有 <code>.java</code> 或编译没过 → 没有代码可跑，不注册工具；④ <code>tool:</code> 那一行被写进了正文（在结束的 <code>---</code> 之后），没被当成声明。</td>
+              </tr>
+              <tr>
+                <td>声明改了没反应</td>
+                <td>是否敲过 <code>ai/skill reload</code></td>
+                <td>基板<b>不监听目录</b>：加载时机只有启动扫一次与显式重载。md、java、prompt.md 改完都要重载；<code>prompt.md</code> 被技能运行时现读的那种用法，改完下一轮就生效，但重新解析 md 与重新编译还是要重载。技能正在编译时 <code>reload</code> 会被拒一次（「技能正在编译中，本次 reload 未执行」），编完再敲。</td>
+              </tr>
+              <tr>
+                <td>md 里的键像没写一样</td>
+                <td>第一处非空行是不是 <code>---</code>，缩进用的是不是空格</td>
+                <td>第一处非空行不是 <code>---</code> → 整个文件按「没有 front matter」处理，所有键都不生效。缩进里混了 Tab → 那一行被当成第零层，子块整段失效（认缩进只数空格）。缩进比上一层更深、又不在子块位置的行会被直接跳过，键就像没写过。</td>
+              </tr>
+              <tr>
+                <td>参数表里某个参数不见了</td>
+                <td>那个参数块的缩进</td>
+                <td>参数名下面的字段要比参数名多缩进一层，兄弟字段对齐。多缩一层会被当成「意外缩进」跳过；行内数组里有逗号的值会被切开（用引号也救不了，切分在剥引号之前）。</td>
+              </tr>
+              <tr>
+                <td>钩子一次都没被叫到</td>
+                <td><code>ai/skill list</code> 里的 <code>hooks=</code>，以及启动日志里「声明了钩子…但入口类里没有匹配的方法」那一行</td>
+                <td>三种原因：① md 的 <code>hooks:</code> 里钩子名拼错（列表里就会显示成你写的那个名字）；② 值写成了别的形状（应写数组或逗号分隔的一行）；③ <b>实现没写在入口类上</b> —— 钩子只在入口类上找，写在别的类里等于没写。另外通知类事件那条路只记账，不能发言、也起不了一轮。</td>
+              </tr>
+              <tr>
+                <td>扩展点没生效</td>
+                <td>启动日志里的 <code>[ext]</code> 行</td>
+                <td>接口名写错（<code>implements</code> 了一个不存在的名字编译就过不去，所以更常见的是<b>写在一个基板不扫的位置</b>：内部类、匿名类会被跳过）；实例化抛异常时日志会写「不能用作扩展点（已跳过）」，插件其余部分照常。总开关 <code>extEnabled</code> 关掉时全部扩展点都不走。</td>
+              </tr>
+              <tr>
+                <td>注入的上下文偶尔整段不见</td>
+                <td>日志里的 <code>[ext] budget over …</code> 与 <code>[ext] timeout</code></td>
+                <td>两级预算：先按 <code>maxChars()</code> 逐段截断，再按 <code>ctxBudgetChars</code> 从 <b>order 最大的开始整段丢</b>。所以 order 大的段先被丢、内容长的段先被截。做法：重要的段给小的 order、把 <code>maxChars()</code> 收到够用就好。超时（<code>extTimeoutMs</code>，出厂 200 毫秒）也只丢这一段，慢活不要放在 <code>build</code> 里。</td>
+              </tr>
+              <tr>
+                <td>出站改正文没起作用</td>
+                <td>是不是 <code>transform</code> 返回了 <code>null</code></td>
+                <td><code>transform</code> 返回 <code>null</code> 就是「不改」（这是默认口径）；要改就把新正文返回回去。返回空串或全空白会让这一条被丢掉。另外 <code>extra</code> 只在还有话要发的时候收一次，追加的消息不再过 stage。</td>
+              </tr>
+              <tr>
+                <td>她说「发不出去」，但权限是给了的</td>
+                <td>那句拒绝原文，以及 <code>ai/perm</code> 里这个 op 的条目</td>
+                <td>技能门与动作门：入口判一次（整把工具或<b>任一动作</b>放行，工具才可见），工具内部每个动作再判一次自己的 op。只放行了一个动作时，别的动作仍会被拒 —— 这是设计，不是 bug。要开就到 <code>Skill</code> 的 <code>Run</code> 里补那个动作，或者整把工具一条放行。另外两道闸门管的是别的东西：数据那一层管「这类数据能不能改 / 能不能读、这一行是不是他的」，路径那一层管「这个路径能不能碰」。</td>
+              </tr>
+              <tr>
+                <td>工具里报「没有这个库」</td>
+                <td>有没有 <code>declare(Libs)</code>，以及表名是否被别人占了</td>
+                <td>业务表由用到它的技能声明。没声明就直接用 → 每次调用都报没有这个库；表名或别名被别的技能占了 → 声明失败、技能整条不可用，日志里会写「表名或别名已被别的库占用」。</td>
+              </tr>
+              <tr>
+                <td>代码改动之后「那一项能力」整块不见了，别的技能没事</td>
+                <td>启动日志里的 <code>[skills] … ERROR</code> 行</td>
+                <td><code>.java</code> 编译失败或找不到入口类时，这个技能状态是 <code>ERROR</code>：它的工具、钩子、扩展点<b>全部</b>不装，但装配继续、别的技能照常。所以「刚才还能用的一项功能突然没了」先去看那一行，改完重载即可。</td>
+              </tr>
+              <tr>
+                <td>失败没被当成失败（她像没看见一样继续）</td>
+                <td>返回文本的第一行形状</td>
+                <td>失败文本照 <code>[&lt;工具名&gt;] ok=0 …</code> 这个形状写，主循环才认得出它是失败；权限阻断那句话里的 <code>[权限阻断]</code> 标记也一样，别改写、别删。识别面是<b>包含</b>这个标记，所以前面多几个字不影响。</td>
+              </tr>
+              <tr>
+                <td>定时任务说出的话打到控制台去了</td>
+                <td>派子 Agent 时有没有带上目标会话</td>
+                <td>心跳钩子没有自己的会话，落点是控制台。要让它说回原来的群 / 私聊，用带 <code>session</code> 的那个重载，把建任务时记下的会话键交下来；认不出来时宿主回落控制台，任务不会丢。另外「到点才跑」的派发要用带主体的那一个重载，否则普通人建的任务会继承钩子主体（等于借定时任务升权）。</td>
+              </tr>
+              <tr>
+                <td><code>host()</code> 是 null 时插件崩了</td>
+                <td>插件里有没有做 null 判断</td>
+                <td><code>BuildContext.host()</code> 与 <code>Outbound.host()</code> 都可能为 <code>null</code>（宿主没绑定到这个插件、外部直接注册的合成实现、插件已被卸载）。写法是「拿不到就少做点事」，绝不抛异常；同理 <code>caller()</code> 在定时任务的出站路径上也可能是 <code>null</code>。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="sec">日志里该看哪几行</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>看哪里</th><th>能看到什么</th></tr></thead>
+            <tbody>
+              <tr><td><code>ai/status</code></td><td>装配到哪一步、有没有失败。技能扫描是装配中的一步，装配整体失败时先看这里。</td></tr>
+              <tr><td><code>ai/skill list</code></td><td>每个技能的名字、状态、工具名、钩子清单。状态只有三种：<code>LOADED</code>（装好了）、<code>MD_ONLY</code>（只有 md，没有可执行代码）、<code>ERROR</code>（装不上，错误原话在 <code>ai/skill validate</code> 里）。</td></tr>
+              <tr><td><code>ai/skill validate</code></td><td>技能库体检：<code>ERROR</code> 的逐条原因（编译失败、名字不一致、工具名重名、库声明失败），以及「声明了 <code>tool</code> 但没有 <code>.java</code> 代码」这种不一致。全部没问题时回一句「技能库无问题（共 N 个）」。</td></tr>
+              <tr><td><code>ai/skill read &lt;技能名&gt;</code></td><td>这个技能的 JSON 概览（名字、说明、工具、注入槽、钩子、状态、文件数、目录、错误）与 md 正文。</td></tr>
+              <tr><td><code>ai/tools</code></td><td>当前工具面：每把工具的名字、对当前调用者的管控状态（<code>Run</code> / <code>Ban</code> / <code>-</code>）、来源（基板还是哪个技能）、一句话说明。</td></tr>
+              <tr><td><code>ai/perm</code> / <code>ai/perm list &lt;op&gt;</code></td><td>合并后的权限表、来源汇总、每个 op 谁能用、归属文件在哪。授权与封禁的回执也在这里看。</td></tr>
+              <tr><td>启动日志 <code>[skills]</code></td><td>扫描了哪个目录、每个技能的装载结果（<code>[skills] &lt;名字&gt; → LOADED 工具=… 钩子=…</code>）、工具名自动英文化的那一行对照、缺 md / 编译失败 / 名字不一致的原话、扫完的总数（技能几个、工具几个、钩子几个）。</td></tr>
+              <tr><td>启动日志 <code>[acl]</code></td><td>权限文件读到了几份、哪一份版本对不上、越界条目那一行（<code>[acl] 越界忽略：…</code>）、认不出的条目、拿不到工具归属时的说明。</td></tr>
+              <tr><td>启动日志 <code>[ext]</code></td><td>挂了几个扩展点、每个插件挂了哪些、每次调用的一行耗时与字符数、超时（<code>[ext] timeout</code>）、异常（<code>[ext] error</code>）、预算丢段（<code>[ext] budget over</code>）、不能用作扩展点的类。</td></tr>
+              <tr><td>启动日志 <code>[store]</code></td><td>库声明与建表的结果：库名冲突、建表失败、「库声明后建表失败（不影响插件装载）」。看到这个说明技能装上了，但那张表没建出来。</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note reveal">
+          <p><span class="n-title">排错的顺序（省时间的那种）</span>：① <code>ai/skill list</code> 看状态 —— <code>ERROR</code> 就 <code>ai/skill validate</code> 读原话，这一步能解决一大半；② 状态正常但工具不在 <code>ai/tools</code> 里，就看 md 的 <code>tool:</code> 与注册名；③ 工具在但普通人用不了，看 <code>ai/perm list &lt;op&gt;</code>；④ 都能用但行为不对，看 <code>[ext]</code> 与技能自己打的诊断行。</p>
+        </div>
+
+        <div class="note reveal">
+          <p><span class="n-title">相邻内容在别处</span>：权限模型、三域各自的默认值、<code>ai/perm</code> 的完整输出与排错顺序见<a href="perms.html">权限管理</a>；数据根的整体布局见<a href="files.html">文件与数据根</a>；基板九件事与各能力边界见<a href="capabilities.html">基板能力</a>；命令的完整参数见<a href="commands.html">命令参考</a>。</p>
+        </div>
+      </section>
+
+
+    </div>
+
+        <nav class="pager">
+      <a class="prev" href="migration.html"><span class="p-dir">← PREV</span><span class="p-name">10 · 升级指引</span></a>
+      <a class="next" href="changelog.html"><span class="p-dir">NEXT →</span><span class="p-name">12 · 更新日志</span></a>
+    </nav>
+
+    <footer class="foot">
+      <span>AiAgent V4 文档 · 纯静态、自包含（无 CDN / 无第三方库 / 无网络请求）</span>
+      <span>插件：<code>AiAgentV4.jar</code></span>
+      <span>数据目录：<code>SairFrameWork\data\AiAgent-V4\</code></span>
+      <a href="index.html">回到总览</a>
+      <div class="icp">湘ICP备2025152033号</div>
+    </footer>
+  </div>
+
+  <aside class="rail">
+    <div class="rail-inner">
+      <p class="rail-title">本页目录</p>
+      <ol id="toc-list"></ol>
+      <div class="rail-foot">点击标题右侧 <code>#</code> 可复制该小节链接</div>
+    </div>
+  </aside>
+</main>
+
+<button class="to-top" id="to-top" type="button" title="回到顶部">↑</button>
+<script src="js/site.js"></script>
+</body>
+</html>

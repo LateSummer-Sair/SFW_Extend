@@ -17,8 +17,10 @@ import sair.v4.ai.Msg;
 import sair.v4.ai.Res;
 import sair.v4.auth.Acl;
 import sair.v4.auth.Auth;
-import sair.v4.auth.Bits;
 import sair.v4.auth.Caller;
+import sair.v4.auth.Favor;
+import sair.v4.auth.OpList;
+import sair.v4.auth.Ops;
 import sair.v4.ctx.Turn;
 import sair.v4.hot.DynCode;
 import sair.v4.hot.Sk;
@@ -44,7 +46,8 @@ import sair.v4.tool.Tool;
  *   prompt / prompt_write                 提示词加载与注入          （③）
  *   agent                                 多 Agent 调度与清单表     （④）
  *   ctx                                   上下文注入                （⑤）
- *   perm                                  权限账本（授权/撤销/查询/验算）（⑥）
+ *   perm                                  好感度 + 技能管控表        （⑥）
+ *   tools / config                        能力自省 / 配置自省        （⑥）
  *   model                                 直连模型                  （⑦）
  *   napcat                                OneBot 动作               （⑧）
  *   console                               控制台输出                （⑨）
@@ -52,9 +55,15 @@ import sair.v4.tool.Tool;
  * </pre>
  *
  * 业务形状的能力（发图片、禁言、天气、搜索、审核、主动发言……）一律由 data/skills 提供。
- * 权限：没有"工具级档位"这回事（旧档位表 {@code PermTable} 已随 P9b-2 删除）——
- * 判据是资源 ACL：要碰资源那一刻判 {@code Res.*} 的位（{@code Host.need*}/{@code needRes}），
- * 所以这里每个工具都在实现里自己判它要碰的资源。
+ * 权限：<b>只有一条判定 —— 身份 × op</b>（见 {@code sair.v4.auth.Acl}）。资源不再有位：
+ * 本机文件、数据库、对外动作对 {@code MASTER} 与她本人（{@code SYSTEM}）完全可见可改可执行，
+ * 对 {@code ALLUSER} 是黑盒 —— 唯一的路就是技能（工具）。所以这里<b>每个动作分支各判自己那个 op</b>：
+ * <pre>
+ *   String deny = needOp(auth, conf, "store.get");
+ *   if (deny != null) return deny;
+ * </pre>
+ * 判完 op 之后那几道<b>行归属 / 会话作用域 / 配额</b>判断照旧保留（它们是数据正确性，不是权限位）；
+ * 内置工具的全部 op 由 {@link #declareOps(OpList)} 在装配期登记（清单 = 技能管控表的骨架）。
  */
 public final class Builtins {
 
@@ -103,6 +112,16 @@ public final class Builtins {
         final Auth auth = boot.auth();
         final Tick tick = boot.tick();
         final DynCode dyn = boot.dyn();
+        final Favor favor = boot.favor();
+
+        // 内置工具的全部 op 在这里登记（技能管控表的骨架：ai/perm gen 按这份清单列空 Run 行）。
+        // 这就是装配期调用点；Boot 侧若要在别处补登记，直接调 Builtins.declareOps(auth.ops())。
+        declareOps(auth == null ? null : auth.ops());
+
+        // 罢工硬干活闸（情绪 v2 · SPEC §4）的读句柄：只读 kv 的 mood:<场合> 行，异常吞掉、绝不抛。
+        // 同一个 store = 情绪插件 h.store() 用的那一份（Boot 的 store 字段），所以判据真源同源、只有一处。
+        STRIKE_DB = store;
+        STRIKE_OUT = out;
 
         // ---------------- ① 六库：读 ----------------
         reg.add(Tool.of("store")
@@ -116,30 +135,60 @@ public final class Builtins {
                         String op = J.s(args, "op", "list").toLowerCase();
                         sair.v4.store.LibSpec L = libs.get(lib);
                         if (L == null) return "未知的库：" + lib + "（可用：" + libNames(libs) + "）";
-                        // ACL（C 类 R 位）：读库（list/get/search/count）要 R。主体 = 当轮触发者，拿不到按 SYSTEM。
-                        String aclDeny = needRes(auth, conf, sair.v4.auth.Res.db(lib), 'R');
-                        if (aclDeny != null) return aclDeny;
                         Caller me = t == null ? null : t.caller();
                         boolean master = me != null && me.master();
                         String deny = scopedDeny(lib, me, false);
                         if (deny != null) return deny;
+                        // v6 DB 域（读）：get / count / search / list 四个分支（含认不出的 op 走的默认分支）
+                        // 共用这一道 —— 类别键按被查的 lib 映射（规格 §3 白名单）。老守卫（scopedDeny /
+                        // constrain / inScope / keepInScope）原样留在后面，两条口径都跑：这一道答"这类数据
+                        // 你能不能读"，老守卫答"这一行是不是你的会话 / 群"。
+                        String readDeny = dbReadDenyOf(auth, dbKeyOf(lib), me);
+                        if (readDeny != null) return readDeny;
                         JsonObject filter = master ? J.sub(args, "filter") : constrain(lib, J.sub(args, "filter"), me);
                         int limit = J.i(args, "limit", 20);
                         if ("get".equals(op)) {
+                            // 动作级 op：取一条
+                            String aclDeny = needOp(auth, conf, "store.get");
+                            if (aclDeny != null) return aclDeny;
                             JsonObject o = store.get(lib, J.l(args, "id", 0));
                             if (o == null) return "没有这一条";
                             if (!master && !inScope(lib, o, me)) return Acl.DENY_PREFIX + "这条记录不属于你的会话";
+                            // v6 补的读口行归属（丙核出的缺口）：memory 只读「本人 / 本群 / global」。
+                            // 老 inScope 对 memory 一律 true ⇒ 只靠它的话，"读口授权给 ALLUSER"就等于
+                            // 能读任意 scope_id 的记忆行。这里与记忆技能内部的 visible 同口径；
+                            // MASTER / SYSTEM 恒全权（规格 §0）⇒ 用 isFree 而不是 master。
+                            if (!isFree(me) && !readVisible(lib, o, me)) return Acl.DENY_PREFIX + "这条记忆不在你的作用域里（只能读本人 / 本群 / global）";
                             return J.json(o);
                         }
                         if ("count".equals(op)) {
+                            // 动作级 op：数行数
+                            String aclDeny = needOp(auth, conf, "store.count");
+                            if (aclDeny != null) return aclDeny;
+                            // v6 读口行归属：memory 不能"整库一把数"（那会数出别人的行数）——
+                            // 按可见的三条作用域分别数（本人 / 本群 / global），与 keepReadScope 同口径。
+                            if (!isFree(me) && "memory".equals(lib)) return String.valueOf(memoryReadCount(store, lib, filter, me));
                             return String.valueOf(store.count(lib, filter));
                         }
                         if ("search".equals(op)) {
+                            // 动作级 op：检索
+                            String aclDeny = needOp(auth, conf, "store.search");
+                            if (aclDeny != null) return aclDeny;
                             List<JsonObject> hits = store.search(lib, J.s(args, "query", ""), limit);
-                            if (!master) hits = keepInScope(lib, hits, me);
+                            if (!master) {
+                                hits = keepInScope(lib, hits, me);       // 老守卫：dialog / grouplog 的会话归属
+                                if (!isFree(me)) hits = keepReadScope(lib, hits, me);   // v6：memory 的本人 / 本群 / global
+                            }
                             return J.json(hits);
                         }
-                        return J.json(store.list(lib, filter, limit, J.s(args, "order", "ts desc")));
+                        // 默认分支（list，以及认不出的 op 当 list 处理）：动作级 op
+                        String aclDeny = needOp(auth, conf, "store.list");
+                        if (aclDeny != null) return aclDeny;
+                        List<JsonObject> rows = store.list(lib, filter, limit, J.s(args, "order", "ts desc"));
+                        // v6 读口行归属：list 原来只靠 constrain 的等值过滤（它只碰 dialog / grouplog），
+                        // memory 一行都不过滤 ⇒ 这里按行再过一次可见面（MASTER / SYSTEM 不筛）。
+                        if (!isFree(me)) rows = keepReadScope(lib, rows, me);
+                        return J.json(rows);
                     }
                 }));
 
@@ -154,23 +203,27 @@ public final class Builtins {
                         String lib = J.s(args, "lib", "");
                         String op = J.s(args, "op", "put").toLowerCase();
                         if (libs.get(lib) == null) return "未知的库：" + lib + "（可用：" + libNames(libs) + "）";
-                        // ACL（C 类 W 位）：写库（put/update/delete）要 W。
-                        String aclDeny = needRes(auth, conf, sair.v4.auth.Res.db(lib), 'W');
-                        if (aclDeny != null) return aclDeny;
                         Caller me = t == null ? null : t.caller();
                         boolean master = me != null && me.master();
                         String deny = scopedDeny(lib, me, true);
                         if (deny != null) return deny;
-                        // 归属硬判（与权限位无关）：C 类按类默认分配现在是 R（非主人只读），
-                        // 非主人本来就没有 W；这条硬判是为"主人哪天按人放开 C 类的 W"留的
-                        // —— 原始写口不能靠默认位兜底，必须自己判归属。
+                        // 归属硬判（与 op 判定无关，是数据正确性）：op 判定只管"这个人能不能用这个动作"，
+                        // 挡不住"他用自己的权限去改别人的行" —— 原始写口必须自己判归属。
                         // ① note / kv：与"哪一行"无关，非主人一律拒（连存在性都不必问）；
                         String ownDeny = writeClosedDeny(lib, me);
                         if (ownDeny != null) return ownDeny;
                         if ("update".equals(op)) {
+                            // 动作级 op：改一行
+                            String aclDeny = needOp(auth, conf, "store_write.update");
+                            if (aclDeny != null) return aclDeny;
                             long id = J.l(args, "id", 0);
                             JsonObject old = store.get(lib, id);
                             if (old == null) return "更新失败（id 不存在？）";
+                            // v6 DB 域（写）：先过"这类数据你能不能改 + 这一行是不是他的"（dbDeny 的第三参
+                            // rowOwner），再走下面的老守卫（inScope / writeMemoryDeny / writeScopeDeny /
+                            // constrainRow 一条都不删）—— 顺序按规格 §7：dbDeny 包一层，旧守卫降级为兜底。
+                            String dbDeny = dbDenyOf(auth, dbKeyOf(lib), rowOwnerOf(lib, old), me);
+                            if (dbDeny != null) return dbDeny;
                             if (!master && !inScope(lib, old, me)) return Acl.DENY_PREFIX + "这条记录不属于你的会话";
                             // ② memory 专属：非主人只动得了自己那一行（别人的行 / global 行一律拒）。
                             //    **只在 lib = memory 时生效** —— dialog/grouplog 的归属由上面的 inScope 与
@@ -189,9 +242,16 @@ public final class Builtins {
                             return ok ? "已更新" : "更新失败";
                         }
                         if ("delete".equals(op)) {
+                            // 动作级 op：删一行
+                            String aclDeny = needOp(auth, conf, "store_write.delete");
+                            if (aclDeny != null) return aclDeny;
                             long id = J.l(args, "id", 0);
                             JsonObject old = store.get(lib, id);
                             if (old == null) return "删除失败（id 不存在？）";
+                            // v6 DB 域（写）：同 update —— 先 dbDeny（行归属按类别显式映射，规格 §7-4），
+                            // 再走老守卫 inScope / writeMemoryDeny。
+                            String dbDeny = dbDenyOf(auth, dbKeyOf(lib), rowOwnerOf(lib, old), me);
+                            if (dbDeny != null) return dbDeny;
                             if (!master && !inScope(lib, old, me)) return Acl.DENY_PREFIX + "这条记录不属于你的会话";
                             // ② 同 update：memory 专属的行级归属判
                             if ("memory".equals(lib)) {
@@ -203,6 +263,13 @@ public final class Builtins {
                         }
                         JsonObject row = J.sub(args, "row");
                         if (row == null) row = new JsonObject();
+                        // 动作级 op：写一行（默认分支；认不出的 op 也按 put 处理）
+                        String aclDeny = needOp(auth, conf, "store_write.put");
+                        if (aclDeny != null) return aclDeny;
+                        // v6 DB 域（写）：这一行还没落库，归属按送进来的 row 现算（rowOwner 形态
+                        // user:<QQ> / group:<群号> / null=无归属的共享行）—— 无归属行只有被指名的身份动得了。
+                        String dbDeny = dbDenyOf(auth, dbKeyOf(lib), rowOwnerOf(lib, row), me);
+                        if (dbDeny != null) return dbDeny;
                         // 作用域越权硬判（在 constrainRow 的静默改写**之前**）：非主人显式写
                         // scope=global 一律拒（原来会被静默改写成 user，导致下面 writeMemoryDeny 的
                         // "global 只有主人能写"分支永远走不到）；MASTER/SYSTEM 不受影响
@@ -233,16 +300,22 @@ public final class Builtins {
                     public Object call(JsonObject args, Turn t) {
                         String op = J.s(args, "op", "stat").toLowerCase();
                         if ("stat".equals(op)) {
-                            // ACL：store_admin 管理面（C 类）。stat 读 R；其余写 W。
-                            String aclDeny = needRes(auth, conf, sair.v4.auth.Res.mem("admin"), 'R');
+                            // 动作级 op：六库统计（只暴露"有多少行"，不暴露行内容）
+                            String aclDeny = needOp(auth, conf, "store_admin.stat");
                             if (aclDeny != null) return aclDeny;
                             return J.json(store.stat());
                         }
                         if ("maintain".equals(op)) {
-                            String aclDeny = needRes(auth, conf, sair.v4.auth.Res.mem("admin"), 'W');
+                            // 动作级 op：整库维护清理
+                            String aclDeny = needOp(auth, conf, "store_admin.maintain");
                             if (aclDeny != null) return aclDeny;
                             // 整库维护会删掉<b>所有人</b>的超龄行（没有"逐行归属"可言）：非主人一律拒
                             Caller me = t == null ? null : t.caller();
+                            // v6 DB 域：整库动作没有单一行归属，只能把它<b>覆盖到的每一类</b>都过一遍写判定
+                            // （rowOwner=null ⇒ 只有被指名的身份动得了）。规格 §7-2：writeMemoryDeny(null)
+                            // 这道整库闸因 rowOwner 只有行级而保留，dbDeny 是加在它前面的一层，不是替代。
+                            String dbDeny = dbWholeDeny(auth, MAINTAIN_KEYS, me);
+                            if (dbDeny != null) return dbDeny;
                             String ownDeny = writeMemoryDeny(null, me);
                             if (ownDeny != null) return ownDeny;
                             // 三档保留期都从配置取默认（keepDays 只管记忆/笔记类）：
@@ -257,9 +330,12 @@ public final class Builtins {
                         String path = J.s(args, "path", "");
                         File f = Str.blank(path) ? new File(conf.filesDir(), lib + "-" + Str.stamp() + ".jsonl") : new File(path);
                         if ("optimize".equals(op)) {
-                            String aclDeny = needRes(auth, conf, sair.v4.auth.Res.db(lib), 'W');
+                            // 动作级 op：合并全文索引段
+                            String aclDeny = needOp(auth, conf, "store_admin.optimize");
                             if (aclDeny != null) return aclDeny;
-                            // 整库维护动作（合并 FTS 段）：非主人一律拒（不指望位表兜底 —— 主人可以给 C 类开 W）
+                            // 整库维护动作：非主人一律拒（op 判定之外再加一道 —— 别指望账本不写这一行）
+                            String dbDeny = dbDenyOf(auth, dbKeyOf(lib), null, t == null ? null : t.caller());
+                            if (dbDeny != null) return dbDeny;
                             String ownDeny = writeAdminDeny("维护", t == null ? null : t.caller());
                             if (ownDeny != null) return ownDeny;
                             // 批量删行之后合并 FTS 段（删除标记这时才真正丢掉；还要 VACUUM 才还盘）
@@ -267,28 +343,46 @@ public final class Builtins {
                                     ? ("已合并 " + lib + " 的全文索引段") : "合并失败（库名不对 / 该库没有索引）";
                         }
                         if ("vacuum".equals(op)) {
-                            String aclDeny = needRes(auth, conf, sair.v4.auth.Res.mem("admin"), 'W');
+                            // 动作级 op：回收空闲页
+                            String aclDeny = needOp(auth, conf, "store_admin.vacuum");
                             if (aclDeny != null) return aclDeny;
                             // 整库维护动作（回收空闲页）：非主人一律拒
+                            // v6 DB 域：VACUUM 动的是整个数据库文件 ⇒ 覆盖全部业务类别，逐类过写判定。
+                            String dbDeny = dbWholeDeny(auth, ADMIN_LIB_KEYS, t == null ? null : t.caller());
+                            if (dbDeny != null) return dbDeny;
                             String ownDeny = writeAdminDeny("维护", t == null ? null : t.caller());
                             if (ownDeny != null) return ownDeny;
                             store.db().exec("VACUUM");
                             return "VACUUM 已执行（回收空闲页；期间独占数据库）";
                         }
                         if ("export".equals(op)) {
-                            String aclDeny = needRes(auth, conf, sair.v4.auth.Res.db(lib), 'W');
+                            // 动作级 op：整库导出
+                            String aclDeny = needOp(auth, conf, "store_admin.export");
                             if (aclDeny != null) return aclDeny;
                             // 整库导出会把跨用户/跨群数据一次性拿走：非主人一律拒
                             // （这一段在 <b>写出文件之前</b>，被拒时一个字节都不会落盘）
+                            // v6 DB 域：整库导出 = 无归属行的读走写侧口径（rowOwner=null ⇒ 只有被指名的身份）。
+                            String dbDeny = dbDenyOf(auth, dbKeyOf(lib), null, t == null ? null : t.caller());
+                            if (dbDeny != null) return dbDeny;
+                            // v6 File 域：导出要<b>写出</b>本机文件（path 来自工具参数）⇒ write=true 看 Run。
+                            String fileDeny = fileDenyOf(auth, f.getPath(), true, t == null ? null : t.caller());
+                            if (fileDeny != null) return fileDeny;
                             String ownDeny = writeAdminDeny("导出", t == null ? null : t.caller());
                             if (ownDeny != null) return ownDeny;
                             return store.exportJson(lib, f) ? ("已导出 " + f.getAbsolutePath()) : "导出失败";
                         }
                         if ("import".equals(op)) {
-                            String aclDeny = needRes(auth, conf, sair.v4.auth.Res.db(lib), 'W');
+                            // 动作级 op：整库导入覆盖
+                            String aclDeny = needOp(auth, conf, "store_admin.import");
                             if (aclDeny != null) return aclDeny;
                             // 整库覆盖也是"任意行"的写口（且没有逐行归属可验）：与 store_write 同一把尺子
                             Caller me = t == null ? null : t.caller();
+                            // v6 DB 域：整库覆盖（rowOwner=null）；v6 File 域：要<b>读入</b> path 指的本机文件
+                            // （path 来自工具参数）⇒ write=false 看 Read。两道都在既有守卫之前。
+                            String dbDeny = dbDenyOf(auth, dbKeyOf(lib), null, me);
+                            if (dbDeny != null) return dbDeny;
+                            String fileDeny = fileDenyOf(auth, f.getPath(), false, me);
+                            if (fileDeny != null) return fileDeny;
                             String ownDeny = writeClosedDeny(lib, me);
                             if (ownDeny == null && "memory".equals(lib)) ownDeny = writeMemoryDeny(null, me);
                             if (ownDeny != null) return ownDeny;
@@ -309,15 +403,24 @@ public final class Builtins {
                     public Object call(JsonObject args, Turn t) {
                         String op = J.s(args, "op", "list").toLowerCase();
                         if ("validate".equals(op)) {
+                            // 动作级 op：技能库体检
+                            String aclDeny = needOp(auth, conf, "skill.validate");
+                            if (aclDeny != null) return aclDeny;
                             List<String> p = skills.validate();
                             return p.isEmpty() ? "技能库无问题（共 " + skills.size() + " 个）" : Str.join(p, "\n");
                         }
                         if ("read".equals(op)) {
+                            // 动作级 op：读一份说明书
+                            String aclDeny = needOp(auth, conf, "skill.read");
+                            if (aclDeny != null) return aclDeny;
                             Sk sk = skills.get(J.s(args, "name", ""));
                             if (sk == null) return "没有这个技能";
                             String body = sk.doc == null ? "" : sk.doc;
                             return "技能 " + sk.name + "\n" + J.json(sk.toJson()) + "\n\n" + body;
                         }
+                        // 默认分支（list，含认不出的 op）：动作级 op
+                        String aclDeny = needOp(auth, conf, "skill.list");
+                        if (aclDeny != null) return aclDeny;
                         JsonArray arr = new JsonArray();
                         for (Sk sk : skills.list()) {
                             if (Str.has(J.s(args, "name", "")) && !sk.name.contains(J.s(args, "name", ""))) continue;
@@ -338,33 +441,38 @@ public final class Builtins {
                     public Object call(JsonObject args, Turn t) {
                         String op = J.s(args, "op", "").toLowerCase();
                         String name = Str.safeName(J.s(args, "name", ""));
-                        // ── 结构性依赖收口（P10a）：<b>这把工具自己先判一次落点</b> ──
-                        // 权限注册表不再做工具级判定（见 tool/Registry.call 的注释），所以"谁能让它写技能库"
-                        // 曾经只靠<b>调用点自觉</b>（例如 {@code 经验蒸馏.promote} 里那句
-                        // {@code h.needPath(h.conf().skillsDir(), 'W')}）—— 任何新入口忘了判，就等于开了
-                        // "写源码 + 热加载 = 代码执行"的后门。这里把判定收进工具本身：
-                        // 动手（写盘 / 编译 / 热加载）之前，先对这次要落的路径判 W 位；
-                        // 主体取法与其它 op 一致（{@code Ctx.caller()}，取不到就拒，绝不回落 SYSTEM）。
-                        // 两个落点各自判：技能库目录（本工具的主落点）+ 草稿区（draft/promote 会写它）。
-                        List<File> targets = new ArrayList<File>();
-                        targets.add(conf.skillsDir());
-                        if ("draft".equals(op) || "promote".equals(op)) targets.add(conf.draftsDir());
-                        String selfDeny = skillWriteSelfDeny(auth, conf, out, targets);
-                        if (selfDeny != null) return selfDeny;
+                        // ── 后门收口 ──
+                        // 这把工具是"写源码 + 热加载 = 代码执行"的形状，所以<b>工具自己</b>在动手之前
+                        // 对这次的动作判 op（{@code skill_write.add} 等）：工具级 op 放行不代表某个动作放行，
+                        // 判定必须落在<b>每个动作分支的第一行</b>（见下面各分支）。
                         if ("reload".equals(op)) {
+                            // 动作级 op：重扫技能库
+                            String aclDeny = needOp(auth, conf, "skill_write.reload");
+                            if (aclDeny != null) return aclDeny;
                             skills.scan();
                             return "已重扫，当前 " + skills.size() + " 个技能（工具 " + skills.toolCount() + " 个）"
                                     + TOOL_NAME_RULE;
                         }
-                        if ("drafts".equals(op)) return draftsJson(conf);
+                        if ("drafts".equals(op)) {
+                            // 动作级 op：列草稿
+                            String aclDeny = needOp(auth, conf, "skill_write.drafts");
+                            if (aclDeny != null) return aclDeny;
+                            return draftsJson(conf);
+                        }
                         if (Str.blank(name)) return "需要 name" + TOOL_NAME_RULE;
                         File dir = new File(conf.skillsDir(), name);
                         if ("delete".equals(op)) {
+                            // 动作级 op：删技能
+                            String aclDeny = needOp(auth, conf, "skill_write.delete");
+                            if (aclDeny != null) return aclDeny;
                             Fs.deleteRec(dir);
                             skills.scan();
                             return "已删除技能 " + name;
                         }
                         if ("read_source".equals(op)) {
+                            // 动作级 op：读技能源码
+                            String aclDeny = needOp(auth, conf, "skill_write.read_source");
+                            if (aclDeny != null) return aclDeny;
                             List<File> src = Fs.walk(dir, ".java", 2);
                             if (src.isEmpty()) return "该技能没有 java 源码";
                             StringBuilder sb = new StringBuilder();
@@ -375,6 +483,9 @@ public final class Builtins {
                         String java = J.s(args, "java", "");
                         // ---- 草稿区：不扫描、不监听，草稿永远不进工具表 ----
                         if ("draft".equals(op)) {
+                            // 动作级 op：写草稿
+                            String aclDeny = needOp(auth, conf, "skill_write.draft");
+                            if (aclDeny != null) return aclDeny;
                             if (Str.blank(md) && Str.blank(java)) return "需要 md 或 java 内容" + TOOL_NAME_RULE;
                             File d = new File(conf.draftsDir(), name);
                             String err = writeSkillFiles(d, name, md, java);
@@ -383,6 +494,9 @@ public final class Builtins {
                                     + "确认没问题后用 op=promote 搬进技能库）" + TOOL_NAME_RULE;
                         }
                         if ("promote".equals(op)) {
+                            // 动作级 op：草稿搬进技能库
+                            String aclDeny = needOp(auth, conf, "skill_write.promote");
+                            if (aclDeny != null) return aclDeny;
                             File d = new File(conf.draftsDir(), name);
                             if (!d.isDirectory()) return "没有这个草稿：" + name + "（用 op=drafts 看有哪些）";
                             if (dir.exists()) {
@@ -393,10 +507,17 @@ public final class Builtins {
                             }
                             Fs.mkdirs(dir);
                             int n = 0;
+                            int skipped = 0;
                             String base = d.getAbsolutePath() + File.separator;
                             for (File f : Fs.walk(d, null, 3)) {
                                 String abs = f.getAbsolutePath();
                                 if (!abs.startsWith(base)) continue;
+                                // ★ 护栏：权限文件（perms.jsonc）不能经技能写入的路带进技能目录 ——
+                                //   否则一次 promote 就能给这个技能自己开口子。它在草稿里就跳过。
+                                if (isPermFile(f.getName())) {
+                                    skipped++;
+                                    continue;
+                                }
                                 File to = new File(dir, abs.substring(base.length()));
                                 Fs.mkdirs(to.getParentFile());
                                 if (Fs.copy(f, to)) n++;
@@ -409,9 +530,19 @@ public final class Builtins {
                             }
                             return "已提升 " + name + "（" + n + " 个文件，" + conf.draftsRel() + " 里的草稿已删除），"
                                     + (sk != null && sk.providesTool() ? ("工具 " + sk.tool + " 已生效") : "已加载")
+                                    + (skipped > 0 ? ("；已跳过 " + skipped + " 个受保护文件（" + Acl.SKILL_FILE_NAME
+                                            + "：权限文件只能由主人用控制台 ai/perm 写）") : "")
                                     + mappedNote(sk) + TOOL_NAME_RULE;
                         }
-                        if (!"add".equals(op) && !"update".equals(op)) {
+                        if ("add".equals(op)) {
+                            // 动作级 op：新增技能
+                            String aclDeny = needOp(auth, conf, "skill_write.add");
+                            if (aclDeny != null) return aclDeny;
+                        } else if ("update".equals(op)) {
+                            // 动作级 op：覆盖技能内容
+                            String aclDeny = needOp(auth, conf, "skill_write.update");
+                            if (aclDeny != null) return aclDeny;
+                        } else {
                             return "未知操作：" + op + "（可用 add/update/delete/reload/read_source/draft/drafts/promote）";
                         }
                         if (Str.blank(md) && Str.blank(java)) return "需要 md 或 java 内容" + TOOL_NAME_RULE;
@@ -436,8 +567,14 @@ public final class Builtins {
                     public Object call(JsonObject args, Turn t) {
                         String kind = J.s(args, "kind", "java").toLowerCase();
                         if ("cmd".equals(kind) || "shell".equals(kind)) {
+                            // 动作级 op：执行系统命令
+                            String aclDeny = needOp(auth, conf, "exec.cmd");
+                            if (aclDeny != null) return aclDeny;
                             return dyn.runCmd(J.s(args, "cmd", ""), J.l(args, "timeout", 30000));
                         }
+                        // 动作级 op：编译并运行一段 Java（默认分支）
+                        String aclDeny = needOp(auth, conf, "exec.java");
+                        if (aclDeny != null) return aclDeny;
                         List<String> a = J.strings(args, "args");
                         return dyn.runJava(J.s(args, "code", ""), a.toArray(new String[0]));
                     }
@@ -452,12 +589,28 @@ public final class Builtins {
                     @Override
                     public Object call(JsonObject args, Turn t) {
                         String op = J.s(args, "op", "show").toLowerCase();
-                        if ("list".equals(op)) return J.json(prompts.files());
-                        if ("sections".equals(op)) return J.json(prompts.identity().sectionNames());
+                        if ("list".equals(op)) {
+                            // 动作级 op：列提示词文件
+                            String aclDeny = needOp(auth, conf, "prompt.list");
+                            if (aclDeny != null) return aclDeny;
+                            return J.json(prompts.files());
+                        }
+                        if ("sections".equals(op)) {
+                            // 动作级 op：初始提示词的分节名
+                            String aclDeny = needOp(auth, conf, "prompt.sections");
+                            if (aclDeny != null) return aclDeny;
+                            return J.json(prompts.identity().sectionNames());
+                        }
                         if ("read".equals(op)) {
+                            // 动作级 op：读一份提示词
+                            String aclDeny = needOp(auth, conf, "prompt.read");
+                            if (aclDeny != null) return aclDeny;
                             String txt = prompts.read(J.s(args, "name", ""));
                             return txt == null ? "没有这份提示词" : txt;
                         }
+                        // 默认分支（show，含认不出的 op）：动作级 op
+                        String aclDeny = needOp(auth, conf, "prompt.show");
+                        if (aclDeny != null) return aclDeny;
                         return prompts.identity().raw();
                     }
                 }));
@@ -476,23 +629,38 @@ public final class Builtins {
                         String scope = J.s(args, "scope", Inject.GLOBAL);
                         String key = J.s(args, "key", "manual");
                         if ("reload".equals(op)) {
+                            // 动作级 op：重载初始提示词
+                            String aclDeny = needOp(auth, conf, "prompt_write.reload");
+                            if (aclDeny != null) return aclDeny;
                             prompts.reload();
                             return "已重载初始提示词（" + prompts.identity().raw().length() + " 字符）";
                         }
                         if ("clear".equals(op)) {
+                            // 动作级 op：移除注入
+                            String aclDeny = needOp(auth, conf, "prompt_write.clear");
+                            if (aclDeny != null) return aclDeny;
                             boolean ok = prompts.inject().remove(scope, slot, key);
                             return ok ? "已移除" : "没有这条注入";
                         }
                         if ("write".equals(op)) {
+                            // 动作级 op：新建 / 覆盖提示词文件
+                            String aclDeny = needOp(auth, conf, "prompt_write.write");
+                            if (aclDeny != null) return aclDeny;
                             return prompts.write(J.s(args, "name", ""), J.s(args, "text", "")) ? "已写入" : "写入失败";
                         }
                         if ("load".equals(op)) {
+                            // 动作级 op：载入一份提示词并注入
+                            String aclDeny = needOp(auth, conf, "prompt_write.load");
+                            if (aclDeny != null) return aclDeny;
                             String name = J.s(args, "name", "");
                             String txt = prompts.read(name);
                             if (txt == null) return "没有这份提示词：" + name;
                             prompts.inject().put(scope, slot, "file:" + name, txt, "prompt:" + name);
                             return "已把 " + name + " 注入到 " + slot + "（" + txt.length() + " 字符）";
                         }
+                        // 默认分支（inject，含认不出的 op）：动作级 op
+                        String aclDeny = needOp(auth, conf, "prompt_write.inject");
+                        if (aclDeny != null) return aclDeny;
                         String text = J.s(args, "text", "");
                         if (Str.blank(text)) return "需要 text";
                         prompts.inject().put(scope, slot, key, text, "manual");
@@ -513,7 +681,7 @@ public final class Builtins {
                     @Override
                     public Object call(JsonObject args, Turn t) {
                         // 闸②（D46★2）：子 Agent 是最小单位 —— 它在自己的回合里调 agent 工具，
-                        // **所有 op 一律拒**（spawn/list/status/stop 全拒）。放在 ACL 判定之前：
+                        // **所有 op 一律拒**（spawn/list/status/stop 全拒）。放在 op 判定之前：
                         // 这不是"你有没有权限"的问题，是"这个身份根本不许有这扇门"。
                         // 只靠闸①（派活处过滤工具表）不够：模型仍可能凭记忆喊这个名字，Registry 照旧会找到实现。
                         if (t != null && t.isSubagent()) {
@@ -522,12 +690,10 @@ public final class Builtins {
                         Caller me = t == null ? null : t.caller();
                         boolean master = me != null && me.master();
                         String op = J.s(args, "op", "list").toLowerCase();
-                        // ACL：agent = 一把工具，它的<b>入口</b>是 T 类资源。spawn/stop 执行 X；list/status 读 R。
-                        // （T 类对 ALLUSER 默认一位都没有 ⇒ 非主人连 list 都被拦；要放开由主人写 T 类例外条目。）
-                        String aclDeny = needRes(auth, conf, sair.v4.auth.Res.tool("agent"),
-                                ("spawn".equals(op) || "stop".equals(op)) ? 'X' : 'R');
-                        if (aclDeny != null) return aclDeny;
                         if ("spawn".equals(op)) {
+                            // 动作级 op：派一个子 Agent
+                            String aclDeny = needOp(auth, conf, "agent.spawn");
+                            if (aclDeny != null) return aclDeny;
                             String task = J.s(args, "task", "");
                             if (Str.blank(task)) return "需要 task";
                             List<String> tools = J.strings(args, "tools");
@@ -543,6 +709,9 @@ public final class Builtins {
                                     model, speak));
                         }
                         if ("status".equals(op)) {
+                            // 动作级 op：看单个任务
+                            String aclDeny = needOp(auth, conf, "agent.status");
+                            if (aclDeny != null) return aclDeny;
                             long id = J.l(args, "id", 0);
                             for (JsonObject o : agent.tasks(null, master ? null : (me == null ? "" : me.session()))) {
                                 if (J.l(o, "id", 0) == id) return J.json(o);
@@ -550,7 +719,9 @@ public final class Builtins {
                             return "没有这个任务（或它不是你的）";
                         }
                         if ("stop".equals(op)) {
-                            // 旧档位判定 auth.check("agent.stop")（ROOT 档）已并入本工具顶部的 ACL 判定（stop → T 类 X 位）。
+                            // 动作级 op：中断在跑的回合
+                            String aclDeny = needOp(auth, conf, "agent.stop");
+                            if (aclDeny != null) return aclDeny;
                             // 按会话停：主人停全部；非主人 / 不带 session 时只停自己那个会话的回合
                             // （多会话并行之后，"一个用户敲停"不能打断别人的回合）
                             String want = J.s(args, "session", "").trim();
@@ -560,6 +731,9 @@ public final class Builtins {
                             return "已请求中断 " + n + " 个在跑的回合"
                                     + (all ? "（主人：全部会话）" : "（只停目标会话）");
                         }
+                        // 默认分支（list，含认不出的 op）：动作级 op
+                        String aclDeny = needOp(auth, conf, "agent.list");
+                        if (aclDeny != null) return aclDeny;
                         String status = J.s(args, "status", "").trim().toLowerCase();
                         if (Str.blank(status) || "all".equals(status)) status = null;
                         return J.json(agent.tasksJson(status, master ? null : (me == null ? "" : me.session())));
@@ -592,6 +766,9 @@ public final class Builtins {
                             return Acl.DENY_PREFIX + "只有主人能注入 " + slot + " 槽（普通会话只能注入 context）";
                         }
                         if ("inject".equals(op)) {
+                            // 动作级 op：往槽位注入文本
+                            String aclDeny = needOp(auth, conf, "ctx.inject");
+                            if (aclDeny != null) return aclDeny;
                             String text = J.s(args, "text", "");
                             if (Str.blank(text)) return "需要 text";
                             String key = J.s(args, "key", "ctx");
@@ -599,30 +776,33 @@ public final class Builtins {
                             return "已注入 " + slot + "（作用域 " + scope + "）";
                         }
                         if ("clear".equals(op)) {
+                            // 动作级 op：清空注入
+                            String aclDeny = needOp(auth, conf, "ctx.clear");
+                            if (aclDeny != null) return aclDeny;
                             if (!master && Str.has(scopeArg) && !scopeArg.equals(own)) {
                                 return Acl.DENY_PREFIX + "只能清自己的注入";
                             }
                             prompts.inject().clearScope(master && Str.has(scopeArg) ? scopeArg : own);
                             return "已清空作用域 " + (master && Str.has(scopeArg) ? scopeArg : own) + " 的注入";
                         }
+                        // 默认分支（list，含认不出的 op）：动作级 op
+                        String aclDeny = needOp(auth, conf, "ctx.list");
+                        if (aclDeny != null) return aclDeny;
                         return J.json(prompts.inject().list(own));
                     }
                 }));
 
-        // ---------------- ⑥ perm：权限账本（授权 / 撤销 / 查询 / 验算；四个 op 全部仅主人） ----------------
+        // ---------------- ⑥ perm：好感度（关系值） + 权限文件（授权/封禁/撤回/重排） ----------------
         reg.add(Tool.of("perm")
                 .desc(PERM_DESC)
-                .returns("回执原文（条目 + 实际生效位 + 默认分配 + 是不是「例外：超出默认分配」）；"
-                        + "acl 给清单或验算结果；whoami 给身份与五类有效位")
+                .returns("好感度：身份与数值（whoami/get/list/set/reset）；权限：条目原文或回执（show/gen/run/ban/revoke）")
                 .params(schemaPerm())
-                // 示例写死在工具上 = 盖掉 tools-index.md 里那行老口径示例（它还在教 op=set/setlevel + 数字档位，
-                // 留着会跟新口径打架）。tools-index.md 那一行由 S8 清理，清掉后这三行可以撤。
                 .examples(java.util.Arrays.asList(PERM_EXAMPLES))
                 .handler(new Tool.Handler() {
                     @Override
                     public Object call(JsonObject args, Turn t) {
                         Caller c = t == null ? sair.v4.ctx.Ctx.caller() : t.caller();
-                        return permTool(args, out, auth == null ? null : auth.acl(), c);
+                        return permTool(args, out, auth, favor, c);
                     }
                 }));
 
@@ -632,7 +812,7 @@ public final class Builtins {
         // 不行就直说 → 给结论**。前四步全靠这一把：清单（list）、按意图找（search）、
         // 完整说明书 + **以调用者现在的身份能不能用**（show）。
         // 边界（与别处一致）：只看 Registry.visible(c) 里的工具 —— 不给不该看的人暴露能力面；
-        // 判定一律现算 auth.bits(c, Res.tool(名))，基板不缓存、不猜。
+        // 判定一律现算（auth.ops().of(名) + auth.allowed(c, op)），基板不缓存、不猜。
         reg.add(Tool.of("tools")
                 .desc(TOOLS_DESC)
                 .returns("工具清单 / 按意图匹配到的几把 / 一把工具的完整说明书（含参数表与"
@@ -673,14 +853,11 @@ public final class Builtins {
                     @Override
                     public Object call(JsonObject args, Turn t) {
                         String op = J.s(args, "op", "chat").toLowerCase();
-                        // ACL：model 的入口是 <b>T 类</b>资源（工具已从 C 类拆出来）：chat/vision 出网 → X；
-                        // balance/models/info 读信息 → R。T 类按类默认分配对 ALLUSER 是 NONE（一位都不给），
-                        // 所以这条判定现在真能拦人；要按人放开就在 T 类上写例外条目。
-                        boolean netOp = "chat".equals(op) || "vision".equals(op);
-                        String aclDeny = needRes(auth, conf, sair.v4.auth.Res.tool("model"), netOp ? 'X' : 'R');
-                        if (aclDeny != null) return aclDeny;
                         DeepSeek ai = boot.ai();
                         if ("info".equals(op)) {
+                            // 动作级 op：看当前模型信息
+                            String aclDeny = needOp(auth, conf, "model.info");
+                            if (aclDeny != null) return aclDeny;
                             JsonObject o = new JsonObject();
                             o.addProperty("configured", conf.model());
                             o.addProperty("resolved", conf.resolveModel());
@@ -690,30 +867,44 @@ public final class Builtins {
                             return J.json(o);
                         }
                         if ("balance".equals(op)) {
+                            // 动作级 op：查余额
+                            String aclDeny = needOp(auth, conf, "model.balance");
+                            if (aclDeny != null) return aclDeny;
                             JsonObject b = ai.balance();
                             return b == null ? "查询余额失败" : J.json(b);
                         }
-                        if ("models".equals(op)) return J.json(ai.models());
+                        if ("models".equals(op)) {
+                            // 动作级 op：列模型清单
+                            String aclDeny = needOp(auth, conf, "model.models");
+                            if (aclDeny != null) return aclDeny;
+                            return J.json(ai.models());
+                        }
                         JsonArray msgs = new JsonArray();
                         String sys = J.s(args, "system", "");
                         if (Str.has(sys)) msgs.add(Msg.system(sys));
-                        List<String> images = J.strings(args, "images");
-                        if ("vision".equals(op) && !images.isEmpty()) {
-                            // ★图片直传收口（甲方急令，T12-R3c）：这里是**唯一**能把图直接塞进请求的旁路
-                            // （入站那条已由 CtxBuild.user 的 mode 闸门挡着）。判据**复用同一个 visionMode**
-                            // —— 与入站**同源**，不在这里造第二套判定。非 native（off/relay 皆然）一律**整条拒绝**：
-                            // 不许静默、不许"挂了文本不挂图"的半挂中间态；判不出来（ctx 未就绪/异常）**也拒绝**。
-                            String deny = imageDirectDeny(boot, t);
-                            if (deny != null) return deny;
-                            msgs.add(Msg.userWithImages(J.s(args, "text", ""), images));
-                        } else {
-                            msgs.add(Msg.user(J.s(args, "text", "")));
+                        if ("vision".equals(op)) {
+                            // 动作级 op：看图（出网，走多模态分支）
+                            String aclDeny = needOp(auth, conf, "model.vision");
+                            if (aclDeny != null) return aclDeny;
+                            List<String> images = J.strings(args, "images");
+                            if (!images.isEmpty()) {
+                                // ★图片直传收口（甲方急令，T12-R3c）：这里是**唯一**能把图直接塞进请求的旁路
+                                // （入站那条已由 CtxBuild.user 的 mode 闸门挡着）。判据**复用同一个 visionMode**
+                                // —— 与入站**同源**，不在这里造第二套判定。非 native（off/relay 皆然）一律**整条拒绝**：
+                                // 不许静默、不许"挂了文本不挂图"的半挂中间态；判不出来（ctx 未就绪/异常）**也拒绝**。
+                                String deny = imageDirectDeny(boot, t);
+                                if (deny != null) return deny;
+                                msgs.add(Msg.userWithImages(J.s(args, "text", ""), images));
+                            } else {
+                                msgs.add(Msg.user(J.s(args, "text", "")));
+                            }
+                            return modelReply(ai, true, msgs, args);
                         }
-                        JsonObject opts = new JsonObject();
-                        String m = J.s(args, "model", "");
-                        if (Str.has(m)) opts.addProperty("model", m);
-                        Res r = "vision".equals(op) ? ai.vision(msgs, opts) : ai.chat(msgs, null, opts);
-                        return r.ok() ? Str.nz(r.content) : ("模型调用失败：" + r.error);
+                        // 默认分支（chat，含认不出的 op）：动作级 op
+                        String aclDeny = needOp(auth, conf, "model.chat");
+                        if (aclDeny != null) return aclDeny;
+                        msgs.add(Msg.user(J.s(args, "text", "")));
+                        return modelReply(ai, false, msgs, args);
                     }
                 }));
 
@@ -726,7 +917,7 @@ public final class Builtins {
                 .handler(new Tool.Handler() {
                     @Override
                     public Object call(JsonObject args, Turn t) {
-                        // 工具路径<b>只走"装好闸门"的实例</b>：回落到未装闸门的 api 等于把 E 类判定整层删掉
+                        // 工具路径<b>只走"装好闸门"的实例</b>：回落到未装闸门的 api 等于把 op 判定整层删掉
                         // （Boot 里那个 api 是给"基板自己发回复/定时推送"用的）。
                         // 闸门没装配 = 整把工具 fail-closed（连 list 都不给），理由里点明原因。
                         String action = J.s(args, "action", "list");
@@ -745,11 +936,10 @@ public final class Builtins {
                             return why;
                         }
                         if ("list".equals(action)) {
+                            // 目录不是"一个动作"：它的每一行按 napcat.<动作> 各判一次，
+                            // 只把放行的动作名交出去（判不动的动作名不进目录 —— 不给越权者暴露能力面）。
                             JsonObject cat = api.catalog();
                             JsonObject visible = new JsonObject();
-                            // 目录可见性 = 这个主体对 napcat.<动作> 有没有 X 位：与下面那道闸门
-                            // （Guard 的 allowRes(Res.platform(action),'X')）<b>同一判据</b>，不再问旧档位表
-                            // —— 旧表只会多拦，会把"实际调不动"的动作名暴露给非主人。
                             Caller who = napcatSubject(conf);
                             if (auth == null) {
                                 String why = "[tool] napcat 权限面没有装配（auth == null）—— 拒绝列出动作目录";
@@ -757,7 +947,8 @@ public final class Builtins {
                                 return why;
                             }
                             for (Map.Entry<String, com.google.gson.JsonElement> e : cat.entrySet()) {
-                                if (auth.allowRes(who, sair.v4.auth.Res.platform(e.getKey()), 'X') == null) {
+                                // 走同一口判定（needOpAs）：罢工态下目录里一个动作都不放行（SPEC §4）。
+                                if (needOpAs(auth, who, "napcat." + e.getKey()) == null) {
                                     visible.add(e.getKey(), e.getValue());
                                 }
                             }
@@ -774,7 +965,9 @@ public final class Builtins {
                             if (out != null) out.err(why);
                             return why;
                         }
-                        String deny = auth.allowRes(who, sair.v4.auth.Res.platform(action), 'X');
+                        // 动作级 op：动作名就是代码里那个 action 字符串（napcat.<动作名>）
+                        // 判定走同一口 needOpAs（不再直呼 auth.allow）—— 罢工闸因此覆盖到 NapCat 一族。
+                        String deny = needOpAs(auth, who, "napcat." + action);
                         if (deny != null) return deny;
                         if (!api.available()) return sair.v4.qq.Api.NOT_CONNECTED;
                         return J.json(api.call(action, J.sub(args, "params")));
@@ -796,22 +989,22 @@ public final class Builtins {
                     @Override
                     public Object call(JsonObject args, Turn t) {
                         String op = J.s(args, "op", "print").toLowerCase();
-                        // ACL：<b>整把工具都判 E 类</b>（D10「E 类含 SFW 命令交互」+ P10a 裁决）——
-                        // 这把工具的契约就是"SFW 控制台（仅主人）"，而且 print/clear 是<b>往主人机位写</b>
-                        // （非主人可借它在控制台里打出伪造的框架输出去骗主人）。统一用 X 而不是 R：
-                        // SYSTEM 的 E 默认只有 X，用 R 会把她自己（自主读控制台）挡在外面。
-                        String aclDeny = needRes(auth, conf, sair.v4.auth.Res.platform("sfw.run"), 'X');
-                        if (aclDeny != null) return aclDeny;
                         // 每次用到时读配置（consoleTap* 改动即时生效：上限/开关/转发档位）
                         sair.v4.term.SfwOut.installTap(boot.conf());
 
                         if ("read".equals(op)) {
+                            // 动作级 op：读控制台输出
+                            String aclDeny = needOp(auth, conf, "console.read");
+                            if (aclDeny != null) return aclDeny;
                             long since = J.l(args, "since_seq", 0L);
                             int max = J.i(args, "tail_chars", 0);
                             String filter = J.s(args, "filter", "");
                             return sair.v4.term.SfwOut.read(since, max, filter);
                         }
                         if ("run".equals(op)) {
+                            // 动作级 op：跑一条框架命令（与 Host.sfwRun 同一档事）
+                            String aclDeny = needOp(auth, conf, "console.run");
+                            if (aclDeny != null) return aclDeny;
                             String cmd = J.s(args, "cmd", "");
                             // B10：这一格原来回的是「需要 cmd」—— 既没有 [console] 前缀、也没有 ok= 标记，
                             // 于是连续失败闸门（Loop.failed）既认不出工具名、也读不到 ok=，
@@ -822,12 +1015,21 @@ public final class Builtins {
                             return sair.v4.term.SfwOut.run(cmd);
                         }
                         if ("history".equals(op)) {
+                            // 动作级 op：看最近的框架命令
+                            String aclDeny = needOp(auth, conf, "console.history");
+                            if (aclDeny != null) return aclDeny;
                             return sair.v4.term.SfwOut.history(J.i(args, "limit", 20));
                         }
                         if ("size".equals(op)) {
+                            // 动作级 op：看控制台规模
+                            String aclDeny = needOp(auth, conf, "console.size");
+                            if (aclDeny != null) return aclDeny;
                             return sair.v4.term.SfwOut.size();
                         }
                         if ("visible".equals(op)) {
+                            // 动作级 op：全量读取当前可见全文
+                            String aclDeny = needOp(auth, conf, "console.visible");
+                            if (aclDeny != null) return aclDeny;
                             // 全量读取（当前可见全文）：按需调用，务必给 tail_chars（框架这个 API 会整份拷贝）
                             int max = J.i(args, "tail_chars", 4000);
                             String txt = sair.v4.term.SfwOut.visibleText(max);
@@ -840,6 +1042,9 @@ public final class Builtins {
                             return "[console] visible ok=1 chars=" + txt.length() + "\n" + txt;
                         }
                         if ("clear".equals(op)) {
+                            // 动作级 op：清屏
+                            String aclDeny = needOp(auth, conf, "console.clear");
+                            if (aclDeny != null) return aclDeny;
                             sair.v4.term.SfwOut con = boot.console();
                             if (con == null) return "控制台不可用（当前输出不是 SFW 控制台）";
                             con.clear();
@@ -847,6 +1052,9 @@ public final class Builtins {
                             return "已清屏（捕获缓冲仍保留 " + sair.v4.term.ConsoleTap.lines() + " 条，可继续 read）";
                         }
                         if ("print".equals(op) || op.isEmpty()) {
+                            // 动作级 op：往控制台打一行（默认分支，含认不出的 op）
+                            String aclDeny = needOp(auth, conf, "console.print");
+                            if (aclDeny != null) return aclDeny;
                             out.print(J.s(args, "text", "") + "\n", Out.Tone.NORMAL);
                             return "已打印";
                         }
@@ -872,34 +1080,39 @@ public final class Builtins {
                         Caller me = t == null ? null : t.caller();
                         boolean master = me != null && me.master();
                         String op = J.s(args, "op", "list").toLowerCase();
-                        // 读：按调用者判 C 类 R（非主人默认有 R）。写见下一段：账本是**她自己的账**。
-                        String aclDeny = needRes(auth, conf, sair.v4.auth.Res.mem("alarm"), 'R');
-                        if (aclDeny != null) return aclDeny;
-                        // 写（add/done/fail/defer/abandon）按 **SYSTEM** 判 W：别人委派的事要真能记进来、
-                        // 到点办完要真能收尾，而普通用户对 C 类只有 R（D43）—— 所以闸门交给"她的判断 + 配额"，
-                        // 不给用户开写位（这条是设计选择，见 notes 里的记录）。
-                        if (!"list".equals(op) && auth != null) {
-                            String wDeny = auth.allowRes(
-                                    Caller.systemActor(conf == null ? 0L : conf.masterQQ()),
-                                    sair.v4.auth.Res.mem("alarm"), 'W');
-                            if (wDeny != null) return wDeny;
-                        }
                         if ("remove".equals(op)) {
+                            // 动作级 op：删一条
+                            String aclDeny = needOp(auth, conf, "alarm.remove");
+                            if (aclDeny != null) return aclDeny;
                             return tick.remove(J.l(args, "id", 0), me) ? "已删除" : "没有这个闹钟（或它不是你的）";
                         }
                         if ("clear".equals(op)) {
+                            // 动作级 op：清空自己能看到的
+                            String aclDeny = needOp(auth, conf, "alarm.clear");
+                            if (aclDeny != null) return aclDeny;
                             int n = tick.clear(me);
                             return master ? ("已清空 " + n + " 个闹钟") : ("已清空你自己的 " + n + " 个闹钟");
                         }
-                        if ("done".equals(op) || "fail".equals(op)) {
+                        if ("done".equals(op)) {
+                            // 动作级 op：办妥收尾
+                            String aclDeny = needOp(auth, conf, "alarm.done");
+                            if (aclDeny != null) return aclDeny;
                             long id = J.l(args, "id", 0);
-                            boolean done = "done".equals(op);
-                            boolean ok = tick.mark(id, done ? Tick.ST_DONE : Tick.ST_FAILED,
-                                    J.s(args, "result", ""), J.s(args, "why", ""), me);
-                            return ok ? ("#" + id + (done ? " 已记成办妥" : " 已记成没办成"))
-                                      : ("没有这个闹钟（或它不是你的）：#" + id);
+                            boolean ok = tick.mark(id, Tick.ST_DONE, J.s(args, "result", ""), J.s(args, "why", ""), me);
+                            return ok ? ("#" + id + " 已记成办妥") : ("没有这个闹钟（或它不是你的）：#" + id);
+                        }
+                        if ("fail".equals(op)) {
+                            // 动作级 op：没办成收尾
+                            String aclDeny = needOp(auth, conf, "alarm.fail");
+                            if (aclDeny != null) return aclDeny;
+                            long id = J.l(args, "id", 0);
+                            boolean ok = tick.mark(id, Tick.ST_FAILED, J.s(args, "result", ""), J.s(args, "why", ""), me);
+                            return ok ? ("#" + id + " 已记成没办成") : ("没有这个闹钟（或它不是你的）：#" + id);
                         }
                         if ("defer".equals(op)) {
+                            // 动作级 op：顺延或给待办排期
+                            String aclDeny = needOp(auth, conf, "alarm.defer");
+                            if (aclDeny != null) return aclDeny;
                             long id = J.l(args, "id", 0);
                             long when = parseWhen(J.s(args, "at", ""), J.i(args, "in", 0));
                             if (when <= 0) return "时间无法识别（用 at=\"HH:mm\"/\"+30m\"/\"明天 09:00\" 或 in=分钟）";
@@ -908,6 +1121,9 @@ public final class Builtins {
                                       : ("顺延不了 #" + id + "：别人委派的是工作不能拖，或者这条不是你的");
                         }
                         if ("add".equals(op)) {
+                            // 动作级 op：记一件（写 at/in = 到点触发；不写时间 = 先记成待办）
+                            String aclDeny = needOp(auth, conf, "alarm.add");
+                            if (aclDeny != null) return aclDeny;
                             String atArg = J.s(args, "at", "");
                             int inArg = J.i(args, "in", 0);
                             String repeatArg = J.s(args, "repeat", "once");
@@ -1004,10 +1220,15 @@ public final class Builtins {
                                     qqArg, principalMaster);
                             return J.json(row);
                         }
-                        // list：主人看全部（mine=true 时只看自己委派的），别人只看自己委派的
+                        // 默认分支（list，含认不出的 op）：动作级 op
+                        // 读：主人看全部（mine=true 时只看自己委派的），别人只看自己委派的
+                        String aclDeny = needOp(auth, conf, "alarm.list");
+                        if (aclDeny != null) return aclDeny;
                         boolean onlyMine = J.b(args, "mine", false);
                         JsonArray arr = new JsonArray();
-                        for (JsonObject a : tick.alarms(master ? null : me)) {
+                        // 主人走**无参**那条（= 全部）；给 alarms(Caller) 传 null 是"没有主体" ⇒ 空（口径见 Tick.alarms）。
+                        List<JsonObject> visible = master ? tick.alarms() : tick.alarms(me);
+                        for (JsonObject a : visible) {
                             if (onlyMine) {
                                 long oq = J.l(Tick.ownerOf(a), "qq", 0L);
                                 if (me == null || oq != me.qq()) continue;
@@ -1023,193 +1244,627 @@ public final class Builtins {
         }
     }
 
-    // ==================== ⑥ perm：权限账本（授权 / 撤销 / 查询 / 验算） ====================
-    //
-    // 口径一句话：账本（数据根的 perms.json）是"主人的例外授权清单"，一条一行，写法固定：
-    //     类["主体","范围","位"]
-    // 判定 = 按类默认分配 + 例外突破默认；主体层级 User(3) > Group(2) > ALLUSER(1)，
-    // SYSTEM 自成一路；同层级按行序，后面的覆盖前面的（范围的具体度不参与优先级）。
-    // 这四个 op 一律 MASTER 专属（受保护第一层 mem:acl），非主人只回五个字。
+    /**
+     * 内置工具的全部 op（= 技能管控表的骨架：{@code ai/perm gen} 按这份清单把每个 op 列成一行空 Run）。
+     *
+     * <p><b>由装配期调用</b>：{@code Builtins.register(boot)} 里已经用 {@code boot.auth().ops()} 调过一次
+     * （见 register 开头那句 declareOps）；Boot 侧若还有别的装配入口要补登记，直接
+     * {@code Builtins.declareOps(auth.ops())} —— 本方法只登记，不做任何判定、不碰盘。</p>
+     *
+     * <p>NapCat 的 op 从 {@link sair.v4.qq.Api#actionNames()}（动作目录）生成：目录里加一个动作，
+     * 这里就多一个 {@code napcat.<动作名>}，两边不会漂。</p>
+     */
+    public static void declareOps(OpList ops) {
+        if (ops == null) return;
+        // ① 六库：读 / 写 / 管理
+        ops.add("store", "list", "列库里的行");
+        ops.add("store", "get", "取一条");
+        ops.add("store", "search", "检索");
+        ops.add("store", "count", "数行数");
+        ops.add("store_write", "put", "写一行");
+        ops.add("store_write", "update", "改一行");
+        ops.add("store_write", "delete", "删一行");
+        ops.add("store_admin", "stat", "六库统计");
+        ops.add("store_admin", "maintain", "维护清理");
+        ops.add("store_admin", "optimize", "合并全文索引段");
+        ops.add("store_admin", "vacuum", "回收空闲页");
+        ops.add("store_admin", "export", "导出 JSONL");
+        ops.add("store_admin", "import", "导入覆盖");
+        // ② 技能库 / 动态执行
+        ops.add("skill", "list", "技能清单");
+        ops.add("skill", "read", "读技能说明书");
+        ops.add("skill", "validate", "技能库体检");
+        ops.add("skill_write", "add", "新增技能");
+        ops.add("skill_write", "update", "覆盖技能内容");
+        ops.add("skill_write", "delete", "删技能");
+        ops.add("skill_write", "reload", "重扫技能库");
+        ops.add("skill_write", "read_source", "读技能 java 源码");
+        ops.add("skill_write", "draft", "写草稿");
+        ops.add("skill_write", "drafts", "列草稿");
+        ops.add("skill_write", "promote", "草稿搬进技能库");
+        ops.add("exec", "java", "编译并运行一段 Java");
+        ops.add("exec", "cmd", "执行系统命令");
+        // ③ 提示词
+        ops.add("prompt", "show", "看初始身份提示词");
+        ops.add("prompt", "list", "列提示词文件");
+        ops.add("prompt", "read", "读一份提示词");
+        ops.add("prompt", "sections", "初始提示词的分节名");
+        ops.add("prompt_write", "load", "载入一份提示词并注入");
+        ops.add("prompt_write", "inject", "注入一段文本");
+        ops.add("prompt_write", "write", "新建或覆盖提示词文件");
+        ops.add("prompt_write", "clear", "移除注入");
+        ops.add("prompt_write", "reload", "重载初始提示词");
+        // ④ Agent 调度 / ⑤ 上下文注入
+        ops.add("agent", "spawn", "派一个子 Agent");
+        ops.add("agent", "list", "任务清单表");
+        ops.add("agent", "status", "单个任务状态");
+        ops.add("agent", "stop", "中断在跑的回合");
+        ops.add("ctx", "inject", "往槽位注入文本");
+        ops.add("ctx", "list", "列当前注入项");
+        ops.add("ctx", "clear", "清空注入");
+        // ⑥ perm：好感度面 + 权限文件面
+        ops.add("perm", "whoami", "我是谁（含我的好感度）");
+        ops.add("perm", "get", "查一个人的好感度");
+        ops.add("perm", "list", "好感度榜单");
+        ops.add("perm", "set", "直接定好感度");
+        ops.add("perm", "reset", "清空好感度");
+        ops.add("perm", "show", "看合并后的权限表");
+        ops.add("perm", "gen", "在已有权限文件里重排（不新建文件）");
+        ops.add("perm", "run", "授权（Run = 可用）");
+        ops.add("perm", "ban", "封禁（Ban = 不可用）");
+        ops.add("perm", "revoke", "撤回条目");
+        // ⑥b/⑥c 自省
+        ops.add("tools", "list", "列你能用的工具");
+        ops.add("tools", "search", "按意图找工具");
+        ops.add("tools", "show", "读一把工具的说明书");
+        ops.add("config", "list", "列已知配置键");
+        ops.add("config", "get", "看一个键");
+        ops.add("config", "set", "改一个键");
+        // ⑦ 模型直连
+        ops.add("model", "chat", "问一句");
+        ops.add("model", "vision", "看图");
+        ops.add("model", "balance", "查余额");
+        ops.add("model", "models", "模型清单");
+        ops.add("model", "info", "当前模型信息");
+        // ⑧ NapCat：每个动作一个 op（动作目录是唯一来源）
+        List<String> acts = sair.v4.qq.Api.actionNames();
+        for (int i = 0; i < acts.size(); i++) {
+            ops.add("napcat", acts.get(i), "NapCat 动作");
+        }
+        // ⑨ 控制台 / ④ 到点的事
+        ops.add("console", "read", "读控制台最近的输出");
+        ops.add("console", "run", "跑一条框架命令");
+        ops.add("console", "history", "最近的框架命令");
+        ops.add("console", "print", "往控制台打一行");
+        ops.add("console", "clear", "清屏");
+        ops.add("console", "size", "控制台规模");
+        ops.add("console", "visible", "当前可见全文");
+        ops.add("alarm", "add", "记一件到点的事");
+        ops.add("alarm", "list", "闹钟清单");
+        ops.add("alarm", "remove", "删一条");
+        ops.add("alarm", "clear", "清空自己的");
+        ops.add("alarm", "done", "办妥收尾");
+        ops.add("alarm", "fail", "没办成收尾");
+        ops.add("alarm", "defer", "顺延或排期");
+    }
 
-    /** 非主人来要权限时唯一的那句话（不解释、不透露账本内容）。 */
+    /**
+     * 模型直连（chat / vision）的收口：临时换模型 + 把结果规整成字符串。
+     * <p>两个动作共用它，但<b>op 判定各自在自己的分支里判</b>（见 model 工具的实现）。</p>
+     */
+    private static String modelReply(DeepSeek ai, boolean vision, JsonArray msgs, JsonObject args) {
+        JsonObject opts = new JsonObject();
+        String m = J.s(args, "model", "");
+        if (Str.has(m)) opts.addProperty("model", m);
+        Res r = vision ? ai.vision(msgs, opts) : ai.chat(msgs, null, opts);
+        return r.ok() ? Str.nz(r.content) : ("模型调用失败：" + r.error);
+    }
+
+    // ==================== ⑥ perm：好感度（关系值） + 权限文件（授权 / 撤销 / 重排） ====================
+    //
+    // 一把工具两个面，op 名固定（与控制台命令面的名字不同，这一处是故意的）：
+    //   好感度面：whoami（我是谁 + 我的好感度）· get（查一个人）· list（榜单）· set（直接定值）· reset（清空）
+    //   权限面：show（看合并后的表）· gen（在已有权限文件里重排）· run（授权）· ban（封禁）· revoke（撤回）
+    //
+    // 口径一句话：好感度只是"关系值"，<b>不判任何权限</b>；谁能用哪个 op 由按归属分散的权限文件
+    // （数据根 perms-core.jsonc + 每个技能自己的 skills\<技能名>\perms.jsonc）说了算 ——
+    // Run 白名单 = 可用 / Ban 黑名单 = 不可用 / 空 = 未授权 = 不可用，优先级 Ban > Run > 空；
+    // MASTER 与她本人（SYSTEM）恒全权，不受表影响。
+    //
+    // 权限面那五个另有一层<b>业务硬判</b>：权限文件是主人的信息，show/run/ban/gen/revoke 只有主人能真正调通
+    // —— 连她自己的自主行为（SYSTEM，op 判定恒放行）也不给。
+
+    /** 非主人来改账本时唯一的那句话（不解释、不透露账本内容）。 */
     public static final String PERM_DENY = "这得主人定";
 
-    /** 五个 op 的人话名（回执 / 报错 / 说明共用一份文案）。 */
+    /** 十个 op 的人话名（回执 / 报错 / 说明共用一份文案）。 */
     private static final String PERM_OPS =
-            "grant 授权/覆盖 · revoke 撤销 · acl 看清单或验算（这三个只有主人）"
-            + " · whoami 我是谁（谁都能问：只回自己五类有效位，不回账本正文）"
-            + " · check 查某人在某类/某范围的位与例外（只读；谁都能查自己，查别人只有主人）";
+            "whoami 我是谁（含我的好感度）· get 查一个人 · list 好感度榜单 · set 直接定值 · reset 清空"
+            + " · show 看权限表 · gen 重排已有权限文件 · run 授权 · ban 封禁 · revoke 撤回";
 
     /**
-     * {@code whoami} 是否对所有身份开放（主人 2026-09-15 口径：非主人问得到"自己的位与默认分配"，
-     * 但<b>不回账本条目原文</b>）。
+     * perm 工具的口径正文（<b>她自己读的就是这一段</b>：人话 → 表里条目的映射 + 两条优先级规则）。
      *
-     * <p>与 {@code notes/acl-decisions.md} D3 那句"非主人问权限 = 拒答"的差别只在这一格：
-     * D3 说的是"问<b>别人</b>有什么权限"（那是 {@code acl} op，恒 MASTER 专属）；
-     * 若裁定 whoami 也要 MASTER 专属，把这一个字面量改成 {@code false} 即可，逻辑不用动。</p>
-     */
-    private static final boolean PERM_WHOAMI_OPEN = true;
-
-    /**
-     * perm 工具的口径正文（<b>她自己读的就是这一段</b>：人话 → 账本条目的映射表 + 两条优先级规则）。
+     * <p><b>为什么放工具描述、不并进 {@code identity.md}</b>：身份提示词是<b>每轮常驻</b>的预算，
+     * 而这份口径只在"主人说改权限"这一刻有用，工具描述正是那一刻必然送进模型的上下文。</p>
      *
-     * <p><b>为什么放工具描述、不并进 {@code identity.md}</b>：① 身份提示词是<b>每轮常驻</b>的预算
-     * （预算键 {@code identityMaxChars}，默认 8000，超了只 warn、不截断 —— 见 {@code prompt.PromptFile}），
-     * 塞进来就是"每一轮都付这份钱"，而身份那点预算该留给她的根设定；② 这份口径只在"主人说改权限"这一刻有用，
-     * 工具描述正是那一刻必然送进模型的上下文，而身份提示词是每轮常驻的预算；③ 它就是这把工具的契约
-     * （授权口径本来就只跟 perm 有关），不用两头同步；④ 事实块 / 身份提示词的改写不归它管，不交叉。</p>
-     *
-     * <p>{@code public} 是给探针断言用的（{@code ProbeAclGrant} 直接核这段文本覆盖了哪些人话说法，
-     * 免得口径悄悄被改窄）。注册处用 {@code .desc(PERM_DESC)} 把它挂到工具上。</p>
+     * <p>{@code public} 是给探针断言用的（核这段文本覆盖了哪些人话说法，免得口径悄悄被改窄）。</p>
      */
     public static final String PERM_DESC =
-            "权限账本（资源的 RWX 位；只有主人能改）：" + PERM_OPS + "。"
-            + "别人来要权限（含「给我权限」）只回「这得主人定」，绝不写盘、别说账本有什么。\n"
-            + "· 「这人有没有特例放行」用 op=check：principal 留空=查你自己，cls=A/B/C/E/T，"
-            + "scope 留空=整类（给具体范围更准）；**只读**、一个字都不改；"
-            + "查别人只有主人，非主人只能查自己。\n"
-            + "账本一条一行：类[\"主体\",\"范围\",\"位\"]\n"
-            + "· 五类：A 本机（所有本机文件 + 内存中的所有进程，含网络资源）"
-            + "· B SFW（SFW 运行时目录，只有文件）"
-            + "· C 数据（数据库全部内容 + dataDir 的 files 目录）"
-            + "· E 外部交互（Napcat 输入输出 + 向 SFW 发命令及其输出）"
-            + "· T 工具（只有入口受管控：R 看工具、W 改/注册、X 执行；执行不判位）。\n"
-            + "· 主体：User<QQ号>（个人，跨群有效）· Group<群号>（只在该群会话生效）"
-            + "· SYSTEM（你自己）· ALLUSER（全体用户，不含你和主人）。\n"
-            + "· 范围：A/B 写路径（盘符 D: / 目录 / 文件）；C 写库名 / mem:xxx /"
-            + " files 下某文件完整路径（C 类按名字相等命中，整类写空串）；E 写动作名；"
-            + "T 写工具名（tool: 前缀可省）；空串 = 该类全部。\n"
-            + "· 位：R/W/X 的 7 种组合（R、W、X、RW、RX、WX、RWX）；空串 = 一位都没有（显式拒绝，压过默认分配）。\n"
-            + "· 没写进账本的走默认分配：A=不给、B=不给、C=R、E=不给、T=不给"
-            + "（A 类 = 本机文件与进程（含网络资源），普通用户连读都不给，R/W/X 三位全收回；"
-            + "B 类 = SFW 目录内的文件，一位都不给；"
-            + "C 类 = 数据库全部内容 + files 目录，只给读；"
-            + "E 类 = Napcat 输入输出与 SFW 命令交互，一位都不给；"
-            + "T 类 = 工具入口（看 / 改·注册 / 执行），一位都不给 —— 非主人看不到也调不动任何工具）；"
-            + "你自己（SYSTEM）是 A=R、B=RW、C=RWX、E=RWX、T=RWX。\n"
-            + "· 受限配置文件与脚本（`.json` / `.ini` / `.conf` / `.properties` / `.yml` / `.yaml` / `.toml` /"
-            + " `.bat` / `.cmd` / `.ir` / `.xml` / `.env` / `.key` / `.pem` / `.p12`，大小写不敏感；只算 SFW 内的 B 类）是**受保护资源**，"
-            + "非主人一律读不到（例外也不开）—— 别把配置内容、脚本内容念给别人。\n"
-            + "· 例外可以突破默认 —— 想给某人读本机文件（A 类）：A[\"User<QQ>\",\"\",\"R\"]（整类给读）；"
-            + "只给某个范围：A[\"User<QQ>\",\"D:/share\",\"RWX\"]（范围外照样一点都碰不到）；"
-            + "给全体用户：A[\"ALLUSER\",\"\",\"R\"]。默认收回了 A 类之后，按人放开就走这几条。\n"
-            + "主人说什么 → 就调什么：\n"
-            + "·「帮我设定123456权限位置A=RWX」→ op=grant principal=123456 cls=A bits=RWX（scope 留空 = 整个 A 类）\n"
-            + "·「帮我设定123456权限位置C盘的XXX目录=RWX」→ op=grant principal=123456 cls=A scope=C:/XXX bits=RWX\n"
-            + "·「帮我设定群123456权限位置D盘=R」→ op=grant principal=群123456 cls=A scope=D: bits=R\n"
-            + "·「帮我设定123456，23456，45678的权限位置D:/share = R」→ principal=123456,23456,45678"
-            + "（逗号 = 一主体一条，自动展开）cls=A scope=D:/share bits=R\n"
-            + "·「帮我设定123456能用 agent 这个工具」→ op=grant principal=123456 cls=T scope=agent bits=X"
-            + "（T 类只管入口三位；tool: 前缀可省）\n"
-            + "·「帮我设定 A[\\\"User123456\\\",\\\"D:/share\\\",\\\"RWX\\\"]」→ 整条照抄进 principal"
-            + "（其余参数不用给），原样落账\n"
-            + "·「帮我取消123456的A权限」→ op=revoke principal=123456 cls=A（scope 留空 = 删其 A 类全部条目 → 回默认分配）\n"
-            + "·「帮我取消123456在D:/share的权限」→ op=revoke principal=123456 scope=D:/share（只删命中这一条）\n"
-            + "·「帮我禁止123456读D:/share」→ op=grant principal=123456 cls=A scope=D:/share bits="
-            + "（空串！「禁止」＝写空位条目＝显式拒绝，跟「取消」不是一回事）\n"
-            + "·「帮我看看123456现在有什么权限」→ op=acl principal=123456（先看，别改）\n"
-            + "·「帮我列出所有授权」→ op=acl（不带参数）\n"
-            + "四条规矩：① 回执里的「实际生效位」是基板算的，别自己算：例外条目直接生效 —— "
-            + "A=RWX 就是真能写本机，不再被默认分配压回去；给 SYSTEM 写例外要在回执里说清「这是给她自己的例外，"
-            + "会影响她的自主行为」；A 的 W/X、B 的 W、E 的 X 是高风险（接近主人的能力），基板会在控制台多打一行 warn。"
-            + "② 层级优先：User<QQ>(3) > Group<群号>(2) > ALLUSER(1)，SYSTEM 自成一路（只管你自己）—— "
-            + "更细的身份赢，User 条目哪怕写在 Group 条目前面也照样赢。"
-            + "③ 同层级按行序：同层命中多条时，账本里靠后的覆盖靠前的；范围的具体度不参与优先级 —— "
-            + "要「先全清、再单独放开」，就把放开那条写在后面。"
-            + "④ 含糊就先复述一遍再问主人，别猜着写盘；位只认 RWX，主人说数字（老口径）就回一句「现在按 RWX 写」。";
+            "一、好感度（关系值，**不判任何权限** —— 只是她跟这个人处得怎么样）："
+            + "whoami 我是谁 · get 查一个人 · list 榜单 · set 直接定值 · reset 清空。\n"
+            + "二、权限（**权限的唯一口径**：身份 × op → Ban / Run / 空；权限文件按归属分散 —— 基板工具写"
+            + "数据根下 " + Acl.CORE_FILE_NAME + "，每个技能写自己的 skills\\<技能名>\\" + Acl.SKILL_FILE_NAME
+            + "，技能文件里写了不属于它的 op 会被忽略，技能没有那份文件 = 它的全部 op 不授权）："
+            + "show 看合并后的表 · gen 只在已有权限文件里重排补注释（不新建文件）· run 授权（= 可用）· ban 封禁 · revoke 撤回。\n"
+            + "· 表里一条一行：Run[\"op\",\"身份\"…] = 可用 · Ban[\"op\",\"身份\"…] = 不可用。"
+            + "op = 工具名 或 工具名.动作名（写工具名 = 覆盖它的全部动作，如 memory 盖住 memory.remember）。\n"
+            + "· 身份：user:<QQ号>（个人，跨群有效）· group:<群号>（只在该群会话生效）· ALLUSER（全体用户）；"
+            + "裸数字 = user:<QQ>；「群123456」也认。**MASTER 与她本人（SYSTEM）恒全权，写进表里会被拒收**。\n"
+            + "· 三态：Ban 黑名单 = 不可用；Run 白名单 = 可用；**空**（写了 Run 却一个身份都没给，或者表里根本没这一行）"
+            + "= 未授权 = 不可用。优先级 Ban > Run > 空：同一个 op 上，该身份只要命中任何一条 Ban 就拒。\n"
+            + "· 归属：不给谁开就是默认（技能目录里没有 " + Acl.SKILL_FILE_NAME + " 的技能，它的全部 op 一律不授权）；"
+            + "run/ban 会写进该 op 归属的那个文件 —— 技能自己的工具写技能目录、其余写数据根 core，回执里会告诉你写到哪。\n"
+            + "· 主人说什么 → 就调什么：\n"
+            + "·「让123456能用记忆」→ op=run target=memory principal=123456\n"
+            + "·「只让123456能记、不能删」→ op=run target=memory.remember principal=123456（删那个动作不写 = 未授权）\n"
+            + "·「全体用户都能查天气」→ op=run target=weather principal=ALLUSER\n"
+            + "·「群123456能用发图」→ op=run target=sendimage principal=群123456\n"
+            + "·「禁止123456用 exec」→ op=ban target=exec principal=123456（Ban 压过一切 Run）\n"
+            + "·「取消123456的授权」→ op=revoke target=memory principal=123456（target 留空 = 撤他名下全部条目）\n"
+            + "·「看看现在谁能用什么」→ op=show（**先看，别改**）\n"
+            + "·「权限文件乱不乱 / 重排一下」→ op=gen（只在已有权限文件里按工具分组补中文释义；不新建文件；没列到的 = 未授权）\n"
+            + "四条规矩：① 回执里的条目原文是基板写进去的，别自己拼；含糊就先复述一遍再问主人，别猜着写表；"
+            + "② run/ban/gen/show/revoke 只有主人能调；别人来要权限（含「给我权限」）只回「这得主人定」，"
+            + "绝不写表、别说表里有什么；③ 授权到 ALLUSER = 把这条路给所有人（高风险：exec / skill_write / "
+            + "store_admin / prompt_write / console / perm / config / model / napcat 这些基板会在控制台多打一行 warn）；"
+            + "④ 改完立即生效，不用重启。";
 
-    /** perm 的用法示例（盖掉 tools-index.md 那行老口径示例，见上面注册处的注释）。 */
+    /** perm 的用法示例（盖掉 tools-index.md 里的老口径示例）。 */
     private static final String[] PERM_EXAMPLES = {
-            "op=acl（列所有授权；加 principal=123456 看某人权限）",
-            "op=grant principal=123456 cls=A scope=D:/share bits=RWX（主人说「帮我设定123456在D:/share读写执行」）",
-            "op=revoke principal=123456 cls=A（主人说「帮我取消123456的A权限」）",
-            "op=check cls=C scope=memory（只读：某范围有多少位、有无例外命中；principal 留空=自己）",
+            "op=show（看合并后的权限表全部条目与来源文件）",
+            "op=run target=memory.remember principal=123456（让这个人能记一笔）",
+            "op=ban target=exec principal=ALLUSER（全体用户都别碰动态执行）",
+            "op=revoke target=memory principal=123456（撤回他名下 memory 的全部条目；target 留空 = 全撤）",
+            "op=gen（只在已有权限文件里重排并按工具分组补释义；不新建文件；没列到的 = 未授权）",
+            "op=get（看我自己的好感度；查别人要主人：principal=123456）",
     };
 
-    /** 类别的人话名（回执 / 说明用）。 */
-    private static String clsName(char cls) {
-        switch (Character.toUpperCase(cls)) {
-            case 'A': return "A 本机（本机文件与进程，含网络资源）";
-            case 'B': return "B SFW（SFW 运行时目录，仅文件）";
-            case 'C': return "C 数据（数据库全部内容 + files 目录）";
-            case 'E': return "E 外部交互（Napcat 与 SFW 命令交互）";
-            case 'T': return "T 工具（只有入口受管控）";
-            default: return cls + "（认不出的类别）";
+    /**
+     * perm 的十个 op 的实现（<b>独立成静态方法</b>：探针可以直接调它，不用起一个 Boot）。
+     *
+     * <p><b>op 判定在动作分支开头照旧判</b>（主体 = 调用者）：{@code MASTER} 与她本人 {@code SYSTEM}
+     * 恒全权；其余按权限文件判（空 = 未授权 = 不可用）。权限面的 show/run/ban/gen/revoke 在 op 判定
+     * <b>之后</b>再加一层业务硬判：权限文件是主人的信息，只有主人能看能改（连她自己的自主行为也不给）。</p>
+     *
+     * @param auth  权限面（{@code null} = 没装配：一律按拒绝处理）
+     * @param favor 好感度子系统（{@code null} = 没装配：好感度面如实回"读不到"）
+     * @param c     调用者（{@code null} = 无主体）
+     */
+    public static String permTool(JsonObject args, Out out, Auth auth, Favor favor, Caller c) {
+        String op = J.s(args, "op", "whoami").trim().toLowerCase();
+        if ("acl".equals(op)) op = "show";            // 老名字：acl 就是 show（同一个动作）
+        boolean master = c != null && c.master();
+        String deny = needOpAs(auth, c, "perm." + op);
+        if (deny != null) return deny;
+        if ("whoami".equals(op)) return permWhoami(favor, c);
+        if ("get".equals(op)) return permGet(args, favor, c);
+        if ("list".equals(op)) return permList(args, favor);
+        if ("set".equals(op)) return permSet(args, favor, c);
+        if ("reset".equals(op)) return permReset(favor);
+        // 权限面：账本是主人的信息 —— 看与改都只有主人
+        if ("show".equals(op)) {
+            if (!master) return permOwnerOnly(out, c);
+            return permShow(auth);
+        }
+        if ("gen".equals(op)) {
+            if (!master) return permOwnerOnly(out, c);
+            return permGen(out, auth);
+        }
+        if ("run".equals(op)) {
+            if (!master) return permOwnerOnly(out, c);
+            return permGrant(args, out, auth, false);
+        }
+        if ("ban".equals(op)) {
+            if (!master) return permOwnerOnly(out, c);
+            return permGrant(args, out, auth, true);
+        }
+        if ("revoke".equals(op)) {
+            if (!master) return permOwnerOnly(out, c);
+            return permRevoke(args, out, auth);
+        }
+        return "op 只认 " + PERM_OPS + "。旧的 check/levels/level/setlevel 已经没有了（资源不再有位、"
+                + "好感度不再插手权限）：要看自己手上有什么用 tools op=show，要看表用 perm op=show。";
+    }
+
+    /** 非主人调权限面时的那五个字（控制台留一行）。 */
+    private static String permOwnerOnly(Out out, Caller c) {
+        if (out != null) out.dim("[acl] 非主人调用技能管控表（" + (c == null ? "无主体" : c.label()) + "），已拒");
+        return PERM_DENY;
+    }
+
+    // ---------------- 好感度面 ----------------
+
+    /** {@code whoami}：我是谁 + 我的好感度（判不判得到由 op 判定说了算）。 */
+    private static String permWhoami(Favor favor, Caller c) {
+        JsonObject me = new JsonObject();
+        if (c == null) {
+            me.addProperty("caller", "无主体（没有可判定的身份）");
+            return J.json(me);
+        }
+        boolean master = c.master();
+        me.addProperty("kind", c.kind().name().toLowerCase(java.util.Locale.ROOT));   // master/system/alluser
+        me.addProperty("entry", c.isConsole() ? "console" : "qq");
+        me.addProperty("qq", c.qq());
+        me.addProperty("session", c.session());
+        me.addProperty("master", master);
+        me.addProperty("system", c.system());
+        if (c.isGroup()) {
+            me.addProperty("group", c.groupId());
+            me.addProperty("role", c.groupRole());
+        }
+        // 好感度只是"关系值"，不判任何权限；主人与本地控制台不适用（-1）
+        if (master || c.isConsole() || favor == null) {
+            me.addProperty("favor", -1);
+        } else {
+            double v = c.favor();
+            me.addProperty("favor", (long) v);
+            me.addProperty("level", favor.levelName(v));
+        }
+        me.addProperty("note", "好感度只是关系值，不判任何权限；你能用哪些工具/动作由技能管控表"
+                + "（身份 × op：Run = 可用 / Ban = 不可用 / 空 = 未授权）决定 —— "
+                + "看自己手上有什么用 tools op=list。");
+        return J.json(me);
+    }
+
+    /** {@code get}：查一个人的好感度（principal 留空 = 自己；查别人只有主人与她自己的自主行为）。 */
+    private static String permGet(JsonObject args, Favor favor, Caller c) {
+        if (favor == null) return "好感度子系统没装配（读不到 favor 表）";
+        String rawP = J.s(args, "principal", "").trim();
+        long qq;
+        if (Str.blank(rawP)) {
+            if (c == null || c.qq() <= 0L) {
+                return Acl.DENY_PREFIX + "查不了：这一轮没有可用的 QQ 身份（要查别人就把 principal 写成 QQ 号）";
+            }
+            qq = c.qq();
+        } else {
+            Long id = qqOf(rawP);
+            if (id == null) {
+                return "主体写法认不出：" + rawP + "（好感度只认 QQ 号：裸数字 / user:<QQ>；留空 = 你自己）";
+            }
+            qq = id.longValue();
+        }
+        boolean mine = c != null && c.qq() == qq;
+        boolean owner = c != null && (c.master() || c.system());
+        if (!mine && !owner) {
+            return Acl.DENY_PREFIX + "查别人的好感度要主人 —— 你自己的用 perm op=get（不带 principal）";
+        }
+        JsonObject o = favor.snapshot(qq);
+        JsonArray arr = new JsonArray();
+        for (JsonObject e : favor.events(qq, 5)) arr.add(e);
+        o.add("recent", arr);
+        return J.json(o);
+    }
+
+    /** QQ 号写法 → 号码（认不出返回 {@code null}）：只认裸数字 / {@code user:<QQ>} / {@code qq:<QQ>} / {@code 用户<QQ>}。 */
+    private static Long qqOf(String raw) {
+        String k = Acl.principalKey(raw);
+        if (k == null || !k.startsWith(Acl.USER_PREFIX)) return null;
+        try {
+            return Long.valueOf(Long.parseLong(k.substring(Acl.USER_PREFIX.length()).trim()));
+        } catch (Throwable ignore) {
+            return null;
         }
     }
 
-    /** 类别写法 → 类字母；认不出返回 {@code 0}（只认 A/B/C/E/T，容忍 "A类" 这种写法）。 */
-    private static char clsOf(String raw) {
-        String s = raw == null ? "" : raw.trim();
-        if (s.isEmpty()) return 0;
-        char c = Character.toUpperCase(s.charAt(0));
-        if (c < 'A' || c > 'Z') return 0;
-        String rest = s.substring(1).trim();
-        if (!rest.isEmpty() && !"类".equals(rest)) return 0;
-        return "ABCET".indexOf(c) >= 0 ? c : 0;
+    /** {@code list}：好感度榜单（按数值降序）。 */
+    private static String permList(JsonObject args, Favor favor) {
+        if (favor == null) return "好感度子系统没装配（读不到 favor 表）";
+        int limit = J.i(args, "limit", 20);
+        if (limit <= 0) limit = 20;
+        List<JsonObject> top = favor.top(limit);
+        StringBuilder sb = new StringBuilder("好感度榜单（按数值降序，前 " + top.size() + " 名）：");
+        if (top.isEmpty()) return sb.append("（一个人都还没有）").toString();
+        for (int i = 0; i < top.size(); i++) {
+            JsonObject o = top.get(i);
+            sb.append("\n  ").append(i + 1).append(". ").append(J.l(o, "qq", 0L))
+              .append("  ").append((long) J.d(o, "value", 0D))
+              .append("  ").append(Str.nz(J.s(o, "level", "")));
+            String note = Str.oneLine(Str.nz(J.s(o, "note", "")));
+            if (Str.has(note)) sb.append("  ← ").append(Str.cut(note, 40));
+        }
+        sb.append("\n（好感度只是关系值，不判任何权限）");
+        return sb.toString();
     }
 
-    /** 类别认不出时的统一回话。 */
-    private static String clsProblem(String raw) {
-        return "类别只认 A 本机 / B SFW / C 数据 / E 外部交互 / T 工具（现在是 \"" + (raw == null ? "" : raw.trim()) + "\"）";
-    }
-
-    /** 位的人话写法（{@code NONE} 说成"一位都没有"，因为条目里写的是空串）。 */
-    private static String bitsText(int mask) {
-        return mask == Bits.NONE ? "NONE（一位都没有）" : Bits.format(mask);
-    }
-
-    /** 主体键属于哪条线：{@code SYSTEM} 走她自己的默认分配，其余（含 ALLUSER）走用户那条线。 */
-    private static Caller.Kind kindOf(String principalKey) {
-        return Acl.SYSTEM_KEY.equals(principalKey) ? Caller.Kind.SYSTEM : Caller.Kind.ALLUSER;
-    }
-
-    /** 某个身份在某类上的默认分配表（一句话，回执用）：{@code A=NONE B=NONE C=R E=NONE T=NONE}。 */
-    private static String allocText(Caller.Kind kind) {
+    /** {@code set}：直接定值（主人手动调关系值；不受单次加减区间限制，每一次都写一行流水）。 */
+    private static String permSet(JsonObject args, Favor favor, Caller c) {
+        if (favor == null) return "好感度子系统没装配（读不到 favor 表）";
+        String rawP = J.s(args, "principal", "").trim();
+        long qq;
+        if (Str.blank(rawP)) {
+            if (c == null || c.qq() <= 0L) return "要给 QQ 号：perm op=set principal=123456 value=100";
+            qq = c.qq();
+        } else {
+            Long id = qqOf(rawP);
+            if (id == null) return "主体写法认不出：" + rawP + "（只认 QQ 号：裸数字 / user:<QQ>）";
+            qq = id.longValue();
+        }
+        if (args == null || !args.has("value")) {
+            return "要给 value（0 是合法值）：perm op=set principal=" + qq + " value=100";
+        }
+        double v = J.d(args, "value", -1D);
+        if (v < 0D) return "好感度不能是负数（要给 0 就写 value=0）";
+        Favor.Change ch = favor.setValue(qq, v, J.s(args, "note", "主人直改"), c == null ? "perm" : c.label());
         StringBuilder sb = new StringBuilder();
-        char[] cs = { 'A', 'B', 'C', 'E', 'T' };
-        for (int i = 0; i < cs.length; i++) {
-            if (i > 0) sb.append(" ");
-            sb.append(cs[i]).append("=").append(Bits.format(Acl.allocOf(kind, cs[i])));
+        sb.append("已把 ").append(qq).append(" 的好感度定为 ").append((long) ch.after)
+          .append("（").append(favor.levelName(ch.after)).append("）");
+        if (ch.before != ch.after) {
+            sb.append("；原来 ").append((long) ch.before).append("（").append(favor.levelName(ch.before)).append("）");
+        }
+        sb.append("\n（好感度只是关系值，不判任何权限；这次改动已经写了一行 favor_event 流水）");
+        return sb.toString();
+    }
+
+    /** {@code reset}：清空好感度（favor 表清干净，流水表保留）。 */
+    private static String permReset(Favor favor) {
+        if (favor == null) return "好感度子系统没装配（读不到 favor 表）";
+        int n = favor.resetAll();
+        return "已清空 " + n + " 条好感度记录（所有人回到初识；favor_event 流水表原样保留）";
+    }
+
+    // ---------------- 权限面：权限文件（core + 每个技能自己的 perms.jsonc，合并视图） ----------------
+
+    /** 权限文件的人读路径（数据根下用相对路径；根外给全路径）。 */
+    private static String permPath(Acl acl, File f) {
+        if (f == null) return "(无)";
+        try {
+            File root = acl == null ? null : acl.dataRoot();
+            if (root != null) {
+                String r = root.getAbsolutePath();
+                String p = f.getAbsolutePath();
+                if (p.startsWith(r + File.separator)) {
+                    return root.getName() + File.separator + p.substring(r.length() + 1);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return f.getAbsolutePath();
+    }
+
+    /** 回执里"写到哪个文件"：按<b>归属</b>算出来的那个落点；没有具体 op 就把这次写了的文件都列出来。 */
+    private static String permWrote(Acl acl, String op) {
+        if (acl == null) return "(无)";
+        if (op != null && !op.trim().isEmpty()) {
+            File tf = acl.targetOf(op);
+            if (tf != null) return permPath(acl, tf);
+        }
+        List<File> ws = acl.writtenFiles();
+        if (ws.isEmpty()) return permPath(acl, acl.file());
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ws.size(); i++) sb.append(i == 0 ? "" : "、").append(permPath(acl, ws.get(i)));
+        return sb.toString();
+    }
+
+    /** {@code show}：看合并后的权限表（条目原文 + 统计 + 来源汇总 + 还没进表的 op）。主人专属。 */
+    private static String permShow(Auth auth) {
+        if (auth == null) return "权限面没装配（读不到权限文件）";
+        Acl acl = auth.acl();
+        if (acl == null) return "权限面没装配（读不到权限文件）";
+        StringBuilder sb = new StringBuilder();
+        sb.append(acl.stat());
+        sb.append("\n").append(acl.sourceStat());
+        for (File f : acl.sources()) sb.append("\n  ").append(permPath(acl, f)).append("  ").append(acl.entriesOf(f)).append(" 条");
+        sb.append("\n口径：Run[\"op\",\"身份\"…] = 可用 · Ban[…] = 不可用 · 空 = 未授权 = 不可用；"
+                + "优先级 Ban > Run > 空；MASTER 与她本人（SYSTEM）不受表影响。");
+        sb.append("\n权限文件按归属分散：基板工具写数据根 " + Acl.CORE_FILE_NAME + "；每个技能写自己的 "
+                + "skills\\<技能名>\\" + Acl.SKILL_FILE_NAME + "（只写它自己提供的工具，越界条目忽略；"
+                + "技能没有那份文件 = 它的全部 op 不授权）。");
+        List<String> lines = acl.list();
+        if (lines.isEmpty()) {
+            sb.append("\n（表是空的：一个 op 都没授权 —— 没有权限文件就是默认；要开口：op=run target=<op> principal=<身份>）");
+        }
+        for (int i = 0; i < lines.size(); i++) sb.append("\n  ").append(lines.get(i));
+        List<Acl.Reject> rej = acl.rejects();
+        for (int i = 0; i < rej.size(); i++) {
+            Acl.Reject r = rej.get(i);
+            sb.append("\n  认不出的条目：").append(r.text());
+        }
+        List<String> missing = missingOps(acl, auth.ops());
+        sb.append("\n\n清单里的 op 共 ").append(auth.allOps().size()).append(" 个，其中还没进表 ")
+          .append(missing.size()).append(" 个");
+        if (!missing.isEmpty()) {
+            int show = Math.min(12, missing.size());
+            for (int i = 0; i < show; i++) sb.append(i == 0 ? "：" : "、").append(missing.get(i));
+            if (missing.size() > show) sb.append(" …");
+            sb.append("（= 未授权；要开就 op=run）");
         }
         return sb.toString();
     }
 
-    /** 高风险例外：A 的 W/X、B 的 W、E 的 X（等于把接近主人的能力给出去了）。 */
-    private static boolean risky(char cls, int mask) {
-        switch (Character.toUpperCase(cls)) {
-            case 'A': return (mask & (Bits.W | Bits.X)) != 0;
-            case 'B': return (mask & Bits.W) != 0;
-            case 'E': return (mask & Bits.X) != 0;
-            default: return false;
+    /** 清单里有、但表里一行都没提的 op（工具级那一行也算覆盖了它的全部动作）。 */
+    private static List<String> missingOps(Acl acl, Ops ops) {
+        List<String> out = new ArrayList<String>();
+        if (acl == null || ops == null) return out;
+        java.util.Set<String> covered = new java.util.HashSet<String>();
+        for (Acl.Entry e : acl.entries()) covered.add(e.op());
+        for (String op : ops.all()) {
+            if (covered.contains(op)) continue;
+            if (covered.contains(Ops.toolOf(op))) continue;
+            out.add(op);
         }
+        return out;
     }
 
     /**
-     * 主体写法的宽松归一 —— <b>只做设计稿写明的几条，绝不瞎猜</b>：
-     * {@code 群123456}/{@code 群号123456} → {@code Group123456}，裸数字 → {@code User<数字>}，
-     * {@code 全体用户/所有人} → {@code ALLUSER}，{@code 你自己/她自己/系统} → {@code SYSTEM}
-     * （后两条跟她读到的口径文本用的是同一批词）。认不出返回 {@code null}。
+     * {@code gen}：<b>只在已有权限文件里重排 / 补注释</b>（不新建文件）。主人专属。
+     *
+     * <p>没有权限文件 = 一切未授权，这正是默认 —— gen 不再生成"完整清单"。</p>
      */
-    private static String principalKeyOf(String raw) {
-        String s = raw == null ? "" : raw.trim();
-        if (s.isEmpty()) return null;
-        if ("所有人".equals(s) || "全体用户".equals(s) || "全部用户".equals(s) || "所有用户".equals(s)) {
-            return Acl.ALLUSER_KEY;
+    private static String permGen(Out out, Auth auth) {
+        if (auth == null) return "权限面没装配（拿不到 op 清单）";
+        Acl acl = auth.acl();
+        if (acl == null) return "权限面没装配（读不到权限文件）";
+        acl.reload();                                  // 权限文件是主人能手改的：写之前先重读，别盖掉手改的内容
+        int before = acl.entries().size();
+        boolean saved = acl.saveAll(auth, false);      // false = 只在已有文件里重排，不新建文件
+        int after = acl.entries().size();
+        if (out != null) out.dim("[acl] gen：" + before + " → " + after + " 条（" + acl.stat() + "）");
+        StringBuilder sb = new StringBuilder();
+        List<File> wrote = acl.writtenFiles();
+        if (!saved) {
+            sb.append("**没落盘**（权限文件写盘失败）");
+        } else if (wrote.isEmpty()) {
+            // 同控制台：wrote 为空也可能是"已有文件逐字节相同、sameText 跳过"，不是"文件不存在"。
+            int onDisk = 0;
+            for (File f : acl.sources()) if (f != null && f.isFile()) onDisk++;
+            if (onDisk == 0) {
+                sb.append("没有任何权限文件可重排（").append(Acl.CORE_FILE_NAME).append(" 与技能目录里的 ")
+                  .append(Acl.SKILL_FILE_NAME).append(" 都不存在）—— gen 不新建文件；没有文件 = 一切未授权");
+            } else {
+                sb.append("已有 ").append(onDisk)
+                  .append(" 份权限文件，本次没有需要重排的内容 —— gen 不新建文件");
+            }
+        } else {
+            sb.append("已重排 ").append(wrote.size()).append(" 份权限文件：");
+            for (int i = 0; i < wrote.size(); i++) sb.append(i == 0 ? "" : "、").append(permPath(acl, wrote.get(i)));
         }
-        if ("你自己".equals(s) || "她自己".equals(s) || "系统".equals(s) || "系统自己".equals(s)) {
-            return Acl.SYSTEM_KEY;
+        sb.append("\n表里现在 ").append(after).append(" 条，覆盖 op ").append(acl.byOp().size()).append(" 个");
+        List<String> miss = acl.unwrittenOps();
+        if (!miss.isEmpty()) {
+            int show = Math.min(12, miss.size());
+            sb.append("\n这些 op 还没有权限文件（= 不授权）：");
+            for (int i = 0; i < show; i++) sb.append(i == 0 ? "" : "、").append(miss.get(i));
+            if (miss.size() > show) sb.append(" …");
         }
-        String low = s.toLowerCase(java.util.Locale.ROOT);
-        if (s.startsWith("群号")) s = Acl.GROUP_PREFIX + s.substring(2).trim();
-        else if (s.startsWith("群")) s = Acl.GROUP_PREFIX + s.substring(1).trim();
-        else if (low.startsWith("qq号")) s = Acl.USER_PREFIX + s.substring(3).trim();
-        else if (low.startsWith("qq")) s = Acl.USER_PREFIX + s.substring(2).trim();
-        else if (s.startsWith("用户")) s = Acl.USER_PREFIX + s.substring(2).trim();
-        return Acl.principalKey(s);
+        sb.append("\n要开口就给某个 op 加一条：perm op=run target=<op> principal=<身份>"
+                + "（写进该 op 归属的那个文件，不存在就创建）");
+        return sb.toString();
     }
 
-    /** 多主体：逗号 / 顿号 / 分号 / 竖线分开（"123456，23456" = 两个主体，一个主体一条）。 */
+    /**
+     * {@code run} / {@code ban}：给一个身份在某个 op 上写 {@code Run}（可用）或 {@code Ban}（不可用）。主人专属。
+     *
+     * <p>同一个（op + 身份）只留最后写的那一条（{@link Acl#grant} 的口径）；表是人能手改的，
+     * 所以写之前先重读一次。</p>
+     */
+    private static String permGrant(JsonObject args, Out out, Auth auth, boolean ban) {
+        Acl acl = auth == null ? null : auth.acl();
+        if (acl == null) return "权限面没装配（读不到权限文件），改不了";
+        String target = J.s(args, "target", "").trim();
+        String rawP = J.s(args, "principal", "").trim();
+        String verb = ban ? "ban" : "run";
+        if (target.isEmpty() || rawP.isEmpty()) {
+            return "用法：perm op=" + verb + " target=<op> principal=<身份>\n"
+                    + "  target＝op（工具名，或 工具名.动作名；写工具名 = 覆盖它的全部动作，如 memory / memory.remember）\n"
+                    + "  principal＝身份（user:<QQ号> / group:<群号> / ALLUSER；裸数字 = user:<QQ>；"
+                    + "「群123456」也认；逗号分开 = 一个身份一条）\n"
+                    + "  MASTER 与她本人（SYSTEM）恒全权，写不进表里。";
+        }
+        if (!saneOp(target)) return "op 写法认不出：" + target + "（只认 工具名 或 工具名.动作名）";
+        String[] tokens = splitPrincipals(rawP);
+        List<String> keys = new ArrayList<String>();
+        for (int i = 0; i < tokens.length; i++) {
+            String k = Acl.principalKey(tokens[i]);
+            if (k == null) {
+                String why = Acl.principalReason(tokens[i]);
+                return "身份写法认不出：" + tokens[i] + "\n  " + (Str.blank(why)
+                        ? "身份只认 user:<QQ号> / group:<群号> / ALLUSER（裸数字 = user:<QQ>）" : why);
+            }
+            keys.add(k);
+        }
+        boolean known = auth.ops().known(target);
+        acl.reload();                                  // 同上：写之前先重读
+        StringBuilder sb = new StringBuilder();
+        sb.append(ban ? "已封禁：" : "已授权：");
+        for (int i = 0; i < keys.size(); i++) {
+            if (!acl.grant(target, keys.get(i), ban, auth.ops().noteOf(target))) {
+                return "写不进去：" + keys.get(i) + " " + target + "（身份或 op 有一处认不出，表没动）";
+            }
+            if (keys.size() > 1) sb.append("\n").append(i + 1).append(")");
+            sb.append("\n  ").append(ban ? "Ban[\"" : "Run[\"").append(target).append("\",\"")
+              .append(keys.get(i)).append("\"]");
+            if (out != null && !ban && Acl.ALLUSER_KEY.equals(keys.get(i)) && riskyOp(target)) {
+                out.warn("[acl] 高风险授权：Run[\"" + target + "\",\"ALLUSER\"] —— 这等于把这条路给所有人");
+            }
+        }
+        boolean saved = acl.saveAll(auth);
+        sb.append("\n").append(saved
+                ? ("已写入 " + permWrote(acl, target) + "（立即生效，不用重启）")
+                : "注意：写盘失败，改动只在内存里（重启会丢）！");
+        if (!known) {
+            sb.append("\n注意：`").append(target).append("` 不在当前 op 清单里（没有技能声明它）—— "
+                    + "工具名的键只覆盖装载时已注册的动作；把完整的 `工具名.动作名` 精确键写进基板那份文件"
+                    + " = 给一个将来才注册的动作预先授权（精确键命中时不查注册清单）。");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * {@code revoke}：撤回。给 {@code target} = 只撤这个 op 上的条目；{@code target} 留空 = 撤该身份名下的全部条目。
+     * 主人专属。
+     *
+     * <p>注意（{@link Acl#revoke} 的口径）：一条条目带多个身份时，撤其中一个身份会把<b>整条</b>删掉 ——
+     * 要只撤一个人，就别在更宽的身份（{@code ALLUSER}）上跟他写同一条。</p>
+     */
+    private static String permRevoke(JsonObject args, Out out, Auth auth) {
+        Acl acl = auth == null ? null : auth.acl();
+        if (acl == null) return "权限面没装配（读不到权限文件），改不了";
+        String target = J.s(args, "target", "").trim();
+        String rawP = J.s(args, "principal", "").trim();
+        if (rawP.isEmpty()) {
+            return "用法：perm op=revoke principal=<身份> [target=<op>]\n"
+                    + "  target 给了 = 只撤这个 op 上的条目；target 留空 = 撤该身份名下的全部条目。";
+        }
+        if (!target.isEmpty() && !saneOp(target)) return "op 写法认不出：" + target + "（只认 工具名 或 工具名.动作名）";
+        String[] tokens = splitPrincipals(rawP);
+        List<String> keys = new ArrayList<String>();
+        for (int i = 0; i < tokens.length; i++) {
+            String k = Acl.principalKey(tokens[i]);
+            if (k == null) {
+                String why = Acl.principalReason(tokens[i]);
+                return "身份写法认不出：" + tokens[i] + "\n  " + (Str.blank(why)
+                        ? "身份只认 user:<QQ号> / group:<群号> / ALLUSER（裸数字 = user:<QQ>）" : why);
+            }
+            keys.add(k);
+        }
+        acl.reload();                                  // 同上：写之前先重读
+        StringBuilder sb = new StringBuilder();
+        int total = 0;
+        for (int i = 0; i < keys.size(); i++) {
+            String p = keys.get(i);
+            // 先照表里的顺序把要撤的条目挑出来（回执要写它们的原文），再逐条撤
+            List<Acl.Entry> victims = new ArrayList<Acl.Entry>();
+            for (Acl.Entry e : acl.entries()) {
+                if (!e.principals().contains(p)) continue;
+                if (!target.isEmpty() && !e.op().equals(target)) continue;
+                victims.add(e);
+            }
+            if (victims.isEmpty()) {
+                sb.append("\n没有命中的条目：").append(p)
+                  .append(target.isEmpty() ? "（他名下本来就没有条目）" : (" 在 " + target + " 上"));
+                continue;
+            }
+            List<String> ops = new ArrayList<String>();
+            for (int k = 0; k < victims.size(); k++) {
+                if (!ops.contains(victims.get(k).op())) ops.add(victims.get(k).op());
+            }
+            for (int k = 0; k < ops.size(); k++) acl.revoke(ops.get(k), p);
+            total += victims.size();
+            sb.append("\n已撤回 ").append(p).append(" 的 ").append(victims.size()).append(" 条条目：");
+            for (int k = 0; k < victims.size(); k++) sb.append("\n  ").append(victims.get(k).raw());
+        }
+        boolean saved = acl.saveAll(auth);
+        if (out != null) out.dim("[acl] revoke：" + total + " 条条目已从表里删除（" + acl.stat() + "）");
+        StringBuilder head = new StringBuilder(total == 0 ? "没有命中的条目（表没动）" : ("共撤掉 " + total + " 条"));
+        head.append("\n").append(saved
+                ? ("已写入 " + permWrote(acl, target) + "（立即生效，不用重启）")
+                : "注意：写盘失败，改动只在内存里（重启会丢）！");
+        head.append("\n撤掉之后就是「空」= 未授权 = 不可用；要放行别的身份另写一条 op=run。");
+        return sb.append("\n").append(head).toString();
+    }
+
+    /** 多身份：逗号 / 顿号 / 分号 / 竖线分开（"123456，23456" = 两个身份，一个身份一条）。 */
     private static String[] splitPrincipals(String raw) {
         String[] parts = (raw == null ? "" : raw).split("[,，、;；|]");
         List<String> out = new ArrayList<String>();
@@ -1220,730 +1875,41 @@ public final class Builtins {
         return out.toArray(new String[out.size()]);
     }
 
-    /** 看起来是不是"一整条账本条目"（主人给的写法：{@code 类["主体","范围","位"]}）。 */
-    private static boolean isEntryText(String s) {
-        String t = s == null ? "" : s.trim();
-        return t.length() > 3 && t.indexOf('[') > 0 && t.endsWith("]");
+    /** op 写法检查：{@code 工具名} 或 {@code 工具名.动作名}（两段都非空、没有空白、只有一个点）。 */
+    private static boolean saneOp(String op) {
+        String s = Str.trim(op);
+        if (s.isEmpty() || s.indexOf(' ') >= 0 || s.indexOf('\t') >= 0) return false;
+        int i = s.indexOf('.');
+        if (i < 0) return true;
+        return i > 0 && i < s.length() - 1 && s.indexOf('.', i + 1) < 0;
     }
 
-    /** 按（主体 + 类 + 规范化范围）在账本里定位那一条（就是 grant 用的定位键）。 */
-    private static Acl.Entry find(Acl acl, String principalKey, char cls, String scope) {
-        String sc = Acl.scopeOf(cls, scope);
-        if (acl == null || principalKey == null || sc == null) return null;
-        for (Acl.Entry e : acl.entries()) {
-            if (e.cls() == cls && e.principal().equals(principalKey) && e.scope().equals(sc)) return e;
-        }
-        return null;
-    }
-
-    /** 主体键 → "就是这个人"的调用者（验算用；群主体落在那个群的假想会话里）。 */
-    private static Caller callerOf(String principalKey) {
-        if (principalKey == null) return null;
-        if (Acl.SYSTEM_KEY.equals(principalKey)) return Caller.systemActor();
-        if (Acl.ALLUSER_KEY.equals(principalKey)) return Caller.allUser(0L);
-        if (principalKey.startsWith(Acl.GROUP_PREFIX)) {
-            return Caller.allUser(0L).inGroup(idOf(principalKey, Acl.GROUP_PREFIX), "");
-        }
-        if (principalKey.startsWith(Acl.USER_PREFIX)) {
-            return Caller.allUser(idOf(principalKey, Acl.USER_PREFIX));
-        }
-        return null;
-    }
-
-    /** {@code User123456} 里的数字（认不出按 0，认不出的主体本来也匹配不上任何真人）。 */
-    private static long idOf(String key, String prefix) {
-        try {
-            return Long.parseLong(key.substring(prefix.length()).trim());
-        } catch (Throwable ignore) {
-            return 0L;
-        }
-    }
-
-    /**
-     * 类 + 范围 → 一个资源描述（验算用；C 类认 {@code mem:}/{@code db:} 前缀，
-     * T 类认 {@code tool:} 前缀，认不出返回 null）。
-     */
-    private static sair.v4.auth.Res resOf(char cls, String scope) {
-        String s = scope == null ? "" : scope.trim();
-        if (cls == 'A' || cls == 'B') return sair.v4.auth.Res.path(s);
-        if (cls == 'C') {
-            String low = s.toLowerCase(java.util.Locale.ROOT);
-            // 别名 {@code db:memory} = {@code memory}：跟 {@code Acl.scopeOf} 的剥前缀口径对齐，
-            // 否则同一个库两种写法在验算面会得到两种结果（{@code db:memory} 显示「✗ 范围不命中」）。
-            if (low.startsWith("db:")) s = s.substring(3).trim();
-            low = s.toLowerCase(java.util.Locale.ROOT);
-            if (low.startsWith("mem:")) return sair.v4.auth.Res.mem(s.substring(4));
-            // 老习惯写 {@code cls=C scope=tool:xxx}：那是个 T 类资源（工具已从 C 类拆出），
-            // 这里如实造出 T 类资源，让验算印出"按自动判定属于 T 类（不是 C 类）"，而不是静默算错。
-            if (low.startsWith("tool:")) return sair.v4.auth.Res.tool(s.substring(5));
-            // C 类里的「路径式」范围（{@code <数据根>/files/**} 归 C 类）要按<b>真资源</b>验算：
-            // 否则验算拿"库名"去比路径，明明生效的授权会显示「✗ 范围不命中」。
-            if (s.indexOf('/') >= 0 || s.indexOf('\\') >= 0) return sair.v4.auth.Res.path(s);
-            return sair.v4.auth.Res.db(s);
-        }
-        if (cls == 'E') return sair.v4.auth.Res.platform(s);
-        // T 类：工具入口。带不带 {@code tool:} 前缀都认（{@code Acl.scopeOf('T', …)} 的同一套归一）。
-        if (cls == 'T') {
-            String low = s.toLowerCase(java.util.Locale.ROOT);
-            if (low.startsWith("tool:")) s = s.substring(5).trim();
-            return sair.v4.auth.Res.tool(s);
-        }
-        return null;
-    }
-
-    /**
-     * perm 工具的五个 op 的实现（<b>独立成静态方法</b>：探针可以直接调它，不用起一个 Boot）。
-     *
-     * <p><b>授权 / 撤销 / 查询（grant / revoke / acl）是 MASTER 专属</b>：开头一律判受保护第一层
-     * {@code mem:acl} 的 <b>W 位</b>（{@link Acl#masterOnlyRes}：账本自己 + 授权动作，连她自己的
-     * 自主行为也不给）—— 非主人只得到 {@link #PERM_DENY} 五个字，账本正文一个字都不回、
-     * 连"装配没装配"都不漏。</p>
-     *
-     * <p><b>{@code whoami} 谁都能问</b>（它不是授权动作，也不回账本条目原文）：只回身份（kind）与
-     * 五类有效位 + 每格的来源（例外 / 默认分配 / 受保护），见 {@link #permWhoami}。</p>
-     *
-     * <p><b>{@code check} 是只读查询，且不进上面那道 {@code mem:acl} 的门</b>：它不问账本正文，
-     * 只问"这个主体在这一格上是什么"。所以它的权限边界单独写在自己的第一段里 ——
-     * <b>查别人必须 MASTER，非主人只能查自己</b>，越界回 {@link Acl#DENY_PREFIX} 开头的拒绝原文。
-     * 见 {@link #permCheck}。</p>
-     *
-     * @param acl 权限账本（{@code null} = 没装配）
-     * @param c   调用者（{@code null} = 无主体，fail-closed）
-     */
-    public static String permTool(JsonObject args, Out out, Acl acl, Caller c) {
-        String op = J.s(args, "op", "whoami").trim().toLowerCase();
-        boolean master = c != null && c.master();
-        if (acl == null) {
-            // check / whoami 都只读、也都不回账本正文：默认分配是静态表，没账本也答得出
-            if ("check".equals(op)) return permCheck(args, null, c);
-            if (PERM_WHOAMI_OPEN && "whoami".equals(op)) return permWhoami(null, c);   // 没账本也答得出
-            return master ? ("权限账本没装配（读不到数据根下的 " + Acl.FILE_NAME + "），改不了") : PERM_DENY;
-        }
-        // 只读查询：先于授权闸门处理（它自己的"查别人要 MASTER"边界在 permCheck 里）
-        if ("check".equals(op)) return permCheck(args, acl, c);
-        if ("whoami".equals(op) && (PERM_WHOAMI_OPEN || master)) return permWhoami(acl, c);
-        // 受保护第一层（只有主人）：判定走 Acl 同一条 API，不另写一套；同时硬拦非 MASTER
-        // （设计稿：授权 op 是"第一层受保护资源"，SYSTEM 也不给）。
-        String deny = acl.allow(c, sair.v4.auth.Res.mem("acl"), 'W');
-        if (!master || deny != null) {
-            if (out != null && !master) {
-                out.dim("[acl] 非主人调用授权 op（" + (c == null ? "无主体" : c.label()) + "），已拒");
-            }
-            return PERM_DENY;
-        }
-        if ("grant".equals(op)) return permGrant(args, out, acl, c);
-        if ("revoke".equals(op)) return permRevoke(args, out, acl);
-        if ("acl".equals(op)) return permAcl(args, acl);
-        return "op 只认 " + PERM_OPS + "；旧的 get/list/set/reset/levels/setlevel 属于已废除的档位体系"
-                + "（好感度不再插手权限），现在没有这些 op。";
-    }
-
-    /** 一条待授权的条目（参数给的三件套，或主人直接照抄的整条条目）。 */
-    private static final class Spec {
-        String principalKey;      // 规范主体键
-        String principalRaw;      // 主体原文（报错回话用）
-        char cls;
-        String scope;             // 范围原文
-        String bits;              // 位写法（"" = 显式拒绝）
-        String literal;           // 整条条目的原文（不是照抄写法时为 null）
-    }
-
-    /**
-     * {@code grant}：按（主体 + 类 + 规范化范围）<b>就地覆盖</b>已有条目（没有就追加到末尾），
-     * 然后<b>显式落盘</b>，最后给回执。
-     *
-     * <p>回执必须写全三样：<b>原文条目</b> + <b>实际生效位</b> + <b>默认分配是多少</b>，
-     * 并点明是不是「例外：超出默认分配」—— 免得主人以为 A 类写进去的 RWX 被默认分配压了回去
-     * （A 类默认一位都不给，写 {@code A["User<QQ>","","R"]} 就是「超出默认分配 A=NONE，多给了 R」；
-     * v2 起例外就是直接生效的，不再与默认分配取交集）。</p>
-     */
-    private static String permGrant(JsonObject args, Out out, Acl acl, Caller c) {
-        String rawP = J.s(args, "principal", "").trim();
-        if (Str.blank(rawP)) {
-            return "用法：perm op=grant principal=User123456 cls=A scope=D:/share bits=RWX\n"
-                    + "  principal＝主体（User<QQ号> / Group<群号> / SYSTEM / ALLUSER；裸数字 = User<QQ>；"
-                    + "逗号分开 = 一个主体一条；也可以直接给一整条条目）\n"
-                    + "  cls＝A/B/C/E/T　scope＝留空 = 该类全部（A/B 给路径、C 给库名或 mem:xxx 或 files 下的路径、"
-                    + "E 给动作名、T 给工具名）\n"
-                    + "  bits＝R/W/X 的组合（RW / RX / RWX …）；空串 = 一位都不给（显式拒绝）";
-        }
-        boolean hasBits = args != null && args.has("bits");
-        String clsArg = J.s(args, "cls", "").trim();
-        String scopeArg = J.s(args, "scope", "");
-        String bitsArg = hasBits ? J.s(args, "bits", "") : null;
-
-        List<Spec> specs = new ArrayList<Spec>();
-        if (isEntryText(rawP)) {
-            // 字面条目：主人自己给的写法，整条照抄（这是设计稿写明的用法）
-            Acl.Entry lit = Acl.parse(rawP);
-            if (lit == null) return "这条条目写法认不出：" + rawP + "\n  " + Acl.reason(rawP);
-            Spec s = new Spec();
-            s.principalKey = lit.principal();
-            s.principalRaw = lit.principal();
-            s.cls = lit.cls();
-            s.scope = lit.scopeRaw();
-            s.bits = lit.bits();
-            s.literal = rawP;
-            specs.add(s);
-        } else {
-            if (!hasBits) {
-                return "要明确给 bits（R/W/X 的组合，如 RWX）；空串才是「一点都不给」（显式拒绝）。"
-                        + "含糊就先复述一遍问主人，别猜着写盘。";
-            }
-            char cls = clsOf(clsArg);
-            if (cls == 0) return clsProblem(clsArg);
-            String[] tokens = splitPrincipals(rawP);
-            for (int i = 0; i < tokens.length; i++) {
-                Spec s = new Spec();
-                s.principalRaw = tokens[i];
-                s.principalKey = principalKeyOf(tokens[i]);
-                s.cls = cls;
-                s.scope = scopeArg;
-                s.bits = bitsArg;
-                specs.add(s);
-            }
-        }
-        // 先全验一遍：一个主体写不进去，整批都不写（不留半截授权）
-        for (int i = 0; i < specs.size(); i++) {
-            String bad = specProblem(specs.get(i));
-            if (bad != null) return bad;
-        }
-        if (acl.file() != null) acl.reload();          // 账本是人能手改的：写之前先重读，别盖掉手改的内容
-        List<Acl.Entry> written = new ArrayList<Acl.Entry>();
-        for (int i = 0; i < specs.size(); i++) {
-            Spec s = specs.get(i);
-            if (!acl.grant(s.principalKey, s.cls, s.scope, s.bits)) {
-                return "写不进去：" + s.principalKey + " " + s.cls + " \"" + Str.nz(s.scope)
-                        + "\"（主体 / 类 / 范围 / 位有一处认不出，账本没动）";
-            }
-            Acl.Entry e = find(acl, s.principalKey, s.cls, s.scope);
-            if (e != null) written.add(e);
-        }
-        boolean saved = acl.save();
-        StringBuilder sb = new StringBuilder();
-        sb.append(written.size() == 1 ? "已设定：" : ("已设定 " + written.size() + " 条（一个主体一条）："));
-        for (int i = 0; i < written.size(); i++) {
-            Acl.Entry e = written.get(i);
-            if (specs.size() > 1) sb.append("\n").append(i + 1).append(")");
-            sb.append("\n").append(receiptOf(acl, e));
-            if (out != null && risky(e.cls(), acl.effective(e))) {
-                out.warn("[acl] 高风险例外：" + e.raw() + " —— " + clsName(e.cls()) + " 的 "
-                        + Bits.format(acl.effective(e)) + " 等于把接近主人的能力给了 " + e.principal());
-            }
-        }
-        if (specs.size() == 1 && specs.get(0).literal != null && written.size() == 1
-                && !specs.get(0).literal.equals(written.get(0).raw())) {
-            sb.append("\n  照抄的原文：").append(specs.get(0).literal)
-              .append("（账本里按规范写法存成上面那条，含义一样）");
-        }
-        sb.append("\n").append(saved
-                ? ("已写入 " + (acl.file() == null ? Acl.FILE_NAME : acl.file().getAbsolutePath()) + "（立即生效，不用重启）")
-                : "注意：写盘失败，改动只在内存里（重启会丢）！");
-        return sb.toString();
-    }
-
-    /** 一条 Spec 能不能写进账本；不能就返回人话理由（{@code null} = 能）。 */
-    private static String specProblem(Spec s) {
-        if (s.principalKey == null) {
-            String why = Acl.principalReason(s.principalRaw);
-            return "主体写法认不出：" + s.principalRaw + "\n  " + (Str.blank(why)
-                    ? "主体只认 User<QQ号> / Group<群号> / SYSTEM / ALLUSER（裸数字 = User<QQ>；MASTER 不接受例外）" : why);
-        }
-        if (clsOf(String.valueOf(s.cls)) == 0) return clsProblem(String.valueOf(s.cls));
-        if (Acl.scopeOf(s.cls, s.scope) == null) {
-            return "范围写法认不出：" + Str.nz(s.scope) + "（A/B 给路径、C 给库名或 mem:xxx、" 
-                    + "E 给动作名、T 给工具名；空串 = 该类全部）";
-        }
-        if (Acl.bitsOfField(s.bits) == Bits.INVALID) {
-            return "位写法认不出：" + Str.nz(s.bits) + " —— 只认 " + Bits.hint()
-                    + "，空串 = 一位都不给；主人说数字（老口径）就回一句「现在按 RWX 写」，别照数字落账";
-        }
-        return null;
-    }
-
-    /**
-     * 一条条目的回执：原文 + 实际生效位 + 默认分配 + 是不是「例外：超出默认分配」。
-     * <p>实际生效位一律走 {@link Acl#effective}，默认分配一律走 {@link Acl#allocOf} —— 不在这里另算一套。</p>
-     */
-    private static String receiptOf(Acl acl, Acl.Entry e) {
-        int eff = acl.effective(e);
-        Caller.Kind kind = kindOf(e.principal());
-        int alloc = Acl.allocOf(kind, e.cls());
-        StringBuilder sb = new StringBuilder();
-        sb.append("  ").append(e.raw());
-        sb.append("\n    实际生效位 ").append(bitsText(eff))
-          .append("（例外条目直接生效，不再与默认分配取交集）");
-        sb.append("\n    默认分配 ").append(e.cls()).append("=").append(bitsText(alloc))
-          .append(kind == Caller.Kind.SYSTEM ? "（她自己那条线）" : "（一条例外都没命中时按类默认）");
-        int over = eff & ~alloc;
-        int less = alloc & ~eff;
-        if (over != 0) {
-            sb.append("\n    例外：超出默认分配 ").append(e.cls()).append("=").append(Bits.format(alloc))
-              .append(" —— 多给了 ").append(Bits.format(over));
-        } else if (less != 0) {
-            sb.append("\n    例外：比默认分配更紧 —— 收掉了 ").append(Bits.format(less));
-        } else {
-            sb.append("\n    例外：与默认分配一致（没超出）");
-        }
-        if (e.system()) {
-            sb.append("\n    注意：这是给她自己（SYSTEM）的例外，会影响她的自主行为。");
-        }
-        return sb.toString();
-    }
-
-    /**
-     * {@code revoke}：删掉命中的条目（按主体 + 类 + 范围定位），显式落盘，回执说清"回到默认分配多少"。
-     *
-     * <p>两种口径：<b>范围留空</b> = 删掉他在这个类里的<b>全部</b>条目（"帮我取消123456的A权限"）；
-     * <b>给了范围</b> = 只删命中那一条（"帮我取消123456在D:/share的权限"）。
-     * <b>不给类也行</b>（主人那句话里常常没有类字母）：这时按范围在所有类里找命中项，
-     * 但只要给了类就只动那个类。</p>
-     */
-    private static String permRevoke(JsonObject args, Out out, Acl acl) {
-        String rawP = J.s(args, "principal", "").trim();
-        if (Str.blank(rawP)) {
-            return "用法：perm op=revoke principal=User123456 cls=A scope=D:/share\n"
-                    + "  scope 留空 = 删掉他在这个类里的全部条目（回到默认分配）；给了 scope = 只删命中那一条；\n"
-                    + "  cls 可以不给（这时必须有 scope：按范围在所有类里找命中项）。"
-                    + "要「禁止」而不是「取消」，用 op=grant 写空位（bits=空串）。";
-        }
-        String clsArg = J.s(args, "cls", "").trim();
-        String scopeArg = J.s(args, "scope", "");
-        char cls = clsOf(clsArg);
-        if (!Str.blank(clsArg) && cls == 0) return clsProblem(clsArg);
-        if (cls == 0 && Str.blank(scopeArg)) {
-            return "要撤销哪个类？cls=A/B/C/E/T（不给类就得给 scope —— 免得一句话把别的类的条目也删了）";
-        }
-        String[] tokens = splitPrincipals(rawP);
-        List<String> keys = new ArrayList<String>();
-        for (int i = 0; i < tokens.length; i++) {
-            String p = principalKeyOf(tokens[i]);
-            if (p == null) {
-                String why = Acl.principalReason(tokens[i]);
-                return "主体写法认不出：" + tokens[i] + "\n  " + (Str.blank(why)
-                        ? "主体只认 User<QQ号> / Group<群号> / SYSTEM / ALLUSER（裸数字 = User<QQ>）" : why);
-            }
-            keys.add(p);
-        }
-        StringBuilder sb = new StringBuilder();
-        int total = 0;
-        List<String> missing = new ArrayList<String>();
-        if (acl.file() != null) acl.reload();          // 同上：写之前先重读
-        for (int i = 0; i < keys.size(); i++) {
-            String p = keys.get(i);
-            // 先照账本顺序把要删的条目挑出来（回执要写它们的原文），再逐条删
-            List<Acl.Entry> victims = new ArrayList<Acl.Entry>();
-            for (Acl.Entry e : acl.entries()) {
-                if (!e.principal().equals(p)) continue;
-                if (cls != 0 && e.cls() != cls) continue;
-                if (cls == 0 || !Str.blank(scopeArg)) {
-                    String want = Acl.scopeOf(e.cls(), scopeArg);
-                    if (want == null || !e.scope().equals(want)) continue;
-                }
-                victims.add(e);
-            }
-            if (victims.isEmpty()) {
-                missing.add(p + (Str.blank(scopeArg) ? "" : (" 在 " + scopeArg)));
-                continue;
-            }
-            sb.append("\n已撤销 ").append(p).append(" 的 ").append(victims.size()).append(" 条条目：");
-            for (int k = 0; k < victims.size(); k++) {
-                Acl.Entry e = victims.get(k);
-                if (!acl.revoke(p, e.cls(), e.scopeRaw())) continue;      // 按定位键删（同一条）
-                total++;
-                sb.append("\n  ").append(e.raw()).append("   [").append(clsName(e.cls())).append("]");
-                sb.append("\n    回到默认分配 ").append(e.cls()).append("=")
-                  .append(bitsText(Acl.allocOf(kindOf(p), e.cls())))
-                  .append("（若还有别的条目命中这个资源 —— 群条目或 ALLUSER 底稿 —— 按层级优先算，"
-                        + "用 op=acl principal=").append(p).append(" cls=").append(e.cls())
-                  .append(" scope=… 验算）");
-            }
-        }
-        boolean saved = acl.save();
-        if (out != null) out.dim("[acl] revoke：" + total + " 条条目已从账本删除（" + acl.stat() + "）");
-        StringBuilder head = new StringBuilder();
-        head.append(total == 0 ? "没有命中的条目（账本没动）" : ("共删掉 " + total + " 条"));
-        for (int i = 0; i < missing.size(); i++) {
-            head.append("\n  没有命中：").append(missing.get(i))
-                .append("（本来就是默认分配，没有例外条目）");
-        }
-        head.append("\n").append(saved ? "已写入账本（立即生效，不用重启）" : "注意：写盘失败，改动只在内存里！");
-        return sb.append("\n").append(head).toString();
-    }
-
-    /**
-     * {@code acl}：不带参数 = 列全部条目（<b>按文件顺序</b>，标出主体层级与"默认分配 / 例外"）；
-     * 带 {@code principal}（+ 可选 {@code cls} / {@code scope}）= 看这个人 / 验算。
-     *
-     * <p>验算打印<b>按优先级顺序命中的条目链</b>（谁覆盖了谁）与<b>最终有效位</b>：
-     * 有效位一律调 {@link Acl#bitsOf}，来源调 {@link Acl#source} —— 账本怎么判就怎么显示，不另算一套。</p>
-     */
-    private static String permAcl(JsonObject args, Acl acl) {
-        String rawP = J.s(args, "principal", "").trim();
-        String clsArg = J.s(args, "cls", "").trim();
-        String scopeArg = J.s(args, "scope", "");
-        if (Str.blank(rawP)) {
-            StringBuilder sb = new StringBuilder();
-            sb.append(acl.stat()).append("\n账本文件：")
-              .append(acl.file() == null ? "(无)" : acl.file().getAbsolutePath());
-            List<String> lines = acl.list();
-            for (int i = 0; i < lines.size(); i++) sb.append("\n  ").append(lines.get(i));
-            List<Acl.Reject> rej = acl.rejects();
-            for (int i = 0; i < rej.size(); i++) sb.append("\n  跳过非法条目：").append(rej.get(i));
-            return sb.toString();
-        }
-        String p = principalKeyOf(rawP);
-        if (p == null) {
-            String why = Acl.principalReason(rawP);
-            return "主体写法认不出：" + rawP + "\n  " + (Str.blank(why)
-                    ? "主体只认 User<QQ号> / Group<群号> / SYSTEM / ALLUSER（裸数字 = User<QQ>）" : why);
-        }
-        if (Str.blank(clsArg)) {                       // "帮我看看123456现在有什么权限"
-            return principalReport(acl, p);
-        }
-        char cls = clsOf(clsArg);
-        if (cls == 0) return clsProblem(clsArg);
-        Caller who = callerOf(p);
-        if (who == null) return "造不出这个主体的判定身份：" + p;
-        sair.v4.auth.Res r = resOf(cls, scopeArg);
-        boolean whole = Str.blank(scopeArg);            // 空范围 = 整个类
-        boolean autoCls = r != null && r.cls() != cls;  // 类是被自动判定的（A/B 路径、B 类空范围）
-        if (whole && autoCls) {
-            // 整类视图算不出来（B 类没有"空范围"的资源工厂）：说清 + 给该主体在这个类的条目
-            StringBuilder sb = new StringBuilder();
-            sb.append("验算：").append(p).append(" · ").append(clsName(cls)).append(" · 范围＝整类（空串）");
-            sb.append("\n  这一格算不出单一位：范围写空串的条目命中该类所有资源，"
-                    + "而带具体范围的条目只命中它自己（含它下面）—— 「整个类」上没有单一有效位，得给具体资源。");
-            sb.append("\n  给个范围我就能算：A/B 给路径（scope=D:/share）、C 给库名或 mem:xxx、"
-                    + "E 给动作名、T 给工具名。");
-            sb.append("\n").append(classEntries(acl, p, cls, who, null));
-            sb.append("\n  默认分配：").append(cls).append("=").append(bitsText(Acl.allocOf(who.kind(), cls)))
-              .append("（一条例外都没命中时）");
-            return sb.toString();
-        }
-        StringBuilder sb = new StringBuilder();
-        sb.append("验算：").append(p).append(" · ").append(clsName(cls))
-          .append(" · 范围=").append(whole ? "整类（空串）" : scopeArg.trim());
-        sb.append("\n  资源：").append(r == null ? "(造不出来)" : r.toString()).append("  ← ");
-        if (autoCls) {
-            sb.append("按自动判定属于 ").append(clsName(r.cls())).append("（不是 ").append(cls)
-              .append(" 类）—— 类别是自动判的，下面按 ").append(r.cls()).append(" 类算");
-        } else {
-            sb.append("类别与请求一致");
-        }
-        if (whole) {
-            sb.append("\n  （范围＝整类：只有范围写空串的条目命中它，所以这格是「整类视图」）");
-        }
-        sb.append("\n").append(classEntries(acl, p, r.cls(), who, r));
-        int eff = acl.bitsOf(who, r);
-        sb.append("\n  最终有效位：").append(Bits.format(eff))
-          .append(eff == Bits.NONE ? "（一位都没有）" : "")
-          .append("（掩码 ").append(eff).append("）");
-        sb.append("\n  位从哪来：").append(acl.source(who, r));
-        sb.append("\n  默认分配：").append(r.cls()).append("=").append(bitsText(Acl.allocOf(who.kind(), r.cls())))
-          .append("（一条例外都没命中时按类默认）");
-        sb.append("\n  读 R ").append(Bits.has(eff, 'R') ? "有" : "没有")
-          .append(" · 写 W ").append(Bits.has(eff, 'W') ? "有" : "没有")
-          .append(" · 执行/对外 X ").append(Bits.has(eff, 'X') ? "有" : "没有");
-        sb.append("\n  规则：层级优先 User(3) > Group(2) > ALLUSER(1)（SYSTEM 自成一路）；"
-                + "同层级按行序，后面的覆盖前面的；范围的具体度不参与优先级。");
-        return sb.toString();
-    }
-
-    /** 某主体在某类的命中链（{@code r == null} 时只列条目与层级）。 */
-    private static String classEntries(Acl acl, String p, char cls, Caller who, sair.v4.auth.Res r) {
-        List<Acl.Entry> es = new ArrayList<Acl.Entry>();
-        for (Acl.Entry e : acl.entries()) if (e.cls() == cls) es.add(e);
-        StringBuilder sb = new StringBuilder();
-        if (r == null) {
-            sb.append("  ").append(cls).append(" 类条目（按账本顺序从上往下，例外命中时生效位见每行）：");
-        } else {
-            sb.append("  ").append(cls).append(" 类命中链（按账本顺序从上往下；★ = 最终说了算的那条，"
-                    + "它压过上面所有命中的）：");
-        }
-        if (es.isEmpty()) return sb.append("（这个类里一条条目都没有）").toString();
-        Acl.Entry win = r == null ? null : acl.hit(who, r);
-        for (int i = 0; i < es.size(); i++) {
-            Acl.Entry e = es.get(i);
-            sb.append("\n    ").append(i + 1).append(". ").append(e.raw())
-              .append("   主体 ").append(e.tierName());
-            if (r != null) {
-                int t = e.tier(who);
-                sb.append(e.hits(who, r) ? "  ✓命中" : ("  ✗ " + (t <= 0 ? "主体不命中" : "范围不命中")));
-                if (e == win) sb.append("  ★ 最终生效");
-            } else {
-                sb.append("  例外命中时生效 ").append(Bits.format(acl.effective(e)));
-            }
-        }
-        return sb.toString();
-    }
-
-    /**
-     * {@code check}：<b>只读查询</b> —— 某主体在某个类 / 某个范围上的
-     * 「<b>默认分配</b> + <b>有效位</b> + <b>命中的例外条目</b> + <b>是不是落在受保护资源上</b>」。
-     *
-     * <p><b>与 {@code acl} 的分工</b>：{@code acl} 是<b>主人翻账本</b>（清单 / 逐条验算），恒 MASTER 专属、
-     * 走受保护第一层 {@code mem:acl} 的 {@code W} 位那道门；{@code check} 问的是
-     * "这个主体在这一格上到底是什么"，所以对非主人开了一条<b>极窄</b>的口子：
-     * <b>非主人只能查自己</b>。它<b>不进</b> {@code mem:acl} 那道门（那道门管的是"改账本 / 翻账本正文"），
-     * 边界写在下面第 ② 步里。</p>
-     *
-     * <h3>权限边界（第 ② 步，越界就拒）</h3>
-     * <ul>
-     *   <li>{@code principal} 留空 = 查自己（{@link #selfKeyOf}：她自己 → {@code SYSTEM}，
-     *       其余 → {@code User<QQ>}）；</li>
-     *   <li><b>查别人必须 MASTER</b>；非主人写别人的主体键一律拒，回
-     *       {@link Acl#DENY_PREFIX} 开头的拒绝原文（{@code [权限阻断]}，识别面认得出）——
-     *       <b>不是</b> {@link #PERM_DENY} 那五个字：那五个字是"别人来要权限"的回话，
-     *       这里回答的是"你越界查了别人的权限"；</li>
-     *   <li>没有可用的自身身份（没有 QQ 号、也不是她自己）→ 拒（fail-closed）。</li>
-     * </ul>
-     *
-     * <p><b>只读</b>：不 {@code reload()}、不 {@code grant}/{@code revoke}、不 {@code save()} ——
-     * 显示与判定一律用<b>内存里那一份账本</b>（与 {@code Auth.allowRes} 判定时用的同一份，
-     * 所以主人刚写完例外，这里当场就是对的）。<b>本 op 不提供任何写账本的能力</b>
-     * （grant / revoke 保持原样，只有主人能用）。</p>
-     *
-     * <p><b>条目的两条口径</b>：命中条目的筛选一律用账本自己的 {@link Acl#rulesFor(Caller)}
-     * （主体层级 &gt; 0）+ {@link Acl.Entry#scopeHits(sair.v4.auth.Res)}，位与来源一律用
-     * {@link Acl#bitsOf} / {@link Acl#source} —— <b>不在这里另算一套判定</b>。
-     * 范围留空（整类）时没有单一"有效位"可言：这时用该类的<b>整类样本资源</b>
-     * （{@link #probeRes}，与 {@code whoami} 同一份口径）算出"范围写空串的条目才命中"的那一格，
-     * 并在回执里点明它是整类视图。</p>
-     *
-     * @param acl 权限账本（{@code null} = 没装配：默认分配是静态表，照样答得出）
-     * @param c   调用者（{@code null} = 无主体，fail-closed）
-     */
-    private static String permCheck(JsonObject args, Acl acl, Caller c) {
-        String rawP = J.s(args, "principal", "").trim();
-        String clsArg = J.s(args, "cls", "").trim();
-        String scopeArg = J.s(args, "scope", "");
-        boolean master = c != null && c.master();
-        // ① 要查谁：留空 = 自己
-        String selfKey = selfKeyOf(c);
-        String pk;
-        if (Str.blank(rawP)) {
-            if (selfKey == null) {
-                if (master) {          // 主人（本地控制台）可能没有 QQ 号：主人的位恒定，直接说清怎么查
-                    return "你是主人（MASTER 恒全权，任何例外条目都不影响你）—— 要查谁就把 principal 写上"
-                            + "（User<QQ号> / Group<群号> / SYSTEM / ALLUSER）。";
-                }
-                return Acl.DENY_PREFIX + "查不了：这一轮没有可用的主体身份（没有 QQ 号，也不是她自己）"
-                        + " —— 非主人只能查自己";
-            }
-            pk = selfKey;
-        } else {
-            pk = principalKeyOf(rawP);
-            if (pk == null) {
-                String why = Acl.principalReason(rawP);
-                return "主体写法认不出：" + rawP + "\n  " + (Str.blank(why)
-                        ? "主体只认 User<QQ号> / Group<群号> / SYSTEM / ALLUSER（裸数字 = User<QQ>）；"
-                          + "principal 留空 = 查你自己" : why);
-            }
-        }
-        // ② 权限边界：查别人必须 MASTER；非主人只能查自己
-        if (!master && !pk.equals(selfKey)) {
-            return Acl.DENY_PREFIX + "查别人的权限要 MASTER（你查的是 " + pk + "）—— 非主人只能查自己";
-        }
-        // ③ 类别
-        char cls = clsOf(clsArg);
-        if (cls == 0) return clsProblem(clsArg);
-        // ④ 判定身份 + 资源（整类 = 该类的整类样本，只有范围写空串的条目命中它）
-        Caller who = callerOf(pk);
-        if (who == null) return "造不出这个主体的判定身份：" + pk;
-        boolean whole = Str.blank(scopeArg);
-        sair.v4.auth.Res r = whole ? probeRes(acl, cls) : resOf(cls, scopeArg);
-        char judged = r == null ? cls : r.cls();          // 类别是自动判的：以真资源的类为准（与 permAcl 同口径）
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("check：").append(pk).append("（判定身份 ").append(who.kind().name()).append("）· ")
-          .append(clsName(cls)).append(" · 范围=").append(whole ? "整类（空串）" : scopeArg.trim());
-        sb.append("\n  资源：").append(r == null ? "(这个类在当前进程里没有可用的样本资源)" : r.toString());
-        if (r != null && judged != cls) {
-            sb.append("  ← 按自动判定属于 ").append(clsName(judged)).append("（不是 ").append(cls)
-              .append(" 类），下面按 ").append(judged).append(" 类算");
-        }
-        sb.append("\n  默认分配：").append(judged).append("=").append(bitsText(Acl.allocOf(who.kind(), judged)))
-          .append(who.kind() == Caller.Kind.MASTER ? "（MASTER 恒全权）" : "（一条例外都没命中时按类默认）");
-        int eff = (acl == null || r == null) ? Acl.allocOf(who.kind(), judged) : acl.bitsOf(who, r);
-        sb.append("\n  有效位：").append(Bits.format(eff))
-          .append(eff == Bits.NONE ? "（一位都没有）" : "").append("（掩码 ").append(eff).append("）");
-        sb.append("\n  位从哪来：").append(acl == null || r == null
-                ? "账本没装配（按默认分配）" : acl.source(who, r));
-
-        // 命中的例外条目：只看他名下的（主体层级 > 0），再看范围命中不命中
-        List<Acl.Entry> hit = new ArrayList<Acl.Entry>();
-        if (acl != null) {
-            for (Acl.Entry e : acl.rulesFor(who)) {
-                if (e.cls() != judged) continue;
-                if (!whole && r != null && !e.scopeHits(r)) continue;
-                hit.add(e);
-            }
-        }
-        sb.append("\n  命中的例外条目：");
-        if (hit.isEmpty()) sb.append("一条都没有（这个类里没有他名下的条目）");
-        for (int i = 0; i < hit.size(); i++) {
-            Acl.Entry e = hit.get(i);
-            sb.append("\n    ").append(i + 1).append(". ").append(e.raw())
-              .append("   [主体 ").append(e.tierName()).append("]")
-              .append(" -> 例外命中时生效 ").append(Bits.format(acl.effective(e)));
-        }
-        // 受保护资源（两层：第一层只有主人，第二层非主人恒不给）
-        String prot = "不是受保护资源";
-        if (acl != null && r != null) {
-            if (acl.masterOnlyRes(r)) {
-                prot = "第一层受保护资源（账本自己 / 授权动作 / 账号凭据）—— 只有 MASTER 拿得到"
-                        + "（连她自己的自主行为也不给）";
-            } else if (acl.outsiderBlockedRes(r)) {
-                prot = acl.secondLayerCoreRes(r)
-                        ? "第二层受保护资源（她自己的身份与配置：prompts/** 等）—— 非主人一律读不到（例外也不开）"
-                        : "第二层受保护资源（受限配置 / 脚本 / 密钥材料后缀，只算 SFW 内的 B 类）"
-                          + "—— 非主人一律读不到（例外也不开）";
-            }
-        }
-        sb.append("\n  受保护资源：").append(prot);
-        if (whole) {
-            sb.append("\n  （范围＝整类：整类样本只反映范围写空串的条目；要某一格的确切位请给 scope，"
-                    + "例如 scope=D:/share / scope=memory / scope=perm / scope=send_group_msg）");
-        }
-        if (acl == null) sb.append("\n  （权限账本没装配：有效位就是默认分配，例外一条都没有）");
-        sb.append("\n  规则：层级优先 User(3) > Group(2) > ALLUSER(1)（SYSTEM 自成一路）；"
-                + "同层级按行序，后面的覆盖前面的；范围的具体度不参与优先级。");
-        return sb.toString();
-    }
-
-    /**
-     * {@code check} 里"查自己"的那个主体键：她自己（{@code Kind.SYSTEM}）→ {@code SYSTEM}；
-     * 其余（主人 / 普通用户）→ {@code User<QQ>}；没有 QQ 号又没有 SYSTEM 标志 → {@code null}
-     * （调用方按 fail-closed 处理）。
-     */
-    private static String selfKeyOf(Caller c) {
-        if (c == null) return null;
-        if (c.kind() == Caller.Kind.SYSTEM) return Acl.SYSTEM_KEY;
-        return c.qq() > 0L ? (Acl.USER_PREFIX + c.qq()) : null;
-    }
-
-    /** "帮我看看123456现在有什么权限"：他的全部条目 + 每条的生效位 + 默认分配对比。 */
-    private static String principalReport(Acl acl, String p) {
-        Caller.Kind kind = kindOf(p);
-        List<Acl.Entry> mine = acl.rulesOf(p);
-        StringBuilder sb = new StringBuilder();
-        sb.append(p).append(" 的例外条目（按账本顺序）：");
-        if (mine.isEmpty()) sb.append("一条都没有 —— 一切按默认分配走");
-        for (int i = 0; i < mine.size(); i++) {
-            Acl.Entry e = mine.get(i);
-            sb.append("\n  ").append(i + 1).append(". ").append(e.raw())
-              .append("   [主体 ").append(e.tierName()).append("]")
-              .append(" -> 例外命中时生效 ").append(Bits.format(acl.effective(e)))
-              .append("（该类默认分配 ").append(e.cls()).append("=")
-              .append(Bits.format(Acl.allocOf(kind, e.cls()))).append("）");
-        }
-        sb.append("\n  他/她的默认分配（一条例外都没命中时）：").append(allocText(kind));
-        sb.append("\n  要看某个具体资源上到底是多少位：op=acl principal=").append(p).append(" cls=A scope=D:/share");
-        sb.append("\n  （群条目只在该群会话里生效；要看群里的结果就把主体写成 Group<群号>）");
-        return sb.toString();
-    }
-
-    /**
-     * {@code whoami}：调用者的身份（{@code kind}）+ 五类有效位。<b>谁都能问</b> ——
-     * 它只回"位"和"这一格的位从哪来（例外 / 默认分配 / 受保护）"，
-     * <b>绝不回账本条目原文</b>（账本正文是主人的信息），也不对外人报内部路径。
-     */
-    private static String permWhoami(Acl acl, Caller c) {
-        JsonObject me = new JsonObject();
-        if (c == null) {
-            me.addProperty("caller", "无主体（fail-closed：五类都拿不到）");
-            return J.json(me);
-        }
-        boolean master = c.master();
-        me.addProperty("kind", c.kind().name().toLowerCase(java.util.Locale.ROOT));   // master/system/alluser
-        me.addProperty("entry", c.isConsole() ? "console" : "qq");
-        me.addProperty("qq", c.qq());
-        me.addProperty("session", c.session());
-        me.addProperty("master", master);
-        me.addProperty("system", c.system());
-        // 好感度只决定热情度，不插手权限；主人与本地控制台不显示
-        me.addProperty("favor", (master || c.isConsole()) ? -1 : (long) c.favor());
-        if (c.isGroup()) {
-            me.addProperty("group", c.groupId());
-            me.addProperty("role", c.groupRole());
-        }
-        JsonObject alloc = new JsonObject();      // 默认分配（按身份取表）
-        JsonObject bits = new JsonObject();       // 有效位（样本见 sample）
-        JsonObject from = new JsonObject();       // 这一格的位从哪来（有例外 / 默认分配 / 受保护）
-        JsonObject sample = new JsonObject();
-        char[] cs = { 'A', 'B', 'C', 'E', 'T' };
-        for (int i = 0; i < cs.length; i++) {
-            char cls = cs[i];
-            String k = String.valueOf(cls);
-            int def = Acl.allocOf(c.kind(), cls);
-            sair.v4.auth.Res r = probeRes(acl, cls);
-            alloc.addProperty(k, Bits.format(def));
-            bits.addProperty(k, Bits.format(acl == null || r == null ? def : acl.bitsOf(c, r)));
-            from.addProperty(k, fromText(acl, c, r));
-            sample.addProperty(k, probeName(cls, r, master));
-        }
-        me.add("alloc", alloc);
-        me.add("bits", bits);
-        me.add("from", from);
-        me.add("sample", sample);
-        me.addProperty("note", "alloc = 按身份取的五类默认分配；bits = 用 Acl 判定出来的有效位（样本见 sample："
-                + "A/C/E/T 四格是「整类（范围=空串）」样本，只反映范围写空串的条目；B 那一格以数据根为样本），"
-                + "from = 这一格的位从哪来。要看某个具体路径/库/工具/动作上到底是多少位，请主人用 op=acl 验算。");
-        if (acl == null) me.addProperty("ledger", "权限账本没装配（bits 就是默认分配）");
-        return J.json(me);
-    }
-
-    /** 五类有效位的样本资源（A/C/E/T 用"空范围"＝整类样本；B 用数据根，{@code Res} 没有空范围的 B 工厂）。 */
-    private static sair.v4.auth.Res probeRes(Acl acl, char cls) {
-        if (cls == 'A') return sair.v4.auth.Res.path("");
-        if (cls == 'B') return acl != null && acl.dataRoot() != null ? sair.v4.auth.Res.path(acl.dataRoot()) : null;
-        if (cls == 'C') return sair.v4.auth.Res.db("");
-        if (cls == 'E') return sair.v4.auth.Res.platform("");
-        if (cls == 'T') return sair.v4.auth.Res.tool("");
-        return null;
-    }
-
-    /** 这一格的位从哪来（<b>只说来源，不抄账本条目原文</b>）。 */
-    private static String fromText(Acl acl, Caller c, sair.v4.auth.Res r) {
-        if (c != null && c.kind() == Caller.Kind.MASTER) return "MASTER 恒全权（任何条目都不影响主人）";
-        if (acl == null || r == null) return "账本没装配（按默认分配）";
-        if (acl.masterOnlyRes(r)) return "第一层受保护资源（只有主人拿得到）";
-        if (c != null && c.kind() == Caller.Kind.ALLUSER && acl.outsiderBlockedRes(r)) {
-            return "第二层受保护资源（外人恒不给）";
-        }
-        if (acl.hit(c, r) != null) return "例外条目（有例外命中这一格的样本）";
-        return c != null && c.kind() == Caller.Kind.SYSTEM ? "她自己的默认分配" : "默认分配（没有例外命中）";
-    }
-
-    /** 样本资源的人话名（{@code whoami} 里跟着 bits 一起给，免得数字被误读；对外人不报内部路径）。 */
-    private static String probeName(char cls, sair.v4.auth.Res r, boolean master) {
-        if (r == null) return "(无样本)";
-        if (cls == 'B') {
-            return master ? ("数据根 " + r.target() + "（自动判定 " + r.cls() + " 类）")
-                          : ("数据根（自动判定 " + r.cls() + " 类）");
-        }
-        return "整类（范围=空串）";
+    /** 授权到 ALLUSER 的"高风险 op"（只是控制台多打一行的提醒，不参与任何判定）。 */
+    private static boolean riskyOp(String op) {
+        String tool = Ops.toolOf(op);
+        return "exec".equals(tool) || "skill_write".equals(tool) || "store_admin".equals(tool)
+                || "prompt_write".equals(tool) || "console".equals(tool) || "perm".equals(tool)
+                || "config".equals(tool) || "model".equals(tool) || "napcat".equals(tool);
     }
 
     // ==================== ⑥b/⑥c 自省：tools（能力）/ config（配置） ====================
     //
     // 这两把是主人要的那条工作流的"机械化依据"：
     //   知道该用什么工具 → 不知道就查（tools list/search）→ 读说明书（tools show）
-    //   → 验证行不行（show 里按 auth.bits 现算的那一格）→ 行就做 / 不行就直说 → 给结论。
+    //   → 验证行不行（show 里按 op 现算的那一格）→ 行就做 / 不行就直说 → 给结论。
     // 两条共同的边界：
     //   ① 能力面只列 Registry.visible(c) —— 不给不该看的人暴露工具面；
-    //   ② 判定一律现算（auth.bits / auth.allowRes），基板不缓存、不猜、不编。
+    //   ② 判定一律现算（auth.ops().of(名) + auth.allowed(c, op)），基板不缓存、不猜、不编。
 
     /** {@code tools} 的契约正文（她自己读的就是这一段）。 */
     public static final String TOOLS_DESC =
             "能力自省（找工具 / 读说明书 / 验证行不行）：list 列**你现在能用**的工具（名 + 一句话 + 归属）；"
             + "search 按**意图**找（「改设置」「发图」「查余额」）；show <工具名> 读完整说明书："
-            + "描述、返回、**参数表**（类型/必填/默认/示例）、归属、**★以你现在的身份能不能用（缺哪一位也说清）**、"
+            + "描述、返回、**参数表**（类型/必填/默认/示例）、归属、**★以你现在的身份能不能用（哪个 op 能用也说清）**、"
             + "只读还是有副作用。\n"
             + "想不起工具名、不确定 op 怎么填、想确认「我这身份调不调得动」—— 先问我，别硬试"
             + "（撞权限墙会被连续失败闸门掐停整轮）。\n"
-            + "边界：只列你**现在看得见**的工具（工具面按 T 类的 X 位筛）；看不见的我不替你描述。";
+            + "边界：只列你**现在看得见**的工具（工具面按技能管控表里的 op 筛）；看不见的我不替你描述。";
 
     /** {@code config} 的契约正文。 */
     public static final String CONFIG_DESC =
@@ -1982,9 +1948,24 @@ public final class Builtins {
     public static String toolsTool(JsonObject args, Out out, Auth auth, Conf conf, Registry reg, Caller c) {
         if (reg == null) return "工具注册表没装配（拿不到任何工具）";
         String op = J.s(args, "op", "list").trim().toLowerCase();
-        if ("list".equals(op)) return toolsList(reg, c, J.s(args, "keyword", ""));
-        if ("search".equals(op)) return toolsSearch(reg, c, J.s(args, "query", ""));
-        if ("show".equals(op)) return toolsShow(args, out, auth, conf, reg, c);
+        if ("list".equals(op)) {
+            // 动作级 op：列工具清单
+            String deny = needOpAs(auth, c, "tools.list");
+            if (deny != null) return deny;
+            return toolsList(reg, c, J.s(args, "keyword", ""));
+        }
+        if ("search".equals(op)) {
+            // 动作级 op：按意图找
+            String deny = needOpAs(auth, c, "tools.search");
+            if (deny != null) return deny;
+            return toolsSearch(reg, c, J.s(args, "query", ""));
+        }
+        if ("show".equals(op)) {
+            // 动作级 op：读某一把的说明书
+            String deny = needOpAs(auth, c, "tools.show");
+            if (deny != null) return deny;
+            return toolsShow(args, out, auth, conf, reg, c);
+        }
         return "op 只认 " + TOOLS_OPS + "。";
     }
 
@@ -2009,8 +1990,9 @@ public final class Builtins {
         if (kw.isEmpty()) head.append("：").append(vis.size()).append(" 个");
         else head.append("：关键词「").append(kw).append("」命中 ").append(hit).append(" / ").append(vis.size());
         if (vis.isEmpty()) {
-            return head + "\n（你现在一把都用不了：工具面按 **T 类的 X 位**筛 —— 没有这一位就连工具名都看不到。"
-                    + "要放开只能由主人写例外条目，例如 T[\"User<QQ>\",\"tool:send\",\"X\"]）";
+            return head + "\n（你现在一把都用不了：工具面按技能管控表里的 **op** 筛 —— "
+                    + "没有 Run 命中你，连工具名都看不到。要放开只能由主人写授权："
+                    + "perm op=run target=<工具名> principal=<你>）";
         }
         if (hit == 0) {
             return head + "\n（没有匹配的工具；不带关键词看全部：tools op=list）";
@@ -2089,9 +2071,9 @@ public final class Builtins {
         String deny = reg.lastDeny(c, name);
         if (Str.has(deny)) sb.append("上次调用被拒（你本人）：").append(deny).append("\n");
         if (!visible) {
-            // 看不见 = 不描述（工具面按 T:X 筛，说明书也是能力面的一部分）
-            sb.append("说明书：**不给** —— 你现在看不到这把工具（见上面那一格缺的位）。"
-                    + "拿到位之后再来看；要看你手上有什么：tools op=list。");
+            // 看不见 = 不描述（工具面按 op 筛，说明书也是能力面的一部分）
+            sb.append("说明书：**不给** —— 你现在看不到这把工具（见上面那一格：它的 op 一个都没放行给你）。"
+                    + "授权之后再来看；要看你手上有什么：tools op=list。");
             return sb.toString();
         }
         sb.append("描述：").append(Str.nz(t.desc()).trim().isEmpty() ? "(未标注)" : Str.oneLine(t.desc())).append("\n");
@@ -2108,32 +2090,43 @@ public final class Builtins {
     }
 
     /**
-     * 说明书里"★以你现在的身份能不能用"那一格 —— <b>现算</b>
-     * （{@code auth.bits(c, Res.tool(名))}：工具是 T 类资源，入口要的是 {@code X} 位）。
+     * 说明书里"★以你现在的身份能不能用"那一格 —— <b>现算</b>：
+     * 把这一把声明过的 op 挨个判一遍（{@code auth.allowed(c, op)}，判据只有"身份 × op"这一条），
+     * 只要有一个 op 放行就是"能用"，并把每个 op 的可用 / 不可用逐个列出来。
      */
     private static String authLine(Auth auth, Caller c, Tool t) {
         if (auth == null) {
             return "★ 能不能用：算不出 —— 权限面没装配（auth == null）。基板不编一个结论给你。";
         }
         if (c == null) {
-            return "★ 能不能用：不能用 —— 这一轮没有调用者身份（fail-closed：没有主体的调用一律拒）。";
+            return "★ 能不能用：不能用 —— 这一轮没有调用者身份（没有主体 = 没有可判定的身份）。";
         }
-        sair.v4.auth.Res res = sair.v4.auth.Res.tool(t.name());
-        int bits;
+        List<String> ops;
         try {
-            bits = auth.bits(c, res);
+            ops = auth.ops().of(t.name());
         } catch (Throwable e) {
-            return "★ 能不能用：算不出 —— 判定抛异常（" + e + "）；基板不编结论。";
+            return "★ 能不能用：算不出 —— 取 op 清单抛异常（" + e + "）；基板不编结论。";
         }
-        String alloc = Bits.format(Acl.allocOf(c.kind(), 'T'));
-        boolean ok = Bits.has(bits, 'X');
+        List<String> yes = new ArrayList<String>();
+        List<String> no = new ArrayList<String>();
+        for (int i = 0; i < ops.size(); i++) {
+            String op = ops.get(i);
+            boolean ok;
+            try {
+                ok = auth.allowed(c, op);
+            } catch (Throwable e) {
+                return "★ 能不能用：算不出 —— 判定 " + op + " 抛异常（" + e + "）；基板不编结论。";
+            }
+            if (ok) yes.add(op);
+            else no.add(op);
+        }
         StringBuilder sb = new StringBuilder();
-        sb.append("★ 能不能用：").append(ok ? "**能用**" : "**不能用**");
-        sb.append("（你 = ").append(callerText(c)).append("；工具入口要的是 T 类的 `X` 位）\n");
-        sb.append("   T 类有效位：").append(Bits.format(bits));
-        if (!ok) sb.append("  ← **缺 X 位**（没有它 = 这把工具连「交到手」都不给）");
-        sb.append("（该类默认分配 T=").append(alloc).append("）\n");
-        sb.append("   位从哪来：").append(fromText(auth.acl(), c, res));
+        sb.append("★ 能不能用：").append(yes.isEmpty() ? "**不能用**" : "**能用**");
+        sb.append("（你 = ").append(callerText(c)).append("；判据 = 身份 × op，这一把共 ")
+          .append(ops.size()).append(" 个 op）\n");
+        if (!yes.isEmpty()) sb.append("   可用的 op：").append(Str.join(yes, "、")).append("\n");
+        if (!no.isEmpty()) sb.append("   不可用的 op：").append(Str.join(no, "、")).append("\n");
+        sb.append("   （可用 = 技能管控表里有 Run 命中你；不可用 = Ban 命中，或者没授权 —— 空 = 未授权 = 不可用）");
         return sb.toString();
     }
 
@@ -2184,7 +2177,8 @@ public final class Builtins {
 
     /** 声明面的"写 / 对外"动作名。 */
     private static final List<String> ACTION_OPS = java.util.Arrays.asList(
-            "put", "update", "delete", "add", "set", "remove", "clear", "run", "grant", "revoke", "spawn", "stop",
+            "put", "update", "delete", "add", "set", "reset", "remove", "clear", "run", "ban", "grant", "revoke",
+            "spawn", "stop", "gen",
             "inject", "load", "write", "import", "export", "optimize", "vacuum", "maintain", "reload", "promote",
             "draft", "chat", "vision", "print", "send", "collect", "remark", "recall", "see",
             "group", "private", "file", "fileto", "record", "forward", "relay");
@@ -2366,15 +2360,30 @@ public final class Builtins {
     /**
      * <b>{@code config}</b>：改哪儿必须可查（键名 + 生效值 + 即时/需重启）。
      *
-     * @param auth 权限面（{@code null} = 没装配：{@code set} 一律拒）
+     * @param auth 权限面（{@code null} = 没装配：一律拒）
      * @param c    调用者
      */
     public static String configTool(JsonObject args, Out out, Auth auth, Conf conf, Caller c) {
         if (conf == null) return "配置没装配（读不到数据根下的 config.json）";
         String op = J.s(args, "op", "list").trim().toLowerCase();
-        if ("list".equals(op)) return configList(conf, c);
-        if ("get".equals(op)) return configGet(conf, J.s(args, "key", ""));
-        if ("set".equals(op)) return configSet(args, out, auth, conf, c);
+        if ("list".equals(op)) {
+            // 动作级 op：列已知键
+            String deny = needOpAs(auth, c, "config.list");
+            if (deny != null) return deny;
+            return configList(conf, c);
+        }
+        if ("get".equals(op)) {
+            // 动作级 op：看一个键
+            String deny = needOpAs(auth, c, "config.get");
+            if (deny != null) return deny;
+            return configGet(conf, J.s(args, "key", ""));
+        }
+        if ("set".equals(op)) {
+            // 动作级 op：改一个键（下面还有一层"只有主人"的业务硬判）
+            String deny = needOpAs(auth, c, "config.set");
+            if (deny != null) return deny;
+            return configSet(args, out, conf, c);
+        }
         return "op 只认 " + CONFIG_OPS + "。";
     }
 
@@ -2454,12 +2463,11 @@ public final class Builtins {
     /**
      * {@code config op=set <键> <值>}：<b>只有主人</b>。
      *
-     * <p>两道：① 资源位 —— {@code Res.tool("config")} 的 {@code W} 位（走 ACL 同一条 API，
-     * 拒文与别处<b>一字不差同形</b>：{@code 缺 W 位 —— [权限阻断] …}）；
-     * ② 显式 MASTER 复核 —— 改配置 = 改<b>基板边界</b>，连她自己的自主行为（SYSTEM，T=RWX 有 W）
-     * 也不给（D43 第 11 条：边界定义权只有主人有）。</p>
+     * <p>两道：① {@code config.set} 的 <b>op 判定</b>（在 {@link #configTool} 的分支开头判，
+     * 主体 = 调用者）；② 显式 MASTER 复核 —— 改配置 = 改<b>基板边界</b>，连她自己的自主行为
+     * （SYSTEM，op 判定恒放行）也不给（D43 第 11 条：边界定义权只有主人有）。</p>
      */
-    private static String configSet(JsonObject args, Out out, Auth auth, Conf conf, Caller c) {
+    private static String configSet(JsonObject args, Out out, Conf conf, Caller c) {
         String name = J.s(args, "key", "").trim();
         if (name.isEmpty()) {
             return "set 要键名与值：config op=set key=agentMaxRounds value=30（键名清单：config op=list）";
@@ -2468,13 +2476,7 @@ public final class Builtins {
             return "set 要给 value（要清空就写 value=\"\"）：config op=set key=" + name + " value=<值>";
         }
         boolean master = c != null && c.master();
-        // ① ACL 同一条 API（T 类的 W 位 = 改/注册工具的位）：非主人默认 T=NONE ⇒ 拒文与别处同形
-        if (auth == null) {
-            return Acl.DENY_PREFIX + "改配置需要权限面（auth == null：没装配）—— 拒绝 " + name;
-        }
-        String aclDeny = auth.allowRes(c, sair.v4.auth.Res.tool("config"), 'W');
-        if (aclDeny != null) return aclDeny;
-        // ② 只有主人（把"她自己"也挡在外面：边界定义权在她之外）
+        // 只有主人（把"她自己"也挡在外面：边界定义权在她之外）
         if (!master) {
             if (out != null) out.dim("[config] 非主人调用 set（" + (c == null ? "无主体" : c.label()) + "），已拒");
             return Acl.DENY_PREFIX + "改配置只有主人能做（你 = " + callerText(c)
@@ -2531,61 +2533,238 @@ public final class Builtins {
         return v;
     }
 
-    // ==================== ACL 判定（C 数据 / T 工具 / A·B 路径 / E 动作） ====================
+    // ==================== 罢工硬干活闸（情绪 v2 · SPEC §4） ====================
 
     /**
-     * 内置工具侧的 ACL 判定主体：工具路径 = 当轮绑定的触发者（{@link sair.v4.ctx.Ctx#caller()}，
+     * 罢工回执的<b>首行</b>（SPEC §4.1 的契约串，<b>逐字</b>；探针按字面断言）。
+     *
+     * <p>只有这一行 —— 拒的时候<b>不调用任何下游</b>（不发消息、不写库、不联网），只回执。</p>
+     */
+    public static final String STRIKE_LINE = "[罢工中] 我正忙着，这事等会儿再说。";
+
+    /** 罢工闸的白名单：{@code perm} 一族（主人改权限是系统级动作，罢工不挡）。 */
+    private static final String STRIKE_WHITELIST_TOOL = "perm";
+
+    /** 情绪事实行的键前缀（与情绪插件的 {@code EmotionMood.KV} 逐字同源）。 */
+    private static final String STRIKE_MOOD_KV = "mood:";
+
+    /** 罢工档位码（与情绪插件的 {@code EmotionMood.S_STRIKE} 逐字同源）。 */
+    private static final String STRIKE_STATE = "strike";
+
+    /** 装配期注入的读库句柄（判据真源 = {@code kv} 的 {@code mood:<场合>} 行）；没注入 = fail-open。 */
+    private static volatile Store STRIKE_DB;
+
+    /** 装配期注入的 warn 句柄（fail-open 时只记一行 warn）。 */
+    private static volatile Out STRIKE_OUT;
+
+    /**
+     * <b>罢工硬干活闸</b>（SPEC §4）：op 执行前读一眼<b>本场合</b>情绪 —— {@code kv} 的
+     * {@code mood:<场合>} 那一行（群 = {@code mood:group:<群号>}、私聊 = {@code mood:private:<QQ>}）。
+     *
+     * <p><b>只读、异常一律吞掉、绝不抛</b>。{@code state == strike} ⇒ 除白名单（{@code perm} 一族）外
+     * 一律拒，回执 = {@link #STRIKE_LINE}（只有这一行；不调用任何下游）。除此之外<b>行为逐字节不变</b>：
+     * 非 strike 态返回 {@code null}，调用点照旧走 {@code auth.allow(...)}。</p>
+     *
+     * <p><b>fail-open</b>（SPEC §4.4）：取不到场合 / 读库异常 ⇒ <b>不拦</b>，只记一行 warn ——
+     * 罢工是可用性功能，内部错误不许把全部 op 打死；但"能读到 strike"时必须拦。
+     * 判据真源只有 {@code kv} 的 {@code mood:<场合>} 行这一处：不读 {@code emotion} 表、不造第二套状态。</p>
+     *
+     * <p>坦白三处口径（复核用）：① 白名单按<b>工具名那一段</b>比（{@code perm} / {@code perm.*} 都放行，
+     * {@code permx.*} 不放行）；② 调用者取不到（{@code c == null}，Ctx 没绑）时判不出场合 ⇒ fail-open；
+     * ③ <b>不豁免 SYSTEM</b> —— 她自己的钩子 / 定时任务发的 op 在罢工态下同样被拒（SPEC 的白名单只有
+     * {@code perm}），要豁免是另一条裁定。</p>
+     *
+     * <p>调用点共三处（第三轮又加了一处：NapCat 动作出口 {@code Boot} 的 {@code Api.Guard} ——
+     * {@code h.napcat()} 直连原来绕过了这道闸）：{@link #needOpAs}（内置 op）、
+     * {@code sair.v4.skill.Host#need}（技能 op）、{@code sair.v4.tool.Registry#mayEnterDeny}（工具入口）。
+     * 出口那一路用 {@link #strikeDenyScene}（场合从动作参数现算）。</p>
+     *
+     * @param c  判定主体（工具路径 = 当轮触发者，见 {@code needOp} 的口径）
+     * @param op op 名（{@code 工具名} 或 {@code 工具名.动作名}）
+     * @return {@code null} = 放行；非 {@code null} = 罢工态下的回执（直接作为工具结果返回）
+     */
+    public static String strikeDeny(Caller c, String op) {
+        try {
+            // 白名单：perm 一族（工具名那一段就是 perm）。判在最先 —— 主人改权限不能被罢工挡住。
+            if (STRIKE_WHITELIST_TOOL.equals(Ops.toolOf(op))) return null;
+            Store db = STRIKE_DB;
+            if (db == null) {
+                strikeWarn("读不到库句柄（闸门未装配）", "", op);
+                return null;
+            }
+            if (c == null) {
+                strikeWarn("取不到场合（当轮没有调用者）", "", op);
+                return null;
+            }
+            return strikeOf(db, strikeScopeOf(c.groupId(), c.qq()), op);
+        } catch (Throwable t) {
+            // 绝不抛：任何异常都落回"不拦 + 一行 warn"
+            strikeWarn("读情绪异常（" + t.getClass().getSimpleName() + "）", "", op);
+            return null;
+        }
+    }
+
+    /**
+     * <b>说话动作豁免清单</b>（第四轮 P0）：<b>罢工 = 不干活，但要继续骂人</b> —— 把"话"送出去的那几个
+     * 动作在罢工期间<b>照常放行</b>。
+     *
+     * <p>为什么必须豁免：{@code send_group_msg} 也走 NapCat 动作出口，若不豁免，她一生气就连自己的
+     * 回复都发不出去 ⇒ 整群静默最长 10 分钟，「极怒 → 罢工 → <b>专心骂人</b>」当场作废（真机 P0：
+     * {@code [warn] [qq] 发送失败（[罢工中] …）：本条改打控制台}）。</p>
+     *
+     * <p><b>单一真源</b>：判据只有 {@link #strikeSpeakAction(String)} 一处、它只认这一行串；
+     * 探针按字面断言这一串。只含"把文字/消息送出去"的动作 —— 群管、审批、群公告
+     * （{@code _send_group_notice}，GM 明确留在拦的一侧）、上传、点赞、戳一戳一概不在内，照旧拦。</p>
+     */
+    public static final String STRIKE_SPEAK_ACTIONS =
+            "send_msg,send_group_msg,send_private_msg,send_group_forward_msg,send_private_forward_msg";
+
+    /** 这个动作是不是"把话送出去"（{@link #STRIKE_SPEAK_ACTIONS} 是唯一判据；别在别处再写一份清单）。 */
+    public static boolean strikeSpeakAction(String action) {
+        String a = action == null ? "" : action.trim();
+        return !a.isEmpty() && ("," + STRIKE_SPEAK_ACTIONS + ",").contains("," + a + ",");
+    }
+
+    /**
+     * <b>NapCat 动作出口的完整罢工判定</b>（{@code Boot} 的 {@code Api.Guard} 唯一调用点）：
+     * ① 说话动作 ⇒ 放行（{@link #STRIKE_SPEAK_ACTIONS}，第四轮 P0 —— 罢工也要能骂人）；
+     * ② 其余 ⇒ {@link #strikeDenyScene}（按场合判；判据真源仍是 {@code kv} 的 {@code mood:<场合>}）。
+     *
+     * <p>这一层<b>不</b>碰 ACL —— 调用点已经"ACL 先判"过了（ACL 拒文优先的裁定不破）。</p>
+     */
+    public static String strikeDenyAction(String action, String sceneId, String what) {
+        if (strikeSpeakAction(action)) return null;
+        return strikeDenyScene(sceneId, what);
+    }
+
+    /**
+     * <b>按"显式场合串"判罢工闸</b>（NapCat 动作出口用：场合由 {@code Boot} 的 {@code Api.Guard}
+     * 从动作 {@code params} / 会话键现算，见 {@code napcatScene}）。
+     *
+     * <p>与 {@link #strikeDeny} 同一处判据、同一句措辞（{@link #STRIKE_LINE}）、同一份真源
+     * （{@code kv} 的 {@code mood:<场合>}），只是场合不来自 {@link Caller}。为什么动作出口也要判：
+     * {@code h.napcat()} 是<b>直连</b>（不经工具面）—— 群审核 / 申请审批那两个钩子就是直连发禁言、
+     * 警告、审批，原来整段绕过罢工闸。</p>
+     *
+     * <p>白名单不在这条路上：动作不是 op，{@code perm} 一族本来也不走 NapCat。取不到场合（空串）⇒
+     * 放行 + 一行 warn（fail-open，不许因为取不到场合把动作全打死）。</p>
+     *
+     * @param sceneId 场合串（{@code group:<群号>} / {@code private:<QQ>}）；空 = 判不出 ⇒ 放行
+     * @param what    诊断用标签（一般是 {@code napcat.<动作名>}，只进 warn 行，不改回执）
+     * @return {@code null} = 放行；非 {@code null} = 罢工回执
+     */
+    public static String strikeDenyScene(String sceneId, String what) {
+        try {
+            if (Str.blank(sceneId)) {
+                strikeWarn("取不到场合（动作参数与会话都没有 group/user）", "", what);
+                return null;
+            }
+            Store db = STRIKE_DB;
+            if (db == null) {
+                strikeWarn("读不到库句柄（闸门未装配）", "", what);
+                return null;
+            }
+            return strikeOf(db, sceneId, what);
+        } catch (Throwable t) {
+            strikeWarn("读情绪异常（" + t.getClass().getSimpleName() + "）", "", what);
+            return null;
+        }
+    }
+
+    /** 判据主体（{@link #strikeDeny} 与 {@link #strikeDenyScene} 共用）：读 {@code mood:<场合>}，strike ⇒ 回执。 */
+    private static String strikeOf(Store db, String scene, String what) {
+        String row = db.kv(STRIKE_MOOD_KV + scene, null);
+        if (Str.blank(row)) {                              // 没有这一行 = 本场合没在罢工
+            STRIKE_LAST_WARN = "";
+            return null;
+        }
+        JsonObject mood = J.obj(row);
+        if (mood == null) {
+            strikeWarn("mood 行读不出 JSON（" + STRIKE_MOOD_KV + scene + "）", scene, what);
+            return null;
+        }
+        STRIKE_LAST_WARN = "";
+        if (!STRIKE_STATE.equals(J.s(mood, "state", ""))) return null;   // 非 strike：行为逐字节不变
+        return STRIKE_LINE;
+    }
+
+    /**
+     * 场合键：群聊 {@code group:<群号>}、私聊 {@code private:<QQ>}。
+     *
+     * <p>与情绪插件的 {@code EmotionMood.scopeOf(groupId, qq)} <b>同一个表达式</b>：技能类在运行期才编译，
+     * 基板引用不到它，只能同源照抄 —— 改动那一边时这一行必须跟着改（口径写在 SPEC §1/§4）。</p>
+     */
+    private static String strikeScopeOf(long groupId, long qq) {
+        return groupId > 0L ? ("group:" + groupId) : ("private:" + qq);
+    }
+
+    /**
+     * 上一次 fail-open warn 的「原因｜场合」键。
+     * <p>为什么需要它：入口闸（{@code Registry.mayEnterDeny}）与内置体闸（{@link #needOpAs}）会为
+     * <b>同一次 op 调用</b>各求值一次 —— 不折一下，一次 fail-open 会刷两行；SPEC §4.4 要的是<b>一行</b>。
+     * 同一场合、同一原因的连续 fail-open 只记第一行（读成功一次或换了原因/场合就重置）。</p>
+     */
+    private static volatile String STRIKE_LAST_WARN = "";
+
+    /** fail-open 的那一行 warn（warn 自己也不许抛 —— fail-open 是这一层的全部意义）。 */
+    private static void strikeWarn(String why, String scene, String op) {
+        try {
+            String key = why + "|" + (scene == null ? "" : scene);
+            if (key.equals(STRIKE_LAST_WARN)) return;
+            STRIKE_LAST_WARN = key;
+            Out o = STRIKE_OUT;
+            if (o != null) o.warn("[罢工闸] " + why + " —— 按不拦处理：" + op);
+        } catch (Throwable ignored) {
+            // 连 warn 都失败：仍然不拦
+        }
+    }
+
+    // ==================== op 判定（身份 × op → Ban / Run / 空） ====================
+
+    /**
+     * 内置工具侧的判定主体：工具路径 = 当轮绑定的触发者（{@link sair.v4.ctx.Ctx#caller()}，
      * P1 已让工具路径绑触发者）。
      *
-     * <p><b>拿不到触发者 = fail-closed</b>：直接返回 {@code null}，由 {@link Acl#allow} 对它回
-     * "缺少调用者身份"拒绝 —— <b>绝不回落到 SYSTEM</b>。回落 SYSTEM（C:RWX）等于把"无主体 = 放行"的
-     * 旧洞从 E 类挪到 C 类（工人 2026-09-15 已标出）。她自己的自主行为（钩子/定时/装配）不经过这里，
-     * 那些路径 P1 已显式绑 {@link Caller#systemActor}。</p>
+     * <p>她自己的自主行为（钩子 / 定时 / 扩展点）不经过这里，那些路径 P1 已显式绑
+     * {@link Caller#systemActor} —— 所以"钩子里那一句判定"照旧写，判定主体是 SYSTEM，
+     * 恒放行（口径统一：读代码的人不需要分辨这是谁触发的）。</p>
      */
     private static Caller aclCaller(Conf conf) {
-        return sair.v4.ctx.Ctx.caller();   // 可为 null → Acl.allow 对 null 主体拒绝
+        return sair.v4.ctx.Ctx.caller();
     }
 
     /**
-     * 资源判定（放行返回 null，否则返回拒绝原文）：{@code need} 取 'R' 读 / 'W' 写 / 'X' 执行。
-     * 基板侧直调 {@link Auth#allowRes}（C 数据的库/内存、T 类的工具入口、A/B 的路径、E 的动作都在这里收口）。
+     * <b>op 判定</b>（放行返回 {@code null}，否则返回可直接回给模型的拒绝原文）：
+     * 主体 = 当轮触发者，判据 = {@link Auth#allow(Caller, String)}（身份 × op）。
+     *
+     * <p>{@code op} = {@code 工具名} 或 {@code 工具名.动作名}（清单见 {@link Ops}，内置工具那份由
+     * {@link #declareOps(OpList)} 登记）。<b>每个动作分支各判自己那个 op</b> —— 技能管控表就是按这些
+     * 名字放行的，"允许他取一条"与"允许他删一行"能在表里分开写。</p>
+     *
+     * <p>{@code MASTER} 与她本人（{@code SYSTEM}）恒全权（{@code Acl} 内部短路）；{@code ALLUSER}
+     * 按表判：{@code Ban} = 不可用 / {@code Run} = 可用 / <b>空</b> = 未授权 = 不可用。权限面没装配
+     * （{@code auth == null}）时按拒绝处理（fail-closed）—— 不假装有权限面。</p>
+     *
+     * <p><b>罢工硬干活闸在权限判定之后</b>（GM 裁定，SPEC §4）：① 权限面先判 —— 账本没放行就把它的
+     * 拒文原样返回（"权限阻断"那句优先，不许被情绪盖掉）；② 放行了才看情绪，{@code strike} 态下除
+     * {@code perm} 一族一律拒，回执见 {@link #STRIKE_LINE}。非 strike 态这一层放行，返回值与改前
+     * <b>逐字节相同</b>。</p>
      */
-    private static String needRes(Auth auth, Conf conf, sair.v4.auth.Res res, char need) {
-        return auth.allowRes(aclCaller(conf), res, need);
+    private static String needOp(Auth auth, Conf conf, String op) {
+        return needOpAs(auth, aclCaller(conf), op);
     }
 
     /**
-     * <b>{@code skill_write} 的落点自判</b>（结构性依赖收口）：写盘 / 编译 / 热加载之前，
-     * 对这次要落的每个路径判 {@code 'W'} 位；任何一个不通过就拒绝。
-     *
-     * <p><b>为什么必须由工具自己判</b>：权限注册表已不做工具级判定
-     * （见 {@code Registry.call} 的注释："这里不再有工具级权限判定"），旧体系里"唯一拦人的地方"是
-     * <b>调用点自觉</b>（{@code 经验蒸馏.promote} 里那句 {@code h.needPath(h.conf().skillsDir(), 'W')}）。
-     * 那是结构性依赖：任何新入口（别的技能、子 Agent、模型直调 {@code registry.call}）忘了判，
-     * 就等于开了"写源码 + 热加载 = 代码执行"的后门。这里把判定收进工具本身，调用点那句保留
-     * （纵深防御两层都要有）。</p>
-     *
-     * <p><b>主体</b>：与 {@link #needRes} 一致 —— {@code Ctx.caller()}，<b>取不到就拒</b>
-     * （fail-closed，绝不回落 SYSTEM）；判定用真账本（{@code auth}），不是"空账本放行"。</p>
-     *
-     * <p><b>为什么判目录而不是"目录 + 具体文件名"</b>：落点是"技能库"这件事的粒度就是目录；
-     * 判得更细会让 {@code B["…/skills/某技能","RWX"]} 这类条目把"在技能库里新建任意技能"重新打开。</p>
-     *
-     * @return 放行返回 {@code null}；拒绝时返回账本原文（{@code [权限阻断] 需要 … 的 W 位（默认分配 …，当前有效位 …）}）
+     * 同 {@link #needOp}，但<b>主体直接给</b>（调用点手上就有 {@link Caller} 时用：
+     * perm / tools / config 这几个静态入口，判定主体就是它们收到的那一个）。
      */
-    private static String skillWriteSelfDeny(Auth auth, Conf conf, Out out, List<File> targets) {
-        for (int i = 0; targets != null && i < targets.size(); i++) {
-            File f = targets.get(i);
-            if (f == null) continue;
-            String deny = needRes(auth, conf, sair.v4.auth.Res.path(f), 'W');
-            if (deny != null) {
-                if (out != null) {
-                    out.err("[auth] skill_write 自判：落点 " + f.getAbsolutePath() + " 的 W 位不足 —— " + deny);
-                }
-                return deny;
-            }
-        }
-        return null;
+    private static String needOpAs(Auth auth, Caller c, String op) {
+        if (auth == null) return Acl.DENY_PREFIX + "权限面没有装配（auth == null），按拒绝处理：" + op;
+        // ① 权限面先判：ACL 的拒文优先（权限模型不许被情绪改）。
+        String deny = auth.allow(c, op);
+        if (deny != null) return deny;
+        // ② 放行了才是罢工硬干活闸：唯一插入点 = 所有内置 op 判定都走的这一口，在任何副作用之前。
+        return strikeDeny(c, op);
     }
 
     // ==================== 技能库：文件写入 / 草稿 ====================
@@ -2600,16 +2779,35 @@ public final class Builtins {
         return "，工具名「" + sk.toolDeclared + "」已自动英文化注册为 " + sk.toolRegistered;
     }
 
+    /**
+     * <b>护栏</b>：这个文件名是不是权限文件（{@link Acl#SKILL_FILE_NAME} = {@code perms.jsonc}）。
+     *
+     * <p>技能不许自己写它 —— 权限文件按归属分散之后，技能目录里的 {@code perms.jsonc} 就是"这个技能
+     * 自己提供的工具给谁用"的授权书；让技能的写入/覆盖/新增/草稿提升碰到它，等于技能能给自己开口子。
+     * 它只能由主人用控制台 {@code ai/perm} 或直接手改文件来写。</p>
+     */
+    private static boolean isPermFile(String fileName) {
+        return fileName != null && Acl.SKILL_FILE_NAME.equalsIgnoreCase(fileName.trim());
+    }
+
+    /** 拒绝写权限文件时那一句可读原因（写在返回值里，调用方直接回给模型）。 */
+    private static String permFileDeny(String where) {
+        return "拒绝写入 " + Acl.SKILL_FILE_NAME + "：" + where
+                + " —— 权限文件（谁能用这个技能）只能由主人用控制台 ai/perm 写，技能不能给自己开口子。";
+    }
+
     /** 把 md / java 写进某个技能目录（add / update / draft 共用）；返回 null = 成功。 */
     private static String writeSkillFiles(File dir, String name, String md, String java) {
         Fs.mkdirs(dir);
         if (Str.has(md)) {
             File mdf = new File(dir, name + ".md");
+            if (isPermFile(mdf.getName())) return permFileDeny(mdf.getName());
             if (!Fs.write(mdf, md)) return "写入 md 失败";
         }
         if (Str.has(java)) {
             String cls = DynCode.classNameOf(java);
             File jf = new File(dir, (Str.has(cls) ? cls : "AirunSkill") + ".java");
+            if (isPermFile(jf.getName())) return permFileDeny(jf.getName());
             if (!Fs.write(jf, java)) return "写入 java 失败";
         }
         return null;
@@ -2735,8 +2933,8 @@ public final class Builtins {
      * {@code optimize} / {@code vacuum}）<b>只有 MASTER 与 SYSTEM</b> 能做 —— 非主人一律拒。
      *
      * <p>理由：{@code export} 会把任意库<b>整表导出</b>（跨用户 / 跨群数据一次性拿走），
-     * {@code optimize}/{@code vacuum} 是维护动作；C 类按类默认分配虽然只有 {@code R}
-     * （{@code Acl.DEF_C}），但主人可以按人把 C 类的 {@code W} 开出去 —— 所以这一层不靠位表兜底，
+     * {@code optimize}/{@code vacuum} 是维护动作。op 判定只管"这个人能不能用这个动作"，
+     * 挡不住"主人哪天把 {@code store_admin.export} 放给了某个人" —— 所以这一层不靠 op 兜底，
      * 自己硬判"只有 MASTER 与 SYSTEM"。</p>
      *
      * <p>{@code stat} <b>不在其列</b>：它只暴露"有多少行"，不暴露行内容，非主人可读。</p>
@@ -2760,10 +2958,8 @@ public final class Builtins {
      *       原始写口不对非主人开放。</li>
      * </ul>
      *
-     * <p><b>为什么必须硬判、且不看权限位</b>：新 ACL 模型里 C 类按类默认分配是 {@code RWX}
-     * （{@code Acl.DEF_C}）—— 非主人也拿得到 W。旧模型"C 默认只有 R"曾是"非主人写不进库"的
-     * <b>隐性防线</b>，现在它没有了；而 {@code store_write} 是"任意库任意行"的原始写口，
-     * 不判归属就等于绕过所有技能自己的键设计。{@code needDb('W')} 对所有人都放行，靠它挡不住。</p>
+     * <p><b>为什么必须硬判</b>：op 判定只回答"这个人能不能用这个动作"，不回答"他能不能动这一行"
+     * —— 而 {@code store_write} 是"任意库任意行"的原始写口，不判归属就等于绕过所有技能自己的键设计。</p>
      *
      * @return 放行返回 {@code null}；MASTER 与 SYSTEM（她的自主行为）照旧全权
      */
@@ -2812,6 +3008,234 @@ public final class Builtins {
         return out;
     }
 
+    // ==================== v6 DB 域：执行点接入（通用库口） ====================
+
+    /**
+     * 整库动作覆盖到的 DB 类别（{@code store_admin} 的 {@code optimize}/{@code vacuum}/
+     * {@code export}/{@code import} 用）：整库动作<b>没有单一行归属</b>，所以把它覆盖到的每一类
+     * 都过一遍写判定 —— 任一类的 {@code Run} 不成立就拒。{@code rowOwner=null}（无归属的共享行）
+     * 按规格 §2.5-5 只有被指名的身份动得了。
+     */
+    private static final String[] ADMIN_LIB_KEYS = {
+        "memory", "note", "dialog", "grouplog", "sticker", "pref", "emotion", "group_impression"
+    };
+
+    /** {@code maintain}（整库维护清理）实际会删到的三类超龄行。 */
+    private static final String[] MAINTAIN_KEYS = {"memory", "dialog", "grouplog"};
+
+    /**
+     * <b>通用库口的 lib → DB 域类别键</b>映射（规格 §3 白名单）。
+     *
+     * <p>通用口拿到的 {@code lib} 是 {@code Libs} 注册表里的<b>表名</b>，{@code DB} 域的键就是那份
+     * 数据类别表；这八类两者<b>恰好同名</b>（{@code dialog}/{@code grouplog} 是基板环境表，
+     * 其余六类由插件声明）。不同名的那一族是 {@code kv.*}（13 个逻辑子类共用一张 {@code kv} 表），
+     * 它没有注册成 {@code LibSpec} ⇒ 通用口在 {@code libs.get(lib) == null} 那一句就把它拦成
+     * "未知的库"了。</p>
+     *
+     * <p><b>显式白名单，不是字符串推导</b>：认不出的 lib 原样交给 {@link Acl#dbDeny} /
+     * {@link Acl#dbReadDeny}，由它们判"不认识的权限键" ⇒ 拒（方向只许更严，绝不放宽）。</p>
+     *
+     * <p>{@code public}：控制台那条 {@code ai/store import}（{@code term.Cmd}）要判同一个"整库覆盖"，
+     * 库名 → 数据键必须与工具面<b>同一份</b>映射，不许另起一套。</p>
+     */
+    public static String dbKeyOf(String lib) {
+        String l = lib == null ? "" : lib.trim();
+        if ("dialog".equals(l)) return "dialog";
+        if ("grouplog".equals(l)) return "grouplog";
+        if ("memory".equals(l)) return "memory";
+        if ("note".equals(l)) return "note";
+        if ("sticker".equals(l)) return "sticker";
+        if ("pref".equals(l)) return "pref";
+        if ("emotion".equals(l)) return "emotion";
+        if ("group_impression".equals(l)) return "group_impression";
+        return l;
+    }
+
+    /**
+     * <b>这一行归谁</b>（{@link Acl#dbDeny} 的第三参）：规范形态 {@code user:<QQ>} /
+     * {@code group:<群号>}；{@code null} = 无归属的共享行（规格 §2.5-5：只有被指名的身份动得了）。
+     *
+     * <p><b>必须按类别各自映射，不许拿字符串直接比</b>（规格 §7-4）：{@link #inScope} 对
+     * {@code dialog} 比的是 {@code me.session()}（{@code qq:<QQ>} / {@code group:<群号>} /
+     * {@code console}），而 {@code rowOwner} 的规范形态是 {@code user:<QQ>} ⇒
+     * <b>{@code qq: ≠ user:}</b>，直接比会把 dialog 的行归属全判错。映射表（列名与取值都来自
+     * 各自的 {@code LibSpec} 与技能实现）：</p>
+     * <ul>
+     *   <li>{@code dialog}：行 {@code session}（{@code qq:<QQ>} / {@code user:<QQ>}）→ {@code user:<QQ>}；
+     *       {@code group:<群号>} → {@code group:<群号>}；{@code console} 一类 → {@code null}；</li>
+     *   <li>{@code grouplog} / {@code group_impression}：行 {@code group_id} → {@code group:<群号>}；</li>
+     *   <li>{@code memory} / {@code pref}：行 {@code scope}（{@code user}/{@code group}）+ {@code scope_id}
+     *       → {@code user:<scope_id>} / {@code group:<scope_id>}；{@code global} → {@code null}；</li>
+     *   <li>{@code emotion}：行 {@code group_id} / {@code qq} → {@code group:<群号>} / {@code user:<QQ>}；</li>
+     *   <li>{@code sticker}：行 {@code extra.added_by} → {@code user:<QQ>}（没有这个字段的老行 = 无归属）；</li>
+     *   <li>{@code note} 与认不出的库：{@code null}（全体共享行）。</li>
+     * </ul>
+     */
+    private static String rowOwnerOf(String lib, JsonObject row) {
+        if (row == null) return null;
+        String l = lib == null ? "" : lib.trim();
+        if ("dialog".equals(l)) return ownerOfSession(J.s(row, "session", ""));
+        if ("grouplog".equals(l) || "group_impression".equals(l)) return ownerOfGroupId(J.l(row, "group_id", 0L));
+        if ("memory".equals(l) || "pref".equals(l)) {
+            return ownerOfScope(Str.trim(J.s(row, "scope", "")), Str.trim(J.s(row, "scope_id", "")));
+        }
+        if ("emotion".equals(l)) {
+            long g = J.l(row, "group_id", 0L);
+            return g > 0L ? ownerOfGroupId(g) : ownerOfUser(J.l(row, "qq", 0L));
+        }
+        if ("sticker".equals(l)) return ownerOfUser(J.l(J.sub(row, "extra"), "added_by", 0L));
+        return null;
+    }
+
+    /** 会话键形态 → rowOwner：{@code qq:<QQ>}（以及 Api 台账那种 {@code user:<QQ>}）→ {@code user:<QQ>}。 */
+    private static String ownerOfSession(String session) {
+        String s = Str.trim(session);
+        if (s.startsWith("qq:")) return ownerOfUser(numOf(s.substring(3)));
+        if (s.startsWith("user:")) return ownerOfUser(numOf(s.substring(5)));
+        if (s.startsWith("group:")) return ownerOfGroupId(numOf(s.substring(6)));
+        return null;                                   // console 一类：没有归属主体
+    }
+
+    /** {@code scope} + {@code scope_id} → rowOwner（{@code global} / 认不出的作用域 = 无归属）。 */
+    private static String ownerOfScope(String scope, String id) {
+        if ("user".equalsIgnoreCase(scope)) return ownerOfUser(numOf(id));
+        if ("group".equalsIgnoreCase(scope)) return ownerOfGroupId(numOf(id));
+        return null;
+    }
+
+    private static String ownerOfUser(long qq) { return qq > 0L ? ("user:" + qq) : null; }
+
+    private static String ownerOfGroupId(long gid) { return gid > 0L ? ("group:" + gid) : null; }
+
+    /** 号（{@code scope_id} / {@code session} 里那段是文本列）；认不出返回 0（= 无归属）。 */
+    private static long numOf(String s) {
+        String t = Str.trim(s);
+        if (t.isEmpty()) return 0L;
+        try {
+            return Long.parseLong(t);
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    /**
+     * DB 域<b>写</b>判定的一层壳：{@code auth} 没装配 / 判定异常一律按拒（fail-closed，与
+     * {@link #needOpAs} 同口径 —— 绝不让异常变成放行）。放行返回 {@code null}；否则是
+     * {@link Acl#dbDeny} 的拒绝原文（自带 {@code [权限阻断] } 前缀，调用方原样回给模型，不再拼前缀）。
+     */
+    private static String dbDenyOf(Auth auth, String dataKey, String rowOwner, Caller me) {
+        if (auth == null) return Acl.DENY_PREFIX + "权限面没有装配（auth == null），按拒绝处理：" + dataKey;
+        try {
+            Acl acl = auth.acl();
+            if (acl == null) return Acl.DENY_PREFIX + "权限面没有装配（acl == null），按拒绝处理：" + dataKey;
+            return acl.dbDeny(me, dataKey, rowOwner);
+        } catch (Throwable t) {
+            return Acl.DENY_PREFIX + "数据判定异常，按拒绝处理：" + dataKey + "（" + t + "）";
+        }
+    }
+
+    /** DB 域<b>读</b>判定的一层壳（同 {@link #dbDenyOf} 的 fail-closed 口径）。 */
+    private static String dbReadDenyOf(Auth auth, String dataKey, Caller me) {
+        if (auth == null) return Acl.DENY_PREFIX + "权限面没有装配（auth == null），按拒绝处理：" + dataKey;
+        try {
+            Acl acl = auth.acl();
+            if (acl == null) return Acl.DENY_PREFIX + "权限面没有装配（acl == null），按拒绝处理：" + dataKey;
+            return acl.dbReadDeny(me, dataKey);
+        } catch (Throwable t) {
+            return Acl.DENY_PREFIX + "数据判定异常，按拒绝处理：" + dataKey + "（" + t + "）";
+        }
+    }
+
+    /**
+     * <b>File 域路径判定</b>的一层壳：{@code write=true} 看 {@code Run}（写 / 改 / 删 / 建），
+     * {@code false} 看 {@code Read}（读 / 找 / 下载）。同 fail-closed 口径。
+     */
+    private static String fileDenyOf(Auth auth, String path, boolean write, Caller me) {
+        if (auth == null) return Acl.DENY_PREFIX + "权限面没有装配（auth == null），按拒绝处理：" + path;
+        try {
+            Acl acl = auth.acl();
+            if (acl == null) return Acl.DENY_PREFIX + "权限面没有装配（acl == null），按拒绝处理：" + path;
+            return acl.fileDeny(me, path, write);
+        } catch (Throwable t) {
+            return Acl.DENY_PREFIX + "路径判定异常，按拒绝处理：" + path + "（" + t + "）";
+        }
+    }
+
+    /** 整库动作：把它覆盖到的每一类都过一遍写判定（任一拒 ⇒ 拒）。 */
+    private static String dbWholeDeny(Auth auth, String[] keys, Caller me) {
+        for (int i = 0; i < keys.length; i++) {
+            String d = dbDenyOf(auth, keys[i], null, me);
+            if (d != null) return d;
+        }
+        return null;
+    }
+
+    // ==================== v6 读口行归属（补丙核出的 memory 缺口） ====================
+
+    /**
+     * {@code memory} 读口的行归属（非主人）：<b>本人 / 本群 / global</b> 三类可见。
+     *
+     * <p>与记忆技能内部的 {@code MemorySkill.visible} <b>同口径</b>：{@code global} 全可见、
+     * {@code user} 比 {@code scope_id == 自己 QQ}、{@code group} 比 {@code scope_id == 自己所在群}；
+     * 认不出的作用域一律不可见（不猜）。</p>
+     */
+    private static boolean memoryVisible(JsonObject row, Caller me) {
+        if (row == null || me == null) return false;
+        String scope = Str.trim(J.s(row, "scope", ""));
+        String id = Str.trim(J.s(row, "scope_id", ""));
+        if ("global".equalsIgnoreCase(scope)) return true;
+        if ("user".equalsIgnoreCase(scope)) return String.valueOf(me.qq()).equals(id);
+        if ("group".equalsIgnoreCase(scope)) return me.isGroup() && String.valueOf(me.groupId()).equals(id);
+        return false;
+    }
+
+    /**
+     * <b>主人（MASTER）与她本人（SYSTEM）恒全权</b>（规格 §0：不进判定、不受任何块影响）。
+     *
+     * <p>v6 新接的读口行归属用这个判据，而<b>不是</b> {@code me.master()}：老守卫里
+     * {@link #inScope} 只豁免 {@code MASTER}，那不是 v6 的口径（记忆技能内部的 {@code master(h)}
+     * 同样是"主人"一个含义，但规格 §0 明写她本人在内）。新代码按规格走，老守卫原样不动。</p>
+     */
+    private static boolean isFree(Caller c) {
+        return c != null && (c.master() || c.system());
+    }
+
+    /** 读口行归属总入口：memory 走 {@link #memoryVisible}，其它库沿用既有 {@link #inScope} 口径。 */
+    private static boolean readVisible(String lib, JsonObject row, Caller me) {
+        if (!"memory".equals(lib)) return true;
+        return memoryVisible(row, me);
+    }
+
+    /** 读口逐行过滤（与 {@link #keepInScope} 并列的那一层：memory 的作用域可见面）。 */
+    private static List<JsonObject> keepReadScope(String lib, List<JsonObject> rows, Caller me) {
+        List<JsonObject> out = new ArrayList<JsonObject>();
+        if (rows == null) return out;
+        for (JsonObject r : rows) if (readVisible(lib, r, me)) out.add(r);
+        return out;
+    }
+
+    /**
+     * {@code memory} 的非主人条数：不能"整库一把数"（那会数出别人的行数），按可见的三条作用域
+     * 分别数（本人的 {@code user} / 本群的 {@code group} / 全体的 {@code global}）。
+     * 调用方 filter 里的 {@code scope}/{@code scope_id} 一律被这三片覆盖 —— 结果只会比"他能看见的
+     * 面"更窄，不会更宽。
+     */
+    private static long memoryReadCount(Store store, String lib, JsonObject filter, Caller me) {
+        long n = 0L;
+        n += store.count(lib, scopeFilter(filter, "user", String.valueOf(me.qq())));
+        if (me.isGroup()) n += store.count(lib, scopeFilter(filter, "group", String.valueOf(me.groupId())));
+        n += store.count(lib, scopeFilter(filter, "global", ""));
+        return n;
+    }
+
+    /** 复制一份过滤器并把作用域钉死到给定那一层（不改调用方手里的对象）。 */
+    private static JsonObject scopeFilter(JsonObject f, String scope, String scopeId) {
+        JsonObject o = f == null ? new JsonObject() : f.deepCopy();
+        o.addProperty("scope", scope);
+        o.addProperty("scope_id", scopeId);
+        return o;
+    }
+
     // ==================== NapCat 动作权限 ====================
 
     /**
@@ -2820,9 +3244,9 @@ public final class Builtins {
      * {@link sair.v4.ctx.Ctx#caller()}；取不到 = 她自己的自主行为（基板回复、定时推送、扩展点回调），
      * 按 {@link Caller#systemActor(long)} 处理。
      *
-     * <p>旧实现是 {@code auth.allow/check("napcat.<动作>")}（走旧档位表）：权威闸门其实在 Guard 上
-     * （{@code Api.call} 每次都先问它），旧表只能多拦、不能放行 —— 但两处语义不一致，
-     * 而且目录可见性会把<b>实际调不动</b>的动作名暴露给非主人。现在两处一句话：{@code Res.platform + 'X'}。</p>
+     * <p>口径：{@code napcat.<动作名>} 是每个动作自己的 op（清单由 {@link #declareOps(OpList)} 按动作目录登记）。
+     * 装在 {@code guardedApi} 上的那道 Guard（{@code Boot} 里 {@code Api.Guard.deny}）是同一条判定的
+     * 第二处出口 —— 两处取主体必须同源，否则"看得到"与"调得动"会对不上。</p>
      */
     private static Caller napcatSubject(Conf conf) {
         Caller c = sair.v4.ctx.Ctx.caller();
@@ -2852,11 +3276,10 @@ public final class Builtins {
 
     // ==================== NapCat 动作出厂档位：已删除（P9b-1 停用 / P9b-2 删净） ====================
     //
-    // 这里原来是 napcatLevel(action)：把每个 NapCat 动作映射到一个"出厂档位"（MASTER / AFFECTION:<N>，
-    // 其中 set_group_* 走旧档位表的 GROUP_MASTER_AS 常量）。它<b>只有唯一一个活调用点</b> ——
-    // Boot.permSync 给旧档位表补"缺行"。P9b-1 把 permSync 整块删掉之后，本函数在 src 里已无任何调用方
-    // （平台动作的权威判据是 ACL 的 Res.platform(动作) X 位，装在 guardedApi 上的 Guard，与旧表无关），
-    // 故一并删除；P9b-2 再把旧档位表本身（PermTable 整类与 GROUP_MASTER_AS）删除。判定面一个字没变。
+    // 这里原来是 napcatLevel(action)：把每个 NapCat 动作映射到一个"出厂档位"（MASTER / AFFECTION:<N>）。
+    // 权限面整个换成 op 判定之后，每个动作的判据就是 {@code napcat.<动作名>} 这个 op
+    // （装在 guardedApi 上的 Guard 与本文件的工具实现各自判它），与旧档位表无关；per-action 的
+    // 出厂值改由技能管控表说了算（空 = 未授权），所以这里不再保留任何出厂映射。
 
     // ==================== 时间解析 ====================
 
@@ -3215,34 +3638,29 @@ public final class Builtins {
     /**
      * perm 的入参表（口径文本在 {@link #PERM_DESC}：参数说明里只讲"这个参数怎么填"）。
      * <p>取值表写进 {@code enum}：模型看得见合法取值，基板的参数复核也据此拦越界值。</p>
-     * <p>{@code public} 是给探针断言用的（核 op 取值表与四个参数就是她看到的那一份契约）。</p>
+     * <p>{@code public} 是给探针断言用的（核 op 取值表与这几个参数就是她看到的那一份契约）。</p>
      */
     public static JsonObject schemaPerm() {
         return J.obj(
                 "type", "object",
                 "properties", J.obj(
-                        "op", oneOf("grant 授权/覆盖 · revoke 撤销 · acl 看清单或验算（这三个只有主人）"
-                                        + " · whoami 我是谁（谁都能问：只回自己五类有效位）"
-                                        + " · check 查某人在某类/某范围的位与例外（只读；谁都能查自己，查别人只有主人）",
-                                "whoami", "whoami", "grant", "revoke", "acl", "check"),
+                        "op", oneOf("好感度面：whoami 我是谁 · get 查一个人 · list 榜单 · set 直接定值 · reset 清空"
+                                        + "；权限面：show 看合并后的表 · gen 只在已有权限文件里重排 · run 授权 · ban 封禁 · revoke 撤回"
+                                        + "（show/gen/run/ban/revoke 只有主人能调）",
+                                "whoami", "whoami", "get", "list", "set", "reset", "show", "gen", "run", "ban", "revoke"),
                         "principal", obj("string",
-                                "主体。User<QQ号>（个人，跨群有效）/ Group<群号>（只在该群会话生效）/ SYSTEM（她自己）/ "
-                                + "ALLUSER（全体用户）；裸数字 = User<QQ>；「群123456」也认；"
-                                + "多个主体用逗号分开（一主体一条）；"
-                                + "也可以直接给一整条条目（如 A[\"User123456\",\"D:/share\",\"RWX\"]），这时 cls/scope/bits 都不用给。"
-                                + "op=check 时留空 = 查你自己"),
-                        "cls", oneOf("类别：A 本机（本机文件与进程，含网络资源）· B SFW（SFW 运行时目录，仅文件）"
-                                        + "· C 数据（数据库全部内容 + files 目录）"
-                                        + "· E 外部交互（Napcat 输入输出 + 向 SFW 发命令）"
-                                        + "· T 工具（只有入口受管控：R 看 / W 改·注册 / X 执行）",
-                                null, "A", "B", "C", "E", "T"),
-                        "scope", obj("string",
-                                "范围：A/B 给路径（盘符 D: / 目录 / 文件）；C 给库名或 mem:xxx 或 files 下的路径；"
-                                + "E 给动作名；T 给工具名（tool: 前缀可省）；留空 = 该类全部。"
-                                + "revoke 留空 = 删掉他在该类全部条目；check 留空 = 只看整类那一格"),
-                        "bits", obj("string",
-                                "位：R/W/X 的 7 种组合（R、W、X、RW、RX、WX、RWX）；"
-                                + "空串 = 一位都不给（显式拒绝，压过默认分配 —— 「禁止」走这个）")));
+                                "身份 / QQ 号。好感度面（get/set）：QQ 号（裸数字或 user:<QQ>），留空 = 你自己。"
+                                + "权限面（run/ban/revoke）：user:<QQ号>（个人，跨群有效）/ group:<群号>（只在该群会话生效）/ "
+                                + "ALLUSER（全体用户）；裸数字 = user:<QQ>；「群123456」也认；逗号分开 = 一个身份一条。"
+                                + "MASTER 与她本人（SYSTEM）恒全权，写不进表里。"),
+                        "target", obj("string",
+                                "要授权 / 封禁 / 撤回的 **op**：工具名（覆盖它的全部动作，如 memory）"
+                                + "或 工具名.动作名（只管那一个，如 memory.remember）。"
+                                + "写回该 op 归属的那个权限文件（技能自己的工具写技能目录，其余写数据根 core；回执里会说明）。"
+                                + "op=revoke 留空 = 撤该身份名下的全部条目。"),
+                        "value", obj("number", "op=set：好感度的新数值（0 是合法值；不受单次加减区间限制）"),
+                        "note", obj("string", "op=set：为什么改（写进 favor_event 流水）"),
+                        "limit", obj("integer", "op=list：榜单回多少名，默认 20")));
     }
 
     private static JsonObject schemaTools() {

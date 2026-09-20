@@ -30,7 +30,8 @@
     <a href="files.html"><span class="n">08</span>文件</a>
     <a href="architecture.html"><span class="n">09</span>实现</a>
     <a href="migration.html"><span class="n">10</span>升级</a>
-    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+    <a href="skills.html"><span class="n">11</span>技能开发</a>
+    <a href="changelog.html"><span class="n">12</span>更新日志</a>
   </nav>
   <div class="topbar-meta">
     <span class="chip live">纯静态</span>
@@ -77,7 +78,7 @@
 cd /d %~dp0
 start 8x64\bin\javaw -jar SFW.jar %*</code></pre>
             </div>
-            <p class="t-cap">同目录下 <code>SFW.jar</code> 实测 。</p>
+            <p class="t-cap">同目录下还有框架自己的 <code>SFW.jar</code>，不用改它。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">② 启动目录建议固定</h4>
@@ -86,15 +87,15 @@ start 8x64\bin\javaw -jar SFW.jar %*</code></pre>
           </div>
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">③ 只要一份 jar，落位固定</h4>
-            <p>线上这份是 <code>plugins\exection\ai.jar</code>：；仓库根的 <code>AiAgentV4.jar</code> 与它逐位相同。</p>
+            <p>线上这份是 <code>plugins\exection\ai.jar</code>（<code>&lt;框架目录&gt;</code> 指 SFW 的安装目录）；仓库根的 <code>AiAgentV4.jar</code> 与它逐位相同。</p>
             <div class="code" data-lang="powershell">
-              <pre><code>Get-Item 'C:\Sair\SairFrameWork\plugins\exection\ai.jar' | Select-Object Length
+              <pre><code>Get-Item '&lt;框架目录&gt;\plugins\exection\ai.jar' | Select-Object Length</code></pre>
             </div>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">④ 提示词要自己准备</h4>
             <p>冷启动只会建 <b>0 字节空壳</b> <code>prompts\identity.md</code> 与 <code>prompts\subagent.md</code> —— <b>基板不带任何提示词文案</b>（<code>Boot.java</code>）。空文件与"文件不存在"在加载器里语义完全一致。</p>
-            <p class="t-cap">部署后把提示词文件放进数据根的 <code>prompts\</code> 就可以用了。当前线上这三个文件是：<code>identity.md</code> 13,028 字节、<code>subagent.md</code> 1,664 字节、<code>tools-index.md</code> 11,029 字节。</p>
+            <p class="t-cap">部署后把提示词文件放进数据根的 <code>prompts\</code> 就可以用了。当前线上这三个文件是：<code>identity.md</code> 14,034 字节、<code>subagent.md</code> 1,329 字节、<code>tools-index.md</code> 9,998 字节。</p>
           </div>
         </div>
       </section>
@@ -129,16 +130,21 @@ start 8x64\bin\javaw -jar SFW.jar %*</code></pre>
             </thead>
             <tbody>
               <tr><td><code>config.json</code></td><td>配置文件（已知键 94 个，见<a href="config.html#keys">配置页</a>）</td><td><code>Conf.ensureDefaults()</code>（<code>Boot.java</code>）</td></tr>
-              <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>（<code>Conf.java</code>）；表在装配第③步落盘（<code>Boot.java</code>）</td><td><code>Store.open()</code>（<code>Boot.java</code>）</td></tr>
+              <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>（<code>Conf.java</code>）；表在装配第⑯步末尾落盘（<code>Boot.createLibTables</code>）</td><td><code>Store.open()</code>（<code>Boot.java</code>）</td></tr>
               <tr><td><code>prompts\</code></td><td>提示词文件目录（<code>identity.md</code> / <code>subagent.md</code> 等）</td><td>骨架 + 你自己放文件</td></tr>
               <tr><td><code>files\</code></td><td>下载与图片落点（库导出文件也落这里，<code>Cmd.java</code>）</td><td>骨架（<code>Boot.java</code>）</td></tr>
               <tr><td><code>tmp\</code></td><td>临时文件目录</td><td>骨架（<code>Boot.java</code>）</td></tr>
-              <tr><td>外挂扩展层目录</td><td>后加进来的能力存放处；怎么写见 <a href="capabilities.html#skill-dev">06 · 能力</a></td><td>骨架（<code>Boot.java</code>）</td></tr>
+              <tr><td>外挂扩展层目录</td><td>后加进来的能力存放处；怎么写见 <a href="skills.html">11 · 技能开发</a></td><td>骨架（<code>Boot.java</code>）</td></tr>
+              <tr><td>权限文件</td><td><code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code>：谁能用哪个 op、谁能改 / 读哪类数据、谁能碰哪些路径（见 <a href="perms.html">07 · 权限管理</a>）</td><td>主人用控制台写，或手改文件</td></tr>
               <tr><td><code>logs\</code> / <code>debug-port.json</code> 等</td><td>运行期落盘物（日志、调试面状态）</td><td>运行期</td></tr>
             </tbody>
           </table>
         </div>
         <p class="t-cap">更细的文件地图（源码 17 个包 + 数据表落点）见<a href="files.html">文件与数据根</a>页。</p>
+
+        <div class="note reveal">
+          <p><span class="n-title">权限文件只活在实例旁</span>：部署脚本把 <code>data\</code> 往宿主的运行数据根拷时，<b>按文件名跳过</b>这几份 —— <code>perms-core.jsonc</code> 与每个技能目录里的 <code>perms.jsonc</code>，以及旧版那两份统一账本；另外 <code>config.json</code>、<code>v4.db</code>、<code>files\</code>、<code>tmp\</code>、<code>cache\</code>、启动脚本与调试面凭据文件也都不参与拷贝。<b>所以项目仓库里不放权限表，部署也不会用项目里的副本覆盖线上已经授权的那几份</b> —— 升级时它们的字节原样留着。要重置它们，只能在控制台改表或直接编辑那份线上文件。</p>
+        </div>
 
         <div class="note reveal">
           <p><span class="n-title">命令前缀从哪来</span>：控制台命令的前缀是<b>组件名</b>（<code>V4Activity.java</code> 三处都在用 <code>getName()</code> / 安全化后的组件名去构造命令对象），线上这个组件名是 <code>ai</code>，所以命令都写成 <code>ai/start</code> 这种形式；取不到名字时代码里的兜底是 <code>ai4</code>（<code>Cmd.java</code>）。</p>
@@ -281,9 +287,9 @@ ai/napcat status</code></pre>
               <tr><td><code>prompts\</code></td><td>目录 + <code>identity.md</code>、<code>subagent.md</code> 两个 空壳</td></tr>
               <tr><td><code>files\</code></td><td>附件与下载落点</td></tr>
               <tr><td><code>tmp\</code></td><td>临时目录</td></tr>
-              <tr><td>外挂扩展层目录</td><td>能力存放处（怎么写见 <a href="capabilities.html#skill-dev">06 · 能力</a>）</td></tr>
+              <tr><td>外挂扩展层目录</td><td>能力存放处（怎么写见 <a href="skills.html">11 · 技能开发</a>）</td></tr>
               <tr><td><code>config.json</code></td><td>由 <code>Conf.ensureDefaults()</code> 写默认值</td></tr>
-              <tr><td><code>v4.db</code></td><td>建库；表在装配第③步落盘</td></tr>
+              <tr><td><code>v4.db</code></td><td>建库；表在装配第⑯步末尾落盘（<code>Boot.createLibTables</code>）</td></tr>
             </tbody>
           </table>
         </div>
@@ -327,7 +333,7 @@ ai/status</code></pre>
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0"><code>ai/exit</code> 只停基板</h4>
             <p>命令表对它的说明是"框架转发到组件 <code>exit()</code>：停基板（不改配置、不卸载插件；之后可再 start）"（<code>Cmd.java</code>）。</p>
-            <p class="t-cap">但<b>实测行为</b>是：基板停下之后<b>调试口会随之关闭，而 JVM 进程仍然活着</b>；<b>在没有控制台的场景下，这时无法再 start</b>。这是当前实现的行为，<b>未计划修改</b>。</p>
+            <p class="t-cap">但<b>实际行为</b>是：基板停下之后<b>调试口会随之关闭，而 JVM 进程仍然活着</b>；<b>在没有控制台的场景下，这时无法再 start</b>。这是当前实现的行为，<b>未计划修改</b>。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">要真正关停</h4>

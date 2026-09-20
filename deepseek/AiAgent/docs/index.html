@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>总览 · AiAgent V4 文档</title>
-<meta name="description" content="AiAgent V4.1 文档总览：基板九项能力、11 个页面入口与上手前要留意的约定，每条说明都能对应到实现。">
+<meta name="description" content="AiAgent V4.2 文档总览：基板九项能力、12 个页面入口与上手前要留意的约定，每条说明都能对应到实现。">
 <link rel="stylesheet" href="css/site.css">
 <noscript><style>.reveal{opacity:1 !important;transform:none !important}#bg-canvas,.scanline{display:none !important}</style></noscript>
 </head>
@@ -30,7 +30,8 @@
     <a href="files.html"><span class="n">08</span>文件</a>
     <a href="architecture.html"><span class="n">09</span>实现</a>
     <a href="migration.html"><span class="n">10</span>升级</a>
-    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+    <a href="skills.html"><span class="n">11</span>技能开发</a>
+    <a href="changelog.html"><span class="n">12</span>更新日志</a>
   </nav>
   <div class="topbar-meta">
     <span class="chip live">纯静态</span>
@@ -45,7 +46,7 @@
 
     <section class="hero">
       <span class="eyebrow">总览 · 命令使用 / 基板能力 / 技术实现</span>
-      <h1>AiAgent <span class="grad">V4.1</span><br>基板只做九件事</h1>
+      <h1>AiAgent <span class="grad">V4.2</span><br>基板只做九件事</h1>
       <p class="lede">
         本套文档只写三件事：<b>命令怎么用</b>、<b>基板能做什么</b>、<b>它是怎么实现的</b>。
         关于实现的每条说明都能在仓库里找到对应的地方；
@@ -92,7 +93,7 @@
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">不在范围内</span>：技能这一层可以自己长：怎么写、怎么装见 <a href="capabilities.html#skill-dev">06 · 能力</a> 里的「自己写一个技能」。它的加载机制在<a href="architecture.html#hot">实现页的加载管线</a>里以"机制"的形式出现，不涉及任何具体内容。业务能力由它提供，与基板文档分层。</p>
+          <p><span class="n-title">不在范围内</span>：技能这一层可以自己长：怎么写、怎么装见 <a href="skills.html">11 · 技能开发</a>。它的加载机制在<a href="architecture.html#hot">实现页的加载管线</a>里以"机制"的形式出现，不涉及任何具体内容。业务能力由它提供，与基板文档分层。</p>
         </div>
 
         <div class="note reveal">
@@ -116,7 +117,7 @@
           <a class="tile reveal d2" href="capabilities.html#prompt"><span class="t-num">03 / PROMPT</span><h3><span class="dot"></span>提示词</h3><p>从数据根读提示词文件，按槽位注入到系统提示 / 每轮上下文 / 工具说明 / 用户消息前。</p><span class="t-meta"><span>sair.v4.prompt</span><span>注入</span></span></a>
           <a class="tile reveal" href="capabilities.html#agent"><span class="t-num">04 / AGENT</span><h3><span class="dot"></span>Agent 架构</h3><p>主循环 + 子 Agent + 任务台账；回合调度分道、模型调用过闸门。</p><span class="t-meta"><span>sair.v4.agent</span><span>主循环 / 子 Agent</span></span></a>
           <a class="tile reveal d1" href="capabilities.html#ctx"><span class="t-num">05 / CTX</span><h3><span class="dot"></span>上下文装配</h3><p>把系统提示、事实块、历史窗口、本轮输入拼成一次请求（事实块只放事实，不放文案）。</p><span class="t-meta"><span>sair.v4.ctx</span><span>事实块</span></span></a>
-          <a class="tile reveal d2" href="capabilities.html#perm"><span class="t-num">06 / AUTH</span><h3><span class="dot"></span>权限</h3><p>资源 ACL：三个身份 × 五类资源 × 位；账本是数据根下的例外清单，<b>空位 = 拒绝</b>。</p><span class="t-meta"><span>sair.v4.auth</span><span>默认拒绝</span></span></a>
+          <a class="tile reveal d2" href="capabilities.html#perm"><span class="t-num">06 / AUTH</span><h3><span class="dot"></span>权限</h3><p>权限文件按归属分散：基板内置工具写数据根的 <code>perms-core.jsonc</code>，每个技能写自己的 <code>perms.jsonc</code>；三个身份 × 三个域（技能 / 数据 / 路径），没列到就按该域的默认值收尾。</p><span class="t-meta"><span>sair.v4.auth</span><span>默认拒绝</span></span></a>
           <a class="tile reveal" href="capabilities.html#model"><span class="t-num">07 / AI</span><h3><span class="dot"></span>模型客户端</h3><p>对话、流式输出、原生工具调用、图片理解、余额与模型清单；失败收敛成一句可读说明。</p><span class="t-meta"><span>sair.v4.ai</span><span>DeepSeek</span></span></a>
           <a class="tile reveal d1" href="capabilities.html#qq"><span class="t-num">08 / QQ</span><h3><span class="dot"></span>NapCat 连接</h3><p>反向 WebSocket 服务端 + OneBot 动作调用 + 事件解析 + 本地文件外链中转。</p><span class="t-meta"><span>sair.v4.qq</span><span>反向 WS</span></span></a>
           <a class="tile reveal d2" href="capabilities.html#console"><span class="t-num">09 / TERM + UI</span><h3><span class="dot"></span>控制台与界面</h3><p>装配跑在后台线程、进度实时打印；对话正文与过程日志分流；控制台在被捕获时可供模型读取（仅主人）。</p><span class="t-meta"><span>sair.v4.term</span><span>sair.v4.ui</span></span></a>
@@ -135,18 +136,18 @@
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">线上程序</h4>
-            <p><code>C:\Sair\SairFrameWork\plugins\exection\ai.jar</code></p>
+            <p><code>&lt;框架目录&gt;\plugins\exection\ai.jar</code><br><span class="dim">（下同：<code>&lt;框架目录&gt;</code> 指 SFW 的安装目录，<code>&lt;项目目录&gt;</code> 指本仓根）</span></p>
             <p><br><span class="dim"></span></p>
             <p class="t-cap">同一份 jar 在仓库根目录另有 <code>AiAgentV4.jar</code>，与线上这份逐位相同。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">源码</h4>
-            <p><b>110 个 <code>.java</code></b>，分布在 <b>17 个包</b>（根包 <code>sair.v4</code> + 16 个子包）。</p>
+            <p><b>114 个 <code>.java</code></b>，分布在 <b>17 个包</b>（根包 <code>sair.v4</code> + 16 个子包）。</p>
             <div class="code" data-lang="powershell">
               <div class="code-head"><span class="lang">powershell</span><span class="path">计数口径</span><button class="copy" type="button">复制</button></div>
-              <pre><code>Get-ChildItem C:\Sair\Local\AiAgent-V4\src -Recurse -Filter *.java | Measure-Object
-# =&gt; Count : 110
-Get-ChildItem C:\Sair\Local\AiAgent-V4\src -Recurse -Filter *.java |
+              <pre><code>Get-ChildItem &lt;项目目录&gt;\src -Recurse -Filter *.java | Measure-Object
+# =&gt; Count : 114
+Get-ChildItem &lt;项目目录&gt;\src -Recurse -Filter *.java |
   ForEach-Object { $_.DirectoryName } | Sort-Object -Unique | Measure-Object
 # =&gt; Count : 17</code></pre>
             </div>
@@ -187,8 +188,8 @@ Get-ChildItem C:\Sair\Local\AiAgent-V4\src -Recurse -Filter *.java |
       <section class="chapter" id="pages">
         <header class="chapter-head reveal">
           <span class="chapter-tag">目录</span>
-          <h2>十一个页面</h2>
-          <p class="chapter-desc">建议按 02 → 09 的顺序读一遍；<code>07 技术实现</code>讲的是包与分层、装配、线程与调度这些内部机制。</p>
+          <h2>十二个页面</h2>
+          <p class="chapter-desc">建议按 02 → 09 的顺序读一遍；<code>09 技术实现</code>讲的是包与分层、装配、线程与调度这些内部机制。</p>
         </header>
 
         <div class="grid-3">
@@ -197,11 +198,12 @@ Get-ChildItem C:\Sair\Local\AiAgent-V4\src -Recurse -Filter *.java |
           <a class="tile reveal d2" href="config.html"><span class="t-num">04 / CONFIG</span><h3><span class="dot"></span>配置键面</h3><p>逐键说明：含义、默认值、怎么调、调错的后果；以及何时生效（<code>ai/config</code> 只写文件）。</p><span class="t-meta"><span>94 键</span><span>生效时机</span></span></a>
           <a class="tile reveal" href="commands.html"><span class="t-num">05 / COMMANDS</span><h3><span class="dot"></span>控制台命令</h3><p>每条命令的用法、参数、效果、依赖与注意事项，含"群里只 @ 才触发"和正确关停口径。</p><span class="t-meta"><span>命令表</span><span>注意事项</span></span></a>
           <a class="tile reveal d1" href="capabilities.html"><span class="t-num">06 / CAPABILITIES</span><h3><span class="dot"></span>基板能力</h3><p>九件事、生命周期、失败降级、模型面、QQ 面、权限面、存储面、调试面、边界。</p><span class="t-meta"><span>能力面</span><span>边界</span></span></a>
-          <a class="tile reveal d2" href="perms.html"><span class="t-num">07 / PERMS</span><h3><span class="dot"></span>权限管理</h3><p>ACL 模型（三主体 / 五类资源 / 三位）、<code>perms.json</code> 账本格式、<code>ai/acl</code> 与 <code>ai/perm</code> 的分工、怎么授权与撤销、默认与例外、拒绝长什么样。</p><span class="t-meta"><span>账本</span><span>授权 / 撤销</span></span></a>
+          <a class="tile reveal d2" href="perms.html"><span class="t-num">07 / PERMS</span><h3><span class="dot"></span>权限管理</h3><p>权限文件怎么按归属分散、<code>perms-core.jsonc</code> 与各技能 <code>perms.jsonc</code> 的写法、三个域各自的默认值、<code>ai/perm</code> 的看表与改表（含数据与路径两种写命令）、越界与未授权长什么样。</p><span class="t-meta"><span>权限文件</span><span>授权 / 撤销</span></span></a>
           <a class="tile reveal d2" href="files.html"><span class="t-num">08 / FILES</span><h3><span class="dot"></span>文件与数据根</h3><p>17 个包各自负责什么、数据根里每个文件/目录是什么、数据表落在哪个文件。</p><span class="t-meta"><span>包结构</span><span>数据根</span></span></a>
           <a class="tile reveal" href="architecture.html"><span class="t-num">09 / INTERNALS</span><h3><span class="dot"></span>技术实现</h3><p>分层、装配、线程与调度、工具注册与失败闸门、数据表与键、关键机制与 <code>实现细节</code> 索引。</p><span class="t-meta"><span>机制</span><span>实现细节</span></span></a>
           <a class="tile reveal amber d1" href="migration.html"><span class="t-num">10 / UPGRADE</span><h3><span class="dot"></span>从 V3 升级</h3><p>V4 不读 V3 的数据：会失去什么、怎么留档、哪些配置能照抄、升级后要重做哪几件事。</p><span class="t-meta"><span>数据不迁移</span><span>配置对照</span></span></a>
-          <a class="tile reveal amber d2" href="changelog.html"><span class="t-num">11 / CHANGELOG</span><h3><span class="dot"></span>更新日志</h3><p>当前版本一条 + 继承下来的历史版本条目。</p><span class="t-meta"><span>当前版</span><span>历史条目</span></span></a>
+          <a class="tile reveal" href="skills.html"><span class="t-num">11 / SKILLS</span><h3><span class="dot"></span>技能开发</h3><p>写一个技能的全过程：目录布局、md 的每个键怎么填、java 每把工具怎么写、权限表怎么开、一个完整技能具备哪些东西，以及常见坑。</p><span class="t-meta"><span>目录布局</span><span>md / java / 权限表</span></span></a>
+          <a class="tile reveal amber d2" href="changelog.html"><span class="t-num">12 / CHANGELOG</span><h3><span class="dot"></span>更新日志</h3><p>当前版本一条 + 继承下来的历史版本条目。</p><span class="t-meta"><span>当前版</span><span>历史条目</span></span></a>
         </div>
       </section>
 
@@ -248,7 +250,7 @@ Get-ChildItem C:\Sair\Local\AiAgent-V4\src -Recurse -Filter *.java |
 
         <div class="note bad reveal">
           <p><span class="n-title">⑦ 真正关停：用 <code>/exit</code>，或按精确 pid 杀进程</span>：<code>ai/exit</code> <b>只停基板</b>。基板停下之后<b>调试口会随之关闭，而 JVM 进程仍然活着</b>；在没有控制台的场景下，这时<b>无法再 start</b>。这是当前实现的行为，<b>未计划修改</b>。</p>
-          <p>正确做法：要真正结束进程，用框架控制台的 <code>/exit</code>（框架自带文档写的是「退出 SFW」，见 <code>SairFrameWork\readme\pages\plugin-dev.html</code>；进程由 <code>SairFrameWork\run.bat</code> 里的 <code>javaw -jar SFW.jar</code> 拉起），或者按精确 pid 结束进程。注意：命令表里对 <code>/exit</code> 的说明是"之后可再 start"（<code>Cmd.java</code>），而实测在无控制台场景下做不到 —— 以实测为准。</p>
+          <p>正确做法：要真正结束进程，用框架控制台的 <code>/exit</code>（框架自带文档写的是「退出 SFW」，见 <code>SairFrameWork\readme\pages\plugin-dev.html</code>；进程由 <code>SairFrameWork\run.bat</code> 里的 <code>javaw -jar SFW.jar</code> 拉起），或者按精确 pid 结束进程。注意：命令表里对 <code>/exit</code> 的说明是"之后可再 start"（<code>Cmd.java</code>），而在无控制台场景下做不到 —— 以实际行为为准。</p>
         </div>
 
         <h3 class="sec">两条最容易踩的坑</h3>

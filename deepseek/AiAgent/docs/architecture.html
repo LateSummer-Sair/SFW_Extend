@@ -28,7 +28,8 @@
     <a href="files.html"><span class="n">08</span>文件</a>
     <a href="architecture.html"><span class="n">09</span>实现</a>
     <a href="migration.html"><span class="n">10</span>升级</a>
-    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+    <a href="skills.html"><span class="n">11</span>技能开发</a>
+    <a href="changelog.html"><span class="n">12</span>更新日志</a>
   </nav>
 <div class="topbar-meta">
 <span class="chip live">纯静态</span>
@@ -60,10 +61,10 @@
 <tr><td>热插拔与动态执行</td><td>目录扫描、front matter 解析、内存编译、类加载、名字规范化、运行期编译执行</td><td><code>hot</code></td><td><code>SkMd</code> · <code>SkCompile</code> · <code>SkClassLoader</code> · <code>Sk</code> · <code>ToolNames</code> · <code>DynCode</code></td><td>不决定插件做什么；插件目录不进 classpath</td></tr>
 <tr><td>提示词加载与注入</td><td>提示词文件读取与分节、四个注入槽位的渲染</td><td><code>prompt</code></td><td><code>Prompts</code> · <code>PromptFile</code> · <code>Inject</code>（槽位 <code>system</code> / <code>context</code> / <code>tool</code> / <code>arg</code>）</td><td>不拼最终 <code>messages</code>，也不产生正文</td></tr>
 <tr><td>Agent 架构</td><td>回合门面、主循环、工具闭环、子 Agent、轮数上限与连续失败闸门</td><td><code>agent</code></td><td><code>Agent</code> · <code>Loop</code> · <code>Outcome</code></td><td>不管模型怎么说话（那是 <code>ai</code>），也不管消息怎么发出去（那是 <code>qq</code> 与 <code>term</code>）</td></tr>
-<tr><td>上下文装配</td><td>system、事实块、历史、本轮输入的固定顺序，以及事实的每一行</td><td><code>ctx</code></td><td><code>CtxBuild</code> · <code>ChatWindow</code> · <code>Turn</code> · <code>Ctx</code> · <code>RecognizerState</code></td><td>不重算权限位（一律问账本），也不自己发明事实来源</td></tr>
-<tr><td>权限</td><td>位、资源分类、主体层级、账本、唯一判定函数</td><td><code>auth</code></td><td><code>Acl</code> · <code>Res</code> · <code>Bits</code> · <code>Caller</code> · <code>Auth</code></td><td>不读写文件、不发网络请求；只回答「这位调用者对这个资源有哪些位」</td></tr>
+<tr><td>上下文装配</td><td>system、事实块、历史、本轮输入的固定顺序，以及事实的每一行</td><td><code>ctx</code></td><td><code>CtxBuild</code> · <code>ChatWindow</code> · <code>Turn</code> · <code>Ctx</code> · <code>RecognizerState</code></td><td>不重算 op 结论（一律问权限面），也不自己发明事实来源</td></tr>
+<tr><td>权限</td><td>技能管控表、op 清单、身份、四个判定入口（op / 数据写 / 数据读 / 路径）</td><td><code>auth</code></td><td><code>Acl</code> · <code>Ops</code> · <code>Caller</code> · <code>Auth</code> · <code>Favor</code></td><td>判定不碰文件、不发网络请求；读盘只在装载，落盘只在主人的写命令上</td></tr>
 <tr><td>模型客户端</td><td>HTTP 请求、SSE 解析、消息与工具声明工厂、错误收敛</td><td><code>ai</code></td><td><code>DeepSeek</code> · <code>Sse</code> · <code>Msg</code> · <code>Res</code> · <code>ToolSpec</code></td><td>不做路由与重试编排，也不替主循环决定要不要再跑一轮</td></tr>
-<tr><td>NapCat（QQ 连接）</td><td>反向 WS、事件分派、动作出口、出站分段与渲染、引用与媒体</td><td><code>qq</code></td><td><code>Link</code> · <code>QqGateway</code> · <code>Api</code> · <code>Ev</code> · <code>Seg</code> · <code>QuoteCache</code> · <code>Relay</code></td><td>不做权限判定，也不直接跑模型</td></tr>
+<tr><td>NapCat（QQ 连接）</td><td>反向 WS、事件分派、动作出口、出站分段与渲染、引用与媒体</td><td><code>qq</code></td><td><code>Link</code> · <code>Api</code> · <code>Ev</code> · <code>Seg</code> · <code>QuoteCache</code> · <code>Relay</code></td><td>不做权限判定，也不直接跑模型</td></tr>
 <tr><td>控制台交互</td><td>命令面、流式捕获、四种输出端点、本地面板</td><td><code>term</code> + <code>ui</code></td><td><code>Cmd</code> · <code>ConsoleTap</code> · <code>Sinks</code> · <code>TalkPanel</code> · <code>TalkMount</code></td><td>控制台命令的主语恒为 MASTER，不模拟其它调用者</td></tr>
 </tbody></table></div>
 <h3 class="sec">包一览</h3>
@@ -78,7 +79,7 @@
 <tr><td><code>agent</code></td><td>Agent 门面 + 主循环（工具闭环、失败闸门）</td><td><code>Agent</code> · <code>Loop</code></td></tr>
 <tr><td><code>ai</code></td><td>模型客户端、SSE 解析、消息与工具声明工厂</td><td><code>DeepSeek</code> · <code>Sse</code> · <code>Msg</code> · <code>Res</code> · <code>ToolSpec</code></td></tr>
 <tr><td><code>qq</code></td><td>反向 WS 链接、动作出口、事件模型、分段、渲染、引用、去重</td><td><code>Api</code> · <code>QuoteCache</code> · <code>Link</code> · <code>Relay</code> · <code>Seg</code> · <code>Seen</code></td></tr>
-<tr><td><code>auth</code></td><td>ACL 账本与判定、资源分类、位运算、主体、好感度存储</td><td><code>Acl</code> · <code>Res</code> · <code>Bits</code> · <code>Caller</code> · <code>Auth</code></td></tr>
+<tr><td><code>auth</code></td><td>技能管控表与判定、op 清单、主体、好感度存储</td><td><code>Acl</code> · <code>Ops</code> · <code>Caller</code> · <code>Auth</code> · <code>Favor</code></td></tr>
 <tr><td><code>term</code></td><td>控制台命令面、控制台捕获、输出端点、分段器</td><td><code>Cmd</code> · <code>ConsoleTap</code> · <code>Sinks</code> · <code>BootProgress</code> · <code>SfwOut</code> · <code>Segmenter</code></td></tr>
 <tr><td><code>ui</code></td><td>本地交流面板与挂载、面板输出端点、风格</td><td><code>TalkPanel</code> · <code>TalkMount</code> · <code>PanelSink</code> · <code>SfwStyle</code></td></tr>
 <tr><td><code>dev</code></td><td>本机调试口、模拟口、调试壳、调试日志</td><td><code>DebugPort</code> · <code>DebugSimPort</code> · <code>DebugLog</code> · <code>DebugShell</code></td></tr>
@@ -110,10 +111,10 @@
 <div class="tw reveal"><table>
 <thead><tr><th>#</th><th>步骤名</th><th>建了什么</th></tr></thead>
 <tbody>
-<tr><td>①</td><td>数据目录与配置</td><td><code>new Conf(root)</code> → <code>load()</code> → <code>ensureDefaults()</code>；建数据根之前先按 ACL 判 B 类 W 位；<code>Res.dataDir(root)</code> 接线</td></tr>
+<tr><td>①</td><td>数据目录与配置</td><td><code>new Conf(root)</code> → <code>load()</code> → <code>ensureDefaults()</code>；建数据根不判权限（资源不再有位），只按配置把目录建出来</td></tr>
 <tr><td>②</td><td>空数据骨架</td><td><code>ensureSkeleton</code>：只建目录与空文件</td></tr>
 <tr><td>③</td><td>六库</td><td><code>new LibRegistry</code> → 登记环境库 → <code>Store.open</code> → <code>Favor</code>；<b>建表不在这里</b>；另用一次真实读验「库可用」</td></tr>
-<tr><td>④</td><td>权限面</td><td><code>new Auth(conf, favor, out)</code> + <code>auth.init()</code></td></tr>
+<tr><td>④</td><td>权限门禁</td><td><code>new Auth(conf, favor, out)</code> + <code>auth.init()</code></td></tr>
 <tr><td>⑤</td><td>提示词</td><td><code>new Prompts(conf, out)</code>；<code>identity.md</code> 缺失 = 空提示词，不兜底文案</td></tr>
 <tr><td>⑥</td><td>工具注册表</td><td><code>new Registry(auth, conf, out)</code>；<code>auth</code> 为空时不筛工具面</td></tr>
 <tr><td>⑦</td><td>模型客户端</td><td><code>new DeepSeek</code> + 模型调用闸门 <code>new Semaphore(modelConcurrency, true)</code>；<code>new DynCode</code></td></tr>
@@ -193,7 +194,7 @@
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="tool">
-<header class="chapter-head reveal"><span class="chapter-tag">04 / 工具</span><h2>工具注册与调用</h2><p class="chapter-desc">全进程只有一张工具表；入口判位、执行不判位；连续失败由一条「事实化」闸门收敛成一行 JSON。</p></header>
+<header class="chapter-head reveal"><span class="chapter-tag">04 / 工具</span><h2>工具注册与调用</h2><p class="chapter-desc">全进程只有一张工具表；可见面按 op 筛、入口判一次、工具内部每个动作再判一次；连续失败由一条「事实化」闸门收敛成一行 JSON。</p></header>
 <h3 class="sec">唯一注册表</h3>
 <p><code>tool\Registry.java</code> 持一个 <code>ConcurrentHashMap&lt;String,Tool&gt;</code>，注册口只有 <code>add(Tool)</code>：每个工具在表里只有一条记录，重名注册走同一把钥匙，不会出现两份同名工具。</p>
 <h3 class="sec">schema 怎么生成</h3>
@@ -208,9 +209,9 @@
 <div class="tw reveal"><table>
 <thead><tr><th>门</th><th>判据</th></tr></thead>
 <tbody>
-<tr><td>可见性（交不交到手）</td><td><code>auth.bits(c, Res.tool(名))</code> 含 <code>X</code>；判定抛异常 → <b>不交</b>（fail-closed）</td></tr>
-<tr><td>入口闸门（点不点得动）</td><td><code>auth.allowRes(c, Res.tool(名), 'X')</code>；非 <code>null</code> 即拒，并把拒文原文返回</td></tr>
-<tr><td>资源判定（碰得到吗）</td><td>不在这里 —— 发生在工具碰资源那一刻（<code>Host.need*</code> → <code>Acl.allow</code>）</td></tr>
+<tr><td>可见性（交不交到手）</td><td>整把工具放行、或它任一动作放行，这把工具才交到手（<code>Registry.visible</code>）；判定抛异常 → <b>不交</b>（fail-closed）</td></tr>
+<tr><td>入口闸门（点不点得动）</td><td>调用入口问一次 <code>Acl.allow</code>；非 <code>null</code> 即拒，并把拒文原文返回</td></tr>
+<tr><td>工具内部各动作</td><td>每个动作分支再判一次自己的 op；资源不再有位这一层，唯一的路就是工具这条手脚（<code>Host.need(op)</code> → <code>Acl.allow</code>）</td></tr>
 </tbody></table></div>
 <p><b>不筛的两种情况</b>：<code>c == null</code>（没有调用者，诊断或控制台拿全量视图）与 <code>auth == null</code>（权限面没装配 —— 这时基板<b>不假装</b>自己有权限面，交全量而不是交空表）。不过 <code>call()</code> 里 <code>c == null</code> 且 <code>auth != null</code> 时仍走入口闸门，唯一显式放行口是 <code>Gate.deny</code> 里的 <code>c.master()</code>。</p>
 <h3 class="sec">调用路径与结果规整</h3>
@@ -250,7 +251,7 @@
 <div class="tw reveal"><table>
 <thead><tr><th>环节</th><th>口径</th></tr></thead>
 <tbody>
-<tr><td>权限拒绝三形态</td><td><code>[auth] 权限阻断</code> 开头（兼容识别）／正文<b>包含</b> <code>[权限阻断] </code>（现代判据）／以 <code>缺 R/W/X 位 —— </code> 开头（<code>Host.need*</code> 的信息性前缀）</td></tr>
+<tr><td>权限拒绝三形态</td><td><code>[auth] 权限阻断</code> 开头（兼容识别）／正文<b>包含</b> <code>[权限阻断] </code>（现代判据）／以 <code>缺 R/W/X 位 —— </code> 开头（资源位时代的历史前缀，只保留识别面 —— 现在没有任何代码产出它）</td></tr>
 <tr><td><code>ok=</code> 读取</td><td>只认取值恰是 <code>0</code> 或 <code>1</code> 的形态（<code>ok=10</code> 不算命中），否则当「没写」</td></tr>
 <tr><td>计数</td><td><code>failStreak</code> + <code>failLast</code>（最后一次失败截断 120 字）；<b>成功即清零</b></td></tr>
 <tr><td>提示阈值</td><td>达到就往上下文加一条 <b>system</b> 事实行</td></tr>
@@ -295,6 +296,7 @@ open():  Class.forName(DRIVER) -> 建数据目录 -> url = "jdbc:sqlite:" + 绝�
 <thead><tr><th>表</th><th>主键 / 唯一</th><th>列</th><th>索引</th><th>声明处</th></tr></thead>
 <tbody>
 <tr><td><code>favor</code></td><td><code>qq</code> INTEGER PRIMARY KEY</td><td><code>value</code> REAL · <code>level</code> · <code>updated</code> · <code>note</code>（TEXT 默认空串）</td><td><code>idx_favor_value(value)</code></td><td><code>Lib.java</code></td></tr>
+<tr><td><code>favor_event</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT</td><td><code>qq</code> · <code>ts</code> · <code>delta</code> REAL · <code>value_after</code> REAL · <code>op</code> · <code>by</code> · <code>why</code></td><td><code>idx_favor_event_qq(qq,ts)</code></td><td><code>Lib.java</code></td></tr>
 <tr><td><code>alarm</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT</td><td><code>ts</code> NOT NULL · <code>fire_at</code> · <code>repeat</code> · <code>scope</code> · <code>target</code> · <code>task</code> · <code>prompt</code> · <code>enabled</code> · <code>state</code> · <code>owner</code></td><td><code>idx_alarm_fire(fire_at)</code> · <code>idx_alarm_enabled(enabled,fire_at)</code></td><td><code>Lib.java</code></td></tr>
 <tr><td><code>task</code></td><td><code>id</code> INTEGER PRIMARY KEY AUTOINCREMENT</td><td><code>ts</code> NOT NULL · <code>status</code> · <code>owner</code> · <code>agent</code> · <code>tools</code> · <code>task</code> · <code>result</code> · <code>ms</code></td><td><code>idx_task_status(status,ts)</code></td><td><code>Lib.java</code></td></tr>
 <tr><td><code>kv</code></td><td><code>k</code> TEXT PRIMARY KEY</td><td><code>v</code> · <code>updated</code></td><td>主键自动索引 <code>sqlite_autoindex_kv_1</code></td><td><code>Lib.java</code></td></tr>
@@ -413,7 +415,7 @@ handshake(sock): setSoTimeout(10000) -> 读头取 sec-websocket-key / authorizat
   动作名为空 -> error("动作名为空")
   rewrite(action, params, deny)             // 文件外链中转：本地路径 -> URL 或 file:///
   文件改写层自己的读文件判定被拦 -> 直接返回拒文
-  guard != null 时问 Guard.deny(action, p)   // 对外动作闸门（E 类 X 位）
+  guard != null 时问 Guard.deny(action, p)   // 对外动作闸门（op 判定）
   link.call(action, p)                      // 走 WS；超时/断开 -> error("Napcat 没有响应…")
   recordSent(action, p, o)                  // 台账：只有发送类动作且响应成功才记
 
@@ -432,113 +434,120 @@ callQuiet(...)：同路但跳过守卫与台账 —— 给基板自己的「不�
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="auth-impl">
-<header class="chapter-head reveal"><span class="chapter-tag">08 / 权限</span><h2>权限面实现</h2><p class="chapter-desc">三个位、五类资源、三类主体、一本 JSON 账本；判定只有一条函数：按类默认分配 + 例外突破默认。</p></header>
-<h3 class="sec">位：只有 R / W / X</h3>
-<div class="code" data-lang="java"><div class="code-head"><span class="lang">java</span><span class="path">src\sair\v4\auth\Bits.java</span><button class="copy" type="button">复制</button></div>
-<pre><code>NONE = 0        一位都没有（显式拒绝、或上限封死）
-R = 1           读
-W = 2           写 / 改本机状态
-X = 4           执行 / 对外动作
-ALL = R|W|X
-INVALID = -1    认不出来的输入：哨兵
+<header class="chapter-head reveal"><span class="chapter-tag">08 / 权限</span><h2>权限面实现</h2><p class="chapter-desc">权限文件按归属分散（基板内置工具写数据根 <code>perms-core.jsonc</code>，每个技能写自己的 <code>perms.jsonc</code>），装载时合并成一张技能管控表；一份 op 清单、三个身份、三个域（技能 / 数据 / 路径）；判定是四个入口：能不能用这个 op、能不能改这类数据、能不能读这类数据、能不能碰这个路径。</p></header>
+<h3 class="sec">权限文件的形状：三域、四层</h3>
+<div class="code" data-lang="json"><div class="code-head"><span class="lang">json</span><span class="path">src\sair\v4\auth\Acl.java（这一版写 version 6；这里把两份文件的内容并在一起看）</span><button class="copy" type="button">复制</button></div>
+<pre><code>{
+  "version": 6,
+  "_readme": "…一段给人看的用法说明，基板读表时跳过…",
 
-// 字面量：R W X RW RX WX RWX NONE —— 大小写不敏感、顺序不敏感（"wr" 与 "RW" 同值）
-// 认不出来一律 INVALID，不猜；判定链上拿到 -1 就当「没有权限」（fail-closed）</code></pre></div>
-<p><b>一个刻意的区分</b>：账本条目里的「位」字段允许写<b>空串</b>表示 <code>NONE</code>（条目层语义）；而 <code>Bits.parse</code> 对空串返回 <code>INVALID</code> —— 「没写」不等于「写了空」（<code>Bits.java</code>）。<code>has(mask, need)</code> 对认不出的位名、<code>NONE</code>、非法掩码一律 <code>false</code>：把「需要什么都不需要」当成放行，本身就是个权限洞（<code>Bits.java</code>）。</p>
-<h3 class="sec">资源：五个类</h3>
-<div class="tw reveal"><table>
-<thead><tr><th>类</th><th>含义</th><th>怎么造</th></tr></thead>
-<tbody>
-<tr><td><code>A</code></td><td>SFW 数据根之外的任意本机磁盘路径</td><td><code>Res.path(p)</code> 落在 SFW 之外（<code>Res.java</code>）</td></tr>
-<tr><td><code>B</code></td><td>SFW 路径之内的文件</td><td>同上，落在 SFW 之内（<code>Res.java</code>）</td></tr>
-<tr><td><code>C</code></td><td>她自己的运行时脚手架：库、内存状态、<code>files</code> 目录</td><td><code>Res.db(lib)</code> / <code>Res.mem(what)</code>（<code>Res.java</code>）</td></tr>
-<tr><td><code>E</code></td><td>对外交互（NapCat 动作、向 SFW 发命令）</td><td><code>Res.platform(action)</code>（<code>Res.java</code>）</td></tr>
-<tr><td><code>T</code></td><td>工具（只有入口受管）</td><td><code>Res.tool(name)</code>（<code>Res.java</code>）</td></tr>
-<tr><td><code>*</code></td><td>通配资源，非主人一律不给</td><td><code>Res.all()</code>（<code>Res.java</code>）</td></tr>
-</tbody></table></div>
-<p><b><code>files</code> 树没有专有位</b>：<code>&lt;数据根&gt;/files/**</code> 是 C 类里的一个特例文件实体，位一律服从 C；<code>isFilesTree()</code> 只用来让路径式范围能命中它，判定侧不为它单开一档（<code>Res.java</code>、<code>Acl.java</code>）。</p>
-<h3 class="sec">默认分配表（唯一的两张表）</h3>
-<div class="tw reveal"><table>
-<thead><tr><th>主体</th><th>A 本机</th><th>B SFW</th><th>C 数据</th><th>E 外部交互</th><th>T 工具</th></tr></thead>
-<tbody>
-<tr><td>MASTER</td><td colspan="5">恒 <code>RWX</code>，任何条目都不影响他（<code>Acl.java</code>）</td></tr>
-<tr><td>SYSTEM（她本人的自主行为）</td><td><code>R</code></td><td><code>RW</code></td><td><code>RWX</code></td><td><code>RWX</code></td><td><code>RWX</code></td></tr>
-<tr><td>ALLUSER（全部用户主体）</td><td><code>NONE</code></td><td><code>NONE</code></td><td><code>R</code></td><td><code>NONE</code></td><td><code>NONE</code></td></tr>
-</tbody></table></div>
-<p>常量 <code>DEF_A</code>／<code>DEF_B</code>／<code>DEF_C</code>／<code>DEF_E</code>／<code>DEF_T</code> 与 <code>SYS_A</code>／<code>SYS_B</code>／<code>SYS_C</code>／<code>SYS_E</code>／<code>SYS_T</code> 全在 <code>auth\Acl.java</code>；取值入口 <code>defaultAlloc(char)</code> 与 <code>systemAlloc(char)</code>。</p>
-<div class="note bad">
-<b>T 类默认 <code>NONE</code></b>：非主人摸不到任何工具入口 —— <code>R</code>（看工具 = 可见性）／<code>W</code>（改·注册）／<code>X</code>（执行）一位都不给，于是普通用户的回合看到的工具面是<b>空的</b>；要放开某个人，由主人写 <code>T["User&lt;QQ&gt;","","X"]</code> 这类例外条目（<code>Acl.java</code>、<code>Registry.java</code>）。<b>C 类只给 <code>R</code></b>：非主人对数据只读，<code>W</code> 与 <code>X</code> 都收回（<code>Acl.java</code>）。
-</div>
-<h3 class="sec">主体层级与命中顺序</h3>
-<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\auth\Acl.java</span><button class="copy" type="button">复制</button></div>
-<pre><code>TIER_USER = 3 / TIER_GROUP = 2 / TIER_ALLUSER = 1 / TIER_NONE = 0
+  "Skill": {
+    "Run": {
+      ["memory.remember", "memory.recall"]: ["ALLUSER"],
+      ["weather"]: ["ALLUSER"]
+    },
+    "Ban": {
+      ["exec"]: ["ALLUSER"]
+    }
+  },
 
-hit(c, r):
-  best = null; bestTier = 0
-  for e in entries:                       // 按**行序**遍历
-      类别不同 / tier(c) &lt;= 0 / 范围不命中 -> skip
-      t >= bestTier -> best = e; bestTier = t    // ★ 高层级直接接管；同级后来者覆盖
-  return best                             // null = 一条都没命中，走默认分配</code></pre></div>
-<p><code>SYSTEM</code> 自成一路（只对 <code>Kind.SYSTEM</code> 生效，层级 3）（<code>Acl.java</code>）。<b>范围的具体度不参与优先级</b> —— 只有「主体层级 + 行序」两条规则（<code>Acl.java</code>）。<code>ALLUSER</code> 不含 MASTER、也不含 SYSTEM：否则一句 <code>A["ALLUSER","",""]</code> 会把她的自主行为整个打死（<code>Acl.java</code>）。</p>
-<h3 class="sec">唯一判定：<code>bitsOf</code> 与 <code>allow</code></h3>
+  "DB": {
+    "Run":  { ["pref.donation"]: ["ALLUSER"] },
+    "Read": { ["pref.donation"]: ["ALLUSER"] },
+    "Ban":  { }
+  },
+
+  "File": {
+    "Run":  { },
+    "Read": { ["D:/data/share/"]: ["ALLUSER"] },
+    "Ban":  { }
+  }
+}
+
+落点   := 数据根 perms-core.jsonc（不属于任何技能的 op / 数据键 / 全部路径） | skills\&lt;技能名&gt;\perms.jsonc（该技能自己的 op 与数据键）
+注释   := 以 // 开头的整行，写在内容的前一行，读盘前整行丢掉
+域     := Skill | DB | File
+层     := Skill: Run | Ban      DB / File: Run | Read | Ban
+规则键 := ["a", "b"]（op / 数据类别 / 路径）  单元素也带括号，与裸键等价；认不出的键点名且不生效
+身份   := user:&lt;QQ号&gt; | group:&lt;群号&gt; | ALLUSER   （裸 QQ 号 = user:&lt;QQ号&gt;）
+         MASTER / SYSTEM 写进文件里整行忽略（不报错、不生效，也不占"已声明"位）
+空身份表 = 一条决定：数据与路径两域照写（列出来了但谁都不给）；技能域与"没列到"等效
+越界    = 技能文件里写了不属于它的 op / 数据键（那一条不生效），或写了 File 块（整块不生效），启动日志都点名一行</code></pre></div>
+<p><b>三域的默认值与优先级</b>：<code>Skill</code> —— <code>Ban</code> &gt; <code>Run</code> &gt; 没列到 = 不能；<code>DB</code> —— 改：<code>Ban</code> &gt; <code>Run</code> &gt; 没列到 = 不能改；读：<code>Ban</code> &gt; <code>Read</code> &gt; 没列到 = <b>能读</b>（全表唯一默认放开的一处）；<code>File</code> —— 改：<code>Ban</code> &gt; <code>Run</code> &gt; 没列到 = 不能改；读：<code>Ban</code> &gt; <code>Read</code> &gt; 没列到 = 不能读。技能目录里没有那份 <code>perms.jsonc</code> 时，这个技能的全部 op 就落进“空”这一档 —— 默认拒绝。</p>
+<p><b>判定层次</b>：先看<b>域</b>（问的是 op、数据还是路径），再看<b>层</b>（写看 <code>Run</code>、读看 <code>Read</code>），层内把覆盖这个键的规则<b>从最具体往最宽</b>过一遍 —— 第一把给出决定的键说了算：同一把键上 <code>Ban</code> 压过 <code>Run</code> / <code>Read</code>，身份取并集；更具体的键（<code>pref.donation</code> 比 <code>pref</code>，路径按最长）没给这个身份任何决定时，才落到更宽的键；一把键都没有就按该域“没列到”的默认值收尾（<code>Acl.decide</code>）。</p>
+<p><b>没有位，也没有资源分类</b>：资源（本机文件、运行目录、数据库、对外动作）对主人与她本人完全可见、可改、可执行；对 <code>ALLUSER</code> 是黑盒 —— 想读、想写、想碰，唯一的路是技能（工具）这条手脚，再加上数据与路径两道独立闸门。</p>
+<h3 class="sec">op 从哪来、身份怎么写</h3>
+<p>op 清单来自<b>声明</b>：技能在装载期用 <code>OpList.add(tool, action, note)</code> 把自己的动作列一遍，内置工具在注册时声明；<code>Ops.of(tool)</code> 对没声明过的老技能退化成工具名本身。写文件时的分组、释义与顺序由这份清单产出，<code>ai/perm gen</code> 只是在<b>已有的</b>权限文件里按它重排（不新建文件），没进表的 op 照样不授权（<code>auth\Ops.java</code>、<code>auth\OpList.java</code>）。</p>
+<div class="tw reveal"><table>
+<thead><tr><th>op 形状</th><th>什么时候用</th><th>出处</th></tr></thead>
+<tbody>
+<tr><td><code>工具名</code></td><td>单动作工具；写在键里也表示覆盖这把工具<b>已经注册的</b>全部动作（工具名是宽键，只认装载时已注册的动作；写完整的 <code>工具名.动作名</code> 精确键则不看这份清单 —— 那等于给一个将来才注册的动作预先授权）</td><td><code>auth\Ops.java</code>、<code>Auth.aclKnownOps</code></td></tr>
+<tr><td><code>工具名.动作名</code></td><td>多动作工具里的某一个动作</td><td><code>auth\Ops.java</code></td></tr>
+<tr><td><code>napcat.动作名</code></td><td>NapCat 的每个动作各占一个 op</td><td><code>qq\Api.java</code></td></tr>
+</tbody></table></div>
+<p>身份只有三种写法：<code>user:&lt;QQ号&gt;</code> / <code>group:&lt;群号&gt;</code> / <code>ALLUSER</code>，裸 QQ 号等于 <code>user:&lt;QQ号&gt;</code>（另外还认几种等价写法：<code>全体</code> / <code>所有人</code> / <code>全部</code> 等于 <code>ALLUSER</code>，<code>qq:</code> 前缀等于 <code>user:</code>，<code>用户…</code> 等于 <code>user:</code>，<code>群号…</code> / <code>群…</code> 等于 <code>group:</code>）。主人（<code>MASTER</code>）与她本人（<code>SYSTEM</code>）恒全权，不进判定：<b>手写进文件里</b>的那几行被整行忽略 —— 不报错、不生效，也<b>不占</b>“已经声明过”的位置（<code>Acl.principalsOf</code>、<code>Acl.isFreeKey</code>）；<b>控制台写命令</b>里写这两个身份则会被直接回绝，两句原话分别是“主人恒全权，不需要写进表里”与“她自己恒全权，不需要写进表里”（<code>Acl.principalReason</code>，控制台路径用它）。主体种类由 <code>Caller.kind()</code> 给出，顺序是“显式自主标志 &gt; 主人 &gt; 其余”，正式身份只有上面三个（<code>auth\Caller.java</code>）。</p>
+<h3 class="sec">四个判定入口</h3>
 <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\auth\Acl.java（判定链）</span><button class="copy" type="button">复制</button></div>
-<pre><code>bitsOf(caller, resource):
-  caller 或 resource 为 null          -> NONE        // fail-closed
-  MASTER                              -> ALL         // 恒全权
-  资源是通配 '*'                      -> NONE        // 非主人一律空
-  masterOnlyRes(资源)                 -> NONE        // 第一层：连她也不给
-  ALLUSER 且 outsiderBlockedRes(资源) -> NONE        // 第二层：外人恒空
-  命中条目 != null                    -> 命中.mask() // 例外直接生效，不再与默认取交集
-  caller 是 SYSTEM                    -> systemAlloc(类)；否则 defaultAlloc(类)
+<pre><code>四个入口（都先过同两道短路：caller 为 null = 不筛；kind 是 MASTER / SYSTEM = 放行）：
+  allow(caller, op)                         Skill 域：这个 op 能不能用
+  dbDeny(caller, 数据键, 行归属)              DB 域写：这类数据能不能改 + 这一行是不是他的
+  dbReadDeny(caller, 数据键)                 DB 域读：这类数据能不能读
+  fileDeny(caller, 路径, write)              File 域：write 看 Run、否则看 Read
 
-allow(caller, resource, need):
-  资源 null / 位名认不出（bit &lt;= 0）/ caller null  -> DENY_PREFIX + 人话原因
-  Bits.has(bits, bit) -> null（放行）
-  否则 -> DENY_PREFIX + "需要 &lt;目标&gt; 的 &lt;X&gt; 位（&lt;来源&gt;，当前有效位 &lt;RWX|NONE&gt;）"</code></pre></div>
-<p>拒绝文案前缀常量是 <code>Acl.DENY_PREFIX = "[权限阻断] "</code>（<code>Acl.java</code>）；括号里的「来源」由 <code>source(c,r)</code> 给出：MASTER／例外条目原文／她自己的默认分配／默认分配。</p>
-<h3 class="sec">两层受保护资源（例外也不开）</h3>
+域内判定（decide）：把覆盖这个键的规则从最具体往最宽过一遍，第一把给出决定的说了算
+  同一把键上：命中任一条 Ban        -> 拒（Ban 压过 Run 与 Read）
+              只命中 Run / Read     -> 放行
+              这把键出现过但身份表是空的 -> 空表也是一条决定（不再往更宽的键落）
+  一把覆盖键都没有 -> 按该域"没列到"的默认值收尾
+
+Skill 拒绝文案（尾部说明是哪一层挡的）：
+  op 为空                   -> DENY_PREFIX + "没有给出 op 名 —— 按拒绝处理"
+  命中 Ban                  -> DENY_PREFIX + "「op」在技能管控表的黑名单里"
+  命中空表                  -> DENY_PREFIX + "「op」没有授权给你（列出来了，但谁都没给）"
+  一条都没命中              -> DENY_PREFIX + "「op」没有授权给你（未列到 = 未授权）"
+
+opMatch(键, 调用 op):   精确相等，或键写在工具级且那个动作已注册（memory 覆盖 memory.remember）
+principalMatch(键, c):  ALLUSER 命中全体；user:&lt;QQ&gt; 比 qq；group:&lt;群号&gt; 比群号；指名命中另记
+rowOwned(c, 行归属):    行归属主体等于调用者；无归属的行只有被指名的身份动得了</code></pre></div>
+<p>判定过程出任何异常都在 <code>Auth.allow</code> 那一层收敛成<b>拒</b>（fail-closed）；权限面没装配也按拒处理 —— 绝不让异常变成放行（<code>auth\Auth.java</code>）。数据与路径两道由 <code>Builtins</code> 侧的薄壳调用（同样 fail-closed）。拒绝原文的前缀常量是 <code>Acl.DENY_PREFIX = "[权限阻断] "</code>，这个前缀一字不改、这一版只在它后面补分层说明；<code>Auth.DENY_PREFIX</code> 那一句旧文案只留给识别面兼容。</p>
+<h3 class="sec">三层闸门分别落在哪</h3>
 <div class="tw reveal"><table>
-<thead><tr><th>层</th><th>内容</th><th>MASTER</th><th>SYSTEM</th><th>ALLUSER</th></tr></thead>
+<thead><tr><th>闸门</th><th>落在哪</th><th>问的是</th></tr></thead>
 <tbody>
-<tr><td>第一层</td><td>账本自身（<code>perms.json</code> + <code>.tmp</code>）、授权动作本身（<code>mem:acl</code>）、账号凭据（<code>get_cookies</code>）</td><td><code>RWX</code></td><td><b>∅</b></td><td>∅</td></tr>
-<tr><td>第二层·核心档</td><td><code>&lt;数据根&gt;/prompts/**</code>、<code>config.json</code>、<code>debug-port.json</code></td><td><code>RWX</code></td><td>按类默认</td><td><b>∅</b></td></tr>
-<tr><td>第二层·按扩展名档</td><td><b>只对 B 类路径</b>生效的后缀清单（见下）</td><td><code>RWX</code></td><td>按类默认</td><td><b>∅</b></td></tr>
+<tr><td><b>技能门</b></td><td>工具入口两道：<code>Registry.visible(caller)</code>（交不交到手）与 <code>Registry.call</code> 的入口闸门（点不点得动）；工具内部每个动作再由 <code>Host.need(op)</code> 自查一次</td><td>这个身份能不能用这个 op（<code>Acl.allow</code>）</td></tr>
+<tr><td><b>数据门</b></td><td>通用库口：<code>store</code> 的四个读分支、<code>store_write</code> 的 <code>put</code>/<code>update</code>/<code>delete</code>、<code>store_admin</code> 的各分支（整库动作把它覆盖到的每一类都过一遍）</td><td>这类数据能不能改（外加这一行是不是他的）、能不能读（<code>Acl.dbDeny</code> / <code>Acl.dbReadDeny</code>）</td></tr>
+<tr><td><b>文件门</b></td><td>碰路径的写口：本地文件改写、外链地址产出、整库导出与导入</td><td>这个路径能不能碰（<code>Acl.fileDeny</code>，<code>write</code> 决定看哪一层）</td></tr>
 </tbody></table></div>
-<div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\auth\Acl.java（后缀清单）</span><button class="copy" type="button">复制</button></div>
-<pre><code>.json .ini .conf .properties .yml .yaml .toml     // 受限配置
-.bat  .cmd  .ir                                    // 能改本机状态的脚本
-.xml  .env  .key .pem .p12                         // 密钥与证书材料
-
-// 匹配：大小写不敏感（toLowerCase）+ 精确到后缀（endsWith）
-// 所以 export.jsonl 不算 .json —— 导出的 .jsonl 不受影响</code></pre></div>
-<p>第一层单列的理由：她若能通过工具碰账本或授权动作，任何「诱导她自己改权限」的路径都能绕过主人（<code>Acl.java</code>）。按扩展名那一档<b>只对 B 类</b>：A 类已经由 <code>DEF_A</code> 兜住，不必再按后缀分档，也免得让人以为「A 类换个后缀就能读」（<code>Acl.java</code>）。</p>
-<h3 class="sec">账本：<code>perms.json</code> 的格式与落盘</h3>
-<div class="code" data-lang="json"><div class="code-head"><span class="lang">json</span><span class="path">src\sair\v4\auth\Acl.java（版本 3 形状）</span><button class="copy" type="button">复制</button></div>
-<pre><code>{"version": 3,
- "entries": ["A[\"Group123456\",\"D:/share\",\"RWX\"]",
-             "A[\"User987654\",\"D:/share\",\"R\"]",
-             "A[\"ALLUSER\",\"\",\"\"]",
-             "C[\"User123456\",\"grouplog\",\"R\"]"]}
-
-条目 := 类 '[' '"' 主体 '"' ',' '"' 范围 '"' ',' '"' 位 '"' ']'
-类   := 字母（A/B/C/E/T；将来加 N 也认，认不出的类不会命中任何资源）
-主体 := User&lt;QQ号&gt; | Group&lt;群号&gt; | SYSTEM | ALLUSER   （裸 QQ 号 = User&lt;QQ号&gt; 的便捷写法）
-        MASTER 不接受：主人恒全权，不需要例外
-范围 := A/B → 路径（"" = 整个类）；C → 库名 / mem:xxx / files 下的路径
-        E → 动作名；T → 工具名（可省 tool: 前缀）；"" = 整个类
-位   := ""（显式拒绝）| R | W | X | RW | RX | WX | RWX</code></pre></div>
+<p>旧守卫不删：会话归属（<code>inScope</code> / <code>constrain</code> / <code>constrainRow</code>）、整库闸（<code>writeAdminDeny</code> / <code>writeMemoryDeny(row == null)</code>）与那几条不是归属的规则都原样保留，新的两道闸门是<b>加在它们前面</b>的一层，不是替代品 —— 老守卫答“这一行是不是你的会话 / 是不是整库动作”，新闸门答“这类数据 / 这个路径给不给你”。</p>
+<h3 class="sec">写文件：授权 / 封禁 / 数据 / 路径 / 撤回 / 重排</h3>
 <div class="tw reveal"><table>
 <thead><tr><th>操作</th><th>行为</th></tr></thead>
 <tbody>
-<tr><td>条目字符串</td><td><b>原样保留、原样打印</b>（<code>Entry.raw()</code>）；<code>list()</code> 给「层级 + 原始条目 + 例外命中时生效位」三列（<code>Acl.java</code>）</td></tr>
-<tr><td>授权 / 覆盖</td><td>定位键 = 主体 + 类 + <b>规范化范围</b>：同一条就地覆盖，否则追加末尾。<b>不落盘</b>，要持久化自己调 <code>save()</code>（<code>Acl.java</code>）</td></tr>
-<tr><td>撤销</td><td>删掉「主体 + 类 + 规范化范围」那一条；没有就返回 <code>false</code>（<code>Acl.java</code>）</td></tr>
-<tr><td>落盘</td><td>先写 <code>&lt;file&gt;.tmp</code> 再 rename —— 原子替换，不会留半截文件（<code>Acl.java</code>）</td></tr>
-<tr><td>范围规范化</td><td>路径式条目一律归一（<code>Res.path</code> 给的是正斜杠小写盘符）；不归一就会出现条目进得去、却永远命不中的静默失效（<code>Acl.java</code>）</td></tr>
-<tr><td>非法条目</td><td>不抛异常，收进 <code>Reject(raw, reason)</code> 列表并给人话理由（<code>Acl.java</code>）</td></tr>
+<tr><td>授权 / 覆盖</td><td>定位键 = 域 + 层 + 键 + 身份：同一个键上同一个身份只留最后写的那一条（先撤旧的再写新的），同一行里别的身份原样留着；op 写进它 <b>归属</b>的那份文件（<code>Acl.grant</code>、<code>Acl.ownerFileOf</code>），数据与路径的规则写回它<b>读自</b>的那份（<code>Acl.grantKey</code>）</td></tr>
+<tr><td>撤回</td><td>键会<b>自动认它属于哪一块</b>（op / 数据 / 路径），一次把这个身份在该键上的全部条目摘干净；一行里若还写着别人，只摘这一个、其余留着，摘空了整条删（<code>Acl.revoke</code>）</td></tr>
+<tr><td>重排</td><td><code>gen</code> 走 <code>saveAll(auth, false)</code>：<b>只在已有的权限文件里</b>按域、层、键排好，不新建文件、不发明数据或路径条目、不给宽身份新增授权；没有权限文件的 op 会被列出来“= 不授权”（<code>Acl.java</code>）</td></tr>
+<tr><td>落盘</td><td><b>按归属分文件写回</b>：一份文件只带它自己的东西，重排结果与盘上现有字节<b>完全相同就跳过写</b>；要写就<b>写技能文件时永不产出路径块、数据块只在该技能确实带着自己的数据规则时才写</b>（产出必须能被读侧无警告地读回）；先写 <code>&lt;file&gt;.tmp</code> 再 rename —— 原子替换，不会留半截文件；写完自己 <code>reload()</code> 一遍（<code>Acl.java</code>）</td></tr>
+<tr><td>越界过滤</td><td>技能文件里 op 只接受“归属等于该目录名”的；<b>数据键只接受属于这个技能的</b>（不属它的忽略并点名）；<b><code>File</code> 块整块忽略</b>（路径属于部署，只许写在 <code>perms-core.jsonc</code>）。拿不到工具归属时（注册表还没装配）技能文件一律不读，<code>ALLUSER</code> 按未授权处理（<code>Acl.readV6</code>、<code>Acl.addRule</code>、<code>Acl.warnForeignRule</code>、<code>Acl.warnOutOfScope</code>）</td></tr>
+<tr><td>认不出的键</td><td>数据键不在那份类别表里、路径写法不能用、域或层名拼错：一律<b>点名 + 不生效</b>，并进装载汇总的“认不出的键”那一栏（<code>Acl.unknown</code>、<code>Acl.unknownKeys</code>）。判定侧那句“不认识的权限键”只在<b>完全没有得到任何决定、而且没有被任何一个已知宽键覆盖</b>时才给（<code>Acl.coveredByKnownKey</code>）</td></tr>
+<tr><td>宽键与子键</td><td>判定时把覆盖这个键的规则从最具体往最宽过一遍，更具体的键没给决定才落到更宽的键（<code>Acl.decide</code>）；<b>数据与文件两域</b>的宽键按自己的身份表命中，<b>表里没一一列出的那层子键也照它判</b>；技能那一域的宽键只覆盖装载时已经注册的动作（<code>Acl.opSpec</code>）。同一把键上 <code>Ban</code> 压过允许；同键多处取并集</td></tr>
+<tr><td>空身份表</td><td>字面 <code>[]</code> 是一条<b>决定</b>（“列出来了但谁都不给”），不再往更宽的键落、也不吃“没列到”的默认值（<code>Acl.decide</code> 的 <code>Decision.EMPTY</code>）。数据与路径两域照写保留（读侧写成空表 = 不能读）；技能域的空表与“没列到”等效，重排时跳过不写</td></tr>
+<tr><td>护栏：技能不能给自己开口子</td><td>技能的写入路径碰到 <code>perms.jsonc</code> 一律拒收，回一句可读原因（<code>Builtins.isPermFile</code>、<code>Builtins.permFileDeny</code>）</td></tr>
+<tr><td>非法写法</td><td>不抛异常，收进 <code>Reject(raw, why)</code> 并原样留着点名；键里剥不出工具名就跳过（<code>Acl.java</code>）</td></tr>
+<tr><td>谁写它</td><td>只有主人敲 <code>ai/perm run|ban|db|file|revoke|gen</code> 才落盘；装载、判定、查看都不写（<code>term\Cmd.java</code>）</td></tr>
 </tbody></table></div>
-<p><b>权限面只有一件事</b>：<code>Auth</code> 是薄门面 —— <code>bits(c,r)</code> 与 <code>allowRes(c,r,need)</code> 两个出口，账本懒装载、进程内缓存一份，<code>reloadAcl()</code> 重读（<code>auth\Auth.java</code>）。<code>init()</code> 的语义是「账本已经装过就重读一次，还没装过就什么都不做」，它<b>不写盘</b>（<code>Auth.java</code>）。</p>
-<p><b>好感度不参与权限判定</b>：<code>favor</code> 表仍在（好感度是数据，也是事实块 <code>caller.favor</code> 的来源，<code>CtxBuild.java</code>），但它不进判定链 —— <code>Auth</code> 的构造器不持有 <code>Favor</code>（<code>Auth.java</code>）。要放开某人，写例外条目这条路就够。</p>
+<p>释义剥法只对 <b>Skill 域</b>的键做：工具键与动作键取第一个 <code>（</code>（半角 <code>(</code> 与 <code>#</code> 也算）之前的那一段；数据键与路径键不剥。<code>_readme</code> 不参与判定（<code>Acl.stripGloss</code>）。</p>
+<h3 class="sec">接线：工具面与事实块</h3>
+<p><b>工具面两道门</b>：<code>Registry.visible(caller)</code> 决定“交不交到手”—— 整把工具放行、或它任一动作放行，这把工具才会出现在模型可见的工具面里；<code>Registry.call</code> 的入口闸门决定“点不点得动”，工具内部每个动作再判一次自己的 op。不筛的情况只有两个：<code>caller == null</code>（内部 / 诊断）与权限面未装配 —— 后者<b>不假装</b>自己有权限面（<code>tool\Registry.java</code>）。</p>
+<p><b>数据面与文件面的接线口</b>：工具面那几条都由 <code>Builtins</code> 里的薄壳调用（<code>dbDenyOf</code> / <code>dbReadDenyOf</code> / <code>fileDenyOf</code>，整库动作走 <code>dbWholeDeny</code> 把它覆盖到的每一类都过一遍）；行归属按类别各自映射成 <code>user:&lt;QQ&gt;</code> / <code>group:&lt;群号&gt;</code>，<b>不由字符串直接比</b> —— 会话键那种形态与规范身份不是一个写法（<code>Builtins.rowOwnerOf</code>）。</p>
+<p><b>事实块三个键</b>：<code>caller.kind</code>（<code>MASTER</code> / <code>SYSTEM</code> / <code>ALLUSER</code>）、<code>caller.ops</code>（<b>结论</b>：恒全权写字符串 <code>"ALL"</code>，其余写可用 op 数组，一个都没授权写 <code>[]</code>，绝不写 <code>null</code>）、<code>caller.rules</code>（<b>依据</b>：能命中他的条目原文，条数有上限、超出的末尾补一句“还有 N 条”；主人与她本人恒为空数组）。三个键都直接问权限面，基板不重算任何一次判定（<code>ctx\CtxBuild.java</code>）。</p>
+<h3 class="sec">多源合并装载</h3>
+<p>装载走的是<b>多源合并</b>：<code>Acl.loadMerged(core, skillsDir, toolOwners, 已注册的 op 清单, out)</code> 把数据根下的 <code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code> 读成一个合并视图 —— core 在前、技能文件按目录名排序在后，来源与条数由 <code>sourceStat()</code> 汇总成人读的一行，装载汇总由 <code>summary()</code> 给（启动与 <code>ai/perm</code> 各打一次）。把“当前已注册的 op 清单”一并交下去是必须的一步：工具级的那条键只覆盖这把工具<b>已经注册的动作</b>，拿不到清单时退回“本表里被授予过的动作”这条更严的口径（只会更严，不会放宽）。<code>Auth</code> 侧是这条装载路径在本基板里的<b>唯一调用方</b>（<code>auth\Auth.java</code>、<code>Acl.loadMerged</code>）。</p>
+<p>旧格式照读：上一版的嵌套写法与旧的统一表都还能读进来（前者装载时提示建议 <code>ai/perm gen</code> 重排，后者 warn 一行建议分家、<b>不删不写</b>）；<code>version</code> 读到 5 按旧语义读并点名，读到比这一版新也点名“版本比基板新”；老文件缺数据或路径两域 ⇒ 按该域“没列到”的默认值走（<b>不会因为“没写”而放宽</b>）。更早那版按资源分类的权限账本（<code>Acl.LEGACY_FILE_NAME</code>）还会读一次做迁移：只有工具入口那几条能翻译成新口径 —— 条目里带 <code>X</code> 的转 <code>Run</code>，其余的转 <code>Ban</code>；按资源分类的那几行在新语义里没有意义，忽略并计数。迁移<b>只读不写</b>（<code>Acl.readLegacy</code>、<code>Acl.readLegacyBlocks</code>）。</p>
+<p><b>归属从哪来</b>：哪个 op 属于哪个技能由工具注册表回答（<code>Registry.toolOwners()</code>）。技能装载或卸载会改变归属，而归属正是“技能文件里哪些条目算越界”的判据，所以每次全量扫描收口都会重读一次权限文件（<code>Boot.reloadPerm</code>）；读不到就按空表处理，判定侧 fail-closed 不受影响。读盘只有一处（<code>Acl.readInto</code>）：<code>Acl.load</code> 与 <code>Acl.loadMerged</code> 都走它，换解析器不用改别处；一份文件读不出来时<b>按空处理 + 点名文件</b>——读不出等于“没有授权”，绝不等于“没有限制”。</p>
+<div class="note bad">
+<b>好感度不进判定链</b>：好感度表仍在（它是数据，也是事实块 <code>caller.favor</code> 的来源），但 <code>Auth</code> 的构造器不持有它 —— 一个工具能不能用只看技能管控表（<code>auth\Auth.java</code>、<code>auth\Favor.java</code>）。
+</div>
+<p><b>权限面是一层薄门面</b>：<code>Auth</code> 的出口是 <code>allow(c, op)</code>、<code>allowed(c, op)</code>、<code>allowedOps(c)</code>，加上装载与重读那几支；它把“已注册的 op 清单”一并交给账本，自己不算判定。合并后的权限表懒装载、进程内缓存一份，<code>reloadAcl()</code> 重新合并重读。<code>init()</code> 的语义是“已经装过就重读一次，还没装过就什么都不做”，它<b>不写盘</b>。账本（<code>Acl</code>）自己也不主动往控制台刷：装载汇总由装配方与控制台各打一次，免得每次重读都刷屏（<code>auth\Auth.java</code>、<code>Boot.logPermDefault</code>）。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="ctx-impl">
@@ -561,7 +570,7 @@ assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没�
 <thead><tr><th>行前缀</th><th>内容</th></tr></thead>
 <tbody>
 <tr><td><code>time:</code></td><td>当前时间</td></tr>
-<tr><td><code>caller:</code></td><td><code>entry</code>／<code>qq</code>／<code>name</code>／<code>master</code>／<code>session</code>／<code>group</code>／<code>role</code>／<code>favor</code>（非主人）／<code>kind</code>／<code>bits</code>／<code>rules</code></td></tr>
+<tr><td><code>caller:</code></td><td><code>entry</code>／<code>qq</code>／<code>name</code>／<code>master</code>／<code>session</code>／<code>group</code>／<code>role</code>／<code>favor</code>（非主人）／<code>kind</code>／<code>ops</code>／<code>rules</code></td></tr>
 <tr><td><code>person:</code></td><td>六库聚合出的「正在说话的这个人」是谁（跨群同一人）；构建失败这一行就不存在</td></tr>
 <tr><td>（媒体行）</td><td>只有媒体段的消息才有</td></tr>
 <tr><td><code>napcat:</code></td><td><code>connected</code> / <code>disconnected</code></td></tr>
@@ -570,7 +579,7 @@ assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没�
 <tr><td>（能力索引行）</td><td>「类别 → 工具[一句话]」；缺配置就没有这一行</td></tr>
 <tr><td><code>rounds:</code></td><td>第几轮 / 还剩几轮 / 上限是谁的；由 <code>Loop</code> 每回合<b>就地刷新</b>（<code>Loop.java</code>）</td></tr>
 </tbody></table></div>
-<p><code>bits</code> 一律问账本（<code>Acl.bitsOf</code>），基板不在这里重算任何一位；<code>rules</code> 给「此人能命中的例外条目原文」，省去每次翻纪律文本。同一行的 JSON 也落到 <code>Turn</code> 状态（键 <code>models</code>），插件用现成的只读口就能读到，不额外新增扩展点接口。</p>
+<p><code>ops</code> 与 <code>rules</code> 都直接问权限面（<code>Acl.allow</code> 的结论与依据），基板不在这里重算一次判定；<code>rules</code> 给「此人能命中的条目原文」，省去每次翻纪律文本。同一行的 JSON 也落到 <code>Turn</code> 状态（键 <code>models</code>），插件用现成的只读口就能读到，不额外新增扩展点接口。</p>
 <h3 class="sec"><code>models:</code> 的八个字段</h3>
 <div class="code" data-lang="json"><div class="code-head"><span class="lang">json</span><span class="path">src\sair\v4\ctx\CtxBuild.java</span><button class="copy" type="button">复制</button></div>
 <pre><code>models: {"self":"…","self_has_vision":true,"main":"…","main_has_vision":true,
@@ -739,9 +748,9 @@ assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没�
 <tbody>
 <tr><td><code>status()</code> / <code>pendingLine()</code></td><td>装配状态与各面计数 / 加载中的排队提示（<code>Cmd.java</code>）</td></tr>
 <tr><td><code>chat(text)</code></td><td>本地对话：要一个 <code>Future</code> 才能等回合结束，所以走 <code>Boot.turns</code> 那条单线程队列（<code>Cmd.java</code>）</td></tr>
-<tr><td><code>tools(a)</code></td><td>工具清单（带「该调用者在这把工具上的有效位」）（<code>Cmd.java</code>、<code>Registry.java</code>）</td></tr>
+<tr><td><code>tools(a)</code></td><td>工具清单（带「技能管控表在这把工具上的 Run / Ban 结论」）（<code>Cmd.java</code>、<code>Registry.java</code>）</td></tr>
 <tr><td><code>startCmd</code> / <code>restartCmd</code></td><td>起基板 / 重启（<code>Life</code> 接口交给壳实现）（<code>Cmd.java</code>）</td></tr>
-<tr><td><code>config(a)</code> / <code>aclCmd()</code></td><td>配置读写（敏感值掩码打印）与账本操作（<code>Cmd.java</code>）</td></tr>
+<tr><td><code>config(a)</code> / <code>perm(a)</code> / <code>favor(a)</code></td><td>配置读写（敏感值掩码打印）、技能管控表操作、好感度数值（<code>Cmd.java</code>）</td></tr>
 <tr><td><code>caller()</code></td><td>控制台命令的主语一律是 MASTER（<code>Cmd.java</code>）</td></tr>
 </tbody></table></div>
 <p><b>控制台为什么单开一条队列</b>：本地 <code>chat</code> 需要一个 <code>Future</code> 才能等回合结束，它走 <code>Boot.turns</code>（单线程 + 64 槽有界队列）；QQ 入站、闹钟、异步子 Agent 走 <code>Lanes</code>。两条路分开，一个慢群就不会堵住全部会话。</p>
@@ -784,7 +793,7 @@ assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没�
 <div class="tw reveal"><table>
 <thead><tr><th>扩展点</th><th>能做什么</th><th>不能做什么</th></tr></thead>
 <tbody>
-<tr><td><code>OutboundStage</code><br>出站改写</td><td>位置在<b>分段之后、发送之前</b>（<code>QqSink</code> / <code>TaskSink</code>）。逐条三个口：<code>veto</code> 一票否决（<code>true</code> = 这一条不发）、<code>transform</code> 改正文（返回 <code>null</code> = 不改，返回空串 = 基板丢弃这一条）、<code>extra</code> 追加独立消息；另有一个整批收尾口，拿得到最终整条消息列表，可以整表改写或原样不动（<code>ext\OutboundStage.java</code>）</td><td>改不动基板判定：权限位、地址判定、闸门与台账都在这条管线之外。否决是<b>整条丢</b>，没有「改一点点再发」的中间态；<code>extra</code> 追加出来的消息不再回 stage，插件之间就不会互相追加成环</td></tr>
+<tr><td><code>OutboundStage</code><br>出站改写</td><td>位置在<b>分段之后、发送之前</b>（<code>QqSink</code> / <code>TaskSink</code>）。逐条三个口：<code>veto</code> 一票否决（<code>true</code> = 这一条不发）、<code>transform</code> 改正文（返回 <code>null</code> = 不改，返回空串 = 基板丢弃这一条）、<code>extra</code> 追加独立消息；另有一个整批收尾口，拿得到最终整条消息列表，可以整表改写或原样不动（<code>ext\OutboundStage.java</code>）</td><td>改不动基板判定：op 判定、地址判定、闸门与台账都在这条管线之外。否决是<b>整条丢</b>，没有「改一点点再发」的中间态；<code>extra</code> 追加出来的消息不再回 stage，插件之间就不会互相追加成环</td></tr>
 <tr><td><code>ContextProvider</code><br>上下文提供者</td><td>每轮往 <code>messages</code> 里加一段，自己声明顺序（<code>order</code> + 插件名）、段位（<code>stable()</code>）与单段字符上限（<code>maxChars()</code>）：稳定段排在系统提示词之后、内置事实块之前，易变段排在内置事实块之后（<code>ext\ContextProvider.java</code>、<code>BuildContext.java</code>）</td><td>内置事实块的位置与内容、历史条数与字符预算、本轮 user 消息的位置，都由基板定，它碰不到。它拿到的是只读口 <code>BuildContext.host()</code>，要写就写自己的库或自己的 <code>kv</code></td></tr>
 <tr><td><code>LifecycleHook</code><br>生命周期钩子</td><td>主回合的三个时点：回合开始（装配完、还没跑）、真要对外说话时、回合结束（正文已发出或已失败）。用途是记账与清理：写对话历史、记调用量、清临时态、发「typing」这类副作用（<code>ext\LifecycleHook.java</code>）</td><td>不改消息内容 —— 那是 <code>OutboundStage</code> 的事，所以这里拿到的是只读 <code>BuildContext</code>，没有可改的正文。子 Agent 回合与后台收尾回合不触发，它们本来也不进对话历史</td></tr>
 <tr><td><code>TriggerVoter</code><br>触发投票</td><td>三态票：<code>ANSWER</code> 回、<code>DECLINE</code> 不回（省掉一整轮模型调用）、<code>ABSTAIN</code> 不管。按 <code>order, 插件名</code> 依次问，<b>第一个非弃权票生效</b>（不是多数决）（<code>ext\TriggerVoter.java</code>、<code>QqGateway.java</code>）</td><td>改不动地址判定本身：没人表态时网关仍走「私聊一律回、群里要求被 @」那条路。投票抛异常或超时都按 <code>ABSTAIN</code> 处理 —— 宁可不答，一条消息也不会因为投票而凭空消失</td></tr>
@@ -801,7 +810,7 @@ assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没�
 <p><b>两道上限</b>：单次扩展点调用超时 <code>extTimeoutMs</code> 默认 200ms（<code>&le;0</code> = 不超时；超时即放弃该次调用）；上下文块还有全局字符预算 <code>ctxBudgetChars</code> 默认 6000，超预算从尾部丢块并计数 <code>budgetDrops</code>（<code>ext\ExtRegistry.java</code>、<code>Conf.java</code>）。</p>
 <p><b>总开关</b> <code>on() = enabled() &amp;&amp; any()</code>：没挂任何 provider 时，连 provider 都不会被调用，开销一点都不多。故障隔离也分两层：扩展点自己做了异常隔离，调用方再兜一层「连注册表都炸了」，两层都只丢外挂块，不影响这一轮（<code>ExtRegistry.java</code>、<code>CtxBuild.java</code>）。</p>
 <div class="note">
-<b>四个口都不通向判定层</b>：权限位、地址判定、轮数上限与失败闸门、出站台账，全部由基板定。扩展点能读到结果、改写自己要发出去的东西、往上下文里加自己那一段，但改不了基板怎么判 —— 所以装了再多外挂，判定的口径仍然是同一份。
+<b>四个口都不通向判定层</b>：op 判定、地址判定、轮数上限与失败闸门、出站台账，全部由基板定。扩展点能读到结果、改写自己要发出去的东西、往上下文里加自己那一段，但改不了基板怎么判 —— 所以装了再多外挂，判定的口径仍然是同一份。
 </div>
 </section>
 </div>

@@ -117,6 +117,11 @@ public final class Skills {
     /** 注入"库落盘"回调（装配期调一次；没注入 = 运行期新声明的表要等重启才建）。 */
     public void setLibSync(Runnable r) { this.libSync = r; }
 
+    /** op 清单（技能在装载期声明；判定与 {@code ai/perm gen} 都按它走）。 */
+    private volatile sair.v4.auth.OpList ops;
+
+    public void setOps(sair.v4.auth.OpList o) { this.ops = o; }
+
     // ==================== 扫描与加载 ====================
 
     /** 全量扫描：新增/变更的技能重新编译并注册，删除的技能摘掉工具与钩子。 */
@@ -336,8 +341,8 @@ public final class Skills {
 
         skills.put(name, sk);
 
-        // 注册工具（权限不在这里声明：没有"工具级档位"这回事 —— 判据是资源 ACL，
-        // 要碰资源那一刻判 Res.* 的位；旧档位表的键规则「中文文件夹名.工具名」已随 PermTable 删除）
+        // 注册工具（权限不在这里声明：判据是技能管控表 —— 身份 × op → Ban / Run / 空，
+        // op 名由技能自己在装载期用 declareOps 声明，判定在工具入口与每个动作分支各判一次）
         registry.removeByOwner(name);
         // 插件扩展点（基板⑦）：注册库声明 → 注册扩展点 → 注册工具 → 挂事件钩子 → 装注入片段（装载顺序的最后一步）
         registerExt(name, sk);
@@ -407,7 +412,19 @@ public final class Skills {
             try {
                 Class<?> k = Class.forName(cn, false, sk.loader);
                 if (!Skill.class.isAssignableFrom(k)) continue;
-                ((Skill) k.newInstance()).declare(g);
+                Skill inst = (Skill) k.newInstance();
+                inst.declare(g);
+                // op 声明（技能管控表的骨架）：失败只让这个技能的 op 退化成"工具名一个 op"，
+                // 不让插件不可用 —— 判定与账本都还认工具名那一层。
+                sair.v4.auth.OpList ol = ops;
+                if (ol != null) {
+                    try {
+                        inst.declareOps(ol);
+                    } catch (Throwable ot) {
+                        if (out != null) out.warn("[skills] " + name + " 的 " + cn
+                                + " 声明 op 失败（退化成工具名）：" + (ot.getCause() == null ? ot : ot.getCause()));
+                    }
+                }
                 any = true;
             } catch (Throwable t) {
                 if (!isEntry) {
@@ -795,10 +812,10 @@ public final class Skills {
     /**
      * 钩子派发（基板把事件交给技能；没人接就什么都不发生）。
      *
-     * <p><b>主体 = SYSTEM（她自己的自主行为），不是主人</b>：A={@code R}、B={@code RW}、C={@code RWX}、
-     * E={@code X} —— 记库、发她自己的推送都行，但 A 类没有 {@code W/X}，所以 {@code exec}
-     * （判 {@code Res.path(execShell())} 的 {@code X}）与写本机文件都被拒。
-     *
+     * <p><b>主体 = SYSTEM（她自己的自主行为），不是主人</b>：主人与她本人对全部资源完全可见、
+     * 可改、可执行 —— 她自己的记库、发她自己的推送、跑她自己的动作都放行。判定的落点因此不在
+     * 这里（她恒全权，{@code h.need(op)} 直接放行），而在<b>代表谁执行</b>：工具通路上主体是触发者，
+     * 由技能管控表按身份 × op 判。</p>
      * <p>旧口径是 {@code Caller.system(...)}（那是 {@code master=true} 的老工厂，语义"以主人身份运行"）
      * —— 等于"定时任务 = 主人权限"，与 {@link #hookActor()} 那条 P1 已改的口径不一致（这里曾漏改一处）。
      * 现在两处同源：主体一律 {@link Caller#systemActor(long)}。</p>

@@ -179,10 +179,9 @@ public final class Agent {
         //   现在没有游标、不落进度状态，窗口就是"此刻这个会话最近的 N 条"。
         putChatWindow(t, c);
         String input = Str.has(text) ? text : Str.nz(mediaFact);
-        // 防御性：落 dialog = 她自己的自主行为（SYSTEM C:RWX）。先按 ACL 判 C 类 W 位再落库 ——
-        // 证明基板记录对话不会被默认 OTHER 位误伤；被拦（理论上不会）则留日志、本轮不落 dialog。
-        String dialogDeny = dialogWriteDeny();
-        if (dialogDeny != null && out != null) out.warn("[auth] 自主落库被拦（本轮不写 dialog）：" + dialogDeny);
+        // 落 dialog = 她自己的自主行为（判定主体 = SYSTEM，她本人恒全权）：这里**不做权限判定** ——
+        // 资源不再有位、技能管控表也管不到她自己这条线，没有任何 op 可判（旧口径的"先判 C 类 W 位"
+        // 整段已随资源位删除）。
         ctx.assemble(t, input);
         // ★ 落点纪律（2026-09-15 真机事故：定时那一轮的正文被"投递通路"直接发进了群，而那条正文是
         //   "已经查了并回群里了…得跟你说清"这种**回执口吻**——它不是对用户说的话）。
@@ -212,13 +211,13 @@ public final class Agent {
                         + "工具名、调度过程、内部键值。拿不准就问自己一句：这句话发给他们看，体面吗。");
             }
         }
-        if (dialogDeny == null && store != null && Str.has(input)) store.appendDialog(t.session(), "user", input, 0);
+        if (store != null && Str.has(input)) store.appendDialog(t.session(), "user", input, 0);
         // 生命周期：回合开始（基板⑦）。钩子拿到的"本轮正文"就是这一轮的用户输入；
         // 一个钩子都没挂 = 一行代码都不多走（见 ext.ExtRegistry.on()）。
         hookStart(t, input);
         Loop.Outcome oc = run(t);
         if (oc.ok() && Str.has(oc.text)) {
-            if (dialogDeny == null && store != null) store.appendDialog(t.session(), "assistant", sair.v4.qq.Seg.forMemory(sair.v4.qq.MarkerTags.strip(oc.text)), 0);
+            if (store != null) store.appendDialog(t.session(), "assistant", sair.v4.qq.Seg.forMemory(sair.v4.qq.MarkerTags.strip(oc.text)), 0);
             // ★ 唯一对外出口 = 她的显式说话动作（发送类工具）。基板的"正文自动投递"这条隐式通路：
             //   ① 投递通路（TaskSink：定时/闹钟/task）—— **一律关掉**（真机事故：她本来就自己 send 了，
             //      那 145 字的回执正文又被多投了一遍到群里）；
@@ -820,15 +819,5 @@ public final class Agent {
         m.put("active", active.size());
         m.put("running_tasks", running());
         return m;
-    }
-
-    /**
-     * 防御性：她自己的落 dialog = 自主行为（SYSTEM C:RWX）。先按 ACL 判 C 类 W 位再落库。
-     * <p>本类拿不到 {@code Auth}（装配早期也可能还没起来），用空账本判定 —— 对 SYSTEM/MASTER 而言，
-     * 空账本与真实账本逐位一致（{@code sair.v4.Conf.needPath} 同口径）；返回 null = 放行。</p>
-     */
-    private String dialogWriteDeny() {
-        return sair.v4.auth.Acl.empty(null).allow(
-                Caller.systemActor(conf.masterQQ()), sair.v4.auth.Res.db("dialog"), 'W');
     }
 }

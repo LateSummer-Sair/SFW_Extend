@@ -30,7 +30,8 @@
     <a href="files.html"><span class="n">08</span>文件</a>
     <a href="architecture.html"><span class="n">09</span>实现</a>
     <a href="migration.html"><span class="n">10</span>升级</a>
-    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+    <a href="skills.html"><span class="n">11</span>技能开发</a>
+    <a href="changelog.html"><span class="n">12</span>更新日志</a>
   </nav>
   <div class="topbar-meta">
     <span class="chip live">纯静态</span>
@@ -104,7 +105,7 @@
               <tr><td>对话历史</td><td>不带入</td><td>私聊 / 控制台会话各自重新开始；对话保留期 <code>dialogKeepDays</code> 默认 180 天</td></tr>
               <tr><td>知识笔记与纠错记录</td><td>不带入</td><td>需要的话，在 V3 还在跑的时候自己导出文字另存</td></tr>
               <tr><td>表情包记录与磁盘图片</td><td>不带入</td><td>V4 要重新收集；图片落点在数据根的 <code>files\</code></td></tr>
-              <tr><td>好感度数值</td><td>不带入</td><td>所有人从 0 开始。另外留意：V4 里好感度<b>不再决定权限</b>，权限只看 ACL 账本（见<a href="perms.html">权限管理</a>）</td></tr>
+              <tr><td>好感度数值</td><td>不带入</td><td>所有人从 0 开始。另外留意：V4 里好感度<b>不再决定权限</b>，权限只看按归属分散的权限文件（基板侧那份在数据根下，每个技能那份在它自己的目录里，见<a href="perms.html">权限管理</a>）</td></tr>
               <tr><td>定时任务与运行台账</td><td>不带入</td><td>需要在控制台重新设置；<code>ai/tick</code> 与 <code>ai/alarm</code> 可以查看心跳与定时清单</td></tr>
               <tr><td>群成员 / 昵称缓存</td><td>不带入</td><td>这类缓存不再需要：V4 改为按需实时查询</td></tr>
             </tbody>
@@ -211,7 +212,7 @@ Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
           </div>
           <div class="tl-item amber">
             <div class="tl-when">STEP 6 · 重新配</div>
-            <div class="tl-what">把身份提示词放进 <code>prompts\identity.md</code>（冷启动只会给它建一个空壳文件）；重新设定时任务；要给谁放开某项能力，就按<a href="perms.html">权限页</a>的写法在数据根的 <code>perms.json</code> 里写例外（默认对非主人是全关的）。</div>
+            <div class="tl-what">把身份提示词放进 <code>prompts\identity.md</code>（冷启动只会给它建一个空壳文件）；重新设定时任务；要给谁放开某项能力，就按<a href="perms.html">权限页</a>的写法敲 <code>ai/perm run &lt;op&gt; &lt;身份&gt;</code> —— 那一条会写进该 op 归属的那份权限文件（默认对非主人是全关的）。</div>
           </div>
         </div>
 
@@ -235,7 +236,7 @@ Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">② 权限例外</h4>
-            <p>V4 的权限判据只有一本账：数据根的 <code>perms.json</code>。<b>一条例外都没命中时就按资源类型给位</b>，其中 A 类（SFW 数据根之外的本机路径）对普通用户<b>一位都不给</b>。写法与例子见<a href="perms.html#change">权限页 · 怎么授权</a>。</p>
+            <p>V4 的权限判据是按归属分散的那几份权限文件：基板侧那份写在数据根下的 <code>perms-core.jsonc</code>（路径也写在这一份里），每个技能写自己的 <code>perms.jsonc</code>，装载时合并成一张表。表分技能、数据、路径三个域，每个域里没列到的按该域的默认值走 —— <b>技能没列到就不能用</b>、数据没列到能读不能改、文件没列到不能碰；技能目录里没有那份文件时，它的全部 op 都不授权，而主人与她本人恒全权。写法与例子见<a href="perms.html#change">权限页 · 怎么授权</a>。</p>
           </div>
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">③ 定时任务</h4>
@@ -272,11 +273,11 @@ Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
               </tr>
               <tr>
                 <td>权限</td>
-                <td>判据换成<b>资源 ACL 账本</b>：按类默认分配 + 例外突破默认；主体层级 <code>User&lt;QQ&gt;(3) &gt; Group&lt;群号&gt;(2) &gt; ALLUSER(1)</code>，同级里后面的覆盖前面的</td>
+                <td>判据换成<b>按归属分散的权限文件</b>：三个域各判各的 —— 技能（谁能用哪个 op）、数据（谁能改、谁能读哪类数据）、路径（谁能碰哪些路径）；同一把键上 <code>Ban</code> 压过允许，更具体的键优先。没列到时技能不能用、数据能读不能改、文件不能碰；<code>user:&lt;QQ号&gt;</code>、<code>group:&lt;群号&gt;</code>、<code>ALLUSER</code> 各算各的</td>
               </tr>
               <tr>
                 <td>好感度</td>
-                <td><b>不再参与权限判定</b>：控制台 <code>ai/perm</code> 只管好感度数值，<code>ai/acl</code> 只看权限账本</td>
+                <td><b>不再参与权限判定</b>：控制台 <code>ai/perm</code> 管“能不能做”，<code>ai/favor</code> 管好感度数值，两件事各走各的</td>
               </tr>
               <tr>
                 <td>模型选择</td>
@@ -311,7 +312,7 @@ Copy-Item '&lt;V3 数据目录&gt;' '&lt;备份目录&gt;' -Recurse
 
             <nav class="pager">
       <a class="prev" href="architecture.html"><span class="p-dir">← PREV</span><span class="p-name">09 · 技术实现</span></a>
-      <a class="next" href="changelog.html"><span class="p-dir">NEXT →</span><span class="p-name">11 · 更新日志</span></a>
+      <a class="next" href="skills.html"><span class="p-dir">NEXT →</span><span class="p-name">11 · 技能开发</span></a>
     </nav>
 
     <footer class="foot">

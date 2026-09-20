@@ -92,7 +92,12 @@ public final class Relay {
     private final Conf conf;
     private final Out out;
 
-    /** 权限账本（ACL）：把本地路径变成外链 URL / file:/// 之前，先判"能不能读这个文件"（洞 2 兜底）。 */
+    /**
+     * 权限面（{@code Boot} 装配期经 {@link Api#setRelay} / {@link Api#setAuth} 推进来）。
+     * <p>本类<b>原来不做任何权限判定</b>（见 {@link #urlOf} 的说明），v6 起把 {@code File} 域的
+     * 路径判定接在这里：把本机文件交出去 = 读文件（{@code File.Read}）。判定面没装配时一律
+     * <b>不产出 URL</b>（fail-closed）。</p>
+     */
     private volatile sair.v4.auth.Auth auth;
 
     private volatile HttpServer server;
@@ -116,27 +121,11 @@ public final class Relay {
         this.out = out;
     }
 
-    /** 装权限账本（{@code Boot} 装配时注入；本类是"唯一对外判定"的兜底）。 */
-    public void setAuth(sair.v4.auth.Auth a) { this.auth = a; }
-
     /**
-     * 判定"当前主体能不能读这个本地绝对路径"（洞 2 的兜底判定，与 {@code Api} 改写层同一把尺子）。
-     * <p>放行返回 {@code null}；拒绝返回拒绝原文并打一行告警（绝不静默）。</p>
+     * 装权限面（{@code Api} 在 {@code Boot} 装配期推进来）：本类据此做 {@code File} 域的路径判定。
+     * {@code null} = 没装配 ⇒ 判定一律拒（不产出 URL / HTTP 侧 404）。
      */
-    private String needPath(String path) {
-        sair.v4.auth.Caller c = sair.v4.ctx.Ctx.caller();
-        if (c == null) c = sair.v4.auth.Caller.systemActor(conf == null ? 0L : conf.masterQQ());
-        sair.v4.auth.Auth a = auth;
-        if (a == null) {
-            String why = sair.v4.auth.Acl.DENY_PREFIX + "需要 " + sair.v4.auth.Res.normPath(path)
-                    + " 的 R 位（权限面没有装配，按拒绝处理）";
-            warn("[relay] " + why);
-            return why;
-        }
-        String deny = a.allowRes(c, sair.v4.auth.Res.path(path), 'R');
-        if (deny != null) warn("[relay] " + deny);
-        return deny;
-    }
+    public void setAuth(sair.v4.auth.Auth a) { this.auth = a; }
 
     // ---------------- 生命周期 ----------------
 
@@ -268,7 +257,41 @@ public final class Relay {
         return "http://" + Str.nz(publicHost) + ":" + boundPort + "/" + mask(token) + "/<绝对路径>";
     }
 
-    // ---------------- 唯一的对外判定 ----------------
+    // ---------------- 形态改写 + File 域路径判定 ----------------
+
+    /**
+     * 判定主体：与 {@code Api} 的改写层、{@code Boot} 的 NapCat 闸门<b>取法同源</b> ——
+     * 先问当轮绑定的 {@link sair.v4.ctx.Ctx#caller()}；取不到 = 她自己的自主行为
+     * （基板回复、定时推送、HTTP 中转请求线程）⇒ {@code Caller.systemActor(masterQQ)}。
+     */
+    private sair.v4.auth.Caller subject() {
+        sair.v4.auth.Caller c = sair.v4.ctx.Ctx.caller();
+        if (c == null) c = sair.v4.auth.Caller.systemActor(conf == null ? 0L : conf.masterQQ());
+        return c;
+    }
+
+    /**
+     * <b>v6 File 域：这个本地路径能不能交出去</b>（{@code null} = 能，否则是 {@code Acl} 的拒绝原文）。
+     *
+     * <p>本类的 javadoc 原先写"本类不做权限判定" —— v6 起这句作废：本类是把本机任意绝对路径变成
+     * 外链 URL 的最后一跳（{@link #urlOf} / {@link #urlFor} / {@link #externalUrlOf} 与
+     * {@link Files#route}），"能不能碰这个路径"必须在这里也答一遍（{@code Api} 层那道是第一道）。
+     * 交给 NapCat 取文件 = <b>读文件</b> ⇒ {@code write=false}（看 {@code File.Read}）。</p>
+     *
+     * <p>权限面没装配（{@code auth == null}）或判定抛异常一律按拒 —— 本类的失败方向只有一个：
+     * <b>不产出 URL</b>。</p>
+     */
+    private String pathDeny(String path) {
+        sair.v4.auth.Auth a = auth;
+        if (a == null) return sair.v4.auth.Acl.DENY_PREFIX + "权限面没有装配（auth == null），按拒绝处理：" + path;
+        try {
+            sair.v4.auth.Acl acl = a.acl();
+            if (acl == null) return sair.v4.auth.Acl.DENY_PREFIX + "权限面没有装配（acl == null），按拒绝处理：" + path;
+            return acl.fileDeny(subject(), path, false);
+        } catch (Throwable t) {
+            return sair.v4.auth.Acl.DENY_PREFIX + "路径判定异常，按拒绝处理：" + path + "（" + t + "）";
+        }
+    }
 
     /**
      * 本地文件 → NapCat 能取到的写法。
@@ -276,15 +299,21 @@ public final class Relay {
      * <ul>
      *   <li>中转在跑、且是个普通文件 → {@code http://host:port/<token>/C:/x/y.txt}（跨机可用）；</li>
      *   <li>其余情况 → {@code file:///C:/x/y.txt}（同机口径，V3 现场验证过）；</li>
-     *   <li>不是本地绝对路径（相对路径、fileid 一类）→ {@code null}：交给 NapCat 自己解释，基板不改写。</li>
+     *   <li>不是本地绝对路径（相对路径、fileid 一类）→ {@code null}：交给 NapCat 自己解释，基板不改写；</li>
+     *   <li><b>{@code File} 域判定不通过 → {@code null}</b>：连 {@code file:///} 回退都不产出
+     *       （被拒的路径一个字节都不外发）。</li>
      * </ul>
      * <p>调用方拿到什么就用什么：不需要知道 NapCat 在哪台机器上。</p>
+     *
+     * <p><b>本类做的是"两道判定里的第二道"</b>（{@code File} 域路径判定，见 {@link #pathDeny}）；
+     * 第一道"能不能做这个 NapCat 动作"（{@code napcat.<动作名>} 的 op）由 {@code Api} 的改写层与
+     * {@code Boot} 的 NapCat 闸门负责，两处取主体同源（都是 {@code Ctx.caller()} → {@code systemActor}）。</p>
      */
     public String urlOf(File f) {
         if (f == null) return null;
         String raw = f.getPath();
         if (Str.blank(raw) || !looksAbsolute(raw)) return null;
-        if (needPath(raw) != null) return null;      // 洞 2：读不了 → 不产出 URL / file:///
+        if (pathDeny(raw) != null) return null;      // File 域被拒：不产出任何写法（含 file:/// 回退）
         String fwd = raw.replace('\\', '/');
         String u = externalUrlOf(f);
         if (u != null) return u;
@@ -292,11 +321,13 @@ public final class Relay {
     }
 
     /**
-     * 只有在"中转在跑、且这是个普通文件"时才给出外链 URL；其余情况返回 {@code null}
-     * （调用方自己决定回退成什么：{@link Api} 用 {@code file:///}，强制层则保留原值并告警）。
+     * 只有在"中转在跑、且这是个普通文件、且 {@code File} 域判定放行"时才给出外链 URL；
+     * 其余情况返回 {@code null}（调用方自己决定回退成什么：{@link Api} 用 {@code file:///}，
+     * 强制层则保留原值并告警）。
      */
     public String externalUrlOf(File f) {
         if (f == null || !running() || !f.isFile()) return null;
+        if (pathDeny(f.getPath()) != null) return null;
         return urlFor(f.getPath());
     }
 
@@ -304,12 +335,13 @@ public final class Relay {
      * 本地绝对路径 → 外链 URL：<b>只看形态，不要求文件存在</b>（强制层用）。
      * <p>为什么不等存在性：{@link Api} 的强制改写对"像本地路径"的值一律换成外链 ——
      * 存在与否由取的时候决定（NapCat 拿到 404 时原因更直白），也避免"先探测再改写"带来的竞态。</p>
+     * <p>{@code File} 域判定不通过 ⇒ {@code null}（不产出 URL）。</p>
      */
     public String urlFor(String path) {
         if (!running()) return null;
         String raw = Str.trim(path);
         if (Str.blank(raw) || !looksAbsolute(raw)) return null;
-        if (needPath(raw) != null) return null;      // 洞 2：读不了 → 不产出外链 URL
+        if (pathDeny(raw) != null) return null;
         return baseUrl() + "/" + encPath(raw.replace('\\', '/'));
     }
 
@@ -417,6 +449,21 @@ public final class Relay {
     /** 请求处理：只读、token 前缀、异常一律吞掉。 */
     private final class Files implements HttpHandler {
 
+        /**
+         * 一次中转取文件。判定口径（<b>已裁定</b>，别当漏判定来改）：
+         *
+         * <p>{@link #route} 里也过了一道 {@code File} 域判定（{@link #pathDeny}），但主体取法
+         * 必须与 {@code Api} 的改写层、{@code Boot} 的 NapCat 闸门<b>同源</b>
+         * （{@code Ctx.caller()} → 取不到按 {@link sair.v4.auth.Caller#systemActor(long)}）。
+         * HTTP 请求跑在中转自己的工作线程上，<b>没有绑定主体</b> ⇒ 主体 = 她本人（{@code SYSTEM}），
+         * 恒全权 ⇒ 这一道对"token 正确的请求"实际恒放行。</p>
+         *
+         * <p><b>这是设计如此，不是洞</b>：授权发生在<b>「URL 产出」那一跳</b>
+         * （{@link #urlOf} / {@link #urlFor} / {@link #externalUrlOf} —— 都过同一道 {@code File} 判定，
+         * 被拒的路径拿不到 URL，连 {@code file:///} 回退都不产出）。<b>"能拿到 URL"本身就是被授权过的
+         * 证明</b>：中转口再拦一次也拦不出新信息（它根本不知道当初是谁要的这个 URL）。
+         * 这一道留着的意义是纵深防御 —— 哪一天 {@code Ctx} 在请求线程里被绑上主体，它立刻生效。</p>
+         */
         @Override
         public void handle(HttpExchange x) {
             requests.incrementAndGet();
@@ -446,8 +493,17 @@ public final class Relay {
             }
             String rest = raw.length() > prefix.length() ? raw.substring(prefix.length() + 1) : "";
             String path = decode(rest);
-            File f = path == null ? null : new File(path);
-            if (f == null || !f.isAbsolute() || !f.exists() || f.isDirectory() || !f.isFile()) {
+            // v6 File 域：这一步同样过路径判定（主体取法与 Api 同源 —— HTTP 请求线程没有绑定主体
+            // ⇒ systemActor，与 NapCat 闸门同一口径；装配/判定异常一律 404，绝不吐文件）。
+            // 「这一道实际恒放行」是已裁定的口径（授权在 URL 产出那一跳），见 handle 的 javadoc。
+            // 排在存在性检查<b>之前</b>：被拒的路径与不存在的路径回答一模一样，不做存在性探测。
+            if (path == null || pathDeny(path) != null) {
+                logRequest(x, 404);
+                fail(x, 404, "没有这个路径");
+                return;
+            }
+            File f = new File(path);
+            if (!f.isAbsolute() || !f.exists() || f.isDirectory() || !f.isFile()) {
                 logRequest(x, 404);
                 fail(x, 404, "没有这个路径");
                 return;

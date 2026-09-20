@@ -456,7 +456,8 @@ public final class ChatWindow {
             if (body.length() > 0) body.append('\n');
             long ts = J.l(r, "ts", 0L);
             body.append('[').append(ts > 0 ? fmt.format(new Date(ts)) : "-").append("] ")
-                .append(who(r, source, selfId)).append(": ").append(text(r)).append(quoteSuffix(r));
+                .append(who(r, source, selfId)).append(": ")
+                .append(text(r, mine(r, source, selfId))).append(quoteSuffix(r));
         }
         JsonObject meta = new JsonObject();
         meta.addProperty("session", session);
@@ -537,10 +538,41 @@ public final class ChatWindow {
     /**
      * 一条记录的正文：<b>压单行后逐字照抄</b>（主人 2026-09-16 裁定：不加单条截断，她要看到完整记录）；
      * 空/NULL 如实标"（无文本）"。
+     *
+     * <p><b>FIX-ECHO（读侧去头）</b>：这一段是<b>给模型看的那一份</b>，所以<b>她自己</b>的标记行要先过
+     * {@link SelfEcho#withoutHead} —— 窗口里她那一行<b>不再带</b> {@code [我发的 msg_id=N] } 那个内部
+     * 记账头（不去头时，模型每一轮都照着这个形状学，用户就真收到了以它开头的消息）。
+     * 库里那一行照旧带头部（P0-1 已发布契约），去重比较也照旧各自去头（见 {@link #cmpText}）——
+     * 这里改的只是"渲染出来的那一份文本"。</p>
+     *
+     * <p><b>FIX-ECHO 补-4（独立复核裁定：读侧不该动别人的话）</b>：去头是<b>有条件的</b> ——
+     * 只有 {@code mine}（这一行是她自己发的，判据见 {@link #mine}）<b>且</b>这一行是标记形状
+     * （{@link #markedSelfRow}）才剥。<b>别人的行逐字原样</b>：外人逐字打出
+     * {@code [我发的 msg_id=1] 你好} 时，模型看到的就是那句话（前缀不被吃掉）；
+     * 模型若从用户文本里学到形状，出站那三道闸会拦。</p>
      */
-    private static String text(JsonObject r) {
-        String s = Str.oneLine(Str.nz(J.s(r, "content", "")));
+    private static String text(JsonObject r, boolean mine) {
+        String raw = Str.oneLine(Str.nz(J.s(r, "content", "")));
+        String s = (mine && markedSelfRow(r)) ? SelfEcho.withoutHead(raw) : raw;
         return s.isEmpty() ? EMPTY_TEXT : s;
+    }
+
+    /**
+     * 这一行是不是"她自己发的"（<b>身份</b>判据；形状判据见 {@link #markedSelfRow}）。
+     *
+     * <ul>
+     *   <li>群（{@code grouplog}）：{@code extra.self=true} —— 那个键<b>只有
+     *       {@code QqGateway.selfEcho} 会写</b>（{@link #markedSelf} 的注释里就是这条抗伪造判据），
+     *       所以它不依赖 {@code selfId} 取没取到；</li>
+     *   <li>私聊/控制台（{@code dialog}）：{@code role=assistant}（{@link #who} 标"我"的同一口径）。</li>
+     * </ul>
+     * <p>与 {@link #who} 的差别只说清：{@code who} 还要 {@code user_id == selfId} 才把它<b>显示</b>成"我"
+     * （抗伪造要求更严）；这里只求"别把别人的话吃掉前缀"，所以用不回退、不可伪造的 {@code extra.self}。</p>
+     */
+    private static boolean mine(JsonObject r, String source, long selfId) {
+        if (r == null) return false;
+        if ("grouplog".equals(source)) return markedSelf(r);
+        return "assistant".equals(Str.trim(Str.nz(J.s(r, "role", ""))));
     }
 
     /** 去重比较用的正文（空正文不参与比较；这里<b>不</b>加"（无文本）"标记）。 */

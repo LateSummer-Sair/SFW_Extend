@@ -30,7 +30,8 @@
     <a href="files.html"><span class="n">08</span>文件</a>
     <a href="architecture.html"><span class="n">09</span>实现</a>
     <a href="migration.html"><span class="n">10</span>升级</a>
-    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+    <a href="skills.html"><span class="n">11</span>技能开发</a>
+    <a href="changelog.html"><span class="n">12</span>更新日志</a>
   </nav>
   <div class="topbar-meta">
     <span class="chip live">纯静态</span>
@@ -55,7 +56,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">01 / PACKAGES</span>
           <h2>源码包结构</h2>
-          <p class="chapter-desc">全部实现都在 <code>src\sair\v4\</code> 下：110 个 <code>.java</code>，分 17 个包（1 个根包 + 16 个子包）。这张表就是“哪段逻辑在哪个包”的入口。</p>
+          <p class="chapter-desc">全部实现都在 <code>src\sair\v4\</code> 下：114 个 <code>.java</code>，分 17 个包（1 个根包 + 16 个子包）。这张表就是“哪段逻辑在哪个包”的入口。</p>
         </header>
 
         <h3 class="sec">这些包分别管什么</h3>
@@ -65,17 +66,17 @@
               <tr><th>包</th><th class="num">文件</th><th>职责（一句话）</th><th>关键词</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>sair.v4</code>（根包）</td><td class="num">6</td><td>装配、内建工具面、配置、QQ 网关入口、心跳、组件入口</td><td><code>Boot</code> <code>Builtins</code> <code>Conf</code> <code>QqGateway</code> <code>Tick</code> <code>V4Activity</code></td></tr>
+              <tr><td><code>sair.v4</code>（根包）</td><td class="num">7</td><td>装配、内建工具面、配置、QQ 网关入口、心跳、组件入口</td><td><code>Boot</code> <code>Builtins</code> <code>Conf</code> <code>Cron</code> <code>QqGateway</code> <code>Tick</code> <code>V4Activity</code></td></tr>
               <tr><td><code>agent</code></td><td class="num">2</td><td>Agent 执行循环与子 Agent 并发控制</td><td><code>Agent</code> <code>Loop</code></td></tr>
               <tr><td><code>ai</code></td><td class="num">5</td><td>模型接口客户端、SSE 流式解析、消息与工具规格、返回封装</td><td><code>DeepSeek</code> <code>Sse</code> <code>Msg</code> <code>Res</code> <code>ToolSpec</code></td></tr>
-              <tr><td><code>auth</code></td><td class="num">7</td><td>权限判定：资源分类、位数、调用者、账本、好感度分级</td><td><code>Acl</code> <code>Auth</code> <code>Bits</code> <code>Caller</code> <code>Res</code> <code>Favor</code></td></tr>
+              <tr><td><code>auth</code></td><td class="num">7</td><td>权限判定：权限文件的合并装载与判定、op 清单、调用者、好感度分级</td><td><code>Acl</code> <code>Auth</code> <code>Caller</code> <code>Ops</code> <code>OpList</code> <code>Favor</code></td></tr>
               <tr><td><code>ctx</code></td><td class="num">6</td><td>回合上下文装配：事实块、聊天窗口、调用者作用域</td><td><code>CtxBuild</code> <code>ChatWindow</code> <code>Turn</code> <code>RecognizerState</code></td></tr>
               <tr><td><code>dev</code></td><td class="num">4</td><td>本机调试口与调试日志：只绑回环的输出口、输入口、命令外壳、日志</td><td>类名不列出（只绑 <code>127.0.0.1</code>，起停见 <a href="commands.html#table">控制台命令</a>）</td></tr>
               <tr><td><code>ext</code></td><td class="num">7</td><td>扩展点：注册表、上下文提供者、出站改写、投票、生命周期钩子</td><td><code>ExtRegistry</code> <code>ContextProvider</code> <code>OutboundStage</code> <code>TriggerVoter</code></td></tr>
               <tr><td><code>hot</code></td><td class="num">7</td><td>动态编译与类加载：内存编译、源码状态、工具名、说明书解析</td><td><code>DynCode</code> <code>Sk</code> <code>SkClassLoader</code> <code>SkCompile</code> <code>SkMd</code></td></tr>
               <tr><td><code>kit</code></td><td class="num">12</td><td>基础件：JSON、文件、字符串、线程、HTTP、文本解码、输出、加密、指纹、网络护栏</td><td><code>J</code> <code>Fs</code> <code>Str</code> <code>Th</code> <code>Http</code> <code>Crypto</code> <code>NetGuard</code></td></tr>
               <tr><td><code>prompt</code></td><td class="num">3</td><td>提示词文件加载与注入位（身份、子 Agent 公共部分、按位注入）</td><td><code>Prompts</code> <code>PromptFile</code> <code>Inject</code></td></tr>
-              <tr><td><code>qq</code></td><td class="num">15</td><td>NapCat 接入：反向 WS、事件与入站、API 调用、分段与渲染、引用缓存、文件外链中转、去重</td><td><code>Link</code> <code>Api</code> <code>Ev</code> <code>Inbound</code> <code>QuoteCache</code> <code>Relay</code> <code>Seen</code></td></tr>
+              <tr><td><code>qq</code></td><td class="num">18</td><td>NapCat 接入：反向 WS、事件与入站、API 调用、分段与渲染、引用缓存、文件外链中转、去重</td><td><code>Link</code> <code>Api</code> <code>Ev</code> <code>Inbound</code> <code>QuoteCache</code> <code>Relay</code> <code>Seen</code></td></tr>
               <tr><td><code>schedule</code></td><td class="num">7</td><td>回合调度：按会话分道、优先级、有界池、任务抽象</td><td><code>Lanes</code> <code>Pool</code> <code>Job</code> <code>ChatJob</code> <code>Dispatcher</code></td></tr>
               <tr><td><code>store</code></td><td class="num">9</td><td>存储：连接与建表、表声明、库注册表、检索、行维护、人物聚合</td><td><code>Db</code> <code>Store</code> <code>LibSpec</code> <code>Lib</code> <code>Libs</code> <code>FtsQuery</code> <code>Person</code></td></tr>
               <tr><td><code>term</code></td><td class="num">6</td><td>控制台：命令面、捕获器、回复分段、输出与投递、装配进度</td><td><code>Cmd</code> <code>ConsoleTap</code> <code>Segmenter</code> <code>Sinks</code> <code>SfwOut</code></td></tr>
@@ -101,15 +102,15 @@
         </header>
 
         <div class="code reveal" data-lang="text">
-          <div class="code-head"><span class="lang">text</span><span class="path">C:\Sair\Local\AiAgent-V4\src</span><button class="copy" type="button">复制</button></div>
+          <div class="code-head"><span class="lang">text</span><span class="path">&lt;项目目录&gt;（本仓根）\src</span><button class="copy" type="button">复制</button></div>
           <pre><code>src\
 └─ sair\
-   └─ v4\                       110 个 .java
-      ├─ Boot.java  Builtins.java  Conf.java              (根包 6 个)
-      ├─ QqGateway.java  Tick.java  V4Activity.java
+   └─ v4\                       114 个 .java
+      ├─ Boot.java  Builtins.java  Conf.java              (根包 7 个)
+      ├─ Cron.java  QqGateway.java  Tick.java  V4Activity.java
       ├─ agent\      2   ai\       5   auth\     7   ctx\      6
       ├─ dev\        4   ext\      7   hot\      7   kit\     12
-      ├─ prompt\     3   qq\      15   schedule\ 7   store\    9
+      ├─ prompt\     3   qq\      18   schedule\ 7   store\    9
       ├─ term\       6   tool\     3   ui\       4
       └─ （另有 1 个契约包 7 个文件，见上一节；数据根下另有 1 个外挂单元目录）</code></pre>
         </div>
@@ -122,7 +123,7 @@
               <tr><th>文件</th><th>里面是什么</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>Builtins.java</code></td><td>15 个基板工具的注册与实现（工具面见 <a href="capabilities.html#nine">基板能力 · 九项</a>）</td></tr>
+              <tr><td><code>Builtins.java</code></td><td>17 个基板工具的注册与实现（工具面见 <a href="capabilities.html#nine">基板能力 · 九项</a>）</td></tr>
               <tr><td><code>Boot.java</code></td><td>装配各步、空数据骨架、状态自省、面板挂载</td></tr>
               <tr><td><code>QqGateway.java</code></td><td>入站判定与路由、落行、去重、通知渲染</td></tr>
               <tr><td><code>Conf.java</code></td><td>键面、文件面、加解密落盘、生效口径（逐键说明见 <a href="config.html#keys">配置 · 键面</a>）</td></tr>
@@ -158,10 +159,10 @@
         </header>
 
         <div class="note reveal">
-          <p><span class="n-title">两个位置的关系</span>：插件落位后，数据根是 <code>C:\Sair\SairFrameWork\data\AiAgent-V4\</code>；本仓的 <code>data\</code> 是同一个结构的本地对照副本（文件名与子目录名一致），两边可以互相对照着看。</p>
+          <p><span class="n-title">两个位置的关系</span>：插件落位后，数据根是 <code>&lt;框架目录&gt;\data\AiAgent-V4\</code>（<code>&lt;框架目录&gt;</code> 指 SFW 的安装目录）；本仓的 <code>data\</code> 是同一个结构的本地对照副本（文件名与子目录名一致），两边可以互相对照着看。</p>
         </div>
 
-        <h3 class="sec">先分清：数据、配置、账本、提示词</h3>
+        <h3 class="sec">先分清：数据、配置、权限文件、提示词</h3>
         <div class="tw scroll reveal">
           <table>
             <thead>
@@ -181,10 +182,10 @@
                 <td>删了会按出厂值重建；里面的个性化设置要重新配一遍</td>
               </tr>
               <tr>
-                <td><b>账本</b></td>
-                <td><code>perms.json</code></td>
-                <td>权限例外清单，<b>独立于配置</b>：谁能对哪类资源做什么，都在这里</td>
-                <td>删了就回到“按默认分配”的状态（普通用户对 A/B/E/T 位都没有）</td>
+                <td><b>权限文件</b></td>
+                <td><code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code></td>
+                <td>权限判据，<b>独立于配置</b>：谁能用哪个 op、谁能改 / 读哪类数据、谁能碰哪些路径，都写在这里；按归属分散，读的时候合并成一张表</td>
+                <td>删了就回到“一切未授权”的状态（主人与她本人恒全权，不受影响）</td>
               </tr>
               <tr>
                 <td><b>提示词</b></td>
@@ -201,7 +202,7 @@
             </tbody>
           </table>
         </div>
-        <p class="t-cap">一句话记住这条边界：<b><code>config.json</code> 管“怎么跑”，<code>perms.json</code> 管“谁能做什么”，<code>v4.db</code> 管“发生过什么”。</b>这三样各管一段，互不代替。</p>
+        <p class="t-cap">一句话记住这条边界：<b><code>config.json</code> 管“怎么跑”，<code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code> 管“谁能做什么”，<code>v4.db</code> 管“发生过什么”。</b>这三样各管一段，互不代替。</p>
 
         <div class="code reveal" data-lang="text">
           <div class="code-head"><span class="lang">text</span><span class="path">SairFrameWork\data\AiAgent-V4\</span><button class="copy" type="button">复制</button></div>
@@ -210,10 +211,10 @@
 ├─ v4.db-wal          预写日志：WAL 模式下还没合并的改动
 ├─ v4.db-shm          WAL 的共享内存索引
 ├─ config.json        全部配置键（逐键说明见 config.html）
-├─ perms.json         权限例外账本（权限模型见 perms.html）
+├─ perms-core.jsonc   基板内置工具与全部路径的权限文件（权限模型见 perms.html）
 ├─ prompts\           提示词正文：identity.md / subagent.md / tools-index.md
 ├─ files\             收到的文件与导出的落点（下载、导出、表情包图片）
-├─ （另有 1 个外挂单元目录 data\skills\，一个子目录一项能力）
+├─ （另有 1 个外挂单元目录 data\skills\，一个子目录一项能力；技能自己那份 perms.jsonc 就放在它的目录里）
 └─ tmp\               临时文件目录</code></pre>
         </div>
 
@@ -228,7 +229,8 @@
               <tr><td><code>v4.db-wal</code></td><td>预写日志，WAL 模式的正常伴生文件；连接建立时就设上</td><td>SQLite 自己</td></tr>
               <tr><td><code>v4.db-shm</code></td><td>WAL 的共享内存索引文件，同样由 SQLite 自己维护</td><td>SQLite 自己</td></tr>
               <tr><td><code>config.json</code></td><td>扁平 JSON，94 个已知键集中在这里；敏感键是密文</td><td><code>Conf</code>（<code>Conf.java</code> 拼出这个路径）</td></tr>
-              <tr><td><code>perms.json</code></td><td>权限例外账本：按主体、按资源类型的例外条目（权限模型见 <a href="perms.html">权限管理</a>）</td><td><code>auth</code> 侧；装配期读入</td></tr>
+              <tr><td><code>perms-core.jsonc</code></td><td>基板侧的权限文件：三个域（<code>Skill</code> / <code>DB</code> / <code>File</code>），域里是它自己那几层（<code>Skill</code> 只有 <code>Run</code> / <code>Ban</code>；<code>Read</code> 只存在于 <code>DB</code> 与 <code>File</code>），规则键写成中括号数组；<b>路径只写在这一份里</b>（权限模型见 <a href="perms.html">权限管理</a>）</td><td><code>auth</code> 侧；装配期与技能目录里的 <code>perms.jsonc</code> 合并读入</td></tr>
+              <tr><td><code>skills\&lt;技能名&gt;\perms.jsonc</code></td><td>技能自己的权限文件：只写这个技能提供的工具与<b>属于它的数据键</b>（写了别人的会被忽略，路径块整块不生效）；技能目录里没有它 = 它的全部 op 不授权</td><td>技能自己带；<code>auth</code> 侧合并读入</td></tr>
               <tr><td><code>prompts\</code></td><td>提示词正文目录，见 <a href="#prompts">提示词文件</a></td><td><code>prompt.Prompts</code></td></tr>
               <tr><td><code>files\</code></td><td>文件落点：下载、导出、表情包图片（控制台的导出会写到 <code>files\&lt;库名&gt;-&lt;时间戳&gt;.jsonl</code>；图片另有一个 <code>stickers\</code> 子目录）</td><td>工具面与控制台命令</td></tr>
               <tr><td><code>data\skills\</code></td><td>外挂单元目录：本页只交代数据根下有这么一个目录，装进来的单元一目录一项能力</td><td>装配期扫描</td></tr>
@@ -274,7 +276,7 @@ public File dbFile()     { return path("v4.db");   }</code></pre>
         <header class="chapter-head reveal">
           <span class="chapter-tag">04 / DB</span>
           <h2>数据表落在哪</h2>
-          <p class="chapter-desc">全部表都在<b>一个</b> SQLite 文件 <code>v4.db</code> 里：6 张业务库表 + 6 张基板运行表，另外还有全文索引虚表与同步触发器。</p>
+          <p class="chapter-desc">全部表都在<b>一个</b> SQLite 文件 <code>v4.db</code> 里：6 张业务库表 + 7 张基板运行表，另外还有全文索引虚表与同步触发器。</p>
         </header>
 
         <div class="note reveal">
@@ -309,8 +311,8 @@ public File dbFile()     { return path("v4.db");   }</code></pre>
         <p>基板为什么只声明两张：<b>消息流就是环境</b>，基板是它们唯一的写入者（入站落行、装配读回）；另外四张是业务表，由各自的使用方在装载期声明。表名与列名的唯一来源是表声明，拼 SQL 之前都会过一遍白名单校验（<code>store\LibSpec.java</code>）。</p>
         <p>外挂层那四张表的声明与索引名不在基板源码里，而在各单元自己的源码里：每个单元声明自己的表，表名与索引名就是最直接的线索（<code>memory</code> / <code>note</code> / <code>sticker</code> / <code>pref</code> 这四张与“六库”对得上，该层另有自己的状态表）。</p>
 
-        <h3 class="sec">六张基板运行表</h3>
-        <p>这六张<b>不是“库”</b>：有的用自定义主键、没有统一的行号与时间列，所以它们不进库注册表，DDL 与列清单留在基板里（<code>store\Lib.java</code>）。</p>
+        <h3 class="sec">七张基板运行表</h3>
+        <p>这七张<b>不是“库”</b>：有的用自定义主键、没有统一的行号与时间列，所以它们不进库注册表，DDL 与列清单留在基板里（<code>store\Lib.java</code>）。</p>
         <div class="tw scroll reveal">
           <table>
             <thead>
@@ -318,6 +320,7 @@ public File dbFile()     { return path("v4.db");   }</code></pre>
             </thead>
             <tbody>
               <tr><td><code>favor</code></td><td>好感度（主键是号码）：它是数据，也是事实块 <code>caller.favor</code> 的来源</td><td><code>Lib.java</code></td></tr>
+              <tr><td><code>favor_event</code></td><td>好感度流水：每一次改动留痕（谁改的、改了多少、改后值）</td><td><code>Lib.java</code></td></tr>
               <tr><td><code>alarm</code></td><td>定时表：触发时间、重复方式、作用域、目标、任务正文、启停状态、归属</td><td><code>Lib.java</code></td></tr>
               <tr><td><code>task</code></td><td>子 Agent 台账：状态、归属、用了哪些工具、结果、耗时</td><td><code>Lib.java</code></td></tr>
               <tr><td><code>kv</code></td><td>通用键值对（键为主键）</td><td><code>Lib.java</code></td></tr>
@@ -355,6 +358,7 @@ public File dbFile()     { return path("v4.db");   }</code></pre>
               <tr><td><code>idx_pref_scope</code></td><td><code>pref</code></td><td><code>scope,scope_id</code></td><td>外挂层表声明处</td></tr>
               <tr><td><code>idx_pref_key</code></td><td><code>pref</code></td><td><code>key</code></td><td>外挂层表声明处</td></tr>
               <tr><td><code>idx_pref_ts</code></td><td><code>pref</code></td><td><code>ts</code></td><td>外挂层表声明处</td></tr>
+              <tr><td><code>idx_favor_event_qq</code></td><td><code>favor_event</code></td><td><code>qq,ts</code></td><td><code>Lib.java</code></td></tr>
               <tr><td><code>idx_favor_value</code></td><td><code>favor</code></td><td><code>value</code></td><td><code>Lib.java</code></td></tr>
               <tr><td><code>idx_alarm_fire</code></td><td><code>alarm</code></td><td><code>fire_at</code></td><td><code>Lib.java</code></td></tr>
               <tr><td><code>idx_alarm_enabled</code></td><td><code>alarm</code></td><td><code>enabled,fire_at</code></td><td><code>Lib.java</code></td></tr>
@@ -501,7 +505,7 @@ public File dbFile()     { return path("v4.db");   }</code></pre>
             </thead>
             <tbody>
               <tr><td><code>AiAgentV4.jar</code></td><td><span class="badge ok">产物</span></td><td>插件本体，落位后按文件名决定控制台前缀（改名为 <code>ai.jar</code> 就是 <code>ai/</code>）</td></tr>
-              <tr><td><code>src\</code></td><td><span class="badge info">源码</span></td><td>全部 110 个 <code>.java</code>，见 <a href="#src-tree">源码树</a></td></tr>
+              <tr><td><code>src\</code></td><td><span class="badge info">源码</span></td><td>全部 114 个 <code>.java</code>，见 <a href="#src-tree">源码树</a></td></tr>
               <tr><td><code>data\</code></td><td><span class="badge mute">数据</span></td><td>数据根的本地对照副本，见 <a href="#datadir">数据根布局</a></td></tr>
               <tr><td><code>docs\</code></td><td><span class="badge info">源码</span></td><td>本静态站：导航上的若干 <code>.html</code> 页面 + <code>css\site.css</code> + <code>js\site.js</code>；无外链、无第三方库、无网络请求</td></tr>
               <tr><td><code>build\</code></td><td><span class="badge mute">暂存</span></td><td>构建暂存区：外挂层源码与文案的中间副本，不参与插件打包，删掉也能重新生成</td></tr>
@@ -520,7 +524,7 @@ public File dbFile()     { return path("v4.db");   }</code></pre>
           </div>
           <div class="panel reveal d1">
             <h3>不可再生的</h3>
-            <p>数据根下的 <code>v4.db</code>、<code>config.json</code>、<code>perms.json</code>、<code>prompts\</code> 是运行资产：删了就没了。尤其是 <code>v4.db</code> —— 保留期那组键是唯一会删数据的旋钮（见 <a href="config.html#retention">配置 · 保留期</a>）。</p>
+            <p>数据根下的 <code>v4.db</code>、<code>config.json</code>、<code>perms-core.jsonc</code>（以及各技能目录里的 <code>perms.jsonc</code>）、<code>prompts\</code> 是运行资产：删了就没了。尤其是 <code>v4.db</code> —— 保留期那组键是唯一会删数据的旋钮（见 <a href="config.html#retention">配置 · 保留期</a>）。</p>
           </div>
         </div>
         <div class="note bad reveal">

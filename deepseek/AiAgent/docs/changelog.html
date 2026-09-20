@@ -30,7 +30,8 @@
     <a href="files.html"><span class="n">08</span>文件</a>
     <a href="architecture.html"><span class="n">09</span>实现</a>
     <a href="migration.html"><span class="n">10</span>升级</a>
-    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+    <a href="skills.html"><span class="n">11</span>技能开发</a>
+    <a href="changelog.html"><span class="n">12</span>更新日志</a>
   </nav>
   <div class="topbar-meta">
     <span class="chip live">纯静态</span>
@@ -55,8 +56,8 @@
       <section class="chapter" id="current">
         <header class="chapter-head reveal">
           <span class="chapter-tag">当前版本</span>
-          <h2>当前版本 · V4.1</h2>
-      <p>这一版是 <b>V4.1</b>：基板的九件事不变，能力面往前走了一步 —— 到点的事（待办与闹钟同一张账、可顺延可收尾）、群里 @ 谁与引用哪条由她自己决定、输出的纯文字口径、情绪拦截会给她回执、以及技能面的整理（新增点名引用等，退休了重复的几支）。细节见下方条目。</p>
+          <h2>当前版本 · V4.2</h2>
+      <p>这一版是 <b>V4.2</b>，版本号不变：基板的九件事不变，权限机制换成了<b>按归属分散</b>的权限文件（基板侧一份，每个技能写自己目录里那份），判定从「身份 × op」扩成<b>技能 / 数据 / 路径三个域</b>；同时新增 <code>ai/favor</code>，把好感度与权限彻底分开。上一版的能力面照旧 —— 到点的事（待办与闹钟同一张账、可顺延可收尾）、群里 @ 谁与引用哪条由她自己决定、输出的纯文字口径，都保持不变。按时间从新到旧，细节见下方条目。</p>
           <p class="chapter-desc">
             这一条记录当前线上这一版的内容：能做什么、有哪些限制、哪些还没落地，都照实写。
             历史条目按版本号从高到低排在后面，改了什么一目了然。
@@ -66,35 +67,81 @@
         <ol class="release-list">
 
           <li class="release v4 reveal">
+            <div class="rel-ver">V4.2（续）</div>
+            <div class="rel-body">
+              <h3 class="rel-title">2026-09-20 · V4.2：权限模型升级为三个域，权限文件按技能归属分散</h3>
+              <div class="rel-desc">
+                <b>版本号不变，仍 V4.2</b>。这一条记的是权限这一次升级：判定从"一个 op 一把尺"扩成<b>三个域</b>，每域各有自己的层，权限文件按<b>归属</b>分散到基板与各技能，控制台补上了数据与路径两种写命令。
+                <br><br>
+
+                <b>① 三个域，各自的层与默认值</b>：<code>Skill</code>（谁能用哪个 op）、<code>DB</code>（谁能改、谁能读哪类数据）、<code>File</code>（谁能碰哪些路径）。
+                <code>Skill</code> 与 <code>File</code> 有 <code>Run</code> / <code>Ban</code>（数据和路径两域另有 <code>Read</code>）。没列到时：技能<b>不能用</b>、数据<b>能读不能改</b>、文件<b>不能碰</b>；
+                其中"数据能读"是全表唯一默认放开的一处，所以装载时会把"没有显式声明过读"的类别逐个点名列出来。
+                <br>
+                · 同一把键上 <code>Ban</code> 压过允许；<b>更具体的键优先</b>（<code>pref.donation</code> 比 <code>pref</code> 具体；路径按最长优先，子目录的禁止压过父目录的允许）；同一个键写多处取<b>并集</b>。
+                <br>
+                · 改数据命中之后<b>还要看这一行归谁</b>：靠 <code>ALLUSER</code> 命中的只动得了自己那一份，要让某人改别人的行，必须把他本人指名写进去。
+                <br>
+                · 数据键是那份固定的类别表（含一批 <code>kv.*</code> 抽屉）；认不出的键装载时点名，并且一律不生效。
+                <br><br>
+
+                <b>② 权限文件按归属分散</b>：基板侧那份在数据根下的 <code>perms-core.jsonc</code>，每个技能写自己目录里的 <code>perms.jsonc</code>。
+                技能文件里<b>只许写自己的 op 与属于自己的数据键</b>，<b>路径块只许写在基板那份</b>；越界的那一条（或整块）被忽略并在启动日志里点名一行。
+                写盘时也守同一条口径：给技能写文件时永不产出路径块、数据块只在它确实带着自己的数据规则时才写 —— 写出来的每一份文件都必须能被读回来时不报越界。
+                <br>
+                · 规则层写法统一成中括号键：<code>["a", "b"]: ["身份…"]</code>，一个键也带括号；<code>//</code> 开头的整行是注释。
+                <br>
+                · 旧格式照读：上一版的嵌套写法与旧的统一表都还能读进来，装载时提示建议重排一次；老文件里没写数据与路径两域时按该域的默认值走，<b>不会因为"没写"而放宽</b>。
+                <br>
+                · 落盘按归属重排：任何一次写命令都会把它管到的已有权限文件按这一版的形状排一遍，排出来与盘上逐字节相同就跳过写；回执里的"已写入 X"指的是<b>这条规则归属的那份文件</b>。
+                <br><br>
+
+                <b>③ 控制台新增两种写命令</b>：<code>ai/perm db run|read|ban &lt;数据键&gt; &lt;身份…&gt;</code> 与 <code>ai/perm file run|read|ban &lt;路径&gt; &lt;身份…&gt;</code>（目录末尾带斜杠 = 整棵子树，路径含空格整段用双引号）；
+                <code>ai/perm revoke &lt;键&gt; &lt;身份&gt;</code> 现在<b>自动认这个键属于哪一块</b>（op / 数据 / 路径）。<code>ai/perm</code> 的看表多了数据与路径两个域的规则行、那一行"未声明 <code>Read</code> 的类别"、以及一行装载汇总。
+                <br><br>
+
+                <b>④ 行为收紧点（如实写）</b>：
+                · 普通身份的<b>通用库写入默认被拒</b> —— 技能自己那条正门照旧，但走通用写口去改数据不再是"有 op 就能改"，要先过数据那一域、再过行归属；
+                · <b>行级数据只读自己的</b> —— 读口补上了作用域收口（本人 / 本群 / 全体），原来"拿到读口就能看任意一行"那条路没有了；
+                · <b>文件默认不能碰</b> —— 取路径的写口（本地文件改写、外链地址产出、导出与导入）都先过路径那一域，没列到就是拒，而且拒绝文案不透露允许范围；
+                · 越界的技能文件条目、认不出的数据键、认不出的路径写法，全部<b>点名 + 不生效</b>；方向只会更严，不会更宽。
+                <br><br>
+
+                <b>⑤ 不变的部分</b>：版本号仍是 <b>V4.2</b>；基板九件事不变；<code>[权限阻断]</code> 这个前缀一字不改（这一版只在它后面补了"是哪一层挡的"这句说明）；主人与她本人恒全权，不受任何块影响；<code>ai/perm gen</code> 照旧只在已有的权限文件里重排、不新建文件。
+              </div>
+            </div>
+          </li>
+
+          <li class="release v4 reveal">
             <div class="rel-ver">当前版本</div>
             <div class="rel-body">
-              <h3 class="rel-title">2026-09-17 · 当前基线：九项能力的基板 + 可插拔外挂扩展</h3>
+              <h3 class="rel-title">2026-09-19 · V4.2：权限机制换成按归属分散的权限文件；新增 ai/favor</h3>
               <div class="rel-desc">
                 <b>这一版是什么</b>：基板只做九件事 —— 通用存储、热插拔与动态执行、提示词加载与注入、Agent 架构、上下文装配、权限与好感度、模型客户端、QQ 连接、控制台交互。
                 业务能力都搬到了 <code>data\skills\</code> 下的外挂扩展里：放一个目录就多一项能力，删掉就彻底消失，一个扩展都不装，基板也照常运转。
                 <br><br>
 
-                <b>① 线上这一版</b>：线上插件是 <code>C:\Sair\SairFrameWork\plugins\exection\ai.jar</code>，
+                <b>① 线上这一版</b>：线上插件是 <code>&lt;框架目录&gt;\plugins\exection\ai.jar</code>（<code>&lt;框架目录&gt;</code> 指 SFW 的安装目录，下同），
                 仓根产物是 <code>AiAgentV4.jar</code>，两者是同一份；落位后按文件名得到控制台前缀 <code>ai/</code>。
                 <br>
 
-                <b>② 源码结构</b>：<code>src\</code> 下 110 个 <code>.java</code>，分 17 个包（1 个根包 + 16 个子包）。
+                <b>② 源码结构</b>：<code>src\</code> 下 114 个 <code>.java</code>，分 17 个包（1 个根包 + 16 个子包）。
                 <br>
 
                 <b>③ 提示词文件</b>：<code>data\prompts\</code> 下有 <code>identity.md</code>（身份）、<code>subagent.md</code>（子 Agent 公共部分）、
-                <code>tools-index.md</code>（文案与能力索引）三份，正文由你自己写 —— 冷启动只给空壳。
+                <code>tools-index.md</code>（文案与能力索引）三份，正文由你自己写 —— 冷启动只建 <code>identity.md</code> 与 <code>subagent.md</code> 两个空壳，<code>tools-index.md</code> 要自己放。
                 <br>
 
                 <b>④ 配置键面</b>：<code>Conf.knownKeys()</code> 一共 <b>94 个键</b>，登记在 <code>src\sair\v4\Conf.java</code> 里，
-                这 94 个键都是真的有读取方的键；<code>config.json</code> 出厂时写入的是它的一个子集。
-                本机调试面的四个键已经从配置面整条撤出，读法见<a href="config.html#keys">配置页 · 键表</a>。
+                这 94 个键都登记在键表里，其中 6 个媒体类键目前还没有读取方（见本节 ⑨）；<code>config.json</code> 出厂时写入的是它的一个子集。
+                本机调试面的四个键早已从配置面整条撤出（不是这一版的改动），读法见<a href="config.html#keys">配置页 · 键表</a>。
                 <br>
 
                 <b>⑤ 控制台命令面</b>：以 <code>ai/help</code> 的实现为准 —— 文本在 <code>src\sair\v4\term\Cmd.java</code>，
-                路由分支共 <b>18 条</b>。按用途分组（<code>ai/</code> 是这个实例的命令前缀）：
+                路由分支共 <b>20 条</b>（其中 <code>acl</code> 与 <code>execs</code>／<code>execq</code>／<code>execfc</code>／<code>orchestrate</code> 已退休、只回一句指路）。按用途分组（<code>ai/</code> 是这个实例的命令前缀）：
                 入口 <code>help</code>；对话 <code>chat</code>（别名 <code>say</code>）／<code>stop</code>／<code>reset</code>；
                 生命周期 <code>start</code>／<code>restart</code>；状态与配置 <code>status</code>／<code>tools</code>／<code>config</code>／<code>tick</code>／<code>alarm</code>；
-                能力面 <code>prompt</code>／<code>perm</code>／<code>acl</code>／<code>napcat</code>／<code>store</code>；
+                能力面 <code>prompt</code>／<code>perm</code>／<code>favor</code>／<code>napcat</code>／<code>store</code>；
                 另有<b>两条</b>命令（外挂库维护、本机调试面开关），名称与用法同样以 <code>ai/help</code> 原文为准。
                 <code>execs</code>／<code>execq</code>／<code>execfc</code>／<code>orchestrate</code> 属于已经删除的「通道」概念，敲下去只会回一句「直接用 <code>ai/chat</code>」。
                 生效口径只有一条：<code>start</code> 与 <code>restart</code> 之外，其余命令都只改配置文件，改完要么 <code>start</code>（没在跑）、要么 <code>restart</code>（已经在跑）才生效。
@@ -114,9 +161,23 @@
 
                 <b>⑧ 当前功能面</b>（下面每一条都是现在就能感受到的行为）：
                 <br>
-                · <b>权限按资源判</b>：三个身份（主人／她自己／其他用户）× 五类资源（本机、运行时目录、数据、外部交互、工具入口）× 三个位（R/W/X），
-                例外清单放在数据根的 <code>perms.json</code> 账本里，判定失败一律拒绝；消息里自称「我是主人」不构成任何授权。看账本用 <code>ai/acl</code>
-                （只读那一支在 <code>src\sair\v4\term\Cmd.java</code>）。
+                · <b>权限按三个域判</b>：技能（谁能用哪个 op）、数据（谁能改、谁能读哪类数据）、路径（谁能碰哪些路径）；每一域里 <code>Ban</code> 压过允许，更具体的键优先；
+                没列到时技能不能用、数据能读不能改、文件不能碰（"数据能读"是全表唯一默认放开的一处，装载时会点名列出来）。
+                原先那套按资源分类的「资源位」不再有 —— 资源对主人与她本人完全可见可改可执行，对其他人是黑盒，要过得过技能、数据、文件三道闸门；
+                消息里自称「我是主人」不构成任何授权。
+                <br>
+                · <b>权限文件按归属分散</b>：基板侧那份（NapCat 动作，以及 console／exec／prompt／model／perm／store／tools／skill／ctx／config／agent／alarm 这些，外带全部路径）写在数据根 <code>perms-core.jsonc</code>；
+                每个技能写自己目录里的 <code>perms.jsonc</code>，只写它自己提供的工具与属于自己的数据键；装载时合并成一张判定表，<code>ai/perm</code> 会打出来源汇总。
+                <br>
+                · <b>默认拒绝</b>：技能目录里没有那份文件，它全部 op 对普通用户就不授权（主人与她本人照旧全权）；删掉技能目录，它的权限也一起消失。
+                <br>
+                · <b>越界忽略</b>：技能文件里写了不属于它的 op（或不属它的数据键）整条忽略，写了路径块则整块忽略，都在启动日志里点名（那一行会写出真归属）；<code>skill_write</code> 不能写这个文件名，技能没法给自己开口子。
+                <br>
+                · <b>权限文件人可读</b>：三个域在外、层在内，规则层的键一律写成中括号数组（<code>["a", "b"]: ["身份…"]</code>），<code>//</code> 注释独占一行写在内容的前一行（基板读之前整行丢掉）；
+                <code>ai/perm</code> 打合并视图 + 数据与路径两域的规则行 + 「另有 N 个动作没在表里（= 未授权）」+ 装载汇总；<code>ai/perm gen</code> 只在已有的文件里重排、补注释，<b>不新建文件</b>；
+                <code>ai/perm run|ban|db|file|revoke</code> 写回该键归属的那一份，并在回执里写明是哪个文件。
+                <br>
+                · <b>新增 <code>ai/favor</code></b>：榜单 / <code>get</code> / <code>set</code> / <code>reset</code> 四支，写命令只有主人能跑；好感度与权限彻底分开 —— 它只是一份数据，不参与任何判定（<code>src\sair\v4\term\Cmd.java</code>、<code>auth\Favor.java</code>）。
                 <br>
                 · <b>配置生命周期只有一条规则</b>：写命令只改文件，<code>ai/start</code> 才「加载并运行」（<code>ai/restart</code> = 停旧基板 → 重读文件 → 重新装配）；
                 <code>ai/status</code> 会把「文件里的值 ≠ 已生效的值」的键列出来，没启动过的实例是正常的 <code>ready=0 reason=not_started</code>。
@@ -567,7 +628,7 @@
     </div>
 
             <nav class="pager">
-      <a class="prev" href="migration.html"><span class="p-dir">← PREV</span><span class="p-name">10 · 升级指引</span></a>
+      <a class="prev" href="skills.html"><span class="p-dir">← PREV</span><span class="p-name">11 · 技能开发</span></a>
       <span></span>
     </nav>
 

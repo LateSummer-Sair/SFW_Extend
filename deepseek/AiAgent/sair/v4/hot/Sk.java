@@ -27,13 +27,14 @@ public final class Sk {
     public String toolRegistered = null;
     /**
      * 旧"权限档位"字段：<b>恒为空串，没有任何语义</b> —— 旧档位体系（技能 md 的 {@code permission:}、
-     * 权限注册表）已随 P9b 整批删除，权限改由资源 ACL 在"要碰资源那一刻"按 {@code Res.*} 的位判。
+     * 权限注册表）已随 P9b 整批删除，权限改由技能管控表（数据根 {@code skillctl.json}）按
+     * <b>身份 × op</b> 判（{@code h.need("工具名.动作名")}）。
      *
      * <p>保留它只是为了<b>不动可观测面</b>：{@link #toJson()} 的 {@code permission} 键与
      * {@code skill_index.permission} 列照旧（{@code Store} 落库时读它），技能列表的 JSON 形状因此不变。
      * 扫描时由基板固定清空（{@code Skills} 里 {@code sk.level = ""}）。</p>
      *
-     * <p><b>不要给它填任何值</b>：现在的权限判据只有 {@code perms.json} 账本，给这里填字符串不会生效，
+     * <p><b>不要给它填任何值</b>：现在的权限判据只有技能管控表，给这里填字符串不会生效，
      * 只会让下一个人以为档位还活着。</p>
      */
     public String level = "";

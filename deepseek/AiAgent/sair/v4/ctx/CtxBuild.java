@@ -1,7 +1,9 @@
 package sair.v4.ctx;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -13,9 +15,7 @@ import java.util.Map;
 
 import sair.v4.Conf;
 import sair.v4.auth.Acl;
-import sair.v4.auth.Bits;
 import sair.v4.auth.Caller;
-import sair.v4.auth.Res;
 import sair.v4.kit.J;
 import sair.v4.kit.Out;
 import sair.v4.kit.Str;
@@ -117,14 +117,16 @@ public final class CtxBuild {
         default String roundsFact(Turn t) { return null; }
 
         /**
-         * <b>权限面</b>（可空）：事实块里的 {@code caller.kind} / {@code caller.bits} 要问
-         * "这个人对五类资源各有什么位"，那只能由权限账本（{@code perms.json}）回答。
+         * <b>权限面</b>（可空）：事实块里的 {@code caller.kind} / {@code caller.ops} 要问
+         * "这个身份能用哪些 op"，那只能由权限面（按归属分散的权限文件 + op 注册表）回答。
          *
-         * <p>装配方接了这一口（{@code Boot} 的 {@code auth()}）就用它的账本 —— 与授权 op 操作的是
-         * <b>同一份内存状态</b>，主人刚写完例外，下一轮事实块立刻是对的。
+         * <p>装配方接了这一口（{@code Boot} 的 {@code auth()}）就用它的清单与账本 —— 与主人的授权
+         * 操作是<b>同一份内存状态</b>，刚写完授权，下一轮事实块立刻是对的。
          * 默认返回 {@code null} = 没接：{@link CtxBuild} 自己按数据根读一份<b>只读</b>账本
-         * （同一个文件、同一套 {@code Acl.bitsOf}，文件变了自动重读），
-         * 所以探针那种"直接 new 一个 CtxBuild"的场合也能拿到真位。</p>
+         * （只读 core {@code perms-core.jsonc}，读不了技能目录里的 {@code perms.jsonc}）；
+         * 那一份手里没有 op 注册表，
+         * 所以"全部 op"退化成账本里出现过的 op（见 {@link #allowedOps(Caller)}）——
+         * 探针那种"直接 new 一个 CtxBuild"的场合也能拿到真清单。</p>
          */
         default sair.v4.auth.Auth auth() { return null; }
     }
@@ -305,14 +307,15 @@ public final class CtxBuild {
             // 好感度：**跟身份无关**地给她（主人裁 2026-09-17 —— 它不判权限、是"关系值"，
             // 每个人都能问她"我的好感度是多少"；她得先看得到，说不说完全由她定）
             c.addProperty("favor", (long) t.caller().favor());
-            // 权限事实（ACL）：主体种类 + 这个人对五类资源的**有效位**。提示词层拿这两个判断
-            // "能不能答应他"，不再看工具名（工具的可见性不再按调用者筛，见 notes/acl-design-draft.md）。
-            // 位一律问账本（Acl.bitsOf），基板不在这里重算任何一位。
+            // 权限事实（技能管控表）：主体种类 + 这个身份**能用哪些 op**（"ALL" = 恒全权）。
+            // 提示词层拿这两个判断"能不能答应他" —— 资源对 ALLUSER 是黑盒，读 / 写 / 执行唯一的路
+            // 是技能（op），所以"可用技能清单"就是权限事实的全部，不再有"资源位"这回事。
+            // 清单一律问权限面（auth.allowedOps），基板不在这里重算任何一次判定。
             c.addProperty("kind", kindName(t.caller()));
-            c.add("bits", callerBits(t.caller()));
-            // 权限事实（续）：这个调用者**能命中的例外条目**（主体层级 > 0），原样条目一行一条。
-            // 目的只有一个 —— 让她"快速查到此人是否具备特例放行"，不用每次去翻纪律文本。
-            // 取值一律问账本（Acl.ruleLines），基板在这里不算任何一位、也不下任何结论。
+            c.add("ops", callerOps(t.caller()));
+            // 权限事实（续）：这个调用者**能命中的管控表条目**，原样条目一行一条（可读形态）。
+            // 目的只有一个 —— 让她"快速查到此人是否具备特例放行"，不用每次去翻调控管表。
+            // 取值一律问账本（Acl.entries），基板在这里不算任何一次判定、也不下任何结论。
             c.add("rules", callerRules(t.caller()));
             sb.append("caller: ").append(J.json(c)).append("\n");
         }
@@ -383,13 +386,20 @@ public final class CtxBuild {
         return sb.toString().trim();
     }
 
-    // ---------------------------------------------------------------- 事实块里的权限事实（caller.kind / caller.bits）
+    // ---------------------------------------------------------------- 事实块里的权限事实（caller.kind / caller.ops / caller.rules）
 
     /** 装配方没接权限面（{@link Env#auth()} 返回 {@code null}）时，自己按数据根读的那份账本（只读缓存）。 */
     private volatile Acl ownAcl;
-    /** 上面那份账本的"文件指纹"（mtime + 长度）：变了就重读，免得事实块报旧位。 */
+    /** 上面那份账本的"文件指纹"（mtime + 长度）：变了就重读，免得事实块报旧清单。 */
     private volatile long ownAclStamp = Long.MIN_VALUE;
     private volatile long ownAclLen = Long.MIN_VALUE;
+
+    /**
+     * {@code caller.ops} 对<b>恒全权</b>身份（{@code MASTER} 与她本人 {@code SYSTEM}）的取值：
+     * 一个字符串 {@code "ALL"}。不逐条列出上百个 op —— "恒全权"一个词就说清了，
+     * 读的人配合 {@code caller.kind} 判（两个键都在同一格事实里）。
+     */
+    static final String OPS_ALL = "ALL";
 
     /**
      * 主体种类（事实块 {@code caller.kind}）：{@code MASTER} / {@code SYSTEM} / {@code ALLUSER}
@@ -401,129 +411,123 @@ public final class CtxBuild {
     }
 
     /**
-     * 事实块 {@code caller.bits}：<b>这个人对五类资源的有效位</b>
-     * （{@code {"A":"R","B":"RX","C":"RWX","E":"NONE","T":"NONE"}}，{@link Bits#format} 的规范写法）。
+     * 事实块 {@code caller.ops}：<b>这个身份能用哪些 op</b>（技能管控表 {@code skillctl.json} 的结论）。
      *
-     * <p><b>五类都写</b>（一位都没有也显式写 {@code NONE}）：提示词层就是拿这五个值判断"能不能答应他"，
-     * 少写一类会被读成"没限制"。</p>
+     * <p><b>形态两种</b>：恒全权（{@code MASTER} / {@code SYSTEM}）写字符串 {@code "ALL"}；
+     * 其余（{@code ALLUSER}）写<b>数组</b> = 可用 op 名清单（{@code auth.allowedOps(caller)}），
+     * 一个都没授权就是空数组 {@code []}。<b>绝不写 {@code null}</b>：写 null 会被读成"没有这个键"，
+     * "一个 op 都没授权"与"没这一格"就分不清了（与 {@code caller.rules} 同一口径）。</p>
      *
-     * <p>取值一律问账本（{@link Acl#bitsOf}）—— <b>基板不在这里重算任何一位</b>。
-     * 每一类用它的<b>代表资源</b>去问（见 {@link #repRes(char)}）：资源自己决定类别，
-     * 所以代表资源的类别必须对得上；例外条目能否命中取决于它的范围，因此这里体现的是
-     * "整类例外 + 覆盖该代表资源的例外"，更细的例外仍由判定那一刻的 {@code Auth.allowRes} 说了算。</p>
+     * <p><b>提示词层怎么读</b>：{@code caller.kind} + {@code caller.ops} 两个一起看 ——
+     * {@code kind=MASTER|SYSTEM} ⇒ 恒全权（{@code ops="ALL"}），不必拿清单比；
+     * {@code kind=ALLUSER} ⇒ 他只能用清单里的那几个 op，清单外的一律照实回技能管控表的拒绝原文
+     * （{@link Acl#DENY_PREFIX}），别反复试。资源本身对 {@code ALLUSER} 是黑盒：读 / 写 / 执行
+     * 唯一的路是技能（op），所以这一格就是权限事实的全部 —— 不再有"资源位"这个概念。</p>
+     *
+     * <p>取值一律问权限面（{@code Auth.allowedOps}）—— <b>基板不在这里重算任何一次判定</b>，
+     * 也不自己拼 op 名。装配方没接权限面时（探针直接 new 一个 {@link CtxBuild}）退回自己按数据根
+     * 读的那份只读账本：那一份手里没有 op 注册表（注册表在权限面里），所以"全集"退化成
+     * <b>账本里出现过的 op</b>（见 {@link #allowedOps(Caller)}）。</p>
      */
-    private JsonObject callerBits(Caller c) {
-        JsonObject o = new JsonObject();
+    private JsonElement callerOps(Caller c) {
+        if (c == null) return new JsonArray();
+        Caller.Kind k = c.kind();
+        if (k == Caller.Kind.MASTER || k == Caller.Kind.SYSTEM) return new JsonPrimitive(OPS_ALL);
+        JsonArray arr = new JsonArray();
+        List<String> ops = allowedOps(c);
+        for (int i = 0; i < ops.size(); i++) arr.add(ops.get(i));
+        return arr;
+    }
+
+    /**
+     * 这个身份能用的 op 名清单：优先权限面（与主人的授权操作是<b>同一份内存状态</b>，
+     * 刚写完授权，下一轮事实块立刻是对的），没接就自己按数据根读一份只读账本。
+     */
+    private List<String> allowedOps(Caller c) {
+        if (c == null) return new ArrayList<String>();
+        if (env != null) {
+            try {
+                sair.v4.auth.Auth a = env.auth();
+                if (a != null) return a.allowedOps(c);
+            } catch (Throwable ignored) {
+                // 权限面没装好 → 退回下面自己读（与 acl() 同一取向：宁可少一格，也不让回合垮）
+            }
+        }
         Acl a = acl();
-        o.addProperty("A", bitsText(a, c, Res.A));
-        o.addProperty("B", bitsText(a, c, Res.B));
-        o.addProperty("C", bitsText(a, c, Res.C));
-        o.addProperty("E", bitsText(a, c, Res.E));
-        o.addProperty("T", bitsText(a, c, Res.T));
-        return o;
+        if (a == null) return new ArrayList<String>();
+        // 自己读的这一路拿不到 op 注册表（它在权限面手里）⇒ "全部 op" 退化成"账本里出现过的 op"。
+        // 工具级条目（Run["memory"]）覆盖的动作也照账本里那个名字列出 —— 不编动作名
+        // （编出来就是谎报"某个动作单独可用"）。
+        List<String> known = new ArrayList<String>(a.byOp().keySet());
+        return a.opsFor(c, known);
     }
 
     /** 事实块 {@code caller.rules} 的<b>条数上限</b>（超出只写一句"还有 N 条"，不把账本整段搬进上下文）。 */
     static final int CALLER_RULES_MAX = 8;
 
     /**
-     * 事实块 <b>{@code caller.rules}</b>：<b>这个调用者能命中的例外条目</b>
-     * （主体层级 &gt; 0，按账本顺序；{@link Acl.Entry#raw()} 的原样写法，例如
-     * {@code A["User123456","D:/share","R"]}）。
+     * 事实块 <b>{@code caller.rules}</b>：<b>这个调用者能命中的技能管控表条目</b>
+     * （身份键完全相等者，按账本顺序；{@link Acl.Entry#text()} 的可读写法，
+     * 例如 {@code [Run] memory.remember ← user:123456}）。
      *
      * <p><b>用途</b>（主人 2026-09-15 21:1x：「特例表加载进内存可以给她快速查询到此人是否具备特例放行」）：
-     * 她拿这一格就能一眼看到"此人有没有特例放行"，不必每次去翻纪律文本或反复试。
-     * 与 {@code caller.bits} 分工明确：{@code bits} 是<b>结论</b>（五类有效位），
-     * {@code rules} 是<b>依据</b>（哪几条例外在起作用），两个都不含判定过程。</p>
+     * 她拿这一格就能一眼看到"此人有没有条目在起作用（放行或封禁）"，不必每次去翻调控管表或反复试。
+     * 与 {@code caller.ops} 分工明确：{@code ops} 是<b>结论</b>（能用哪些 op），
+     * {@code rules} 是<b>依据</b>（哪几条条目在起作用），两个都不含判定过程。</p>
      *
-     * <p>取值一律问账本（{@link Acl#ruleLines(Caller, int)} → {@link Acl#rulesFor(Caller)}，只遍历
-     * 内存里<b>已加载</b>的条目）：<b>不重读磁盘</b>、<b>不算位</b>、<b>不碰 {@code Auth} 之外的判定</b>
-     * —— 基板在这里只"喂查询视图"。取舍（只看主体层级 &gt; 0、不看具体资源）见
-     * {@link Acl#rulesFor(Caller)} 的注释：「某条条目有没有命中某个具体资源」仍由判定那一刻的
-     * {@code Auth.allowRes} 说了算。</p>
+     * <p>取值一律问账本（{@link Acl#entries()}，只遍历内存里<b>已加载</b>的条目）：<b>不重读磁盘</b>、
+     * <b>不判 op</b>、<b>不碰 {@code Acl.allow} 之外的判定</b> —— 基板在这里只"喂查询视图"。
+     * 身份匹配用的是规范身份键的完全相等（{@code ALLUSER} / {@code user:<QQ>} / {@code group:<群号>}，
+     * 与 {@code Acl} 判定时的主体匹配同一套写法）：只看"这条条目写的是不是他"，不看具体 op 命中。</p>
      *
      * <p>上限 {@value #CALLER_RULES_MAX} 条（超出的不列，末尾追加一句"还有 N 条"，N = 没列出来的条数）；
      * <b>一条都没有 = 空数组 {@code []}</b> —— <b>绝不写 {@code null}</b>（写 null 会被读成"没有这个键"，
-     * "没有例外"与"没这一格"就分不清了）。账本读不到（{@link #acl()} 返回 {@code null}）同样是空数组，
-     * 与 {@code bits} 那边"读不到就退该类默认分配"一样：事实块宁可少一个值，也不把回合拖垮。
-     * MASTER 必然是空数组（条目管不到他）—— 那是正确结果，不是查不到。</p>
-     *
-     * <p><b>{@code caller.bits} 的五类语义（A/B/C/E/T）一个字都没动</b>：这一格是<b>新增</b>的键，
-     * 不是把 {@code bits} 拆开重排。</p>
+     * "没有条目"与"没这一格"就分不清了）。账本读不到（{@link #acl()} 返回 {@code null}）同样是空数组，
+     * 与 {@code caller.ops} 那边"读不到就退空清单"一样：事实块宁可少一个值，也不把回合拖垮。
+     * MASTER 与她本人（SYSTEM）必然是空数组（恒全权，条目管不到他们）—— 那是正确结果，不是查不到。</p>
      */
     private JsonArray callerRules(Caller c) {
         JsonArray arr = new JsonArray();
         if (c == null) return arr;
+        Caller.Kind k = c.kind();
+        if (k == Caller.Kind.MASTER || k == Caller.Kind.SYSTEM) return arr;
         Acl a = acl();
         if (a == null) return arr;
         try {
-            List<String> lines = a.ruleLines(c, CALLER_RULES_MAX);
-            for (int i = 0; i < lines.size(); i++) arr.add(lines.get(i));
+            List<String> mine = new ArrayList<String>();
+            mine.add(Acl.ALLUSER_KEY);
+            if (c.qq() > 0L) mine.add(Acl.USER_PREFIX + c.qq());
+            if (c.groupId() > 0L) mine.add(Acl.GROUP_PREFIX + c.groupId());
+            int hit = 0;
+            int listed = 0;
+            for (Acl.Entry e : a.entries()) {
+                if (!appliesTo(e, mine)) continue;
+                hit++;
+                if (listed >= CALLER_RULES_MAX) continue;
+                arr.add(e.text());
+                listed++;
+            }
+            if (hit > listed) arr.add("还有 " + (hit - listed) + " 条");
         } catch (Throwable ignored) {
-            // 账本查询出异常 = 这一格当"没有例外"（与 person 事实同一口径：少一格不影响这一轮）
+            // 账本查询出异常 = 这一格当"没有条目"（与 person 事实同一口径：少一格不影响这一轮）
         }
         return arr;
     }
 
-    /**
-     * 某一类的有效位文字。账本读不到 / 这一类在这个进程里没有可问的资源时，
-     * 按<b>该类默认分配</b>给（{@link Acl#allocOf}，它自己就是"一条例外都没命中"的口径），绝不猜更宽的位。
-     */
-    private String bitsText(Acl a, Caller c, char cls) {
-        if (c == null) return Bits.format(Bits.NONE);
-        Res r = repRes(cls);
-        if (a == null || r == null) return Bits.format(Acl.allocOf(c.kind(), cls));
-        return Bits.format(a.bitsOf(c, r));
-    }
-
-    /**
-     * 五类的<b>代表资源</b>（只用来问"这个人对那一类有什么位"）：资源自己决定类别，
-     * 所以代表资源必须先判成对的那一类，判不成时宁可退"默认分配"（{@code null}）也不把别类的位报上来。
-     * <ul>
-     *   <li><b>A 本机</b> → 系统盘根（{@code C:/}）；不在 SFW 之下才算数，否则退空路径
-     *       （{@link Res#path(String)} 对空路径的口径：类别 A + 匹配串空，只命中"整类"例外）；</li>
-     *   <li><b>B SFW</b> → 数据根（线上它就在 SFW 之内；它自己不是 {@code prompts/**}、{@code config.json}
-     *       那几个受保护目标，所以不会被"第二层受保护"抹成 {@code NONE}）；
-     *       <b>判不成 B</b>（SFW 根与进程工作目录不一致的场合，例如探针的临时数据根 ——
-     *       那时这个进程里根本没有 B 类资源）→ {@code null}；</li>
-     *   <li><b>C 数据</b> → {@code db:memory}（不是 {@code mem:acl} 那个受保护项）；</li>
-     *   <li><b>E 对外</b> → {@code send_group_msg}（不是 {@code get_cookies} 那个受保护动作）；</li>
-     *   <li><b>T 工具</b> → {@code tool:perm}（一个常驻工具名，只用来读"整类 + 覆盖它的例外"）。</li>
-     * </ul>
-     */
-    private Res repRes(char cls) {
-        if (cls == Res.A) return repA();
-        if (cls == Res.B) return repB();
-        if (cls == Res.C) return Res.db("memory");
-        if (cls == Res.T) return Res.tool("perm");
-        return Res.platform("send_group_msg");
-    }
-
-    /** A 类的代表资源：系统盘根（取不到就退空路径）。 */
-    private static Res repA() {
-        String drive = null;
-        try {
-            drive = System.getenv("SystemDrive");
-        } catch (Throwable ignored) {
-            // 环境变量不可读 → 退空路径
+    /** 这一条账本条目写的是不是这个身份能命中的键（{@code mine} = 他的全部规范身份键）。 */
+    private static boolean appliesTo(Acl.Entry e, List<String> mine) {
+        for (String p : e.principals()) {
+            if (mine.contains(p)) return true;
         }
-        if (Str.has(drive)) {
-            Res r = Res.path(drive.trim() + "/");
-            if (r.cls() == Res.A) return r;
-        }
-        return Res.path("");
-    }
-
-    /** B 类的代表资源：数据根；它没被判成 B 就返回 {@code null}（调用方按默认分配给）。 */
-    private Res repB() {
-        File r = conf == null ? null : conf.root();
-        Res res = Res.path(r == null ? "" : r.getPath());
-        return res.cls() == Res.B ? res : null;
+        return false;
     }
 
     /**
-     * 权限账本（只读）：优先用装配方的权限面（{@link Env#auth()}），没接就自己按数据根读一份。
-     * <p>自己读的那份带"文件指纹"缓存：{@code perms.json} 改了（主人写完例外）下一轮就重读。</p>
+     * 权限表（只读）：优先用装配方的权限面（{@link Env#auth()}），没接就自己按数据根读一份。
+     * <p>自己读的那份 = 数据根下的 {@link Acl#fileOf}({@code perms-core.jsonc})，
+     * <b>只有 core</b>（没有工具归属，读不了技能目录里的 {@code perms.jsonc}，也不并旧统一表）——
+     * 所以正常装配下走的一定是上面那一支（权限面会做多源合并），这一支是探针/降级路径。
+     * 它带"文件指纹"缓存：主人手改了 core 下一轮就重读。</p>
      */
     private Acl acl() {
         if (env != null) {
@@ -543,10 +547,10 @@ public final class CtxBuild {
             a = ownAcl;
             if (a == null || m != ownAclStamp || n != ownAclLen) {
                 try {
-                    // out=null：同一份账本的"非法条目"告警由权限面那边报一次，这里不重复刷屏
+                    // out=null：同一份账本的"认不出的条目"告警由权限面那边报一次，这里不重复刷屏
                     a = Acl.load(f, null);
                 } catch (Throwable t) {
-                    a = null;                       // 读不到 = 按默认分配（见 bitsText），不让事实块拖垮回合
+                    a = null;                       // 读不到 = 空清单（见 allowedOps / callerRules），不让事实块拖垮回合
                 }
                 ownAcl = a;
                 ownAclStamp = m;
@@ -776,7 +780,31 @@ public final class CtxBuild {
                 + "（偏好块改用内置默认文案渲染 —— 缺键不停止注入）");
     }
 
-    /** 历史对话（dialog 库，最近 N 条，按时间升序；按字符预算从最旧的整条丢）。 */
+    /**
+     * 历史对话（dialog 库，最近 N 条，按时间升序；按字符预算从最旧的整条丢）。
+     *
+     * <p><b>FIX-ECHO（读侧去头，真机已复现）</b>：注入 {@code t.messages()} 的 content 一律先过
+     * {@link sair.v4.qq.SelfEcho#withoutHead} —— 给模型看的正文<b>永不</b>带那个内部记账头
+     * （{@code [我发的 msg_id=N] }）。不去头时，模型每一轮都在历史里读到这个形状并照着学，
+     * 用户就真收到了以 {@code [我发的 msg_id=…]} 开头的消息（真机 {@code sent} 台账 id=1003/709，
+     * 私聊）。</p>
+     *
+     * <p><b>刻意不动的两处</b>：① 库里的行一个字都不改（P0-1 已发布契约
+     * {@code content.startsWith("[我发的 ")} 必须继续成立，{@code dialog}/{@code grouplog} 照旧带头部）；
+     * ② {@link #dropSelfDup} 的判定语义照旧（它处理的是<b>库里的行</b>与<b>比较串</b>，照旧"留带头部的那条"，
+     * 因为带真 msg_id 的那条信息更多）。去头只发生在"最后要交给模型的那一份"上。</p>
+     *
+     * <p><b>FIX-ECHO 补-4（独立复核裁定：读侧不该动别人的话）</b>：去头是<b>有条件的</b> ——
+     * 只对"<b>她自己</b>的行（{@code role=assistant}）<b>且</b>这一行是标记形状
+     * （{@link #isSelfRow}）"去头。<b>别人的行原样进上下文</b>：外人逐字打出
+     * {@code [我发的 msg_id=1] 你好} 时，模型看到的还是那句话（前缀不被吃掉）；模型若从用户
+     * 文本里学到这个形状，出站那三道闸会拦（见 {@code term.Sinks} 与 {@code qq.Api}）。
+     * 只按形状、不看身份去头，会把用户的话吃掉前缀 —— 那是这一版补回来的对称性。</p>
+     *
+     * <p><b>有意的取舍（写在这里，免得日后被当成漏改）</b>：她的行进上下文时<b>不再带自己的
+     * msg_id</b> —— 与"别人那一行本来也不带 msg_id"一致；换来的是"模型不再学这个形状"。
+     * 去头是幂等的：不带头部的行原样注入（{@code withoutHead} 的契约）。</p>
+     */
     public void appendHistory(Turn t) {
         if (store == null || t == null) return;
         List<JsonObject> rows = store.recentDialog(t.session(), historyLimit());
@@ -787,7 +815,12 @@ public final class CtxBuild {
             String content = J.s(r, "content", "");
             if (Str.blank(content)) continue;
             if (!"user".equals(role) && !"assistant".equals(role)) continue;
-            t.messages().add(msg(role, content));
+            // ★ FIX-ECHO：交给模型的那一份去头 —— 只对她的标记行（身份 ⋀ 形状），别人的话逐字原样。
+            //   去完什么都不剩（只有头部/头条残缺）就不注入空正文 —— 空 content 会被严格的 provider 直接 400。
+            String inject = ("assistant".equals(role) && isSelfRow(r))
+                    ? sair.v4.qq.SelfEcho.withoutHead(content) : content;
+            if (Str.blank(inject)) continue;
+            t.messages().add(msg(role, inject));
         }
     }
 

@@ -49,7 +49,7 @@ import sair.v4.term.SfwOut;
 public class V4Activity extends Activity implements Cmd.Life, sair.v4.dev.DebugShell.Host {
 
     /** 产品版本号（发布口径的唯一一处；启动横幅与文档里的版本以它为准）。 */
-    public static final String VERSION = "V4.1";
+    public static final String VERSION = "V4.2";
 
     private volatile Boot boot;
     private volatile Cmd cmd;
@@ -254,7 +254,7 @@ public class V4Activity extends Activity implements Cmd.Life, sair.v4.dev.DebugS
                         if (old != null) safeStop(old);
                         safeLog(out, "重启：旧基板已停，开始按 config.json 重新装配（线程 " + bootThreadName + "）");
                     } else {
-                        safeLog(out, "基板装配开始（AiAgent V4.1，线程 " + bootThreadName + "，19 步，控制台不受影响）");
+                        safeLog(out, "基板装配开始（AiAgent V4.2，线程 " + bootThreadName + "，19 步，控制台不受影响）");
                     }
                     // ★ 就绪与"装配名额"必须在同一个临界区里、且名额**先**交还（既有竞态；门禁实测
                     //   首跑 ⑩(c) 8/268 红，全落在这一条根因上）：

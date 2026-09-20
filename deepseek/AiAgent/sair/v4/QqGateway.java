@@ -193,9 +193,11 @@ public final class QqGateway {
     /**
      * 一条通知事件 → 一行"特殊消息记录"（<b>只落库，不做别的</b>）。
      *
-     * <p><b>零触发</b>：本方法只读库（查昵称）、只写一行；不派钩子、不投票、不调模型、不发消息。
-     * 转发权限判定的写法与 {@code handleMessage} 那段<b>同一份</b>
-     * （{@link Caller#systemActor(long)} 对目标库的 C 类 W 位）。</p>
+     * <p><b>零触发</b>：本方法只读库（查昵称）、只写一行；不派钩子、不投票、不调模型、不发消息。</p>
+     *
+     * <p><b>权限</b>：落库的是<b>她自己</b>的行（主体即她本人 / {@code SYSTEM}），
+     * 这台机器上只有两种人 —— 主人与她本人<b>恒全权</b>，{@code ALLUSER} 才按技能管控表
+     * （身份 × op → Ban / Run / 空）受管。这里是她写自己的库，<b>不是技能，不判</b>。</p>
      */
     private void handleNotice(Ev ev) {
         if (ev == null || boot == null || boot.store() == null) return;
@@ -218,18 +220,6 @@ public final class QqGateway {
         NoticeRow nr = noticeRow(ev, type);
         if (nr == null) return;
         String table = nr.dialog ? "dialog" : "grouplog";
-        String deny;
-        try {
-            sair.v4.auth.Auth a = boot.auth();
-            deny = a == null ? null
-                    : a.allowRes(Caller.systemActor(conf.masterQQ()), sair.v4.auth.Res.db(table), 'W');
-        } catch (Throwable t) {
-            deny = "ACL 判定异常：" + t;             // 判不出来 = 不落（与"被拦"同一处理）
-        }
-        if (deny != null) {
-            if (out != null) out.warn("[auth] 通知留痕被拦（未写 " + table + "）：" + deny);
-            return;
-        }
         boot.store().put(table, nr.row);
         // 结构事实一行（只有"哪个会话、哪类通知、多少字"，**没有标签正文**）：通知落没落库、
         // 落哪张表，看日志就能核。正文（标签）只在库里，窗口读它，控制台不当回声墙。
@@ -385,7 +375,7 @@ public final class QqGateway {
      *       是最后一道"可辨别"而不是"可阻挡"。</li>
      * </ol>
      *
-     * <p><b>零触发</b>：本方法只读 {@code conf}、读 {@code Seen}、查 ACL、{@code store.put}、
+     * <p><b>零触发</b>：本方法只读 {@code conf}、读 {@code Seen}、{@code store.put}、
      * 打一行 {@code facts}。没有：{@code shouldAnswer}、{@code pluginVote}、
      * {@code Skills.dispatch}/{@code invokeHook}（任何 {@code ON_*}）、{@code Agent.ask}/{@code Loop}、
      * {@code Api.call}（发送）、{@code Sinks.*}、{@code Inbound.remember}、任何 {@code Turn}。
@@ -393,9 +383,9 @@ public final class QqGateway {
      * （它把 {@code mediaFacts} 的输出交给 {@code Turn}），本方法只把 {@code mediaFacts} 的
      * <b>输出</b>喂给 {@code MediaRender.render} 做标签，<b>绝不</b>把它交给任何上下文。</p>
      *
-     * <p><b>ACL 逐字复用通知留痕（N1）那一份</b>：判定主体 {@link Caller#systemActor(long)}
-     * 对目标库的 C 类 {@code W} 位；被拦就 {@code out.warn} 一行、<b>不落库、不抛</b>。
-     * 判不出（ACL 异常）与被拦同一处理 —— 与 N1 的 {@code handleNotice} 逐字一致。</p>
+     * <p><b>权限口径与通知留痕（N1）同一份</b>：写的是<b>她自己</b>的行（主体即她本人 / {@code SYSTEM}），
+     * 这台机器上只有两种人 —— 主人与她本人<b>恒全权</b>，{@code ALLUSER} 才按技能管控表
+     * （身份 × op → Ban / Run / 空）受管。这里是她写自己的库，<b>不是技能，不判</b>。</p>
      *
      * @param action  真实动作名（A 路 = {@code send_group_msg}/{@code send_private_msg}/{@code send_msg}；
      *                B 路 = {@code message_sent}）
@@ -444,19 +434,7 @@ public final class QqGateway {
                 sair.v4.qq.SelfEcho.textOf(sev),
                 sair.v4.qq.SelfEcho.labels(sev, mediaFacts(sev)));
         String table = group ? "grouplog" : "dialog";
-        // 落库前先判 ACL（逐字复用 handleNotice 那一份；被拦 = 不落，且不抛）
-        String deny;
-        try {
-            sair.v4.auth.Auth a = boot.auth();
-            deny = a == null ? null
-                    : a.allowRes(Caller.systemActor(conf.masterQQ()), sair.v4.auth.Res.db(table), 'W');
-        } catch (Throwable t) {
-            deny = "ACL 判定异常：" + t;             // 判不出来 = 不落（与"被拦"同一处理）
-        }
-        if (deny != null) {
-            if (out != null) out.warn("[auth] 自我留痕被拦（未写 " + table + "）：" + deny);
-            return;
-        }
+        // 她自己的留痕（主体即她本人）：恒全权，不是技能 op ⇒ 不判，直接落。
         JsonObject row = new JsonObject();
         row.addProperty("ts", System.currentTimeMillis());
         if (group) {
@@ -617,7 +595,7 @@ public final class QqGateway {
                     + "（窗口内已经处理过这条；累计挡下 " + seen.hits() + " 条）");
             return;
         }
-        // ⑥ 好感度是权限门禁的数据源：把当前数值绑到这次调用上
+        // ⑥ 好感度绑到这次调用上（它不再是权限门禁：放不放行只由技能管控表按 身份 × op 判）
         //    （主人裁 2026-09-17 起它还多一层身份：她对每个人的"关系值" ⇒ 第一次打交道就按人建账，
         //     这样谁都能问她"我的好感度是多少"，而说不说由她定）
         boot.favor().ensure(c.qq());
@@ -673,16 +651,8 @@ public final class QqGateway {
             // （于是"这条不是引用"这一格与"没有 extra 的既有行"完全同形，不引入空壳）。
             String qlink = sair.v4.qq.QuoteCache.linkExtra(quoteRef);
             if (qlink != null) row.addProperty("extra", qlink);
-            // 防御性：落 grouplog = 她自己的自主行为（SYSTEM C:RWX）。先按 ACL 判 C 类 W 位再落库 ——
-            // 证明基板记录群聊不会被默认 OTHER 位误伤；被拦（理论上不会）则留日志、不落这一行。
-            sair.v4.auth.Auth a = boot.auth();
-            String deny = a == null ? null
-                    : a.allowRes(Caller.systemActor(conf.masterQQ()), sair.v4.auth.Res.db("grouplog"), 'W');
-            if (deny != null) {
-                if (out != null) out.warn("[auth] 自主落库被拦（未写 grouplog）：" + deny);
-            } else {
-                quoteRowId = boot.store().put("grouplog", row);
-            }
+            // 落 grouplog = 她自己的行为（主体即她本人 / SYSTEM）：恒全权，不是技能 op ⇒ 不判，直接落。
+            quoteRowId = boot.store().put("grouplog", row);
             // 这里原来还有一行「会话快照落后」检查（noteInboundLag：算"这条消息还没进快照的条数"，
             // 超阈值 warn 一行）。游标机制随主人 2026-09-16 的口径整条删除，那行告警也没有了衡量对象 ——
             // 现在每触发一个回合都现查"本会话最近 N 条聊天记录"（chatWindowSize），
@@ -1332,8 +1302,9 @@ public final class QqGateway {
      * 调用者 → 钩子 payload 里的 {@code _caller}（<b>这条消息是谁发的</b>）。
      *
      * <p>只有<b>身份</b>：{@code entry/qq/session/master/favor/name/group/role}。
-     * 它里面<b>不含</b>任何权限结论 —— 判定主体是 {@code Ctx} 上那一个，
-     * 位由 ACL 按主体身份现算（见 {@code Acl.bitsOf}）。</p>
+     * 它里面<b>不含</b>任何权限结论 —— 这台机器上只有两种人：主人与她本人<b>恒全权</b>，
+     * {@code ALLUSER} 才按技能管控表（身份 × op → Ban / Run / 空）受管；
+     * 具体某个 op 放不放行由拿着这份身份的判定主体现算。</p>
      */
     public static JsonObject callerJson(Caller c) {
         JsonObject o = new JsonObject();

@@ -30,7 +30,8 @@
     <a href="files.html"><span class="n">08</span>文件</a>
     <a href="architecture.html"><span class="n">09</span>实现</a>
     <a href="migration.html"><span class="n">10</span>升级</a>
-    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+    <a href="skills.html"><span class="n">11</span>技能开发</a>
+    <a href="changelog.html"><span class="n">12</span>更新日志</a>
   </nav>
   <div class="topbar-meta">
     <span class="chip live">纯静态</span>
@@ -151,8 +152,9 @@
               <tr><td><code>ai/start</code></td><td><b>唯一的"加载并运行"</b></td><td>组件入口；读 <code>config.json</code> + 19 步装配，已在跑只回话<br><code>Cmd.java</code></td></tr>
               <tr><td><code>ai/restart</code></td><td>停旧 → 重读 → 重装</td><td>组件入口；不并发，重复的会被拒<br><code>Cmd.java</code></td></tr>
               <tr><td><code>ai/tools [all]</code></td><td>当前可见工具</td><td>工具注册表；<code>all</code> = 不按调用者筛<br><code>Cmd.java</code></td></tr>
-              <tr><td><code>ai/perm […]</code></td><td>好感度</td><td>好感度存储；不带参看身份与可见工具<br><code>Cmd.java</code></td></tr>
-              <tr><td><code>ai/acl</code></td><td>权限账本（<b>只读</b>）</td><td>权限面 + <code>perms.json</code>；四段输出<br><code>Cmd.java</code></td></tr>
+              <tr><td><code>ai/perm […]</code></td><td>技能管控表（看表 / 授权 / 封禁 / 数据 / 路径）</td><td>权限面 + 按归属分散的权限文件（<code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code>，装载时合并成一张三域表）；不带参打印整张表<br><code>Cmd.java</code></td></tr>
+              <tr><td><code>ai/favor […]</code></td><td>好感度</td><td>好感度存储；不带参看榜单<br><code>Cmd.java</code></td></tr>
+              <tr><td><code>ai/acl</code></td><td>已退休，只留一句指路</td><td>回一句"改成了技能管控表"并打印 <code>ai/perm</code><br><code>Cmd.java</code></td></tr>
               <tr><td><code>ai/config [键 [值]]</code></td><td>看 / 改配置（都针对文件）</td><td>无（壳配置兜底）；<code>set</code> 只写文件并回"未生效"<br><code>Cmd.java</code></td></tr>
               <tr><td><code>ai/debug [on [token]|off|status|simulate on|off]</code></td><td>本机调试面的唯一开关</td><td>无（<b>独立于基板</b>）；不带子命令 = <code>status</code><br><code>Cmd.java</code></td></tr>
               <tr><td><code>ai/skill [list|reload|validate|read 名]</code></td><td>外挂层清单与重载</td><td>外挂库装配面；不带子命令 = <code>list</code><br><code>Cmd.java</code></td></tr>
@@ -176,36 +178,36 @@
             <tbody>
               <tr>
                 <td><code>ai/skill</code>（不带子命令 = <code>list</code>）</td>
-                <td>回一行合计 <code>外挂 N 个（工具 N，钩子 N）</code>，随后逐行列出每一条的名称、状态、它提供的工具名与挂的钩子名。默认子命令的判据在分发处。</td>
+                <td>回一行合计 <code>技能 N 个（工具 N，钩子 N）</code>，随后逐行列出每一条的名称、状态、它提供的工具名与挂的钩子名。默认子命令的判据在分发处。</td>
                 
               </tr>
               <tr>
                 <td><code>ai/skill reload</code></td>
-                <td><b>显式重扫</b>（没有目录监听，改完外挂要用它）；扫描正在编译时会被拒并回"外挂正在编译中，本次 reload 未执行 —— 编完再试"，不会排到扫描锁后面把控制台卡住。成功后回 <code>已重扫：外挂 N 个，提供工具 N 个</code>。</td>
+                <td><b>显式重扫</b>（没有目录监听，改完外挂要用它）；扫描正在编译时会被拒并回"技能正在编译中，本次 reload 未执行 —— 编完再试"，不会排到扫描锁后面把控制台卡住。成功后回 <code>已重扫：技能 N 个，提供工具 N 个</code>。</td>
                 
               </tr>
               <tr>
                 <td><code>ai/skill validate</code></td>
-                <td>校验外挂库：无问题回 <code>外挂库无问题（共 N 个）</code>，有问题逐条 warn 打出。</td>
+                <td>校验外挂库：无问题回 <code>技能库无问题（共 N 个）</code>，有问题逐条 warn 打出。</td>
                 
               </tr>
               <tr>
                 <td><code>ai/skill read &lt;名&gt;</code></td>
-                <td>打印这一条的 JSON 与它的文档正文；名字不存在时回 <code>没有外挂 &lt;名&gt;</code>。</td>
+                <td>打印这一条的 JSON 与它的文档正文；名字不存在时回 <code>没有技能 &lt;名&gt;</code>。</td>
                 
               </tr>
               <tr>
                 <td>依赖</td>
-                <td>外挂库的装配面：不可用时回 <code>外挂层不可用：库未装配（&lt;缺什么&gt;）</code>，并补一句"外挂层不可用时基板其余能力照常"。</td>
+                <td>外挂库的装配面：不可用时回 <code>skill 不可用：技能库未装配（&lt;缺什么&gt;）</code>，并补一句"技能是外挂层；技能库不可用时基板其余能力照常"。</td>
                 
               </tr>
             </tbody>
           </table>
         </div>
-        <p class="t-cap">技能怎么写、怎么装见 <a href="capabilities.html#skill-dev">06 · 能力</a>；本页只写它作为一条控制台命令的那一面。</p>
+        <p class="t-cap">技能怎么写、怎么装见 <a href="skills.html">11 · 技能开发</a>；本页只写它作为一条控制台命令的那一面。</p>
 
         <div class="note reveal">
-          <p><span class="n-title">上表怎么数出来的</span>：<code>src\sair\v4\term\Cmd.java</code> 共 1,442 行 / 74,925 字节（<code>Get-ChildItem</code> 实测），分发口从  的 <code>route()</code> 起逐条 <code>if ("名字".equals(f))</code>，最后一条分支是  的四个已删除名字 是未知命令兜底。命令表另列的四条框架命令<b>不在分发口里</b>。</p>
+          <p><span class="n-title">上表怎么数出来的</span>：分发口在 <code>src\sair\v4\term\Cmd.java</code> 的 <code>route()</code> 里逐条比对命令名（<code>if ("名字".equals(f))</code>），对不上的落到"未知命令"兜底。命令表另列的四条框架命令<b>不在分发口里</b>。</p>
         </div>
       </section>
 
@@ -258,7 +260,7 @@
             <thead><tr><th>事实</th><th>值 / 行为</th></tr></thead>
             <tbody>
               <tr><td>总步数</td><td>常量 <code>19</code>，各处台账与进度行都用它</td></tr>
-              <tr><td>步骤清单</td><td>19 行 <code>step("名字", …)</code>：数据目录与配置 → 空数据骨架 → 六库 → 权限 → 提示词 → 工具注册表 → 模型客户端 → NapCat 连接 → 上下文装配 → 外挂库 → 回合调度器 → Agent → 心跳 → QQ 网关 → 基板工具面 → 外挂扫描 → NapCat 监听 → 文件外链中转 → 心跳启动</td></tr>
+              <tr><td>步骤清单</td><td>19 行 <code>step("名字", …)</code>：数据目录与配置 → 空数据骨架 → 六库 → 权限门禁 → 提示词 → 工具注册表 → 模型客户端 → NapCat 连接 → 上下文装配 → 技能库 → 回合调度器 → Agent → 心跳 → QQ 网关 → 基板工具面 → 技能扫描 → NapCat 监听 → 文件外链中转 → 心跳启动</td></tr>
               <tr><td>进度行</td><td><code>第 x/19 步 &lt;步骤名&gt;，已耗时 …ms</code>；装配线程已起但没到第一步时给"第 0/19 步（装配线程已起，正在准备）"</td></tr>
               <tr><td>在谁的线程上</td><td>守护线程 <code>v4-boot</code>；调用线程（可能是界面线程）只做"搭壳 + 起线程"</td></tr>
               <tr><td>某一步失败</td><td>只让那项能力缺失，记下<b>第一个失败的步骤名与原因</b>，装配继续；<code>ai/status</code> 打印失败台账</td></tr>
@@ -454,7 +456,7 @@
               <dt>参数</dt>
               <dd><code>all</code>（大小写不敏感）= <b>不按调用者筛选</b>，连被权限挡住的名字一起列（诊断用）；不带参数 = 只看这个调用者能用的（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
               <dt>效果</dt>
-              <dd>逐行打印工具面，每行形状：<code>  工具名  [有效位 · 来源]  一句话描述（截 60 字符）</code>；有效位是该调用者在这把工具上的 <code>RWX</code> 掩码（问不出来时印 <code>-</code>），来源写着基板自带还是某个外挂提供（<code>src\sair\v4\tool\Registry.java</code>、有效位）。排序只按名字（大小写不敏感），这样同一套工具表每次都是同一个字节序，服务端前缀缓存才有得吃。</dd>
+              <dd>逐行打印工具面，每行形状：<code>  工具名  [Run / Ban · 来源]  一句话描述（截 60 字符）</code>；方括号里是技能管控表对这把工具的结论（<code>Run</code> = 放行、<code>Ban</code> = 不放行；<code>all</code> 那种不筛调用者的视图印 <code>-</code>），来源写着基板自带还是某个外挂提供（<code>src\sair\v4\tool\Registry.java</code>）。排序只按名字（大小写不敏感），这样同一套工具表每次都是同一个字节序，服务端前缀缓存才有得吃。</dd>
               <dt>基板自带多少个</dt>
               <dd>装配的「基板工具面」那一步注册 <b>17 个</b>（<code>src\sair\v4\term\Cmd.java</code>）；注册动作 <code>src\sair\v4\Boot.java</code>，实现里 17 处 <code>reg.add(Tool.of("…"))</code>（<code>src\sair\v4\Builtins.java</code> 起）。其余工具在外挂扫描之后陆续出现。</dd>
               <dt>依赖</dt>
@@ -557,7 +559,7 @@
               <tr><td><code>napcatPort</code></td><td>反向 WS 监听端口</td><td><code>8082</code></td></tr>
               <tr><td><code>napcatHost</code></td><td>绑定的网卡地址</td><td><code>127.0.0.1</code>（只听回环）</td></tr>
               <tr><td><code>napcatToken</code></td><td>接入凭据（<b>敏感键</b>，盘上是密文）</td><td>—</td></tr>
-              <tr><td><code>napcatTimeoutMs</code></td><td>调用 NapCat 的等待上限（<code>ai/napcat send</code> 受它约束）</td><td>—</td></tr>
+              <tr><td><code>napcatTimeoutMs</code></td><td>调用 NapCat 的等待上限（<code>ai/napcat send</code> 受它约束）</td><td>10000</td></tr>
               <tr><td><code>relayEnabled</code> / <code>relayPort</code> / <code>relayPublicHost</code> / <code>relayToken</code> / <code>relayTtlMinutes</code></td><td>文件外链中转：开关 / 端口 / 对外地址 / 凭据（敏感键）/ 有效期</td><td>端口 <code>2671</code></td></tr>
             </tbody>
           </table>
@@ -570,74 +572,144 @@
       <section class="chapter" id="perm-cmds">
         <header class="chapter-head reveal">
           <span class="chapter-tag">权限与好感度</span>
-          <h2>八、权限命令：<code>perm</code> / <code>acl</code></h2>
-          <p class="chapter-desc">分工明确：<code>acl</code> 只看权限账本（只读），<code>perm</code> 只管好感度。控制台里没有"授权/撤销"的口子 —— 那是她在模型侧用工具做的事。</p>
+          <h2>八、权限命令：<code>perm</code> / <code>favor</code></h2>
+          <p class="chapter-desc">分工明确：<code>perm</code> 管技能管控表（三个域 —— 技能 / 数据 / 路径），<code>favor</code> 管好感度；写表与写数值都只有主人能跑。旧名字 <code>acl</code> 已经退休，只留一句指路。</p>
         </header>
 
         <div class="keylist">
           <div class="keyrow reveal">
-            <div class="k-head"><span class="k-name">ai/perm</span><span class="k-def">用法：不带子命令 = 看调用者身份与可见工具</span><span class="badge info">只读</span></div>
+            <div class="k-head"><span class="k-name">ai/perm</span><span class="k-def">用法：不带子命令 = 打印整张表</span><span class="badge info">只读</span></div>
             <dl>
               <dt>效果</dt>
-              <dd>打印调用者一行 + <code>可见工具 N / 全部 M</code> + 工具表（<code>src\sair\v4\term\Cmd.java</code>；文本生成 <code>src\sair\v4\Boot.java</code>，工具面没装配时会说明是哪一步失败）。</dd>
+              <dd>打印技能管控表（三个域，每个域里是自己的层）逐条原文 + 一行 <code>Acl.stat()</code> 摘要 + 数据与路径两个域的规则行（域 → 层 → 键，同一个键先取并集）+ 一行"未声明 <code>Read</code>、按默认能读的类别" + 一行装载汇总 + 来源汇总（<code>core</code> 几条、技能几份共几条，再逐份列出路径与条数）+ 一段怎么用；一份权限文件都没有时会直说"一切未授权"，并提示敲 <code>ai/perm run</code> 开口子。认不出的键原样留着并点名，而且一律不生效（<code>src\sair\v4\term\Cmd.java</code>、<code>src\sair\v4\auth\Acl.java</code>）。</dd>
               <dt>注意</dt>
-              <dd>这块输出<b>不再</b>打印任何"配置里的权限覆盖"：旧的那套档位表已随实现整类删除，权限的唯一账本是数据根的 <code>perms.json</code>（<code>src\sair\v4\Boot.java</code>）。</dd>
+              <dd>判据是那些按归属分散的权限文件：基板内置工具那份在数据根下的 <code>perms-core.jsonc</code>，技能自己的工具那份在该技能目录里的 <code>perms.jsonc</code>；装载时合并成一张表。三域各有自己的默认值：技能没列到不能用；数据没列到能读、不能改（<b>全表唯一默认放开的一处</b>）；路径没列到不能碰。同一把键上 <code>Ban</code> 压过允许，更具体的键优先，同一个键写多处取并集。主人与她本人（<code>SYSTEM</code>）恒全权，不进判定（<code>src\sair\v4\auth\Acl.java</code>）。</dd>
             </dl>
           </div>
 
           <div class="keyrow reveal">
-            <div class="k-head"><span class="k-name">ai/perm list</span><span class="k-def">好感度榜单（前 20）</span><span class="badge info">只读</span></div>
+            <div class="k-head"><span class="k-name">ai/perm list [op]</span><span class="k-def">按 op 看谁能用</span><span class="badge info">只读</span></div>
             <dl>
-              <dt>效果</dt>
-              <dd>打印好感度前 20 名的 JSON（<code>src\sair\v4\term\Cmd.java</code>；取数口 <code>src\sair\v4\auth\Favor.java</code>，上限 20 写死在命令里）。</dd>
+              <dt>参数</dt>
+              <dd>一个可选的 op 名（<code>工具名</code> 或 <code>工具名.动作名</code>）；不给就把表里每个 op 逐行列全（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
             </dl>
           </div>
 
           <div class="keyrow amber reveal">
-            <div class="k-head"><span class="k-name">ai/perm set &lt;QQ&gt; &lt;好感度&gt;</span><span class="k-def">写一条好感度</span><span class="badge warn">写库</span></div>
+            <div class="k-head"><span class="k-name">ai/perm gen</span><span class="k-def">重排已有的权限文件</span><span class="badge warn">写盘</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>把<b>已经有权限文件</b>的那几份重排一遍：按域、层、键排好并补上 <code>//</code> 注释，每一层里哪些身份原样保留；<b>不新建文件</b> —— 技能目录里没有 <code>perms.jsonc</code>，就是它的 op 全部不授权。它不发明新的数据或路径条目、也不给宽身份新增授权；技能文件里不会写出路径块。跑完会列出"这些 op 还没有权限文件（= 不授权）"；要让某一项开口子用 <code>ai/perm run &lt;op&gt; &lt;身份&gt;</code>，它会顺手创建该 op 归属的那份文件（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/perm run &lt;op&gt; &lt;身份…&gt;</span><span class="k-def">白名单：授权</span><span class="badge warn">写盘</span></div>
             <dl>
               <dt>参数</dt>
-              <dd>两段：QQ 号 + 数值；少于两段只回 <code>用法：perm set &lt;QQ&gt; &lt;好感度&gt;</code>（<code>src\sair\v4\term\Cmd.java</code>）。数值按小数解析，回显时取整。</dd>
+              <dd>一个 op 名 + 一到多个身份，落进 <code>Skill</code> 那一层的 <code>Run</code>；身份写法 <code>user:&lt;QQ&gt;</code> / <code>group:&lt;群号&gt;</code> / <code>ALLUSER</code>（裸 QQ 号等于 <code>user:&lt;QQ&gt;</code>）。写法认不出来时一个字都不写 —— 先全验、再动账本（<code>src\sair\v4\auth\Acl.java</code>）。</dd>
               <dt>效果</dt>
-              <dd>回 <code>已设置 &lt;QQ&gt; 好感度 = &lt;整数&gt;（&lt;档位名&gt;）</code>；写入时记一笔来源 <code>console</code>（<code>src\sair\v4\term\Cmd.java</code>；<code>Favor.set(long, double, String)</code> <code>src\sair\v4\auth\Favor.java</code>，档位名）。</dd>
-              <dt>依赖</dt>
-              <dd>好感度存储；没装配时回 <code>perm 不可用：好感度存储未装配（&lt;缺什么&gt;）</code>（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
-              <dt>注意</dt>
-              <dd class="risk">好感度<b>不是</b>权限：它不参与"能不能用某个工具"的判断（权限只看 ACL 账本）。</dd>
+              <dd>写完即落盘、当场生效，不需要重载；落到该 op <b>归属</b>的那一份文件（回执里写明是哪一个）（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
             </dl>
           </div>
 
           <div class="keyrow rose reveal">
-            <div class="k-head"><span class="k-name">ai/perm reset</span><span class="k-def">清空全部好感度记录</span><span class="badge bad">无法撤销</span></div>
+            <div class="k-head"><span class="k-name">ai/perm ban &lt;op&gt; &lt;身份…&gt;</span><span class="k-def">黑名单：封禁</span><span class="badge bad">写盘</span></div>
             <dl>
               <dt>效果</dt>
-              <dd>清空并回 <code>已清空 N 条好感度记录</code>（<code>src\sair\v4\term\Cmd.java</code>；实现口 <code>src\sair\v4\auth\Favor.java</code>）。</dd>
-              <dt>注意</dt>
-              <dd class="risk">没有确认步骤、没有备份、没有撤销 —— 敲下去就清了。</dd>
+              <dd>写法与 <code>run</code> 一样，写的是 <code>Skill</code> 那一层的 <code>Ban</code>。<b>同一把键上 <code>Ban</code> 压过允许</b>：只要这个身份命中任何一条 <code>Ban</code> 就拒（<code>src\sair\v4\auth\Acl.java</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/perm db run|read|ban &lt;数据键&gt; &lt;身份…&gt;</span><span class="k-def">数据那一域：谁能改 / 谁能读 / 谁都不能</span><span class="badge warn">写盘</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>一个<b>已知的数据类别</b> + 一到多个身份。<code>run</code> = 谁能改、<code>read</code> = 谁能读、<code>ban</code> = 谁都不能（压过前两者）。数据键要在白名单里，认不出的键会被当场拒掉并说明原因 —— 不会静默写成别的块（<code>src\sair\v4\term\Cmd.java</code>、<code>src\sair\v4\auth\Acl.java</code>）。</dd>
+              <dt>效果</dt>
+              <dd>写进 <code>DB</code> 那一域对应的层，落回这条规则<b>读自的那份文件</b>（回执里写明落到哪里）。改的判定命中之后还要看<b>这一行归谁</b>：靠 <code>ALLUSER</code> 命中的只动得了自己那一份，要让某人改别人的行就得把他指名写进 <code>run</code>（<code>src\sair\v4\auth\Acl.java</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/perm file run|read|ban &lt;路径&gt; &lt;身份…&gt;</span><span class="k-def">路径那一域：谁能碰哪个路径</span><span class="badge warn">写盘</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>一个路径 + 一到多个身份。目录写成<b>末尾带斜杠</b>就是它的整棵子树；不认通配符；<b>路径里含空格时整段用一对双引号包起来</b>（<code>"D:/a b/"</code>），引号没配对会直接拒掉、一段看着像路径的词出现在身份位也会被拒（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+              <dt>效果</dt>
+              <dd>写进 <code>File</code> 那一域对应的层。判定按<b>最长路径优先</b>：子目录里的禁止压过父目录里的允许（<code>src\sair\v4\auth\Acl.java</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/perm revoke &lt;键&gt; &lt;身份&gt;</span><span class="k-def">撤回这个身份的全部条目</span><span class="badge warn">写盘</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd><b>键会自动认它属于哪一块</b>（op / 数据 / 路径），一次把这个身份在该键上的全部条目摘干净并落盘；一行里若因此一个人都不剩，整条被删掉（<code>src\sair\v4\term\Cmd.java</code>、<code>src\sair\v4\auth\Acl.java</code>）。</dd>
             </dl>
           </div>
 
           <div class="keyrow reveal">
-            <div class="k-head"><span class="k-name">ai/perm &lt;QQ&gt;</span><span class="k-def">看某个人的好感度快照</span><span class="badge info">只读</span></div>
+            <div class="k-head"><span class="k-name">ai/perm reload</span><span class="k-def">重新读账本</span><span class="badge info">只读账本</span></div>
             <dl>
               <dt>效果</dt>
-              <dd>打印这个 QQ 的好感度快照 JSON（<code>src\sair\v4\term\Cmd.java</code>；快照口 <code>src\sair\v4\auth\Favor.java</code>）。</dd>
-              <dt>注意</dt>
-              <dd>参数既不是上面任何子命令、也解析不成数字时，回 <code>用法：perm [list|set &lt;QQ&gt; &lt;值&gt;|reset|&lt;QQ&gt;]</code>（<code>src\sair\v4\term\Cmd.java</code>）。已删除的子命令：<code>perm levels</code> / <code>perm setlevel</code> 两个分支<b>整组已删除</b>（它们背靠旧档位体系的读写口，而权限现在只看账本）。</dd>
+              <dd>外面手改了那几份权限文件（<code>perms-core.jsonc</code> 或某个技能目录里的 <code>perms.jsonc</code>）之后，重新合并装载一遍（顺手重新取一次工具归属，技能重扫之后归属可能变了）；装载失败会回一句可读的原因。回执里除了摘要与来源汇总，还会追加那一行装载汇总（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
             </dl>
           </div>
 
-          <div class="keyrow ok reveal">
-            <div class="k-head"><span class="k-name">ai/acl</span><span class="k-def">用法：<code>ai/acl</code>，不接受参数</span><span class="badge ok">只读，不写盘</span></div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/perm：写盘的共同口径</span><span class="k-def">任何一条写命令都一样</span><span class="badge mute">落盘规则</span></div>
             <dl>
-              <dt>它打印什么</dt>
-              <dd>账本 = 数据根的 <code>perms.json</code>（<code>{"version":3,"entries":[…]}</code>），权限的唯一判据。输出四段：① 一行摘要 <code>Acl.stat()</code>（条目数量 + 分类计数 + 默认分配 + 文件名）；② <code>默认分配 &lt;…&gt; · 她自己的默认分配（SYSTEM）&lt;…&gt;</code>；③ 逐条原文（带主体层级、命中时生效位、范围匹配串与顺序说明）；④ 被跳过的非法条目（<b>有才打</b> —— 写错了要看得见，不能静默失效）。结尾两行：账本文件路径（内存账本时明说"没落盘"）+ "只读命令：授权/撤销/查询/验算请让她用 perm 工具"（<code>src\sair\v4\term\Cmd.java</code>、打印实现）。</dd>
-              <dt>实现口</dt>
-              <dd><code>Acl.stat()</code> <code>src\sair\v4\auth\Acl.java</code> · <code>defaultText()</code>  · <code>systemText()</code>  · <code>list()</code>  · <code>rejects()</code>  · <code>file()</code> 被拒绝时的统一前缀 <code>[权限阻断]</code> 在 。</dd>
-              <dt>依赖</dt>
-              <dd>权限面与账本；未装配回 <code>acl 不可用：权限面未装配（&lt;缺什么&gt;）</code>，账本装载失败另有 <code>acl 不可用：账本没能装载（&lt;缺什么&gt;）</code>（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+              <dt>按归属重排</dt>
+              <dd><code>run</code> / <code>ban</code> / <code>db</code> / <code>file</code> / <code>revoke</code> / <code>gen</code> 落盘都走同一条路：<b>把它管到的已有权限文件按这一版的形状重排一遍</b>（一份文件只写它自己的东西），重排结果与文件里现有内容逐字节相同就跳过这一次写。所以第一次写会把整批旧格式文件顺带排成新形状，而后回执里的"已写入 X"指的是<b>这条规则归属的那份文件</b>，不等于"只有 X 被写"（<code>src\sair\v4\auth\Acl.java</code>）。</dd>
+              <dt>只有主人能跑</dt>
+              <dd>这一族里的写命令只有主人能跑；<code>ai/perm</code> 与 <code>ai/perm list</code> 是只读的。身份写法认不出来、或者写了 <code>MASTER</code> / <code>SYSTEM</code>，一个字都不会写盘（先全验、再动账本）（<code>src\sair\v4\term\Cmd.java</code>、<code>src\sair\v4\auth\Acl.java</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/favor</span><span class="k-def">用法：不带子命令 = 好感度榜单</span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>打印好感度榜单：数值降序，最多 20 行，逐行 <code>QQ/昵称 ← 数值 · 档位</code>（<code>src\sair\v4\term\Cmd.java</code>；取数口 <code>src\sair\v4\auth\Favor.java</code>，上限 20 写死在命令里）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/favor get &lt;QQ&gt;</span><span class="k-def">看某人当前数值与档位</span><span class="badge info">只读</span></div>
+            <dl>
+              <dt>参数</dt>
+              <dd>一个 QQ 号；缺了只回用法（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">ai/favor set &lt;QQ&gt; &lt;数值&gt;</span><span class="k-def">主人直改数值</span><span class="badge warn">写库</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>两段：QQ 号 + 数值（QQ 是正整数；数值 ≥ 0，可带小数），写库即生效，不受她自己加减区间的限制（<code>src\sair\v4\term\Cmd.java</code>、<code>src\sair\v4\auth\Favor.java</code>）。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow rose reveal">
+            <div class="k-head"><span class="k-name">ai/favor reset [QQ]</span><span class="k-def">清成初值 / 清空全部</span><span class="badge bad">无法撤销</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>给 QQ 就是把他清成初值（<code>0 = 初识</code>）；不给就清空全部好感度记录。没有确认步骤、没有备份、没有撤销（<code>src\sair\v4\term\Cmd.java</code>、<code>src\sair\v4\auth\Favor.java</code>）。</dd>
               <dt>注意</dt>
-              <dd class="risk"><b>本命令不写盘、不改任何状态</b>：授权 / 撤销 / 查询 / 验算都在她那边的 perm 工具（<code>op=grant/revoke/acl/whoami…</code>），账本改动写完即生效、不需要重载（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+              <dd class="risk">好感度<b>不是</b>权限：它不参与"能不能用某个工具"的判断，也不参与任何判定 —— 权限只看技能管控表。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/acl</span><span class="k-def">已经退休的名字</span><span class="badge mute">只留一句指路</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>回一句"<code>acl</code> 已退休：权限改成了按归属分散的权限文件（数据根 <code>perms-core.jsonc</code> + 每个技能的 <code>perms.jsonc</code>）—— 看表与改表都在 <code>ai/perm</code>"，紧接着把 <code>ai/perm</code> 的表打出来；命令表里把它标成「已退休」，只留这一句指路（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+              <dt>旧账本</dt>
+              <dd>数据根里如果还留着旧版那份权限账本，启动时会一次性读进来，能翻译的那几条按新口径入表（旧账本里按资源分类的那几条不再适用，忽略掉）；那只是迁移用的一次性读取，<b>不会落成新文件</b> —— 权限已经按归属分散在 <code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code> 里了（<code>src\sair\v4\auth\Acl.java</code>）。</dd>
+              <dt>旧格式权限文件</dt>
+              <dd>权限文件本身也有旧格式：上一版的嵌套写法与旧的统一表都还能读进来，装载时会提示建议敲 <code>ai/perm gen</code> 重排一次；老文件里没写数据与路径两域时，就按该域"没列到"的默认值走（<code>src\sair\v4\auth\Acl.java</code>）。</dd>
             </dl>
           </div>
         </div>
@@ -645,13 +717,13 @@
         <h3 class="sec">一句话分清两条命令</h3>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>问题</th><th><code>ai/acl</code></th><th><code>ai/perm</code></th></tr></thead>
+            <thead><tr><th>问题</th><th><code>ai/perm</code></th><th><code>ai/favor</code></th></tr></thead>
             <tbody>
-              <tr><td>管什么</td><td>权限：谁能碰哪个资源</td><td>好感度：一个人的数值与档位</td></tr>
-              <tr><td>能改吗</td><td><b>不能</b>（只读打印）</td><td>能：<code>set</code> / <code>reset</code></td></tr>
-              <tr><td>数据在哪</td><td>数据根的 <code>perms.json</code></td><td>好感度存储（六库之一）</td></tr>
-              <tr><td>改了要重启吗</td><td>账本改动写完即生效</td><td>写库即生效</td></tr>
-              <tr><td>没装配时</td><td><code>acl 不可用：权限面未装配</code></td><td><code>perm 不可用：好感度存储未装配</code></td></tr>
+              <tr><td>管什么</td><td>权限：技能管控表（技能 / 数据 / 路径三个域）</td><td>好感度：一个人的数值与档位</td></tr>
+              <tr><td>能改吗</td><td>能：<code>run</code> / <code>ban</code> / <code>db</code> / <code>file</code> / <code>revoke</code> / <code>gen</code>（只有主人能跑）</td><td>能：<code>set</code> / <code>reset</code>（只有主人能跑）</td></tr>
+              <tr><td>数据在哪</td><td>按归属分散的权限文件：数据根的 <code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code></td><td>好感度存储（基板运行表之一）</td></tr>
+              <tr><td>改了要重启吗</td><td>写完即生效，不需要重载（外面手改了文件才敲 <code>reload</code>）</td><td>写库即生效</td></tr>
+              <tr><td>没装配时</td><td><code>perm 不可用：权限面未装配</code></td><td><code>favor 不可用：好感度存储未装配</code></td></tr>
             </tbody>
           </table>
         </div>
@@ -715,7 +787,7 @@
               <dt>参数</dt>
               <dd>一个库名。导出文件写在配置里的 files 目录下，名字是 <code>&lt;库&gt;-&lt;时间戳&gt;.jsonl</code>；成功回 <code>已导出 &lt;绝对路径&gt;</code>，失败回 <code>导出失败</code>（<code>src\sair\v4\term\Cmd.java</code>；实现 <code>src\sair\v4\store\Store.java</code>）。</dd>
               <dt>注意</dt>
-              <dd>导出的是一个库的全部行，不是某个会话；文件名带时间戳，<b>多次导出不会互相覆盖</b>。</dd>
+              <dd>导出的是一个库的全部行，不是某个会话；文件名带时间戳，<b>多次导出不会互相覆盖</b>。落点固定是配置里的 files 目录 —— <b>这条不从参数取路径</b>，所以导出这一跳没有路径那一层的判定；取路径的是下面的 <code>import</code>（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
             </dl>
           </div>
 
@@ -726,6 +798,8 @@
               <dd>按空白切两段（第二段是路径，带空格会出错）：库名 + 文件路径；成功回 <code>已导入 N 条</code>，失败回 <code>导入失败</code>（<code>src\sair\v4\term\Cmd.java</code>；实现 <code>src\sair\v4\store\Store.java</code>）。</dd>
               <dt>注意</dt>
               <dd>没有"先清空再导入"这种开关 —— 这是<b>往库里加行</b>，不是替换。</dd>
+              <dt>过哪两层的判定</dt>
+              <dd>两件事分开看：<b>路径那一侧</b>是把本机那份文件<b>读进来</b> ⇒ 过路径那一域的<b>读</b>；<b>库那一侧</b>是整库覆盖地写 ⇒ 过数据那一域的<b>写</b>（覆盖的是一批没有归属的行）。两道任意一道被拒就整条不执行；权限面拿不到时按拒处理，一个字节都不写。</dd>
             </dl>
           </div>
         </div>
@@ -748,6 +822,8 @@
             <dl>
               <dt>参数</dt>
               <dd>可选 <code>token</code>；不给就<b>现生成一个</b>：16 字节随机 → 32 位十六进制（<code>src\sair\v4\dev\DebugPort.java</code>）。控制台只回指纹、<b>不回 token 原文</b>；完整值在运行现场凭据文件 <code>&lt;数据根&gt;\debug-port.json</code>（<code>src\sair\v4\term\Cmd.java</code>、路径口）。</dd>
+              <dt>两种 token</dt>
+              <dd>给了 <code>token</code> 就用给的那一个（命令不打印它）；不给就<b>现生成一个</b>，并按"生成了"这条口径回一句：长度、指纹，以及完整值只在运行现场凭据文件里、不进 <code>config.json</code>（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
               <dt>效果</dt>
               <dd>起输出口 → 起输入口 → 把两个口一起写进凭据文件；回 <code>调试面已开：&lt;一行事实&gt;</code>。基板还没跑时补一行：调试口照常可用（读控制台/下命令），但它看到的是「未启动」的基板；之后敲 <code>ai/start</code>（或 <code>ai/restart</code>）它们报的就是那台活基板（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
               <dt>幂等</dt>
@@ -1022,8 +1098,8 @@
                 
               </tr>
               <tr>
-                <td>实测复核</td>
-                <td>全仓检索 <code>System.exit</code>：<b>1 处命中，且该命中是一行注释</b>（就是上面那段说明自己）—— 源码里没有任何一处真的结束 JVM。</td>
+                <td>怎么核对</td>
+                <td>在源码里检索 <code>System.exit</code>：只在一行注释里出现（就是上面那段说明自己）—— 没有任何一处真的结束 JVM。</td>
                 
               </tr>
               <tr>
@@ -1039,12 +1115,12 @@
         <div class="grid-2">
           <div class="panel reveal">
             <h3>① 用框架控制台的 <code>/exit</code></h3>
-            <p>框架自带文档把 <code>/exit</code> 的定义写得很直白：<b>退出框架 / 退出 SFW</b> —— 示例行 <code>/exit  # 退出框架</code>（<code>C:\Sair\SairFrameWork\readme\pages\plugin-dev.html</code>），命令表行 <code>/exit</code> → 退出 SFW。它关的是框架自己的窗口，进程随之结束。</p>
+            <p>框架自带文档把 <code>/exit</code> 的定义写得很直白：<b>退出框架 / 退出 SFW</b> —— 示例行 <code>/exit  # 退出框架</code>（<code>&lt;框架目录&gt;\readme\pages\plugin-dev.html</code>，<code>&lt;框架目录&gt;</code> 指 SFW 的安装目录），命令表行 <code>/exit</code> → 退出 SFW。它关的是框架自己的窗口，进程随之结束。</p>
             <p class="dim">同一条路在调试输出口也留了入口：口上敲 <code>exit</code> / <code>/exit</code> 会走"关框架"那条调用 → 框架关窗（<code>src\sair\v4\dev\DebugPort.java</code>、命令表）。</p>
           </div>
           <div class="panel reveal d1">
             <h3>② 按精确 pid 杀进程</h3>
-            <p>框架是用 <code>javaw</code> 起的：<code>run.bat</code> 的内容是 <code>start 8x64\bin\javaw -jar SFW.jar %*</code>（实测读取 <code>C:\Sair\SairFrameWork\run.bat</code>）。<code>javaw</code> 没有控制台窗口，所以"关掉黑框"这条路不存在。</p>
+            <p>框架是用 <code>javaw</code> 起的：<code>run.bat</code> 的内容是 <code>start 8x64\bin\javaw -jar SFW.jar %*</code>（内容就来自框架自带的 <code>run.bat</code>）。<code>javaw</code> 没有控制台窗口，所以"关掉黑框"这条路不存在。</p>
             <p class="dim">要做的是<b>先定位到这一个 pid</b>再按 pid 结束它：查 <code>javaw.exe</code> 进程列表、核对命令行 / 启动时间，确认是这一个实例之后再结束。按进程名批量结束容易误伤 —— 同一台机器上可能有别的 java / javaw 实例。</p>
           </div>
         </div>
@@ -1102,7 +1178,7 @@
             <div class="k-head"><span class="k-name">无法撤销的几条</span><span class="k-def">敲下去就生效，没有确认步骤</span><span class="badge bad">想清楚再敲</span></div>
             <dl>
               <dt>清单</dt>
-              <dd><code>ai/perm reset</code>（清空全部好感度记录 <code>src\sair\v4\term\Cmd.java</code>）· <code>ai/prompt clear</code>（清空全部注入）· <code>ai/reset</code>（清控制台会话历史）· <code>ai/store vacuum</code>（回收空闲页且期间独占数据库）· <code>ai/uninstall</code>（框架级卸载，卸载后要重装才可用）· <code>ai/store import</code>（往库里加行，不是替换）。</dd>
+              <dd><code>ai/favor reset</code>（清空全部好感度记录 <code>src\sair\v4\term\Cmd.java</code>）· <code>ai/prompt clear</code>（清空全部注入）· <code>ai/reset</code>（清控制台会话历史）· <code>ai/store vacuum</code>（回收空闲页且期间独占数据库）· <code>ai/uninstall</code>（框架级卸载，卸载后要重装才可用）· <code>ai/store import</code>（往库里加行，不是替换）。</dd>
               <dt>注意</dt>
               <dd class="risk">这些命令都没有确认口，也不产生备份文件。数据库文件本身可以离线复制一份当保险。</dd>
             </dl>
@@ -1112,15 +1188,15 @@
             <div class="k-head"><span class="k-name">已经不存在的东西</span><span class="k-def">别照着老习惯敲</span><span class="badge mute">未实现 / 已删除</span></div>
             <dl>
               <dt>已删除</dt>
-              <dd><code>perm levels</code> / <code>perm setlevel</code>（旧档位体系的读写口，整组删除，<code>src\sair\v4\term\Cmd.java</code>）；<code>execs</code> / <code>execq</code> / <code>execfc</code> / <code>orchestrate</code>（已删除的「通道」概念）；<code>debugPort</code> / <code>debugToken</code> / <code>debugSimPort</code> / <code>debugSimulate</code> 四个配置键（<code>src\sair\v4\Conf.java</code>）；<code>config reload</code> 的热重载语义（命令还在，只回一句"已退休"，<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+              <dd><code>perm levels</code> / <code>perm setlevel</code>（旧档位体系的读写口，整组删除）；<code>perm set</code> / <code>perm reset</code> / <code>perm &lt;QQ&gt;</code>（好感度那一组已搬到 <code>ai/favor</code>，旧写法不再认；<code>perm list</code> 还在，换成了按 op 看谁能用）；<code>execs</code> / <code>execq</code> / <code>execfc</code> / <code>orchestrate</code>（已删除的「通道」概念）；<code>debugPort</code> / <code>debugToken</code> / <code>debugSimPort</code> / <code>debugSimulate</code> 四个配置键（<code>src\sair\v4\Conf.java</code>）；<code>config reload</code> 的热重载语义（命令还在，只回一句"已退休"，<code>src\sair\v4\term\Cmd.java</code>）。</dd>
               <dt>未实现（不承诺）</dt>
-              <dd>控制台里<b>没有</b>这些口子，源码里也没有对应分支：定时唤醒的新增 / 取消；权限账本的写入（授权 / 撤销）；失败步骤的自动重试；<code>ai/exit</code> 之后"没有控制台也能再 start"的远程入口；<code>ai/debug on</code> 指定端口。要用到它们，只能走上面写明的既有路径。</dd>
+              <dd>控制台里<b>没有</b>这些口子，源码里也没有对应分支：定时唤醒的新增 / 取消；失败步骤的自动重试；<code>ai/exit</code> 之后"没有控制台也能再 start"的远程入口；<code>ai/debug on</code> 指定端口。要用到它们，只能走上面写明的既有路径。</dd>
             </dl>
           </div>
         </div>
 
         <div class="note ok reveal">
-          <p><span class="n-title">一句话总括</span>：<b>改文件类命令</b>（<code>config set</code> / <code>napcat on|off</code> / <code>napcat relay on|off</code>）改完要 <code>ai/start</code> 或 <code>ai/restart</code>；<b>看状态类命令</b>（<code>help</code> / <code>status</code> / <code>tools</code> / <code>config</code> / <code>acl</code> / <code>debug status</code>）任何状态下都能敲；<b>要真关停</b>用框架控制台的 <code>/exit</code> 或按精确 pid 结束进程 —— <code>ai/exit</code> 到不了那一步。</p>
+          <p><span class="n-title">一句话总括</span>：<b>改文件类命令</b>（<code>config set</code> / <code>napcat on|off</code> / <code>napcat relay on|off</code>）改完要 <code>ai/start</code> 或 <code>ai/restart</code>；<b>看状态类命令</b>（<code>help</code> / <code>status</code> / <code>tools</code> / <code>config</code> / <code>perm</code> / <code>debug status</code>）任何状态下都能敲；<b>要真关停</b>用框架控制台的 <code>/exit</code> 或按精确 pid 结束进程 —— <code>ai/exit</code> 到不了那一步。</p>
         </div>
       </section>
 

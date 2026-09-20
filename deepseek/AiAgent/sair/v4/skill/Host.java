@@ -103,21 +103,21 @@ public interface Host {
     // P9b-2 删除：本接口原来的 auth()（旧档位视图 sair.v4.skill.AuthView）整条删除 ——
     //   AuthView、PermTable 与 Auth 的旧档位 facade 已随旧档位体系一起从 src 消失（见 notes\acl-decisions.md
     //   D13/D34）；技能侧零调用（P12 早已清掉旧用法），所以不保留返回类型换成 Auth 的过渡口。
-    // 资源判定唯一入口是下面的 need*/needPath/needDb/needPlatform，判定主体/账本见 acl()。
+    // op 判定唯一入口是下面的 need(op)；判定主体、账本与清单见 acl()。
 
     /** 好感度视图（可读不可改）。 */
     FavorView favor();
 
-    // ==================== 资源判定（ACL：唯一一条判定） ====================
+    // ==================== op 判定（技能管控表：唯一一条判定） ====================
 
     /**
-     * 基板装配的权限账本（{@code perms.json} + 唯一一条判定）。
+     * 基板装配的权限面（技能管控表 {@code skillctl.json} + 唯一一条判定）。
      * <p>宿主没装配权限面（或不是基板实现）时返回 {@code null} —— 调用方一律按拒绝处理。</p>
      *
      * <p><b>P9b-2</b>：本方法原来是"经 {@code AuthView auth()} 中转"的默认实现（{@code auth() instanceof Auth}）。
      * 旧档位视图 {@code AuthView} 已整条删除，所以默认实现改为<b>直接返回 {@code null}</b>；
      * 基板实现（{@code Boot} 里的宿主）覆写它，返回自己装配的 {@code sair.v4.auth.Auth}。
-     * 老宿主 / 桩实现不覆写就拿到 {@code null} ⇒ 一切 {@code need*} 走 fail-closed 分支（行为与过去一致）。</p>
+     * 老宿主 / 桩实现不覆写就拿到 {@code null} ⇒ 一切 {@code need(op)} 走 fail-closed 分支（行为与过去一致）。</p>
      */
     default sair.v4.auth.Auth acl() { return null; }
 
@@ -137,158 +137,45 @@ public interface Host {
     default Caller subject() { return sair.v4.ctx.Ctx.caller(); }
 
     /**
-     * 资源判定：<b>放行返回 {@code null}，否则返回可直接回给模型的拒绝原文</b>。
+     * <b>op 判定</b>：放行返回 {@code null}，否则返回可直接回给模型的拒绝原文。
      *
      * <pre>
-     *   String deny = h.needPath(dst, 'W');
+     *   String deny = h.need("memory.remember");
      *   if (deny != null) return deny;      // 技能把这句话原样回给用户
      * </pre>
      *
-     * <p>拒绝文案 = 「缺 X 位 —— 」+ 账本给的原文（点明资源、该资源类型上限、当前有效位；
-     * 受保护资源还会点明"仅 MASTER/SYSTEM"）。没有主体 / 没有权限面同样拒绝（fail-closed）。</p>
+     * <p>op 名 = {@code 工具名} 或 {@code 工具名.动作名}（清单见 {@link sair.v4.auth.Ops}）。
+     * 多动作技能<b>每个动作分支各判一次自己那个 op</b> —— 技能管控表就是按这些名字放行的，
+     * 所以"允许他记一笔"与"允许他删别人的"能在表里分开写。</p>
      *
-     * @param r   要碰的资源（{@link sair.v4.auth.Res}）
-     * @param bit 需要哪一位：{@code 'R'} 读 / {@code 'W'} 写 / {@code 'X'} 执行·对外
+     * <p><b>判定主体</b>是 {@link #subject()}（当轮绑定的主体）：工具调用 = 触发者；钩子 / 扩展点 =
+     * {@code SYSTEM}（她自己的自动策略，恒放行）。{@code MASTER} 与她本人 {@code SYSTEM} 恒全权，
+     * 不受管控表影响；{@code ALLUSER} 按表判：{@code Ban} 黑名单 = 不可用 / {@code Run} 白名单 = 可用 /
+     * <b>空</b>（没写这条，或写了没给身份）= 未授权 = 不可用，优先级 {@code Ban > Run > 空}。</p>
+     *
+     * <p>资源不再有位：资源对主人与她本人完全可见可改可执行，对 {@code ALLUSER} 是黑盒 ——
+     * 想读、想写、想执行，唯一的路就是被判定的这个 op（技能）。</p>
+     *
+     * <p>没有权限面（{@code acl() == null}）或判定过程出任何事，一律<b>拒绝</b>（fail-closed）。</p>
+     *
+     * <p><b>顺序（GM 裁定，情绪 v2 §4）</b>：① <b>权限面先判</b> —— 账本没放行就把它的拒文原样返回
+     * （v6 铁律：权限表是对 ALLUSER 的约束，"权限阻断"那句不许被情绪盖掉）；② 放行了才轮到
+     * <b>罢工硬干活闸</b>（{@code strike} 态下除 {@code perm} 一族一律拒）。两道判据都只有一处真源，
+     * 罢工那句由 {@link sair.v4.Builtins#strikeDeny} 统一产出，这里不写第二套措辞。</p>
+     *
+     * @param op op 名（{@code 工具名} 或 {@code 工具名.动作名}）
+     * @return 放行返回 {@code null}；否则返回含 {@code [权限阻断]} 前缀的拒绝原文
      */
-    default String need(sair.v4.auth.Res r, char bit) {
-        String tag = needTag(bit);
+    default String need(String op) {
         sair.v4.auth.Auth a = acl();
         if (a == null) {
-            // 产出面的前缀一律用 Acl.DENY_PREFIX（"[权限阻断] "）：旧串 Auth.DENY_PREFIX
-            // （"[auth] 权限阻断："）只保留给识别面兼容，不再出现在任何产出文案里（D12 ★4 / D13 ⑤）。
-            return tag + sair.v4.auth.Acl.DENY_PREFIX + "权限面没有装配（auth == null），按拒绝处理：" + r;
+            return sair.v4.auth.Acl.DENY_PREFIX + "权限面没有装配（auth == null），按拒绝处理：" + op;
         }
-        String deny = a.allowRes(subject(), r, bit);
-        return deny == null ? null : (tag + deny);
-    }
-
-    /** 文件 / 目录：路径资源（{@code SFW 根内 = B}、{@code 根外 = A}，自动判类）。 */
-    default String needPath(String path, char bit) { return need(sair.v4.auth.Res.path(path), bit); }
-
-    /** 同 {@link #needPath(String, char)}（{@link java.io.File} 版）。 */
-    default String needPath(java.io.File f, char bit) { return need(sair.v4.auth.Res.path(f), bit); }
-
-    /** 库 / 内存态 / 工具运行时（C 类）：读该库前 {@code 'R'}、写前 {@code 'W'}。 */
-    default String needDb(String lib, char bit) { return need(sair.v4.auth.Res.db(lib), bit); }
-
-    /** QQ 平台动作（E 类）：一律 {@code 'X'}（对外 = 执行）。 */
-    default String needPlatform(String action) { return need(sair.v4.auth.Res.platform(action), 'X'); }
-
-    // ==================== 自主入口（她自发的动作，判定主体固定 SYSTEM） ====================
-
-    /**
-     * <b>自主入口：她自发的动作</b> —— 判定主体<b>固定为 {@code SYSTEM}</b>，
-     * 然后<b>就按 SYSTEM 自己的位判</b>（{@code A=R} {@code B=RW} {@code C=RWX} {@code E=RWX} {@code T=RWX}），
-     * <b>不按资源类别额外设限</b>。
-     *
-     * <p><b>为什么必须有这个入口</b>（模型见 {@code notes/acl-decisions.md}：11 总纲 / D2）：
-     * 工具通路的判定主体是<b>触发者</b>（{@link #subject()} = {@code Ctx.caller()}），
-     * 而"她自发要干的事"—— 收表情、<b>发表情</b>、出网取信息、读库写库、记忆维护、自发说话 ——
-     * 经常正是<b>在别人的回合里</b>被触发的。走工具通路就会按那个陌生人判，
-     * 被"ALLUSER 的默认位"当场拒掉。可这些动作的主意是<b>她自己的</b>：
-     * 按冻结模型"她自发的一切动作 = 大脑发出的动作 ⇒ 天然 SYSTEM 位面"。
-     * 所以自主动作走这个入口，主体钉死 {@code SYSTEM}，与"谁在说话"彻底解耦。</p>
-     *
-     * <p><b>为什么不按类别设限</b>（主人 2026-09-15 21:2x 定案，覆盖此前"E 类一律拒绝 / T 类不适用"
-     * 的写法）：主人原话 ——「收<b>发</b>表情这个动作都是属于 SYSTEM 位面的，因为<b>没人要求她这么做</b>」，
-     * 并明确「<b>基板不需要验证语义，因为 SYSTEM 是她自身，由 SYSTEM 验证语义合理</b>」。
-     * 「这一次动作到底是不是她自发的」<b>由她判断</b>，基板<b>不替她裁决、不验证语义</b>：
-     * 基板只做机械三件事 —— <b>按位放行/拒绝、记账、代执行</b>。所以这里对资源类别一律不设限，
-     * 放不放得行只由 {@code SYSTEM} 那一行的位决定。</p>
-     *
-     * <h3>规则（只有两条，都是 fail-closed）</h3>
-     * <ol>
-     *   <li>{@code r == null} → <b>拒绝</b>（没有资源描述就没有可放行的动作）；</li>
-     *   <li>判定过程出任何事（权限面没装配 {@code acl() == null}、{@code Auth}/账本抛异常……）→ <b>拒绝</b>
-     *       —— 绝不让"抛了异常"变成放行，与 {@link #need(sair.v4.auth.Res, char)} 同口径。</li>
-     * </ol>
-     * <p>另外，判定主体固定 = {@link Caller#systemActor()}：本方法<b>不读</b> {@code Ctx.caller()} ——
-     * 那个槽位装的是"别人"，读了就等于把"她自己的主意"重新绑回请求者面
-     * （那正是这个入口要解决的问题）。通配资源（{@code Res.all()}）不需要单开一档：
-     * {@code Acl.bitsOf} 对非主人恒 {@code NONE}，所以她拿通配资源也是拒 —— 位表自己说的话。</p>
-     *
-     * <p><b>它不给调用者任何额外权限</b>（这一条决定它安不安全）：它用的是
-     * <b>{@code SYSTEM} 自己的位</b>，<b>谁调用都一样</b> —— 主人调用不会变成 MASTER、
-     * 陌生人在别人的回合里调用也不会变成那个陌生人。所以技能<b>借它升级不到 {@code SYSTEM} 之外</b>：
-     * 它最多把她自己的自主能力（{@code A=R}、{@code B=RW}、{@code C=RWX}、{@code E=RWX}、{@code T=RWX}）
-     * 借出来，<b>接不过去主人那一档</b>；而 {@code perms.json} 账本、{@code mem:acl}（授权动作本身）、
-     * {@code get_cookies} 这类<b>第一层受保护资源连她也不给</b>（{@code Acl.masterOnlyRes}），
-     * 走这个入口一样拒。</p>
-     *
-     * <p><b>行归属不在这里，而且基板现在也没有这样一道门</b>：本方法只做"按位反射式放行/拒绝"这一件事
-     * —— 它既不看行、也不看内容（拿不到、也不该拿语义：语义由她判）。"她只能动<b>自己那一行</b>"
-     * （{@code sender} = 自己 / 只写自己的 {@code user} 作用域 / 只碰她自己的记忆行）
-     * <b>目前仍由调用方与存储层各自负责</b>—— 现状就是技能自己按 {@code scope}/{@code scope_id}
-     * 约束自己的行。基板这里<b>不宣称</b>有一层"行归属门"在替谁兜这件事（本轮不建那一层）。</p>
-     *
-     * <p><b>判定路径与 {@link #need(sair.v4.auth.Res, char)} 完全同一条</b>
-     * （{@link #acl()} → {@code Auth.allowRes} → {@code Acl.allow} → {@code Acl.bitsOf}）：
-     * 只有"主体"这一格从 {@link #subject()} 换成 {@code systemActor()}，
-     * 所以例外条目 / 受保护资源 / 默认分配三件事的口径一字不差
-     * （{@code SYSTEM} 名下的例外条目照旧生效）。</p>
-     *
-     * <pre>
-     *   String deny = h.selfDb("memory", 'W');               // 她的记忆维护：按 SYSTEM 判（放行 → null）
-     *   if (deny != null) return deny;                       // 拒绝原文可原样回给模型
-     *   String deny2 = h.selfAct(Res.platform("set_group_card"), 'X');   // 她自发改自己的名片
-     * </pre>
-     *
-     * @param r   她要碰的资源（{@link sair.v4.auth.Res}）
-     * @param bit 需要哪一位：{@code 'R'} 读 / {@code 'W'} 写 / {@code 'X'} 执行·对外
-     * @return <b>放行返回 {@code null}</b>（与 {@code need*} 一致）；否则返回可直接回给模型的拒绝原文
-     *         （含 {@link sair.v4.auth.Acl#DENY_PREFIX}，所以 {@code tool.Registry.isDenyText} 认得出）
-     */
-    default String selfAct(sair.v4.auth.Res r, char bit) {
-        String tag = needTag(bit);
-        if (r == null) {
-            // 规则①：没有资源描述 = 拒（fail-closed）
-            return tag + sair.v4.auth.Acl.DENY_PREFIX + "自主入口缺资源描述 —— 按拒绝处理（fail-closed）";
-        }
-        String deny;
-        try {
-            // 规则②：这一整段出任何事都落到下面的 catch = 拒（含"权限面没装配"这一格）
-            sair.v4.auth.Auth a = acl();
-            deny = a == null
-                    // 与 need(...) 逐字同一条 fail-closed 文案：权限面没装配 = 拒，绝不静默放权
-                    ? (sair.v4.auth.Acl.DENY_PREFIX + "权限面没有装配（auth == null），按拒绝处理：" + r)
-                    : a.allowRes(sair.v4.auth.Caller.systemActor(), r, bit);
-        } catch (Throwable t) {
-            return tag + sair.v4.auth.Acl.DENY_PREFIX + "自主入口判定异常，按拒绝处理：" + r + "（" + t + "）";
-        }
-        return deny == null ? null : (tag + deny);
-    }
-
-    /**
-     * 她的自主动作碰一个<b>路径</b>（{@code SFW 根之内 = B}、{@code 根之外 = A}，自动判类）：
-     * 就是 {@code selfAct(Res.path(path), bit)}。
-     *
-     * <p>薄封装只为让调用点不用自己判类别（判错类别会把 A 类的动作送进 B 类的口径）；
-     * 语义、规则、拒绝文案全部见 {@link #selfAct(sair.v4.auth.Res, char)}。</p>
-     */
-    default String selfPath(String path, char bit) {
-        return selfAct(sair.v4.auth.Res.path(path), bit);
-    }
-
-    /**
-     * 她的自主动作碰一个<b>库 / 内存态</b>（C 类）：就是 {@code selfAct(Res.db(lib), bit)}。
-     *
-     * <p>薄封装同上：<b>本方法只管位</b>。"只能动自己那一行"的作用域约束<b>由调用方按现有口径自理</b>
-     * （现状就是技能自己按 {@code scope}/{@code scope_id} 约束），基板<b>没有</b>这样一道门
-     * （见 {@link #selfAct(sair.v4.auth.Res, char)} 的"行归属不在这里"一段）。</p>
-     */
-    default String selfDb(String lib, char bit) {
-        return selfAct(sair.v4.auth.Res.db(lib), bit);
-    }
-
-    /** 主体对资源的<b>有效位</b>（{@code RWX} 掩码，见 {@link sair.v4.auth.Bits}）；没有权限面 = {@code NONE}。 */
-    default int bits(sair.v4.auth.Res r) {
-        sair.v4.auth.Auth a = acl();
-        return a == null ? sair.v4.auth.Bits.NONE : a.bits(subject(), r);
-    }
-
-    /** 拒绝文案的位名标签（{@code "缺 W 位 —— "}）。 */
-    static String needTag(char bit) {
-        return "缺 " + Character.toUpperCase(bit) + " 位 —— ";
+        // ① 权限面先判：ACL 的拒文优先（权限模型不许被情绪改）。
+        String deny = a.allow(subject(), op);
+        if (deny != null) return deny;
+        // ② 放行了才是罢工闸（REUSE：判据 / 措辞 / 真源只有 Builtins.strikeDeny 那一处）。
+        return sair.v4.Builtins.strikeDeny(subject(), op);
     }
 
     /** 工具视图（可查可调，不可注册/删除）。 */
@@ -411,10 +298,10 @@ public interface Host {
     /**
      * 执行一条 SFW 框架命令（如 {@code jj/at 1+/100}），回它打出来的新输出。
      *
-     * <p><b>判定</b>：与 {@code console} 工具的 {@code op=run} <b>同一条</b> ——
-     * E 类资源 {@code Res.platform("sfw.run")} 的 {@code X} 位（主任定标 D10：E 类含"SFW 命令交互"）。
-     * 所以：{@code SYSTEM}（她的自主行为，E 默认 {@code X}）放行；{@code ALLUSER}（E 默认 {@code NONE}）拒。
-     * 技能不能借这一条绕过权限面。</p>
+     * <p><b>判定</b>：与 {@code console} 工具的 {@code op=run} <b>同一个 op</b> ——
+     * {@code console.run}（技能管控表：{@code Run["console.run","身份"]}）。所以：主人与她本人
+     * （{@code SYSTEM}）恒全权（{@link #need(String)} 直接放行）；{@code ALLUSER} 没被授权就拒。
+     * 技能不能借这一条绕过管控表。</p>
      *
      * <p><b>主人短路在判定之前</b>（与 {@code Boot} 的 NapCat Guard 里那句
      * {@code if (c.master()) return null;} <b>同口径</b>）：主人一律放行，<b>连"权限面没装配"
@@ -434,7 +321,7 @@ public interface Host {
             return "[console] run ok=0 reason=denied（没有调用者身份，按拒绝处理）";
         }
         if (!c.master()) {                       // ← 主人短路：判定之前先看"是不是主人"
-            String deny = needPlatform("sfw.run");
+            String deny = need("console.run");
             if (deny != null) {
                 return "[console] run ok=0 reason=denied（" + deny + "）";
             }

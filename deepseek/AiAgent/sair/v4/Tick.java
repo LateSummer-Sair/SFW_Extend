@@ -280,11 +280,17 @@ public final class Tick {
         return "self".equalsIgnoreCase(J.s(ownerOf(alarm), "by", ""));
     }
 
+    /**
+     * <b>全部闹钟</b>（主人视角）。
+     *
+     * <p><b>口径（别再用错）</b>：<b>无参 = 全部</b>；而 {@link #alarms(Caller)} <b>传 {@code null} = 没有主体 = 空</b>
+     * （{@link #ownedBy} 对 {@code null} 恒 false）—— 要"主人看全部"就走无参这一条，别传 {@code null}。</p>
+     */
     public List<JsonObject> alarms() {
         return store == null ? new java.util.ArrayList<JsonObject>() : store.listAlarms(false);
     }
 
-    /** 该调用者能看到的闹钟（主人看全部）。 */
+    /** 该调用者能看到的闹钟（主人看全部）；<b>传 {@code null} = 没有主体 = 空</b>（不是"全部"；全部走 {@link #alarms()}）。 */
     public List<JsonObject> alarms(Caller c) {
         List<JsonObject> out = new java.util.ArrayList<JsonObject>();
         for (JsonObject a : alarms()) {
@@ -293,13 +299,25 @@ public final class Tick {
         return out;
     }
 
+    /** {@link #alarms(Caller)} 的 JSON 数组版；<b>传 {@code null} = 没有主体 = 空</b>（不是"全部"；全部走 {@link #alarmsJson()}）。 */
     public JsonArray alarmsJson(Caller c) {
         JsonArray a = new JsonArray();
         for (JsonObject o : alarms(c)) a.add(o);
         return a;
     }
 
-    public JsonArray alarmsJson() { return alarmsJson(null); }
+    /**
+     * <b>全部闹钟</b>（控制台看板 {@code ai/alarm} 用；那条命令只有主人能跑，主人本就可见全部）。
+     *
+     * <p>无参 ≠ 调用者为 {@code null}（{@link #ownedBy} 对 null 恒 false = "没有主体 = 什么都看不到"）：
+     * 她自己的 {@code alarm op=list} 走 {@link #alarms(Caller)}（{@code tick.alarms(me)}，主人走无参）；
+     * {@link #alarmsJson(Caller)} <b>当前没有任何调用方</b>，保留作"按调用者出 JSON"的口。
+     */
+    public JsonArray alarmsJson() {
+        JsonArray a = new JsonArray();
+        for (JsonObject o : alarms()) a.add(o);
+        return a;
+    }
 
     /** 删除：只能删自己建的（主人可删任何）。 */
     public boolean remove(long id, Caller c) {
@@ -395,14 +413,8 @@ public final class Tick {
     /** 到点即唤起（每次 tick 调一次）。 */
     public int fireDue() {
         if (store == null) return 0;
-        // 防御性：读定时任务（alarm）= 她自己的自主行为（SYSTEM C:RWX）。先按 ACL 判 C 类 R 位再读 ——
-        // 证明基板扫闹钟不会被默认 OTHER 位误伤；被拦（理论上不会）则留日志、本轮不查。
-        String deny = sair.v4.auth.Acl.empty(null).allow(
-                Caller.systemActor(conf.masterQQ()), sair.v4.auth.Res.db("alarm"), 'R');
-        if (deny != null) {
-            if (out != null) out.warn("[auth] 自主读任务被拦（本轮不查闹钟）：" + deny);
-            return 0;
-        }
+        // 读定时任务（alarm）= 她自己的自主行为（主体即她本人 / SYSTEM）：恒全权 ⇒ 不判，直接扫。
+        // （技能管控表只管 ALLUSER 的技能 op —— 主人与她本人不受表影响。）
         long now = System.currentTimeMillis();
         int fired = 0;
         for (JsonObject a : alarms()) {
@@ -459,7 +471,7 @@ public final class Tick {
                                     ? Caller.console(conf.masterQQ())
                                     : new Caller(Caller.Entry.QQ, group ? 0 : t, group ? t : 0, "", true, 0, "");
                         } else {
-                            // 非主人：身份就是他自己（favor 现查，权限照旧受限）
+                            // 非主人：身份就是他自己（favor 现查；放不放行按技能管控表 身份 × op 判）
                             c = new Caller(Caller.Entry.QQ, ownerQq, group ? (ownerGroup > 0 ? ownerGroup : t) : 0,
                                     "", false, store == null ? 0 : store.favor(ownerQq), Str.nz(ownerSession));
                         }

@@ -9,9 +9,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import sair.v4.auth.Acl;
-import sair.v4.auth.Auth;
-import sair.v4.auth.Caller;
 import sair.v4.kit.Crypto;
 import sair.v4.kit.Fs;
 import sair.v4.kit.J;
@@ -406,70 +403,10 @@ public final class Conf implements sair.v4.skill.ConfView {
         }
     }
 
-    /**
-     * 基板自身触碰文件资源的 ACL 判定（基板侧不走技能 {@code Host.needPath}）。
-     *
-     * <p>有权限面（{@code auth}）就直调 {@link Auth#allowRes}；没有（装配早期 / 探针）退回空账本判定 ——
-     * 对 SYSTEM/MASTER 与「A 类 X / B 类 W」这类查询，账本条目不影响结果，两种走法逐位一致。</p>
-     *
-     * @param auth   权限面（可为 null；null 时按空账本判定）
-     * @param caller 判定主体（取不到触发者时用 {@code Caller.systemActor(masterQQ)}）
-     * @param f      要碰的文件 / 目录
-     * @param need   {@code 'R'} 读 / {@code 'W'} 写 / {@code 'X'} 执行
-     * @return 放行返回 {@code null}，否则返回可读拒绝原文（与 {@link Acl#allow} 同格式）
-     */
-    public static String needPath(Auth auth, Caller caller, File f, char need) {
-        sair.v4.auth.Res r = sair.v4.auth.Res.path(f);
-        if (auth != null) return auth.allowRes(caller, r, need);
-        return Acl.empty(null).allow(caller, r, need);
-    }
-
-    /**
-     * 同 {@link #needPath(Auth, Caller, File, char)}，但资源描述由调用方给（薄封装）。
-     *
-     * <p>用途：判定对象不是"一个按路径分类的文件"，而是<b>已经定好类别</b>的资源 ——
-     * 例如要执行的<b>本机程序</b>必须按 A 类判（见 {@code Res.exec}），
-     * 不能用 {@code Res.path} 的"落在 SFW 里算 B"那把尺子。</p>
-     *
-     * @return 放行返回 {@code null}，否则返回可读拒绝原文（与 {@link Acl#allow} 同格式）
-     */
-    public static String needRes(Auth auth, Caller caller, sair.v4.auth.Res r, char need) {
-        if (auth != null) return auth.allowRes(caller, r, need);
-        return Acl.empty(null).allow(caller, r, need);
-    }
-
-    /**
-     * 写 SFW（B 类）资源前的防御性判定：放行返回 {@code null}。
-     *
-     * <p>两个基准根不一致时 {@code Res.path} 的保守规则会把什么都判成 A —— 那是 P4 要在装配时
-     * {@code Res.roots(<框架根>, <框架根>)} 修掉的已知状态；在此之前类别不可信，跳过（放行），
-     * 避免把 B 类资源误拦成 A。线上两基准对齐时这条判定是权威的。</p>
-     */
-    public static String needWrite(Auth auth, Caller caller, File f) {
-        if (rootsMisaligned()) return null;
-        return needPath(auth, caller, f, 'W');
-    }
-
-    /** 两个基准根都可用但不一致（{@code Res.path} 的保守规则此时把什么都判成 A）。 */
-    public static boolean rootsMisaligned() {
-        File cr = sair.v4.auth.Res.codeRoot();
-        File wr = sair.v4.auth.Res.cwdRoot();
-        if (cr == null || wr == null) return false;
-        try {
-            return !cr.getCanonicalPath().equalsIgnoreCase(wr.getCanonicalPath());
-        } catch (Throwable t) {
-            return !cr.getAbsolutePath().equalsIgnoreCase(wr.getAbsolutePath());
-        }
-    }
+    // 权限只管控技能（op）：基板自身触碰文件不再有"资源位"这道判定 ——
+    // 资源对主人与她本人（SYSTEM）完全可见、可改、可执行；对 ALLUSER 是黑盒，唯一的路是技能。
 
     public boolean save() {
-        // 写前判定（防御性）：config.json 是 B 类受保护资源；她自己（SYSTEM）写 B 类放行，
-        // 路径被改到 SFW 之外（A 类）才拦 —— 那时宁可写不进去也不在 A 类落配置。
-        String deny = needWrite(null, Caller.systemActor(masterQQ()), file);
-        if (deny != null) {
-            warnings.add(deny);
-            return false;
-        }
         JsonObject out = J.obj(J.json(data));
         if (out == null) out = new JsonObject();
         for (String k : SECRET_KEYS) {
@@ -517,12 +454,9 @@ public final class Conf implements sair.v4.skill.ConfView {
     }
 
     /**
-     * <b>只改文件里的那一个键</b>（内存里的生效值一个字段都不动，返回是否落盘成功）。
+     * 写一个键：<b>只写文件，不改内存态</b>（内存态要生效得重启，或走对应面的 reload）。
      *
-     * <p>三条纪律：</p>
      * <ul>
-     *   <li><b>最小改动</b>：读原文件 → 只替换这一个键 → 原样写回。其余键（含解不开的密文）
-     *       逐字保留，不做"整份重新加密"那种波及全文件的动作；</li>
      *   <li>{@link #SECRET_KEYS} 里的键<b>现加密</b>（空值仍写空，不产出"空密文"）；</li>
      *   <li>文件不存在/为空时<b>先落一份出厂默认</b>再改它（否则一个键孤零零躺在那儿，
      *       第一次 {@code ai/start} 会把默认值补齐，读起来像"我改的键被冲掉了"）。</li>
@@ -534,12 +468,6 @@ public final class Conf implements sair.v4.skill.ConfView {
         try {
             if (!file.isFile() || Fs.size(file) == 0) ensureDefaults();      // 首次：先把默认配置落盘
         } catch (Throwable ignored) {
-        }
-        // 写前判定（防御性）：config.json 是 B 类受保护资源（与 save() 同一条）
-        String deny = needWrite(null, Caller.systemActor(masterQQ()), file);
-        if (deny != null) {
-            warnings.add(deny);
-            return false;
         }
         JsonObject o = J.obj(Fs.read(file, ""));
         if (o == null) o = new JsonObject();

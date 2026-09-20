@@ -34,7 +34,9 @@ import sair.v4.kit.Str;
  *   <li><b>值卫生只借 {@link MediaRender#san}</b>（同包直接调，<b>不</b>新开 public 入口、
  *       不复制一份规则）—— 所以本类<b>必须</b>在 {@code sair.v4.qq} 包内，这是选址的硬约束；
  *       {@code san} 会把 {@code [}→{@code (}、{@code ]}→{@code )}、{@code ·}→{@code -}、压单行、
- *       截断 ⇒ <b>外部文本（乃至她自己的正文）伪造不出这个形状</b>，也伪造不出第二个头部。</li>
+ *       截断 ⇒ <b>外部文本（乃至她自己的正文）伪造不出这个形状</b>，也伪造不出第二个头部。
+ *       （<b>识别侧</b>另有 {@link #HEAD_LEAD_PAREN}：{@code san} 中和出来的圆括号变体也认 —— 见那里的
+ *       说明；<b>产出侧</b>仍旧只有本类这一种方括号形态，一个字没放宽。）</li>
  * </ul>
  *
  * <h3>头部不含 {@code ·}（硬规定）</h3>
@@ -79,8 +81,32 @@ public final class SelfEcho {
     public static final String HEAD_LEAD = "[我发的 msg_id=";
     /** 头部后缀（逐字）。 */
     public static final String HEAD_TAIL = "]";
+    /**
+     * <b>圆括号变体</b>的前缀 —— <b>只用于"认出来"</b>，{@link #head}/{@link #content} <b>绝不用它产出</b>。
+     *
+     * <p>它为什么存在：{@link MediaRender#san} 会把正文里的 {@code [} 中和成 {@code (}、{@code ]} 中和成
+     * {@code )}（那是"外部文本伪造不出标记形状"的硬卫生）。于是模型自己写的那截头一旦经过记账，
+     * 落库就成了 {@code (我发的 msg_id=N)}：真机 {@code dialog id=2370} 就是
+     * {@code [我发的 msg_id=339080329] (我发的 msg_id=1295972856) 诶，不客气喔。…}
+     * —— 外层是基板的真头、内层是模型写的（已被 san 中和）。旧判据只认方括号 ⇒ 读侧剥不掉它、
+     * 出站闸放行它，模型还能从旧行里学到这个变体。</p>
+     *
+     * <p><b>识别放宽、产出不放宽</b>：技能线已发布的判据 {@code content.startsWith("[我发的 ")}
+     * 依赖的是<b>产出</b>，而产出这条路一个字没改（见 {@link #head}/{@link #content}）；
+     * 这里放宽的只是"认"（读侧去头 / 出站闸 / 去重比较）。</p>
+     */
+    public static final String HEAD_LEAD_PAREN = "(我发的 msg_id=";
+    /** 圆括号变体的后缀（识别用；与 {@link #HEAD_LEAD} 只产 {@link #HEAD_TAIL} 同一口径）。 */
+    public static final String HEAD_TAIL_PAREN = ")";
     /** 头部与正文/标签之间的分隔（单空格）。 */
     public static final String SEP = " ";
+
+    /**
+     * 头部<b>内部</b>允许的最大字符数（{@code 123} / {@code 1295972856} / {@code ?} 一类）。
+     * <p>它是"认头"的边界，不是产出口径：产出永远只打一个十进制 id。有它才不至于把
+     * "一整句话恰好以 {@code [我发的 msg_id=} 开头"这种文本一直扫到天边。</p>
+     */
+    private static final int HEAD_MAX = 32;
 
     /**
      * 正文上限（与 {@link MediaRender#MAX_CHARS} 同量级）。
@@ -171,30 +197,213 @@ public final class SelfEcho {
         return sb.toString();
     }
 
-    /** 这个 {@code content} 是不是本类产的标记行（只看头部前缀，<b>绝不解析</b>）。 */
+    /**
+     * 这个 {@code content} 是不是本类产的标记行（只看头部<b>前缀</b>，<b>绝不解析</b>）。
+     *
+     * <p><b>FIX-ECHO 补-1</b>：方括号形态（{@link #HEAD_LEAD}，唯一产法）与<b>圆括号变体</b>
+     * （{@link #HEAD_LEAD_PAREN}，{@code san} 中和出来的形状）<b>都认</b>。仍然只看前缀、不要求收尾 ——
+     * 所以"认得出前缀却没有收尾"的半截头也算命中，调用方据此<b>整条不发</b>（fail-closed），
+     * 而不是把半截头当正文发出去。</p>
+     */
     public static boolean isSelfContent(String content) {
-        return content != null && content.startsWith(HEAD_LEAD);
+        return content != null && atVisibleStart(content);
     }
 
     /**
-     * 去掉头部之后的正文（<b>给读侧的去重/比较用</b>，见 P0-1「窗口读侧 (b′)」）。
+     * {@code s} 里第一个自我记账头（任一形态）的下标；{@code -1} = 没有。
+     *
+     * <p>与 {@link #isSelfContent} 同一判据（<b>前缀级</b>：不要求收尾），因此"中段的半截头"同样命中 ——
+     * 出站闸要的正是 fail-closed。快路：一个形态首字符都没有就直接返回，正常文本一个字都不多扫。</p>
+     */
+    public static int headAt(String s) {
+        if (s == null || s.isEmpty()) return -1;
+        Norm v = norm(s);
+        int at = headAtView(v.s);
+        return at < 0 ? -1 : v.orig(at);          // 返回**原文**下标（日志/调用方都用原文坐标）
+    }
+
+    /** 判据本体（跑在<b>归一化视图</b>上）：视图里第一个头部<b>前缀</b>的下标；{@code -1} = 没有。 */
+    private static int headAtView(String s) {
+        if (s == null || s.isEmpty()) return -1;
+        char a = VIEW_LEAD.charAt(0);
+        char b = VIEW_LEAD_PAREN.charAt(0);
+        if (s.indexOf(a) < 0 && s.indexOf(b) < 0) return -1;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c != a && c != b) continue;
+            if (leadLenView(s, i) > 0) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * {@code s} 的<b>可见开头</b>是不是一个头部（任一形态、<b>含变体写法</b>）。
+     *
+     * <p><b>FIX-ECHO 补-8</b>：判据跑在归一化视图上（见 {@link #norm}），所以"前导的零宽字符 /
+     * 全角括号 / 双空格"都不影响"这是不是开头那一个头"；返回的是<b>视图坐标 0</b> 的事实
+     * （出站闸据此决定"剥头再发"而不是"整条不发"）。</p>
+     */
+    public static boolean atVisibleStart(String s) {
+        if (s == null || s.isEmpty()) return false;
+        return headAtView(norm(s).s) == 0;
+    }
+
+    // ------------------------------------------------------------------ 归一化视图（补-8）
+
+    /**
+     * <b>归一化视图</b>：给判据用的一张"同一形状的不同写法"折叠表（GM 第七轮裁定）。
+     *
+     * <p><b>为什么需要它</b>：判据原本只认逐字 ASCII 方括号/圆括号形状；复核把 18 种写法逐个喂
+     * {@link #headAt}，只有 5 种认。而读侧按第四轮裁定<b>故意逐字保留外人文本</b> ⇒ 用户只要打出
+     * 变体，模型就可能照抄，闸门却看不见 ⇒ 用户收到"人眼与原始抱怨逐字同形"的头。</p>
+     *
+     * <p><b>折叠规则（判据用，只影响"认不认"）</b>：</p>
+     * <ol>
+     *   <li><b>不可见字符</b>一律丢掉：{@code Character.FORMAT}（Cf：{@code \u200B} 零宽空格、
+     *       {@code \u200C}/\u200D}、{@code \u2060} word-joiner、{@code \uFEFF} BOM…）与软连字符
+     *       {@code \u00AD}；</li>
+     *   <li><b>全角→半角</b>：{@code \uFF01..\uFF5E} 整段平移（覆盖 {@code ［］（）＝} 与全角字母数字），
+     *       全角空格 {@code \u3000} 与 NBSP 当空白；</li>
+     *   <li><b>空白不进视图</b>（彻底去掉）⇒ 双空格、{@code msg_id = 1}、{@code 我发的 msg_id} 里
+     *       那个空格、{@code [我发的msg_id=1]} 全部等价；</li>
+     *   <li><b>ASCII 字母小写化</b> ⇒ {@code MSG_ID} / {@code Msg_Id} 等价；</li>
+     *   <li><b>繁体「發」→「发」</b>（最小的一个字映射，不做整表）。</li>
+     * </ol>
+     *
+     * <p><b>它只用来"判"</b>：{@link #withoutHead} 拿到视图里的头跨度之后，用
+     * {@link Norm#map} 映射回<b>原文下标</b>再切 —— 所以"剥"永远作用在原文上，正文一个字不改。</p>
+     */
+    private static final class Norm {
+        final String s;
+        final int[] map;                      // map[i] = 视图第 i 个字符在原文里的下标
+        Norm(String s, int[] map) { this.s = s; this.map = map; }
+        int orig(int viewIdx) {
+            if (viewIdx < 0 || viewIdx >= map.length) return -1;
+            return map[viewIdx];
+        }
+    }
+
+    private static Norm norm(String src) {
+        String s = Str.nz(src);
+        StringBuilder sb = new StringBuilder(s.length());
+        int[] map = new int[s.length()];
+        int n = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\u00AD' || Character.getType(c) == Character.FORMAT) continue;   // 不可见：丢
+            char x = foldChar(c);
+            if (isBlank(x)) continue;                                                // 空白：不进视图
+            sb.append(x);
+            map[n++] = i;
+        }
+        int[] m = new int[n];
+        System.arraycopy(map, 0, m, 0, n);
+        return new Norm(sb.toString(), m);
+    }
+
+    /** 全角→半角 / 繁「發」→简「发」/ ASCII 小写（其余原样）。 */
+    private static char foldChar(char c) {
+        if (c == '\u767C') return '\u53D1';                  // 發 → 发
+        if (c >= '\uFF01' && c <= '\uFF5E') return (char) (c - 0xFEE0);
+        if (c == '\u3000') return ' ';
+        if (c >= 'A' && c <= 'Z') return (char) (c + 32);
+        return c;
+    }
+
+    /** 空白判定（ASCII 空白 + 全角空格 + NBSP 一类不可断空格）。 */
+    private static boolean isBlank(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
+                || c == '\u000B' || c == '\u00A0' || c == '\u3000'
+                || Character.isWhitespace(c) || Character.isSpaceChar(c);
+    }
+
+    /** {@code s} 从 {@code i} 起是不是一个头部的<b>前缀</b>（不要求收尾）；是则返回该前缀长度，否则 {@code -1}。 */
+    private static int leadLenView(String s, int i) {
+        if (s.startsWith(VIEW_LEAD, i)) return VIEW_LEAD.length();
+        if (s.startsWith(VIEW_LEAD_PAREN, i)) return VIEW_LEAD_PAREN.length();
+        return -1;
+    }
+
+    /**
+     * 判据用的<b>视图版</b>前缀：把 {@link #HEAD_LEAD} / {@link #HEAD_LEAD_PAREN} 按 {@link #norm} 的同一条
+     * 折叠规则处理一遍（唯一真源仍是那两个常量 —— 改文法只需改它们，视图自动跟上）。
+     * 视图里没有空白，所以视图版前缀也没有那个空格。
+     */
+    private static final String VIEW_LEAD = deBlank(HEAD_LEAD);
+    private static final String VIEW_LEAD_PAREN = deBlank(HEAD_LEAD_PAREN);
+
+    private static String deBlank(String s) {
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = foldChar(s.charAt(i));
+            if (isBlank(c)) continue;
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * {@code s} 从 {@code i} 起是不是一个<b>完整</b>头部（lead + 内部 + 与 lead 配对的收尾）；
+     * 是则返回整段长度，否则 {@code -1}。<b>跑在视图上</b>。
+     *
+     * <p>内部：1..{@value #HEAD_MAX} 个字符，不许出现四种括号字符，也不许跨行 ——
+     * 于是 {@code [我发的msg_id=123]} / {@code (我发的msg_id=1295972856)} / {@code [我发的msg_id=?]}
+     * 都算，而 {@code [我发的msg_id=} 后面没有收尾的<b>不算</b>（交给调用方按"残缺"处置）。</p>
+     */
+    private static int headLenView(String s, int i) {
+        int n = completeView(s, i, VIEW_LEAD, HEAD_TAIL);
+        if (n >= 0) return n;
+        return completeView(s, i, VIEW_LEAD_PAREN, HEAD_TAIL_PAREN);
+    }
+
+    private static int completeView(String s, int i, String lead, String tail) {
+        if (!s.startsWith(lead, i)) return -1;
+        int from = i + lead.length();
+        int to = Math.min(s.length(), from + HEAD_MAX);
+        for (int j = from; j < to; j++) {
+            char c = s.charAt(j);
+            if (s.startsWith(tail, j)) return (j + tail.length()) - i;
+            if (c == '\n' || c == '\r' || c == '[' || c == ']' || c == '(' || c == ')') return -1;
+        }
+        return -1;
+    }
+
+    /**
+     * 去掉头部之后的正文（<b>读侧去重/比较 + 读侧注入 + 出站剥头都用它</b>，见 P0-1「窗口读侧 (b′)」）。
      *
      * <p>为什么需要它：窗口（{@code grouplog}）里她的那一行<b>带头部</b>，而历史
      * （{@code dialog} 的 {@code assistant} 行）里同一条话是<b>裸正文</b> —— 既有去重是
      * <b>整串逐字相等</b>，加了头部就永不命中 ⇒ 她的话会把真群友挤出窗口（实测最坏 14/30 = 47%）。
      * 比较时把头部剥掉，"同一条话"就重新可比。</p>
      *
-     * <p><b>幂等</b>：不带头部的串原样返回；认不出头部（{@code head} 之后没有 {@link #HEAD_TAIL}）
-     * 也原样返回 —— 宁可"比较不上"（少去重一行），也绝不猜一个截断点。</p>
+     * <p><b>FIX-ECHO 补-1：可重复剥 + 认变体</b>。开头<b>连续多个</b>头部全部剥掉：
+     * 方括号的、圆括号变体的、{@code [我发的 msg_id=?]} 的（真机 {@code dialog id=2647} 就是这个形状）、
+     * 以及"外层真头 + 内层模型写的头"那种<b>双层</b>（真机 {@code dialog id=2370}）。每个头后面
+     * 那<b>一个</b>分隔空格一并吃掉。中段的头<b>不</b>动 —— 那交给出站闸整条拦下，比较串也不该猜截断点。</p>
+     *
+     * <p><b>幂等</b>：不带头部的串原样返回；认得出前缀但没有收尾的（半截头）也<b>原样返回</b> ——
+     * 宁可"比较不上"（少去重一行），也绝不猜一个截断点。</p>
+     *
+     * <p><b>FIX-ECHO 补-8：判在归一化视图、切在原文</b>。头跨度在 {@link Norm} 视图里找（所以全角括号、
+     * 零宽字符、双空格、{@code msg_id = 1}、大写 {@code MSG_ID}、繁体「發」这些写法都认），
+     * 再用 {@link Norm#map} 映射回<b>原文下标</b>去切 —— <b>正文一个字都不改</b>，
+     * 也绝不会出现"判得出、剥不掉"。头后面那段空白（可能不止一个空格）一并吃掉。</p>
      */
     public static String withoutHead(String content) {
         String s = Str.nz(content);
-        if (!s.startsWith(HEAD_LEAD)) return s;
-        int end = s.indexOf(HEAD_TAIL, HEAD_LEAD.length());
-        if (end < 0) return s;
-        String body = s.substring(end + HEAD_TAIL.length());
-        // 头部与正文之间的那一个分隔空格不参与比较（不带头部的正文本来就没有它）
-        if (body.startsWith(SEP)) body = body.substring(SEP.length());
-        return body;
+        while (true) {
+            Norm v = norm(s);
+            int n = headLenView(v.s, 0);               // 视图里的完整头长度
+            if (n <= 0) return s;                      // 没有（完整）头部 = 到头了
+            int cut = v.orig(n - 1) + 1;               // 视图最后一格 → 原文下标 + 1
+            if (cut <= 0 || cut > s.length()) return s;    // 映射不合法：宁可不动
+            String body = s.substring(cut);
+            // 头部与正文之间那段空白不参与比较（不带头部的正文本来就没有它）
+            int k = 0;
+            while (k < body.length() && isBlank(body.charAt(k))) k++;
+            body = body.substring(k);
+            s = body;
+            if (s.isEmpty()) return s;
+        }
     }
 }

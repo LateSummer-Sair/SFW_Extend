@@ -19,7 +19,9 @@ import sair.v4.kit.Text;
 /**
  * 动态执行（基板②的"执行"半边）。
  * <p>两件事：①把一段 Java 源码编译并在宿主进程里跑起来（临时目录里编译，产物即抛）；
- * ②执行系统命令并取回输出。这是"可以调度系统已有资源"的入口，权限上只给主人。</p>
+ * ②执行系统命令并取回输出。这是"可以调度系统已有资源"的入口，权限上由技能管控表按动作判：
+ * {@code exec.java} / {@code exec.cmd}（动作名 = exec 工具的 {@code kind} 取值）——
+ * 表里没写 = 未授权；主人与她本人恒全权。</p>
  */
 public final class DynCode {
 
@@ -32,15 +34,24 @@ public final class DynCode {
     private final Conf conf;
     private final Out out;
 
+    /**
+     * 权限面（技能管控表）。装配期由 {@code Boot} 注入；{@code null} = 没有权限面
+     * （探针直接 new 出来的实例 / 装配第④步失败），判定退到空管控表（只有主人与她本人放行）。
+     */
+    private volatile sair.v4.auth.Auth auth;
+
     public DynCode(Conf conf, Out out) {
         this.conf = conf;
         this.out = out;
     }
 
+    /** 装权限面（{@code Boot} 装配第⑦步注入）；判定按 {@code exec.java} / {@code exec.cmd} 走。 */
+    public void setAuth(sair.v4.auth.Auth a) { this.auth = a; }
+
     /** 编译并运行一段 Java 源码；返回输出或错误说明。 */
     public String runJava(String source, String[] args) {
         if (Str.blank(source)) return "缺少源码";
-        String deny = denyExec();
+        String deny = denyOp("exec.java");
         if (deny != null) return deny;
         String className = classNameOf(source);
         if (className == null) return "源码里找不到类声明（class/interface/enum）";
@@ -89,7 +100,7 @@ public final class DynCode {
      */
     public String runCmd(String command, long timeoutMs) {
         if (Str.blank(command)) return "缺少命令";
-        String deny = denyExec();
+        String deny = denyOp("exec.cmd");
         if (deny != null) return deny;
         ProcessBuilder pb = new ProcessBuilder();
         if (Text.isWindows()) {
@@ -138,41 +149,23 @@ public final class DynCode {
     }
 
     /**
-     * exec 要执行的"本机程序"：Windows 走 ComSpec（cmd.exe），其它走 /bin/sh。
+     * 执行前的 op 判定（放行返回 {@code null}，否则返回可直接回给模型的拒绝原文）。
      *
-     * <p><b>注意这个返回值可能是相对路径</b>（{@code %ComSpec%} 缺失时回落到
-     * {@code new File("cmd.exe")}）—— 所以判定那边必须用 {@code Res.proc(...)}（强制 A 类），
-     * 不能按 {@code Res.path} 的"落在哪算哪"分类（见 {@link #denyExec()}）。</p>
+     * <p>op 名 = {@code exec.<动作名>}：{@link #runJava(String, String[])} 判 {@code exec.java}、
+     * {@link #runCmd(String, long)} 判 {@code exec.cmd}（动作名就是 exec 工具的 {@code kind} 取值）。
+     * 判定主体是当轮绑定的触发者（{@code Ctx.caller()}）；没有绑定主体 = 基板内部<b>直接</b>调用
+     * （不经工具，例如探针用 {@code runCmd} 取命令输出做编码测试），按她本人 {@code SYSTEM} 处理
+     * —— 恒放行。技能拿不到 {@code DynCode} 的直接引用，没有攻击者可触达的"无主体" exec 路径。</p>
+     *
+     * <p>权限面没装配时退到<b>空管控表</b>：主人与她本人恒全权、其余一律未授权 ——
+     * 与"装配失败时不假装有权限面"的同一口径（fail-closed）。</p>
      */
-    private static File execShell() {
-        if (Text.isWindows()) {
-            String cs = System.getenv("ComSpec");
-            return new File(cs == null || cs.trim().isEmpty() ? "cmd.exe" : cs.trim());
-        }
-        return new File("/bin/sh");
-    }
-
-    /**
-     * exec（kind=cmd/java）执行前的判定：对"要执行的程序"做 <b>A 类 + {@code 'X'}</b>。
-     *
-     * <p>资源描述走 {@link sair.v4.auth.Res#proc(java.io.File)}（<b>强制 A 类</b>，
-     * {@code Res.exec} 与它等价 —— D22："A = SFW 路径以外的所有文件<b>以及系统进程</b>"），
-     * <b>不是</b> {@code Res.path}：{@code path} 会把"落在 SFW 根之下"的路径判成 B 类，
-     * 而 {@code %ComSpec%} 缺失时 {@link #execShell()} 回落到的是<b>相对路径</b>
-     * {@code new File("cmd.exe")} —— 它会被归一化到进程工作目录（框架根）下、判成 B 类，
-     * 而 {@code ALLUSER} 的 B 类默认是 {@code RX}（含 X）⇒ 非主人白拿"执行任意系统命令"的位。
-     * 主任定标 D10：shell 严格 A 类；D22 把这条写成"A 类显式包含系统进程"。A 类默认只有 {@code R}
-     * （对 {@code ALLUSER} 是一位都不给）（<b>没有"上限"这种说法了</b>，就是按类默认分配
-     * {@code A=R} + 例外突破），所以非主人与 {@code SYSTEM} 都拿不到 X，只有主人（MASTER 恒全权）能 exec。</p>
-     *
-     * <p>经 exec 工具触发时 {@code Ctx} 绑的是触发者，这里照判；没有绑定触发者 = 基板内部
-     * <b>直接</b>调用（不经工具，例如探针用 runCmd 取命令输出做编码测试），按旧口径放行 ——
-     * 技能拿不到 {@code DynCode} 的直接引用，没有攻击者可触达的"无主体" exec 路径。</p>
-     */
-    private String denyExec() {
+    private String denyOp(String op) {
         Caller caller = Ctx.caller();
-        if (caller == null) return null;
-        return Conf.needRes(null, caller, sair.v4.auth.Res.proc(execShell()), 'X');
+        if (caller == null) caller = Caller.systemActor(conf == null ? 0L : conf.masterQQ());
+        sair.v4.auth.Auth a = auth;
+        if (a != null) return a.allow(caller, op);
+        return sair.v4.auth.Acl.empty(null).allow(caller, op);
     }
 
     /** 命令输出字节 → 文本（平台原生口径；CRLF 归一成 LF，与逐行读的旧行为一致）。 */

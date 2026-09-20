@@ -30,7 +30,8 @@
     <a href="files.html"><span class="n">08</span>文件</a>
     <a href="architecture.html"><span class="n">09</span>实现</a>
     <a href="migration.html"><span class="n">10</span>升级</a>
-    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+    <a href="skills.html"><span class="n">11</span>技能开发</a>
+    <a href="changelog.html"><span class="n">12</span>更新日志</a>
   </nav>
   <div class="topbar-meta">
     <span class="chip live">纯静态</span>
@@ -96,7 +97,7 @@
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">"引用了她的消息但没 @" 不会触发 —— 这是设计，不是故障</span>：群聊的触发判据只有一条"这条消息是否 @ 到了她自己"（<code>QqGateway.java</code>）。所以<b>只引用、不 @</b> 时判定为否，不产生回合、不会回复。要想让她接话，@ 一下即可。</p>
+          <p><span class="n-title">"引用了她的消息但没 @" 不会触发 —— 这是设计，不是故障</span>：群聊的触发判据是"这条消息是否 @ 到了她自己"（<code>QqGateway.java</code>）；技能触发词命中时由技能投票另起一轮，不走这一条。所以<b>只引用、不 @</b> 时判定为否，不产生回合、不会回复。要想让她接话，@ 一下即可。</p>
         </div>
 
         <h3 class="sec">三个容易被当成故障的正常行为</h3>
@@ -109,7 +110,7 @@
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">② 一次回复可能被拆成几条</h4>
             <p>长回复按分段规则拆开发送（分段开关、长度与延迟都是配置键）。</p>
-            <p class="t-cap">出处：<code>Cmd.java</code>（<code>replySplit</code> / <code>replyMaxChars</code> / <code>replyGroupMaxChars</code> / <code>replySplitDelayMs</code> / <code>replySplitJitterMs</code>）。</p>
+            <p class="t-cap">出处：<code>term\Segmenter.java</code>（<code>replySplit</code> / <code>replyMaxChars</code> / <code>replyGroupMaxChars</code> / <code>replySplitDelayMs</code> / <code>replySplitJitterMs</code>），键登记在 <code>Conf.java</code>。</p>
           </div>
           <div class="panel reveal d2">
             <h4 class="sub" style="margin-top:0">③ 发图她能看图</h4>
@@ -196,7 +197,7 @@
         <p class="t-cap">登记处 <code>Conf.java</code>（getter 见）。逐键说明与命令见<a href="config.html#other">配置页 · 其余键</a>。把"尚未接线"与"尚未实现"分开写，是因为前者只差一次接线、后者还差功能本身。</p>
 
         <div class="note bad reveal">
-          <p><span class="n-title">动配置之前先存字节</span>：改之前把 <code>config.json</code> 与 <code>perms.json</code> 各复制一份（带时间戳），再动。理由是配置里既有密文（解不开就白改）、又有人工写的例外清单（写坏了只能靠备份回滚）。这两个文件的落点：<code>SairFrameWork\data\AiAgent-V4\</code>（数据根由 <code>Conf.java</code> 拼出，账本名见 <code>auth\Acl.java</code>）。</p>
+          <p><span class="n-title">动配置之前先存字节</span>：改之前把 <code>config.json</code> 与权限文件各复制一份（带时间戳），再动。理由是配置里既有密文（解不开就白改）、又有人工写的授权清单 —— 权限文件按归属分散：基板内置工具那份是数据根下的 <code>perms-core.jsonc</code>（路径也写在这一份里），每个技能自己那份在它的目录里（三个域各自分层，写坏了只能靠备份回滚）。这两类文件的落点：<code>SairFrameWork\data\AiAgent-V4\</code>（数据根由 <code>Conf.java</code> 拼出，权限文件的读写见 <code>auth\Acl.java</code>）。</p>
         </div>
       </section>
 
@@ -232,24 +233,24 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">权限</span>
           <h2>权限与好感：两个不同的东西</h2>
-          <p class="chapter-desc">一句话分工：<b><code>ai/acl</code> 管"能不能做"（只读查看），<code>ai/perm</code> 管好感度</b>；改判据是改账本，不是改好感度。</p>
+          <p class="chapter-desc">一句话分工：<b><code>ai/perm</code> 管"能不能做"（技能管控表），<code>ai/favor</code> 管好感度</b>；改判据是改技能管控表，不是改好感度。</p>
         </header>
 
         <div class="grid-2">
           <div class="panel reveal">
-            <h4 class="sub" style="margin-top:0"><code>ai/acl</code>：看权限账本（只读）</h4>
-            <p>打印"默认分配 + 逐条例外"。判据只有一本账：数据根的 <code>perms.json</code>，规则是<b>按资源类型的默认分配 + 例外条目突破默认</b>；<b>空位 = 拒绝</b>。</p>
-            <p class="t-cap">主体三类 <code>MASTER</code> / <code>SYSTEM</code> / <code>ALLUSER</code>；资源五类 <code>A</code>（本机）/ <code>B</code>（SFW 内）/ <code>C</code>（数据）/ <code>E</code>（外部交互）/ <code>T</code>（工具）。出处：<code>Cmd.java</code>、<code>auth\Auth.java</code>、<code>auth\Acl.java</code>。</p>
+            <h4 class="sub" style="margin-top:0"><code>ai/perm</code>：看技能管控表</h4>
+            <p>打印整张表 + 一段怎么用。判据是那些按归属分散的权限文件：基板内置工具那份在数据根下的 <code>perms-core.jsonc</code>，每个技能自己那份在它的目录里，装载时两者合并成一张表，分成<b>技能</b>（谁能用哪个 op）、<b>数据</b>（谁能改、谁能读哪类数据）、<b>文件</b>（谁能碰哪些路径）三个域，每个域里是自己的层，规则键写成中括号数组；<b>没列到的按该域的默认值走 —— 技能不能用、数据能读不能改、文件不能碰</b>，同一把键上 <code>Ban</code> 压过允许，更具体的键优先。</p>
+            <p class="t-cap">身份三类 <code>MASTER</code> / <code>SYSTEM</code> / <code>ALLUSER</code>；主人（<code>MASTER</code>）与她本人（<code>SYSTEM</code>）恒全权，不受表影响。出处：<code>Cmd.java</code>、<code>auth\Auth.java</code>、<code>auth\Acl.java</code>。</p>
           </div>
           <div class="panel reveal d1">
-            <h4 class="sub" style="margin-top:0"><code>ai/perm</code>：好感度</h4>
-            <p><code>ai/perm</code> 查看 / 设置 / 重置某个人的好感度数值。<b>好感度不参与权限判定</b>——权限只看账本。</p>
-            <p class="t-cap">出处：<code>Cmd.java</code>，<code>auth\Auth.java</code>。想给别人放开某项能力：按上面的资源写法在 <code>perms.json</code> 里写例外，或在 QQ 里让主人授权。</p>
+            <h4 class="sub" style="margin-top:0"><code>ai/favor</code>：好感度</h4>
+            <p><code>ai/favor</code> 看榜单、<code>get</code> 看一个人的数值与档位、<code>set</code> 直改、<code>reset</code> 清成初值。<b>好感度不是权限，也不参与任何判定</b>——它只影响回话热络。</p>
+            <p class="t-cap">出处：<code>Cmd.java</code>，<code>auth\Favor.java</code>。想给别人放开某项能力：在那个键归属的那份权限文件的对应层里补一个身份（技能自己的工具与它的数据在该技能目录的 <code>perms.jsonc</code>；基板内置工具、其余数据键与全部路径在数据根的 <code>perms-core.jsonc</code>），或在控制台敲 <code>ai/perm run &lt;op&gt; &lt;身份&gt;</code>、<code>ai/perm db|file … &lt;身份&gt;</code>。</p>
           </div>
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">默认对非主人是全关的</span>：一条例外都没命中时按资源类型给位，其中 <code>A</code> 类（SFW 数据根之外的本机路径）对普通用户<b>一位都不给</b>，<code>B</code> / <code>E</code> 类默认也不给；主人（<code>MASTER</code>）恒全权、任何条目都影响不到他。出处：<code>auth\Acl.java</code>。</p>
+          <p><span class="n-title">默认对非主人是全关的</span>：表里没列到他，就是<b>一个 op 都没有</b>，数据不能改、路径不能碰；三个域里只有<b>数据那一域的"读"</b>是例外 —— 没列到时默认可读（装载时会点名列出来）。同一把键上 <code>Ban</code> 压过允许，更具体的键优先。主人（<code>MASTER</code>）与她本人（<code>SYSTEM</code>）恒全权、任何条目都影响不到他们。出处：<code>auth\Acl.java</code>。</p>
         </div>
       </section>
 
@@ -269,8 +270,8 @@
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">怎么开、怎么关</h4>
-            <p><code>ai/debug on [token]</code> 开（token 不给就按已有配置/生成）、<code>ai/debug status</code> 看状态、<code>ai/debug off</code> 关、<code>ai/debug simulate on|off</code> 切输入口的仿真。</p>
-            <p class="t-cap"><b>做完会看到</b>：<code>on</code> 之后回一行"调试口已经在听"加端口与 token 脱敏信息；<code>status</code> 打印两个口的监听状态。<b>只有这条命令能起停这两个口</b>；<code>ai/restart</code> 不会把它关掉。出处：<code>Cmd.java</code>。</p>
+            <p><code>ai/debug on [token]</code> 开（token 不给就现生成一个，只落进数据根的 <code>debug-port.json</code>，不进 <code>config.json</code>）、<code>ai/debug status</code> 看状态、<code>ai/debug off</code> 关、<code>ai/debug simulate on|off</code> 切输入口的仿真。</p>
+            <p class="t-cap"><b>做完会看到</b>：<code>on</code> 之后回一行"调试面已开"加端口与 token 指纹；<code>status</code> 打印两个口的监听状态。<b>只有这条命令能起停这两个口</b>；<code>ai/restart</code> 不会把它关掉。出处：<code>Cmd.java</code>。</p>
           </div>
         </div>
 
@@ -295,7 +296,8 @@
             <tbody>
               <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>（业务库 + 运行表 + 全文索引都在里面）</td><td>备份就是复制它；它的表结构交给基板自己维护就好</td></tr>
               <tr><td><code>config.json</code></td><td>配置文件（已知键 94 个）</td><td>含密文；换启动目录会解不开</td></tr>
-              <tr><td><code>perms.json</code></td><td>权限账本（主人写的例外清单）</td><td>写坏了只能靠备份回滚</td></tr>
+              <tr><td><code>perms-core.jsonc</code></td><td>基板侧的权限文件（主人写的，三个域各自分层，路径也写在这一份里）</td><td>写坏了只能靠备份回滚</td></tr>
+              <tr><td><code>skills\&lt;技能名&gt;\perms.jsonc</code></td><td>技能自己的权限文件（只写这个技能提供的工具与属于它的数据键；目录里没有它 = 它的 op 都不授权）</td><td>跟着技能目录走：删掉目录，它的授权也一起消失</td></tr>
               <tr><td><code>prompts\</code></td><td>提示词文件</td><td><code>ai/prompt reload</code> 即可重载，不必重启</td></tr>
               <tr><td><code>files\</code></td><td>下载 / 图片落点，库导出也落这里</td><td>体积会随使用增长</td></tr>
               <tr><td>日志目录</td><td>运行期日志，按大小滚动、只增不删</td><td>排障先看这里；不会自动清理</td></tr>
@@ -368,7 +370,7 @@
               <tr>
                 <td>外挂层某个单元没起来</td>
                 <td><code>ai/status</code> 的步骤台账</td>
-                <td>装载失败<b>只让那一项能力缺位，装配继续往下走</b>；<code>ai/status</code> 能看出缺了哪一项（技能怎么写见 <a href="capabilities.html#skill-dev">06 · 能力</a>）</td>
+                <td>装载失败<b>只让那一项能力缺位，装配继续往下走</b>；<code>ai/status</code> 能看出缺了哪一项（技能怎么写见 <a href="skills.html">11 · 技能开发</a>）</td>
               </tr>
               <tr>
                 <td>程序还在、基板没了</td>
@@ -381,7 +383,7 @@
         <p class="t-cap">出处：状态与失败步骤 <code>Cmd.java</code>；NapCat 监听与降级 <code>Boot.java</code>、<code>qq\Link.java</code>；重载口径 <code>Cmd.java</code>；装配失败继续 <code>Boot.java</code>；关停 <code>Cmd.java</code>、<code>V4Activity.java</code>。</p>
 
         <div class="note ok reveal">
-          <p><span class="n-title">安全重启的标准动作</span>：① <code>ai/status</code> 记下当前状态与「待生效」清单 → ② 需要的话先备份 <code>config.json</code> / <code>perms.json</code> → ③ <code>ai/restart</code> → ④ 等装配进度打完 → ⑤ 再 <code>ai/status</code> 确认 <code>ready=1</code> 且「待生效」为空 → ⑥ 群里 <b>@ 她</b>发一条测试消息。</p>
+          <p><span class="n-title">安全重启的标准动作</span>：① <code>ai/status</code> 记下当前状态与「待生效」清单 → ② 需要的话先备份 <code>config.json</code> 与那几份权限文件（<code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code>）→ ③ <code>ai/restart</code> → ④ 等装配进度打完 → ⑤ 再 <code>ai/status</code> 确认 <code>ready=1</code> 且「待生效」为空 → ⑥ 群里 <b>@ 她</b>发一条测试消息。</p>
         </div>
       </section>
 
@@ -403,7 +405,7 @@
               <tr><td><code>ai/restart</code></td><td>一行"重启已受理" + 新一轮装配进度 + 「待生效」清单为空</td></tr>
               <tr><td><code>ai/config set …</code></td><td>回执提示"未生效"，并且 <code>ai/status</code> 的「待生效」段出现该键</td></tr>
               <tr><td><code>ai/prompt reload</code></td><td>一行重载回执，<b>不需要重启</b></td></tr>
-              <tr><td><code>ai/debug on</code></td><td>一行"调试口已经在听"+ 端口信息；<code>ai/debug status</code> 显示两个口的状态</td></tr>
+              <tr><td><code>ai/debug on</code></td><td>一行"调试面已开"+ 端口信息；<code>ai/debug status</code> 显示两个口的状态</td></tr>
               <tr><td>群里 @ 她</td><td>她回消息（不 @ 不回，属正常）</td></tr>
               <tr><td>要结束进程</td><td>进程消失（<code>/exit</code> 或按 pid）—— 只用 <code>ai/exit</code> 时进程仍在，这是预期</td></tr>
             </tbody>
@@ -411,7 +413,7 @@
         </div>
 
         <div class="note reveal">
-          <p><span class="n-title">本文档未覆盖</span>：技能这一层有自己的页面：有哪些、各自做什么见 <a href="capabilities.html#skills">06 · 能力</a> 的技能清单，怎么写、怎么装见同页的「自己写一个技能」；本页只写"技能装载失败时基板怎么表现"。命令的逐条参数细节见<a href="commands.html">命令参考</a>；键的逐条含义见<a href="config.html">配置键面</a>。</p>
+          <p><span class="n-title">本文档未覆盖</span>：技能这一层有自己的页面：有哪些、各自做什么见 <a href="capabilities.html#skills">06 · 能力</a> 的技能清单，怎么写、怎么装见 <a href="skills.html">11 · 技能开发</a>；本页只写"技能装载失败时基板怎么表现"。命令的逐条参数细节见<a href="commands.html">命令参考</a>；键的逐条含义见<a href="config.html">配置键面</a>。</p>
         </div>
       </section>
 

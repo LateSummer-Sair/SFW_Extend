@@ -10,11 +10,13 @@ import sair.v4.ctx.Turn;
 
 /**
  * 一个工具（模型可见的能力）。基板工具与技能工具在这里统一：<b>只有一套注册表</b>。
- * <p>没有"通道"属性，<b>也没有"工具级权限档位"</b>（旧档位体系已随 P9b 整批删除）：工具是 <b>T 类资源</b>，
- * 它的位说了算 —— {@link Registry#visible} 按 {@code T:X} 筛"<b>交不交到手</b>"，
- * {@link Registry#call} 再按 {@code T:X} 拦"<b>点不点得动</b>"（两道都过才执行）。
- * 工具<b>内部执行过程一律不判位</b>（主人的口径：只管入口），而"能不能碰某个资源"由要碰资源那一刻的
- * ACL 判定说了算（{@code Host.need*} → {@code Acl.allow}）。工具自己声明的 {@code op} 同样不参与权限判定。</p>
+ * <p>没有"通道"属性，<b>也没有"工具级权限档位"</b>（旧档位体系已随 P9b 整批删除）：权限只剩
+ * <b>身份 × op</b> 一条（{@code Host.need("<op>")} → {@code Acl.allow}），op = 工具名或
+ * 工具名.动作名。{@link Registry#visible} 按"工具级 op 或其任一动作级 op 放行"筛"<b>交不交到手</b>"，
+ * {@link Registry#call} 再按<b>同一判据</b>拦"<b>点不点得动</b>"（两道都过才执行）。</p>
+ * <p>工具内部不重算权限：每个动作分支开头那一句 {@code need("<op>")} 是技能自己的判定，
+ * {@link Registry} 只管入口。资源没有位 —— 资源对主人与她本人完全可见可改可执行，
+ * 对 ALLUSER 是黑盒，想碰唯一的路就是被判定的那个 op。</p>
  */
 public final class Tool {
 

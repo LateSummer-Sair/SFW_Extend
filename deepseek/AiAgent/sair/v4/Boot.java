@@ -18,7 +18,6 @@ import sair.v4.auth.Auth;
 import sair.v4.auth.Caller;
 import sair.v4.auth.Favor;
 import sair.v4.auth.FavorStore;
-import sair.v4.auth.Res;
 import sair.v4.ctx.CtxBuild;
 import sair.v4.ctx.Turn;
 import sair.v4.hot.DynCode;
@@ -112,6 +111,14 @@ public final class Boot {
      * 受理之后到装完之前 → {@code true}（加载中）。</p>
      */
     private volatile boolean requested = false;
+
+    /**
+     * 本次装配是否已经打过权限汇总那一行（{@link #logPermSummary()}）。
+     * <p>规格 §2.5-7 的口径是"装配完成与 {@code ai/perm reload} 之后各打一次"，不许刷屏：
+     * 正常路径在权限装载收口处打（第⑯步末尾 / 技能后台编译的 finally），
+     * {@link #init(InitListener, Runnable)} 的就绪播报里再兜一次底 —— 这个标记保证"一次装配恰好一行"。</p>
+     */
+    private volatile boolean permSummaryLogged = false;
 
     /** 技能编译阶段的耗时（毫秒；-1 = 还没编过）。同步模式 = 步骤⑯的耗时；后台模式 = 后台线程的耗时。 */
     private volatile long skillsCompileMs = -1L;
@@ -260,6 +267,32 @@ public final class Boot {
     /** 本次 init 由 {@link #ensureSkeleton} 真正新建的骨架项。 */
     private final List<String> skeletonCreated = new java.util.ArrayList<String>();
 
+    /**
+     * NapCat 动作的<b>场合</b>（罢工硬干活闸用；第三轮新增，见 {@link #init} 第⑧步的 {@code Api.Guard}）。
+     *
+     * <p>取法（GM 裁定，三条按序）：① {@code params.group_id} ⇒ {@code group:<群号>}；
+     * ② 否则 {@code params.user_id} ⇒ {@code private:<QQ>}；③ 都没有 ⇒ 再看当轮主体
+     * {@link sair.v4.ctx.Ctx#caller()} 的会话键（{@code group:<n>} 直接用、{@code qq:<n>} 折成
+     * {@code private:<n>}）；④ 都取不到 ⇒ 空串（闸门 fail-open，不许因为取不到场合把动作全打死）。</p>
+     *
+     * <p>场合串的形状与情绪插件的 {@code EmotionMood.scopeOf} 同源（{@code group:<群号>} /
+     * {@code private:<QQ>}）—— 这是<b>同一个表达式</b>，不是第二套判据；判据真源始终是 {@code kv} 的
+     * {@code mood:<场合>}（读取与判定都在 {@code Builtins.strikeDenyScene} 那一处）。</p>
+     */
+    private static String napcatScene(JsonObject params) {
+        long gid = J.l(params, "group_id", 0L);
+        if (gid > 0L) return "group:" + gid;
+        long uid = J.l(params, "user_id", 0L);
+        if (uid > 0L) return "private:" + uid;
+        Caller c = sair.v4.ctx.Ctx.caller();
+        if (c != null) {
+            String s = c.session();                       // "console" / "group:<n>" / "qq:<n>"
+            if (s != null && s.startsWith("group:")) return s;
+            if (s != null && s.startsWith("qq:")) return "private:" + s.substring(3);
+        }
+        return "";
+    }
+
     public Boot(File root, Out out) {
         this.root = root;
         this.out = out;
@@ -347,6 +380,7 @@ public final class Boot {
             stepName = "";
             skillsCompileMs = -1L;
             skillsError = "";
+            permSummaryLogged = false;
             synchronized (ledgerLock) {
                 steps.clear();
                 skeletonCreated.clear();
@@ -377,6 +411,10 @@ public final class Boot {
                 if (degraded() && out != null) {
                     out.warn("[v4] 装配有失败步骤（基板降级运行，控制台照常可用）：" + failureReport());
                 }
+                // 权限汇总的兜底：正常路径已经在权限装载收口处打过（见 logPermSummary 的注释）；
+                // 那一步没跑到（技能库/技能扫描那一步失败）时在这里补一次 —— "装配完成必有汇总"。
+                // 技能还在后台编译时这里不打：那种情况由后台收口的 finally 打，否则会打两行。
+                if (!permSummaryLogged && !skillsCompiling) logPermSummary();
             } catch (Throwable t) {
                 if (out != null) out.err("[v4] 就绪播报失败（不影响可用性）：" + t);
             }
@@ -391,17 +429,9 @@ public final class Boot {
             @Override
             public void run() {
                 conf = new Conf(root);
-                // 建数据根前判定（防御性）：数据根在 SFW 之内 = B 类；她自己（SYSTEM）写 B 类放行。
-                // 路径被改到 SFW 之外（A 类）才拦 —— 那时宁可装配失败也不在 A 类上建目录。
-                String mkDeny = Conf.needWrite(null, Caller.systemActor(conf.masterQQ()), conf.root());
-                if (mkDeny != null) {
-                    if (out != null) out.err("[v4] 数据目录被权限拦：" + mkDeny);
-                    throw new IllegalStateException(mkDeny);
-                }
+                // 建数据根不判权限：资源不再有位，数据根就是基板自己的地盘
+                // （她自己的自主行为没有可判的 op），这里只按配置把目录建出来。
                 Fs.mkdirs(conf.root());
-                // 资源类别接线（主人加强定义 D22）：数据根的 files 目录 = C 类（她自己的运行时脚手架）。
-                // 只接这一处：之后所有 Res.path(...) 判定都会把 <dataDir>/files/** 判成 C（其余 dataDir 不变）。
-                Res.dataDir(conf.root());
                 // 读不出来时 load() 返回 false，且面**保持空对象**；而紧接着的 ensureDefaults() 只在
                 // "文件不存在 / 0 字节"时才补默认 ⇒ 一份**非空但解析不出来**的 config.json 会让整台基板
                 // **静默**按全出厂默认跑（表象极像"配置没生效 / 被缓存了"）。实测 load()==false 的三种面：
@@ -456,12 +486,17 @@ public final class Boot {
             }
         });
 
-        // ④ 权限门禁（ACL 账本：数据根的 perms.json；装载只读，任何旧档位表路径都已删除 —— D11/D13）
+        // ④ 权限门禁（权限文件按归属分散：data\perms-core.jsonc + 每个技能的 perms.jsonc；
+        //    装载只读 —— D11/D13；工具归属要等第⑥步的注册表接进来才有）
         step("权限门禁", new Runnable() {
             @Override
             public void run() {
                 auth = new Auth(conf, favor, out);
                 auth.init();
+                // op 清单的骨架：NapCat 一族按动作登记一遍（动态目录，见 declareNapcatOps），
+                // 内置工具那一份交给 Builtins 的登记口（register() 里也会登记，重复无害）。
+                declareNapcatOps();
+                try { Builtins.declareOps(auth.ops()); } catch (Throwable ignored) { }
                 warnRetiredPermKeys();
             }
         });
@@ -475,7 +510,15 @@ public final class Boot {
         // ⑥ 工具注册表（auth 为空时 Registry 不做权限筛，工具面反而更完整）
         step("工具注册表", new Runnable() {
             @Override
-            public void run() { registry = new Registry(auth, conf, out); }
+            public void run() {
+                registry = new Registry(auth, conf, out);
+                // 权限文件按归属分散：多源装载要知道"哪个 op 属于哪个技能"（技能文件里写了不属于它的
+                // op 会被忽略；写回也按归属落文件）。这里把**活对象**接给权限面 —— 技能装载期往同一个
+                // registry 里注册工具，所以不用重 bind；重扫之后由下面的收口回调重读权限文件。
+                if (auth != null) {
+                    auth.bind(registry, conf == null ? null : conf.skillsDir());
+                }
+            }
         });
 
         // ⑦ 模型客户端 + 动态执行
@@ -488,6 +531,7 @@ public final class Boot {
                 // （modelGateWaitMs，默认 180s），等不到就放弃本次调用并收敛成一条失败结果。
                 ai.setGate(new java.util.concurrent.Semaphore(conf.modelConcurrency(), true));
                 dyn = new DynCode(conf, out);
+                dyn.setAuth(auth);      // exec 的 op 判定（exec.java / exec.cmd）；第④步在此之前
             }
         });
 
@@ -506,9 +550,8 @@ public final class Boot {
                 relay = new sair.v4.qq.Relay(conf, out);
                 api.setRelay(relay);
                 api.setOut(out);
-                api.setAuth(auth);                       // 改写层的"读文件"判定也要装在无闸门实例上（洞 2）
+                api.setAuth(auth);                       // 改写层按"这个动作的 op"判（napcat.<动作>），无闸门实例也要装
                 api.setSentTap(sentTap());               // 出站消息台账（F5a）：她发的每一条都留 message_id
-                relay.setAuth(auth);                     // Relay 自身对外判定的兜底
                 // ★ 带闸门那份：先在<b>局部变量</b>上配全（relay/out/auth/sentTap/guard），**最后一行**才交给字段。
                 //   这样"guardedApi != null" ⇔ "闸门已装好"是一个**不可分割**的事实：
                 //   中间任何一步抛异常，字段都还是 null（而不是"实例在、闸门不在"——
@@ -521,21 +564,34 @@ public final class Boot {
                 g.setGuard(new Api.Guard() {
                     @Override
                     public String deny(String action, JsonObject params) {
+                        // 唯一判据：身份 × op。NapCat 动作的 op = "napcat.<动作名>"（见 Ops 的口径）；
+                        // 主人与她本人恒全权（Acl.allow 内部短路），ALLUSER 按技能管控表 —— 没写 = 未授权。
+                        String op = "napcat." + action;
                         Caller c = sair.v4.ctx.Ctx.caller();
                         // 没有绑定主体 = 她自己的自主行为（基板回复、定时推送、钩子/扩展点回调）→ SYSTEM。
                         // 旧口径是"没有绑定调用者 = 基板内部动作 → 放行"，那是钩子绕闸门的那条洞
                         // （notes/acl-impl-plan.md §2.1(a)）：新模型里一律先有主体，再按主体判。
                         if (c == null) c = Caller.systemActor(conf == null ? 0L : conf.masterQQ());
-                        if (c.master()) return null;        // 主人 = MASTER，一律全放行
+                        // ★ 罢工硬干活闸（情绪 v2 §4，第三轮）：动作出口也要判 —— h.napcat() 是**直连**
+                        //   （群审核 / 申请审批的钩子就在这儿发禁言、警告、审批），只判 ACL 会整段绕过罢工。
+                        //   顺序与别处一致：**ACL 先、罢工后**；罢工对所有人生效（含 MASTER，主人恒全权只免 ACL）。
+                        //   ★★ 第四轮 P0：**说话动作豁免**（{@code Builtins.STRIKE_SPEAK_ACTIONS}）——
+                        //   "罢工 = 不干活，但要继续骂人"：send_* 一族在罢工期间照常放行，否则她连自己的
+                        //   回复都发不出去（真机：整群静默）。清单与判据只有 Builtins.strikeDenyAction 一处。
+                        if (c.master()) {
+                            // 主人 = MASTER：ACL 不判（恒全权）⇒ 但罢工照判（与 op 闸的矩阵一致）。
+                            return sair.v4.Builtins.strikeDenyAction(action, napcatScene(params), op);
+                        }
                         if (auth == null) {
                             // 装配失败：不许静默放权（旧行为是 return null = 闸门不存在）
                             if (out != null) {
-                                out.err("[auth] NapCat 闸门没有权限面（auth == null）—— 按拒绝处理：" + action);
+                                out.err("[auth] NapCat 闸门没有权限面（auth == null）—— 按拒绝处理：" + op);
                             }
-                            return Acl.DENY_PREFIX + "需要 " + action + " 的 X 位（权限面没有装配，按拒绝处理）";
+                            return Acl.DENY_PREFIX + "「" + op + "」没有授权（权限面没有装配，按拒绝处理）";
                         }
-                        // 对外动作 = E 类资源的 X 位（E 类上限：MASTER RWX / SYSTEM X / OTHER NONE）
-                        return auth.allowRes(c, Res.platform(action), 'X');
+                        String acl = auth.allow(c, op);
+                        if (acl != null) return acl;   // ACL 拒文优先（逐字不变）
+                        return sair.v4.Builtins.strikeDenyAction(action, napcatScene(params), op);
                     }
                 });
                 guardedApi = g;                              // ← 不可分割：装好了才交出去
@@ -550,8 +606,8 @@ public final class Boot {
                     @Override
                     public boolean napcatConnected() { return link != null && link.connected(); }
 
-                    // 权限面接线口：事实块里的 caller.kind / caller.bits 与人工 op 的授权操作
-                    // **用同一份内存账本**（主人刚写完例外，下一轮事实块立刻就是对的），
+                    // 权限面接线口：事实块里的 caller.kind / 可用 op 与人工授权操作
+                    // **用同一份内存账本**（主人刚写完授权，下一轮事实块立刻就是对的），
                     // 不再靠"文件 mtime 变了才自己重读"。
                     @Override
                     public sair.v4.auth.Auth auth() { return auth; }
@@ -625,13 +681,21 @@ public final class Boot {
                 // 库注册表（基板⑧）：插件在装载期声明自己的表（Skill.declare），基板只给注册表。
                 // 与 Store/Db 用的是同一个对象 —— 声明出来的表立刻进白名单与清单。
                 skills.setLibs(libs());
+                // op 清单（技能管控表的骨架）：技能装载期声明，判定与 ai/perm gen 都按它走
+                if (auth != null) skills.setOps(auth.ops());
                 // 重扫（skill reload / 现场写出来的新插件）声明了新表时立刻落盘，不用等重启
                 skills.setLibSync(new Runnable() {
                     @Override
                     public void run() { createLibTables(); }
                 });
                 // 扫完（含 skill reload / 现场新增技能）原来要同步一次旧档位表 —— P9b-1 已删除
-                // （旧表不再被写；这就是 D11 要求的"启动/加载/任何路径都写不到 perms.json"）
+                // （旧表不再被写；这就是 D11 要求的"启动/加载/任何路径都写不到旧档位表"）
+                // 现在的收口只做一件**只读**的事：重读权限文件 —— 技能增减会改变"op → 归属技能"，
+                // 而归属是"技能文件里越界条目一律忽略"的判据（没有文件 = 该技能全部 op 不授权）。
+                skills.setScanListener(new Runnable() {
+                    @Override
+                    public void run() { reloadPerm(); }
+                });
                 // 钩子执行池（有界）：钩子仍然"同步"跑（要等 _handled），但并发线程数不再随消息数涨
                 hookPool = sair.v4.schedule.Pool.hooks(conf, out);
                 skills.setHookPool(hookPool);
@@ -735,6 +799,12 @@ public final class Boot {
                 // 库落盘：插件装载完成之后跑一次（环境表 + 插件声明的全部表，缺表即建、幂等）。
                 // 不新开装配步骤："19 步"是外挂文案与各处台账的既有口径（见第⑨/⑲步同样的处理）。
                 createLibTables();
+                // 权限文件（core + 每个技能自己的 perms.jsonc）：技能扫完的收口回调已经重读过一次
+                // （见第⑩步 setScanListener），这里只补一行"当前是默认拒绝"的诊断。
+                // 旧口径"首次生成一张完整清单（每个 op 一行空 Run）"已删除：没有权限文件 = 一切未授权，
+                // 要开口就敲 ai/perm run；gen 只在已有文件里重排，不新建文件。
+                logPermDefault();
+                logPermSummary();      // 装载汇总那一行（规格 §2.5-7）：权限装载收口处打一次
             }
         });
 
@@ -903,15 +973,8 @@ public final class Boot {
     public int createLibTables() {
         try {
             if (store == null || store.db() == null) return -1;
-            // 防御性：建表落盘 = 她自己的自主行为（SYSTEM C:RWX）。先按 ACL 判 C 类 W 位再落盘 ——
-            // 用 memory 做代表（SYSTEM 对 C 类恒 RWX，与具体库名无关），证明基板自身建表不会被默认 OTHER 位误伤。
-            if (auth != null) {
-                String deny = auth.allowRes(Caller.systemActor(conf.masterQQ()), Res.db("memory"), 'W');
-                if (deny != null) {
-                    if (out != null) out.warn("[auth] 自主建表被拦（未落盘）：" + deny);
-                    return -1;
-                }
-            }
+            // 建表落盘 = 她自己的自主行为（判定主体 SYSTEM，她本人恒全权）—— 不做权限判定：
+            // 资源不再有位，技能管控表管的是"谁能用哪个 op"，管不到她自己的装配/落库动作。
             int ok = store.db().createTables();
             if (out != null) {
                 out.dim("[store] 库落盘：" + libs().size() + " 个已注册库（含环境库 "
@@ -983,6 +1046,8 @@ public final class Boot {
                     skillsCompileMs = System.currentTimeMillis() - t0;
                     skillsCompiling = false;
                     createLibTables();      // 库落盘：后台扫完（插件声明齐了）才建表
+                    logPermDefault();       // 权限文件是默认拒绝时的那一行诊断（重读已由扫完收口回调做）
+                    logPermSummary();       // 装载汇总那一行：后台装配的收口就在这里（规格 §2.5-7）
                     if (out != null && !stopped) {
                         log("技能就绪：技能 " + (skills == null ? 0 : skills.size()) + " 个（工具 "
                                 + (skills == null ? 0 : skills.toolCount()) + "），编译耗时 "
@@ -998,14 +1063,121 @@ public final class Boot {
 
     // ==================== 权限注册表（旧档位体系）：已删除（P9b-1 停用 / P9b-2 删净） ====================
     //
-    // 这里原来是启动期的"补齐 + 迁移"块：permSync（把内置/NapCat/技能键按出厂档位补进 perms.json）、
+    // 这里原来是启动期的"补齐 + 迁移"块：permSync（把内置/NapCat/技能键按出厂档位补进 perms.jsonc）、
     // migrateLegacyMatrix（把 config.json 的旧 permissionMatrix 迁进表里）、以及 sectionOf/tableSectionOf/
     // legacyKey 三个辅助。整块已删除 —— 理由（D11）：
-    //   perms.json 现在是 **ACL 账本**（{"version":3,"entries":[…]}}）与旧档位表共用的同一个文件；
+    //   perms.jsonc 当年是 **ACL 账本**与旧档位表共用的同一个文件；
     //   旧路径只要在启动时补一次"缺行"并 saveTable()，账本就会被覆盖成旧格式、条目全丢。
     // P9b-1 先把这条路断掉（不再有任何写表入口：原 permTableText/permLevelText/setPerm 三个控制台口一并删除）；
     // P9b-2 再把尸体搬走 —— PermTable 整类、PermTable.save()/exportView()、旧 perm 控制台命令的后端
     // 全部从 src 删除，启动期只剩 Auth.init() 一条**只读**装载路径。
+    // 本轮（资源位 → 技能管控表）：账本换成数据根的 skillctl.json（{@code Acl.FILE_NAME}），
+    // 判定只剩"身份 × op"，资源不再有位。
+
+    /**
+     * 把 NapCat 一族的 op 登记进清单：每个动作一条 {@code napcat.<动作名>}。
+     *
+     * <p><b>为什么必须登记</b>：NapCat 动作目录是<b>动态一族</b>（{@link sair.v4.qq.Api#catalogAll()} 那张表），
+     * 技能的 {@code declareOps} 与内置工具的登记都覆盖不到它 —— 不登记，{@code ai/perm gen} 生成的
+     * 完整清单就会漏掉它们，主人也就没法按动作授权（{@code Run["napcat.set_group_ban", …]} 一类）。</p>
+     *
+     * <p>说明文字取目录里那一句（取不到就空串）；重复登记无害（同一个 op 只保留第一条说明）。</p>
+     */
+    private void declareNapcatOps() {
+        sair.v4.auth.Ops ops = auth == null ? null : auth.ops();
+        if (ops == null) return;
+        try {
+            JsonObject cat = sair.v4.qq.Api.catalogAll();
+            if (cat == null) return;
+            for (String action : cat.keySet()) {
+                ops.declare("napcat", action, J.s(J.sub(cat, action), "desc", ""));
+            }
+        } catch (Throwable t) {
+            if (out != null) out.warn("[auth] NapCat 动作 op 登记失败（只影响清单，不影响判定）：" + t);
+        }
+    }
+
+    /**
+     * 技能重扫之后<b>重读权限文件</b>（只读；不写任何权限文件）。
+     *
+     * <p>为什么必须重读：权限文件按归属分散，而"哪个 op 属于哪个技能"由<b>工具注册表</b>回答
+     * （{@code Registry.toolOwners()}）—— 技能装载/卸载会改变归属，归属又决定技能目录里的
+     * {@code perms.jsonc} 里哪些条目算越界（越界忽略）。所以每次全量扫描收口都重读一次。</p>
+     *
+     * <p>失败只 warn：读不到就是空表（一切未授权），判定侧 fail-closed 不受影响。</p>
+     */
+    private void reloadPerm() {
+        if (auth == null) return;
+        try {
+            auth.reloadAcl();
+        } catch (Throwable t) {
+            if (out != null) out.warn("[acl] 重读权限文件失败（按上一份继续判定）：" + t);
+        }
+    }
+
+    /**
+     * 权限装载汇总那一行（规格 §2.5-7 / §4）：{@link Acl#summary()} 的原文 ——
+     * {@code 权限：Skill N 条 / DB M 条 / File K 条；未声明 Read 的类别：…；认不出的键：…}。
+     *
+     * <p><b>归属（规格 §2.5-7）</b>：{@code Acl} 自己不往 {@code out} 刷（否则每次 reload 都刷屏），
+     * 这一行由装配方与本类、以及控制台 {@code ai/perm reload} 各打一次。所以本方法的调用点就是
+     * "权限装载收口"：同步装配在第⑯步末尾（{@link #runSteps()}）、后台装配在技能编译收口
+     * （{@link #startSkillsAsync()} 的 finally），{@link #init(InitListener, Runnable)} 的就绪播报里
+     * 再兜一次底 —— {@link #permSummaryLogged} 保证"一次装配恰好一行"。</p>
+     *
+     * <p>{@link Acl#readDefaultList()} 的"未声明 Read、按默认能读"清单就在这一行里
+     * （{@code summary()} 已含），这是规格 §2 要求的披露。</p>
+     *
+     * <p><b>权限面为空（降级）时</b>这一行改成说明状态：权限门禁那一步失败 / 账本读不到 ⇒ 一切 op
+     * 按未授权处理；此时事实块走 {@code CtxBuild} 的降级装载（只读 core、不并技能目录）——
+     * <b>这一份拿不到动作清单，工具级条目按更严口径（只覆盖已知动作）判</b>，
+     * 于是事实块里的 {@code caller.ops} 会与权限面不一致。这是"身份事实"与"判定"之间已知的偏差，
+     * 只在这一行说清楚，<b>不改 {@code CtxBuild} 那一处</b>（规格 §4.5 要求它保持原样）。</p>
+     */
+    private void logPermSummary() {
+        if (out == null) return;
+        Acl a;
+        try {
+            a = auth == null ? null : auth.acl();
+        } catch (Throwable t) {
+            // 读不出账本 = 权限面按未授权处理；点名说清，不静默（判定侧 fail-closed 不受影响）
+            out.err("[acl] 权限汇总读不到账本（不影响判定：权限面按未授权处理）：" + t);
+            permSummaryLogged = true;
+            return;
+        }
+        if (a == null) {
+            out.dim("[acl] 权限：权限面为空（降级）—— 权限门禁未装配或账本读不到，一切 op 按未授权处理；"
+                    + "事实块走 CtxBuild 的降级装载（只读 " + Acl.CORE_FILE_NAME
+                    + "、不并技能目录）：这一份拿不到动作清单，工具级条目按更严口径（只覆盖已知动作）判");
+        } else {
+            out.dim("[acl] " + a.summary());
+        }
+        permSummaryLogged = true;
+    }
+
+    /**
+     * 一行诊断：<b>没有任何权限文件 = 一切未授权</b>（这是新默认，不再首次生成完整清单）。
+     *
+     * <p>旧口径（本轮删除）是"首次没有 {@code skillctl.json} 时自动生成一张完整清单、每个 op 一行空
+     * {@code Run}"。现在权限文件按归属分散（{@code data\perms-core.jsonc} + 每个技能自己的
+     * {@code perms.jsonc}），没有文件就是默认拒绝 —— 基板只把这件事说清楚，要开口敲
+     * {@code ai/perm run <op> <身份>}。</p>
+     *
+     * <p>已经有文件就什么都不打（有文件时 {@code ai/perm} 自己会报来源汇总）。</p>
+     */
+    private void logPermDefault() {
+        if (auth == null || out == null) return;
+        try {
+            Acl a = auth.acl();
+            if (a == null) return;
+            if (!a.sources().isEmpty()) return;
+            out.dim("[acl] 没有任何权限文件（" + Acl.CORE_FILE_NAME + " / 技能目录里的 "
+                    + Acl.SKILL_FILE_NAME + " 都不存在）= 一切未授权（主人与她本人恒全权，不受影响）；"
+                    + "要给谁开哪一项敲 ai/perm run <op> <身份>");
+        } catch (Throwable t) {
+            if (out != null) out.warn("[acl] 权限文件状态诊断失败（不影响判定：默认未授权）：" + t);
+        }
+    }
 
     /**
      * {@code config.json} 里若还留着旧档位键（{@code permDefaultBuiltin} / {@code permDefaultSkill}），
@@ -1013,8 +1185,8 @@ public final class Boot {
      *
      * <p>理由（P9b-2）：这两个键只服务旧档位表（{@code Conf.permDefaultBuiltin()} 的读者就是已删的
      * {@code PermTable} / {@code Auth.defaultFor}）。留在配置文件里的老键不该让启动看起来像出错，
-     * 但也不该继续被当成"生效中的默认权限" —— 现在的默认分配按资源类型来
-     * （{@code Acl.defaultText()} / {@code Acl.systemText()}），主人写例外才改得了。</p>
+     * 但也不该继续被当成"生效中的默认权限" —— 现在的口径是技能管控表
+     * （数据根的 {@code skillctl.json}）：<b>MASTER 与她本人恒全权；ALLUSER 按表，未写 = 未授权</b>。</p>
      */
     private void warnRetiredPermKeys() {
         if (out == null || conf == null) return;
@@ -1026,8 +1198,9 @@ public final class Boot {
         }
         if (has) {
             out.dim("[auth] config.json 里的 permDefaultBuiltin / permDefaultSkill 已随旧档位体系退休"
-                    + "（P9b-2 已删除）：忽略即可，它们不再参与任何判定 —— "
-                    + "权限只看数据根的 perms.json 账本，默认分配是 " + sair.v4.auth.Acl.defaultText() + "。");
+                    + "（P9b-2 已删除）：忽略即可，它们不再参与任何判定 —— 权限只看按归属分散的权限文件（"
+                    + Acl.CORE_FILE_NAME + " 与每个技能的 " + Acl.SKILL_FILE_NAME
+                    + "）：MASTER 与她本人恒全权；ALLUSER 按文件判，没列到 = 未授权。");
         }
     }
 
@@ -1400,7 +1573,7 @@ public final class Boot {
      *
      * <p><b>为什么用 {@code guardedApi}（带闸门那个）</b>：基板替机器人发一句话属于"她自己说话"，
      * 与"回复子 Agent 的结论"（{@link Host#spawnAs} 的 {@code reply=true}）是同一条口径 ——
-     * 收件人不需要有权限，闸门按<b>没有绑定调用者 = SYSTEM</b>（E:{@code X}）判。基板闹钟
+     * 收件人不需要有权限，闸门按<b>没有绑定调用者 = SYSTEM</b>（她本人恒全权）判。基板闹钟
      * （{@code Tick}）与消息钩子的回复（{@code QqGateway}）传的也正是 {@code guardedApi}，
      * 这里与它们同源（不另开一条"绕过闸门"的口）。</p>
      *
@@ -1502,8 +1675,8 @@ public final class Boot {
             /**
              * 技能面拿到的 NapCat 接口：<b>只给带闸门且真的装上 Guard 的那一份</b>；
              * 闸门缺失时给"任何动作都被拒"的兜底实例（fail-closed），
-             * <b>绝不回落到不带闸门的 {@code api}</b>（旧实现就是那么回落的 —— 那时"平台动作 = E 类"
-             * 整层失效）。见 {@link Boot#guardedNapcat()}。
+             * <b>绝不回落到不带闸门的 {@code api}</b>（旧实现就是那么回落的 —— 那时
+             * "NapCat 动作 = 一个 op"这道判定整层失效）。见 {@link Boot#guardedNapcat()}。
              */
             @Override
             public Api napcat() { return guardedNapcat(); }
@@ -1513,7 +1686,7 @@ public final class Boot {
 
             /**
              * 私聊"正在输入"：机器人自己的状态动作，走<b>带闸门</b>的 {@code guardedApi}，
-             * 并按 SYSTEM（E:X）判（见 {@link sair.v4.skill.Host#typing} —— 不是用户发起的对外动作）。
+             * 并按 SYSTEM 判（她本人恒全权；见 {@link sair.v4.skill.Host#typing} —— 不是用户发起的对外动作）。
              * 只做 {@code set_input_status} 一个动作、只对私聊、异常全吞。
              */
             @Override
@@ -1554,10 +1727,10 @@ public final class Boot {
             public Inject inject() { return prompts.inject(); }
 
             /**
-             * 权限账本（{@link Host#acl()}）。
+             * 权限面（{@link Host#acl()}）。
              * <p>P9b-2：这里原来是 {@code @Override public AuthView auth()} —— 旧档位视图的出口，
-             * 已随 {@code AuthView} / {@code PermTable} 一起删除。宿主面只需要账本本身，
-             * 所以改成覆写 {@code acl()}（{@code Host.need*}/{@code bits} 走的正是它）。</p>
+             * 已随 {@code AuthView} / {@code PermTable} 一起删除。宿主面只需要权限面本身，
+             * 所以改成覆写 {@code acl()}（{@code Host.need("<op>")} 走的正是它）。</p>
              */
             @Override
             public sair.v4.auth.Auth acl() { return auth; }
@@ -1683,7 +1856,7 @@ public final class Boot {
      * <p>闸门没装配好（第⑧步中途抛异常 ⇒ {@code guardedApi == null}；或有人把 Guard 摘了
      * ⇒ {@code guard() == null}）时返回 {@link #failClosed()} —— 一个"任何动作都被拒"的实例，
      * <b>绝不回落到不带闸门的 {@link #api()}</b>：那份是基板自己说话用的，谁拿到它都能免判定发消息，
-     * 回落过去等于把"平台动作 = E 类"整层删掉（fail-open）。</p>
+     * 回落过去等于把"NapCat 动作 = 一个 op"这道判定整层删掉（fail-open）。</p>
      *
      * <p>顺带说明：调用方拿到的实例在兜底状态下 {@code link == null}，所以它连"发出去"的能力都没有，
      * 拒绝不是靠"恰好没连接"，而是靠这道闸门。</p>
@@ -1715,10 +1888,11 @@ public final class Boot {
                 a.setGuard(new Api.Guard() {
                     @Override
                     public String deny(String action, JsonObject params) {
-                        String why = Acl.DENY_PREFIX + "需要 " + action + " 的 X 位（NapCat 闸门没有装配："
+                        String op = "napcat." + action;
+                        String why = Acl.DENY_PREFIX + "「" + op + "」没有授权（NapCat 闸门没有装配："
                                 + "guardedApi 缺失或没装上 Guard —— 按拒绝处理）";
                         if (out != null) {
-                            out.err("[auth] NapCat 闸门没有装配，技能面的平台动作一律拒绝：" + action);
+                            out.err("[auth] NapCat 闸门没有装配，技能面的平台动作一律拒绝：" + op);
                         }
                         return why;
                     }
@@ -2123,7 +2297,7 @@ public final class Boot {
         return o;
     }
 
-    /** 权限矩阵 + 可见工具（诊断）。 */
+    /** 技能管控表（op）口径 + 可见工具（诊断）。 */
     public String permissions(Caller c) {
         StringBuilder sb = new StringBuilder();
         sb.append("调用者: ").append(c == null ? "(无)" : c.label()).append("\n");
@@ -2134,9 +2308,10 @@ public final class Boot {
         }
         sb.append("可见工具 ").append(registry.visible(c).size()).append(" / 全部 ").append(registry.size()).append("\n");
         sb.append(registry.describe(c));
-        // P9b-2：这里原来还打印一块"配置里的权限覆盖"（auth.matrix() = 旧档位表的全部行）——
-        // 整块已删：旧表随 PermTable 一起消失，权限的唯一账本是数据根的 perms.json。
-        // 看账本请用控制台 ai/acl（只读），授权/撤销走 perm 工具的 grant/revoke。
+        // 资源不再有位：这里不再打印任何"按类的默认分配"，权限的唯一账本是按归属分散的权限文件
+        // （perms-core.jsonc + 每个技能自己的 perms.jsonc）：MASTER 与她本人恒全权；
+        // ALLUSER 按文件判，没列到 = 未授权。
+        // 看账本请用控制台 ai/acl（只读）与 ai/perm（清单/生成），授权/撤销走 perm 工具的 grant/revoke。
         return sb.toString();
     }
 
@@ -2177,7 +2352,7 @@ public final class Boot {
             params.addProperty("group_id", groupId);
             params.addProperty("user_id", conf.selfId());
             params.addProperty("no_cache", true);
-            // 查"机器人自己在群里的角色"是她的自主行为：按 SYSTEM（E:X）判，不是按触发者判。
+            // 查"机器人自己在群里的角色"是她的自主行为：判定主体按 SYSTEM（她本人恒全权），不是按触发者判。
             sair.v4.ctx.Ctx.Scope sc = sair.v4.ctx.Ctx.of(
                     Caller.systemActor(conf == null ? 0L : conf.masterQQ()));
             JsonObject r;

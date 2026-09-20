@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>权限管理 · AiAgent V4 文档</title>
-<meta name="description" content="AiAgent V4 权限管理：ACL 模型（三主体 / 五类资源 / 三位）、perms.json 账本格式、ai/acl 与 ai/perm 的分工、怎么授权与撤销、默认与例外、拒绝长什么样、技术实现与排错。">
+<meta name="description" content="AiAgent V4 权限管理：权限文件按归属分散（基板内置工具写数据根下的 perms-core.jsonc，每个技能写自己的 perms.jsonc），三个域（技能 / 数据 / 路径）各看自己那一层；ai/perm 的看表与改表、怎么授权与封禁、越界与未授权长什么样、技术实现与排错。">
 <link rel="stylesheet" href="css/site.css">
 <noscript><style>.reveal{opacity:1 !important;transform:none !important}#bg-canvas,.scanline{display:none !important}</style></noscript>
 </head>
@@ -30,7 +30,8 @@
     <a href="files.html"><span class="n">08</span>文件</a>
     <a href="architecture.html"><span class="n">09</span>实现</a>
     <a href="migration.html"><span class="n">10</span>升级</a>
-    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+    <a href="skills.html"><span class="n">11</span>技能开发</a>
+    <a href="changelog.html"><span class="n">12</span>更新日志</a>
   </nav>
   <div class="topbar-meta">
     <span class="chip live">纯静态</span>
@@ -43,17 +44,18 @@
 <main class="shell">
   <div class="doc">
 
-    <section class="hero">
-      <span class="eyebrow">权限管理 · 资源 ACL</span>
-      <h1>谁能做什么<br><span class="grad">一本账就说得清</span></h1>
+<section class="hero">
+      <span class="eyebrow">权限管理 · 技能管控表</span>
+      <h1>谁能用什么<br><span class="grad">一张表就说得清</span></h1>
       <p class="lede">
-        权限是基板九件事里的一件，也是<b>唯一决定“给不给能力”的地方</b>。它的判据只有一本账 —— 数据根下的 <code>perms.json</code>；
-        规则也只有一条：<b>先按资源类型的默认分配给位，再让例外条目突破默认</b>。账本里没写的，就是没给；写了空位，就是<b>明确拒绝</b>。
+        权限是基板九件事里的一件，也是<b>唯一决定“给不给能力”的地方</b>。它的判据是一份份<b>按归属分散</b>的权限文件 —— 基板内置工具的那份在数据根下的 <code>perms-core.jsonc</code>，
+        每个技能自己那份在 <code>skills\&lt;技能名&gt;\perms.jsonc</code>。装载时它们合并成一张表，也就是控制台里看到的<b>技能管控表</b>。这张表分<b>三个域</b>：<b>技能</b>（谁能用哪个 op）、<b>数据</b>（谁能改、谁能读哪类数据）、<b>文件</b>（谁能碰哪些路径）；每个域各看自己那一层。
+        规则都写成 <code>["键"]: [身份…]</code> 的中括号形式，一个键也能这么写；<code>//</code> 开头的整行是注释。没列到时按该域自己的默认值收尾 —— 技能不能、数据能读不能改、文件不能碰；注意区分：<b>写出来了却给一个空身份数组</b>不是“没列到”，它是一条“谁都不给”的决定（那两个域的读侧因此就是不能读）。技能目录里没有那份 <code>perms.jsonc</code>，它的全部 op 对普通用户就一律不授权。
       </p>
       <div class="hero-actions">
-        <a class="btn" href="#query">先看看现在的权限 →</a>
+        <a class="btn" href="#query">先看看现在的表 →</a>
         <a class="btn amber" href="#change">我想给别人开权限</a>
-        <a class="btn ghost" href="#deny">被拒时长什么样</a>
+        <a class="btn ghost" href="#deny">不可用时长什么样</a>
       </div>
     </section>
 
@@ -63,119 +65,152 @@
       <section class="chapter" id="model">
         <header class="chapter-head reveal">
           <span class="chapter-tag">01 / 模型</span>
-          <h2>权限模型：谁 × 什么 × 哪一位</h2>
-          <p class="chapter-desc">一次判定永远由三件事决定：<b>主体</b>（谁在要）、<b>资源</b>（要什么）、<b>位</b>（要读、要写，还是要执行 / 对外）。这三样对上号，结论就是唯一的。</p>
+          <h2>权限模型：域 × 每一层 → 允许 / 禁止 / 空</h2>
+          <p class="chapter-desc">一次判定先看你问的是哪一<b>域</b>：技能、数据、还是文件。每一域各有自己的层 —— <b>技能只有允许与禁止两层（<code>Run</code> / <code>Ban</code>）</b>，数据与文件分“改”“读”和“谁都不能”（<code>Run</code> / <code>Read</code> / <code>Ban</code>）。<b>更具体的键优先</b>，同一把键上禁止压过允许，只有“谁都没给决定”时才按该域的默认值收尾。</p>
         </header>
 
-        <h3 class="sec">主体三类（外加两种写法）</h3>
+        <h3 class="sec">三域与各自的层</h3>
+        <p class="t-cap">词表是钉死的：<b>技能只有 <code>Run</code> 与 <code>Ban</code> 两层</b>（它不设“读”，读归数据与文件两域）；<b>数据与文件各有 <code>Run</code> / <code>Read</code> / <code>Ban</code> 三层</b>。在某一域里写它没有的那一层（例如给技能写 <code>Read</code>，或者把层名拼错），整层<b>被忽略并点名</b>，不会生效。</p>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>主体</th><th>是谁</th><th>默认位</th><th>说明</th></tr></thead>
+            <thead><tr><th>域</th><th>键是什么</th><th>有哪些层</th><th>没列到时</th></tr></thead>
             <tbody>
-              <tr><td><code>MASTER</code></td><td>主人。<b>本地控制台就是主人</b>（控制台命令的调用者按主人算）</td><td><b>恒全权</b></td><td>任何条目都影响不到他，也不给他写条目</td></tr>
-              <tr><td><code>SYSTEM</code></td><td>她自己的自主行为：定时唤醒、日常维护、她自己发出去的话</td><td><code>A:R</code> / <code>B:RW</code> / <code>C:RWX</code> / <code>E:RWX</code> / <code>T:RWX</code></td><td>“没有触发者”的那些调用都归这一类</td></tr>
-              <tr><td><code>ALLUSER</code></td><td>除主人和她之外的所有人</td><td>按资源类型的默认分配（见<a href="#defaults">第 06 节</a>）</td><td><code>User&lt;QQ号&gt;</code> 与 <code>Group&lt;群号&gt;</code> 的底稿</td></tr>
-              <tr><td><code>User&lt;QQ号&gt;</code></td><td>某一个具体的人（直接写裸 QQ 号是它的便捷写法）</td><td>命中例外就按例外给位</td><td>给单个用户开口子时最常用</td></tr>
-              <tr><td><code>Group&lt;群号&gt;</code></td><td>某一个群里的所有人</td><td>命中例外就按例外给位</td><td>适合把同一件事放开给整个群</td></tr>
+              <tr><td><code>Skill</code></td><td>op 名（<code>工具名</code> 或 <code>工具名.动作名</code>）</td><td><code>Run</code>（能用）、<code>Ban</code>（不能用）</td><td><b>不能用</b></td></tr>
+              <tr><td><code>DB</code></td><td>数据类别（下面「数据键」那一节逐个列）</td><td><code>Run</code>（能改）、<code>Read</code>（能读）、<code>Ban</code>（谁都不能）</td><td>改：<b>不能改</b>；读：<b>能读</b>（全表唯一默认放开的一处）</td></tr>
+              <tr><td><code>File</code></td><td>路径（目录写成末尾带斜杠 = 整棵子树）</td><td><code>Run</code>（能改）、<code>Read</code>（能读）、<code>Ban</code>（谁都不能）</td><td>改：<b>不能改</b>；读：<b>不能读</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">同一域里，<b>更具体的键优先</b>：<code>pref.donation</code> 比 <code>pref</code> 具体，文件按<b>最长路径优先</b>（子目录里的禁止压过父目录里的允许）。同一把键上 <b><code>Ban</code> 压过 <code>Run</code> 与 <code>Read</code></b>；同一个键在一份文件里写了多处，取<b>并集</b>。</p>
+
+        <h3 class="sec">三种身份（外加两种写法）</h3>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>身份</th><th>是谁</th><th>表里的结论</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td><code>MASTER</code></td><td>主人。<b>本地控制台就是主人</b>（控制台命令的调用者按主人算）</td><td><b>恒全权</b></td><td>不写进表里，任何条目都影响不到他</td></tr>
+              <tr><td><code>SYSTEM</code></td><td>她自己的自主行为：定时唤醒、日常维护、她自己发出去的话</td><td><b>恒全权</b></td><td>同样不写进表里；“没有触发者”的那些调用都归她</td></tr>
+              <tr><td><code>ALLUSER</code></td><td>除主人与她之外的所有人</td><td>只能用表里放行的 op</td><td><code>user:&lt;QQ号&gt;</code> 与 <code>group:&lt;群号&gt;</code> 的底稿</td></tr>
+              <tr><td><code>user:&lt;QQ号&gt;</code></td><td>某一个具体的人（直接写裸 QQ 号是它的便捷写法）</td><td>与 <code>ALLUSER</code> 各算各的</td><td>给单个用户开口子时最常用</td></tr>
+              <tr><td><code>group:&lt;群号&gt;</code></td><td>某一个群里的所有人</td><td>与 <code>ALLUSER</code> 各算各的</td><td>适合把同一件事放开给整个群</td></tr>
             </tbody>
           </table>
         </div>
 
         <div class="grid-2">
           <div class="panel reveal">
-            <h4 class="sub" style="margin-top:0">层级与顺序</h4>
-            <p><b>主体层级</b>是 <code>User&lt;QQ号&gt;(3) &gt; Group&lt;群号&gt;(2) &gt; ALLUSER(1)</code>：层级高的先算；<b>同一层级里，后面的条目覆盖前面的</b>。因此给某个人单独开权限时写 <code>User&lt;QQ号&gt;</code> 就够，它天然压过 <code>ALLUSER</code>。</p>
-            <p>判定的先后是：<b>显式 <code>SYSTEM</code> 标志 → 主人 → 其它主体</b>。<code>SYSTEM</code> 自成一路，只对“她自己的动作”生效，层级同样是 3，不会和普通用户的条目互相干扰。</p>
+            <h4 class="sub" style="margin-top:0">结论只有三种，按域收尾</h4>
+            <p>每一域只问一件事：<b>这个域上的这个键，给不给这个身份</b>。答案三种 —— 允许（<code>Run</code>，数据与文件另有 <code>Read</code>）、禁止（<code>Ban</code>）、空。<b>“空”是两回事</b>：<b>没列到</b>的时候按上面三域表最后一列收尾；<b>写出来了却是一个字面空数组</b>（<code>["sent"]: []</code>）则是一条<b>决定</b> —— 它表示“列出来了，但谁都不给”，判定到这里就停，<b>不再回落到更宽的键、也不吃该域“没列到”的默认值</b>。所以数据与路径两域的读侧一旦写成空表，结论就是不能读，不会被“数据默认能读”那一口吃掉。</p>
+            <p><b>优先级 <code>Ban</code> &gt; <code>Run</code> / <code>Read</code> &gt; 空</b>：同一把键上，只要这个身份命中任何一条 <code>Ban</code> 就拒；没有 <code>Ban</code>，才轮到看有没有给他允许。</p>
           </div>
           <div class="panel reveal d1">
-            <h4 class="sub" style="margin-top:0">主人不写进账本</h4>
-            <p>账本里写 <code>MASTER</code> 会被拒收 —— 主体只认 <code>User&lt;QQ号&gt;</code>、<code>Group&lt;群号&gt;</code>、<code>SYSTEM</code>、<code>ALLUSER</code> 四种。主人恒全权，不需要例外，也不接受例外。</p>
+            <h4 class="sub" style="margin-top:0">主人与她不写进表</h4>
+            <p>身份键的规范写法只有三种：<code>user:&lt;QQ号&gt;</code>、<code>group:&lt;群号&gt;</code>、<code>ALLUSER</code>；裸 QQ 号等于 <code>user:&lt;QQ号&gt;</code>。另外还接受几种等价写法：<code>全体</code> / <code>所有人</code> / <code>全部</code> 等于 <code>ALLUSER</code>，<code>qq:</code> 前缀等于 <code>user:</code>，<code>用户…</code> 等于 <code>user:</code>，<code>群号…</code> / <code>群…</code> 等于 <code>group:</code>。主人（<code>MASTER</code>）与她本人（<code>SYSTEM</code>）恒全权，<b>不受这张表约束</b>：手写进文件里的那几行整行忽略 —— 不报错、不生效，也<b>不占</b>“已经声明过”的位置；在控制台敲写命令时，这两个身份会被直接回绝，回的原话分别是“主人恒全权，不需要写进表里”与“她自己恒全权，不需要写进表里”。</p>
           </div>
         </div>
 
         <div class="note reveal">
-          <p><span class="n-title">她有三条“自主行为”会落到 <code>SYSTEM</code></span>：定时唤醒、日常维护，以及她自己主动发出去的话。这几类调用没有触发者，所以走 <code>SYSTEM</code> 那条线，而不是某个用户的权限。</p>
+          <p><span class="n-title">她有三条“自主行为”落到 <code>SYSTEM</code></span>：定时唤醒、日常维护，以及她自己主动发出去的话。这几类调用没有触发者，所以按她本人算，而不是按某个用户的权限。</p>
         </div>
-        <p class="t-cap">模型都在 <code>auth</code> 包里：<code>auth\Acl.java</code>（账本与判定）、<code>auth\Res.java</code>（资源分类）、<code>auth\Bits.java</code>（位运算与格式化）、<code>auth\Caller.java</code>（主体与默认位）。</p>
+        <div class="note reveal">
+          <p><span class="n-title">默认值里唯一放开的一处</span>：<code>DB</code> 的“读”在没列到时是<b>能读</b> —— 全表只有这一处默认放开。所以装载时会把“没有显式 <code>Read</code> 声明、按默认能读”的类别逐个点名列出来，敲 <code>ai/perm</code> 就能看到那一行；要把某类数据关掉，就在 <code>DB</code> 的 <code>Ban</code> 里写上它。</p>
+        </div>
+        <p class="t-cap">模型都在 <code>auth</code> 包里：<code>auth\Acl.java</code>（合并装载、管控表与判定）、<code>auth\Ops.java</code>（op 清单）、<code>auth\Caller.java</code>（身份）、<code>auth\Auth.java</code>（权限面出口）。</p>
       </section>
 
       <!-- ============ 2 ============ -->
       <section class="chapter" id="res">
         <header class="chapter-head reveal">
           <span class="chapter-tag">02 / 资源</span>
-          <h2>资源五类，位只有三个</h2>
-          <p class="chapter-desc">资源按“要动的是什么东西”分成五类，类别字母就是账本条目里的第一个字符。范围既可以写“整个类”，也可以只写某一个具体目标。</p>
+          <h2>资源没有“位”这回事</h2>
+          <p class="chapter-desc">新模型里不再有“按资源分类分配读 / 写 / 执行”这套 —— 资源不分等级，也没有按类给读 / 写 / 执行的分配。那点位置感，被“能不能用某个 op”整个替掉了。</p>
         </header>
-
-        <div class="tw scroll reveal">
-          <table>
-            <thead><tr><th>类</th><th>是什么</th><th>范围怎么写</th><th><code>ALLUSER</code> 默认</th><th>例子</th></tr></thead>
-            <tbody>
-              <tr><td><code>A</code></td><td><b>本机</b>：SFW 数据根之外的任意本机路径，以及本机进程</td><td>路径（<code>""</code> = 整个 A 类）</td><td><b>无</b>（一位都不给）</td><td><code>A["User123456","D:/share","R"]</code></td></tr>
-              <tr><td><code>B</code></td><td><b>SFW</b>：SFW 运行时目录里的文件（含插件数据根里 <code>files</code> 以外的部分）</td><td>路径（<code>""</code> = 整个 B 类）</td><td><b>无</b></td><td><code>B["Group121873503","","RX"]</code></td></tr>
-              <tr><td><code>C</code></td><td><b>数据</b>：库的全部内容（<code>db:&lt;库&gt;</code>）、运行期内存状态（<code>mem:xxx</code>）、数据根的 <code>files</code> 目录</td><td>库名 / <code>mem:xxx</code> / <code>files</code> 下的路径（<code>""</code> = 整个 C 类）</td><td><code>R</code></td><td><code>C["User123456","grouplog","R"]</code></td></tr>
-              <tr><td><code>E</code></td><td><b>外部交互</b>：QQ 平台动作（NapCat 的输入与输出），以及向 SFW 发命令</td><td>动作名（<code>""</code> = 整个 E 类）</td><td><b>无</b></td><td><code>E["User123456","send_group_msg","X"]</code></td></tr>
-              <tr><td><code>T</code></td><td><b>工具</b>：一把工具的“入口”。执行过程本身不判位，判定只发生在入口</td><td>工具名（可省 <code>tool:</code> 前缀，<code>""</code> = 整个 T 类）</td><td><b>无</b></td><td><code>T["ALLUSER","&lt;工具名&gt;","X"]</code></td></tr>
-            </tbody>
-          </table>
-        </div>
 
         <div class="grid-2">
           <div class="panel reveal">
-            <h4 class="sub" style="margin-top:0">三个位</h4>
-            <p>位只有三个：<b><code>R</code></b> 读 / 看；<b><code>W</code></b> 写 / 改 / 注册；<b><code>X</code></b> 执行或对外（把东西交出去、对外发声）。三者可以任意组合，写成 <code>RWX</code> 这样的串。</p>
-            <p><code>""</code>（空）表示一位都没有，也就是拒绝。位的写法大小写与顺序都不敏感（<code>wr</code> 与 <code>RW</code> 同值）；<b>认不出来的位串会被当成“空”</b>处理 —— 拿不准的时候它偏向不放行。</p>
+            <h4 class="sub" style="margin-top:0">对主人与她本人</h4>
+            <p>资源完全可见、可改、可执行 —— 基板自己的库、数据根里的文件、对外的平台动作都在这一侧，不需要任何条目，也不受表影响。</p>
           </div>
           <div class="panel reveal d1">
-            <h4 class="sub" style="margin-top:0"><code>T</code> 类只看 <code>X</code></h4>
-            <p>工具能不能用只有一条判据：<b>有效位里有没有 <code>X</code></b>。<code>R</code> 与 <code>W</code> 不参与“能不能调”；同样地，看不到的工具名不会出现在模型可见的工具面里 —— 可见性与能不能调由同一个位决定。</p>
+            <h4 class="sub" style="margin-top:0">对 <code>ALLUSER</code></h4>
+            <p>资源是一个<b>黑盒</b>：读 / 写 / 执行唯一的路是技能（工具）这条手脚。所以“他能做什么”就等于“表放行了他哪些 op”。</p>
           </div>
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">特例：数据根的 <code>files</code> 目录</span>：它是 <b>C 类里的一个特例文件实体</b> —— 位服从 C 的默认分配（<code>ALLUSER = R</code>、<code>SYSTEM = RWX</code>），但它会按<b>路径式范围</b>命中。所以想单独放开它下面的文件，可以写 <code>C["User&lt;QQ号&gt;","&lt;数据根&gt;/files","RWX"]</code> 这样的条目。</p>
+          <p><span class="n-title">数据根的 <code>files</code> 目录</span>：它也是一份<b>普通资源</b>，没有自己的位。想让某人能看、能写它下面的东西，路只有一条 —— 在 <code>Run</code> 块里给文件那一组的对应动作补上他的身份；这一条会写进这个 op 归属的那份权限文件（回执里会写清是哪一个）。</p>
         </div>
       </section>
 
       <!-- ============ 3 ============ -->
       <section class="chapter" id="ledger">
         <header class="chapter-head reveal">
-          <span class="chapter-tag">03 / 账本</span>
-          <h2>账本：<code>perms.json</code></h2>
-          <p class="chapter-desc">一本账，一个文件，放在数据根下。<b>账本里没有的东西 = 没给</b>；账本里写了空位 = <b>明确拒绝</b>。这两句就是整套权限的地基。</p>
+          <span class="chapter-tag">03 / 权限文件</span>
+          <h2>权限文件：按归属分散</h2>
+          <p class="chapter-desc">不再是单独的一份账本，而是<b>谁的工具就写在谁那里</b>：基板内置工具的那份放在数据根下，每个技能自己那份放在它的目录里；装载时合并读成一张表。<b>表里没有的 op = 没给</b>；列出来了却给了一个空身份数组 = <b>同样没给</b>。这两句就是整套权限的地基。</p>
         </header>
 
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">文件与格式</h4>
-            <p>文件名固定 <code>perms.json</code>，内容是 <code>{"version":3,"entries":[…]}</code>；每一条条目的形态是 <code>类["主体","范围","位"]</code>，其中三格都用双引号包着。</p>
-            <p>条目字符串会被<b>原样保留、原样打印</b>，所以 <code>ai/acl</code> 里看到的就是账本里的那一行，中间不做二次加工。</p>
+            <p>两份文件名都固定：基板内置工具那份是 <code>perms-core.jsonc</code>，技能那份是 <code>perms.jsonc</code>。层次固定四层：最外面是 <code>version</code>（这一版写 <code>6</code>）与 <code>_readme</code>，接着是<b>域</b>（<code>Skill</code> / <code>DB</code> / <code>File</code>），每个域里是<b>它自己那几层</b>（技能是 <code>Run</code> / <code>Ban</code>；数据与文件是 <code>Run</code> / <code>Read</code> / <code>Ban</code>），层里是<b>规则</b> —— 规则层的键一律写成中括号数组 <code>["a", "b"]</code>，里面只有一个键时也带括号（<code>["weather"]</code> 与裸写 <code>"weather"</code> 等价，读出与重排都按带括号的那一种）。</p>
+            <p>规则的值就是身份数组。以 <code>//</code> 开头的整行是注释，写在内容的前一行，基板读之前整行丢掉。写它有<b>两条入口，都只对主人开放</b>：控制台的 <code>ai/perm</code> 这一族命令，以及她手上那个内置的 <code>perm</code> 工具（授权、封禁、撤回、重排都当场落盘，落盘用的是“先写临时文件再改名”的原子替换，不会留下半截文件）。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">它在哪、谁写它</h4>
-            <p>位置是 <code>SairFrameWork\data\AiAgent-V4\perms.json</code>（数据根由配置对象拼出）。<b>写入方是插件自己</b>：授权 / 撤销时由权限面落盘，落盘用的是“先写临时文件再改名”的原子替换，不会留下半截文件。</p>
-            <p>随仓库的部署脚本会<b>跳过账本</b>，所以升级不会覆盖线上已有的授权清单。</p>
+            <p>落点按归属分：数据根下那份管基板内置工具（不属于任何技能的 op 与路径都写它），<code>skills\&lt;技能名&gt;\perms.jsonc</code> 管这个技能自己提供的工具。技能那份里<b>只许写它自己的 op</b>，<code>DB</code> 块里只许写属于它的数据键，<b><code>File</code> 块只许写在基板那份</b>（路径属于部署，不属于某个技能）。真正动笔的<b>两条入口都只对主人开放</b>：控制台的 <code>ai/perm</code> 那一族命令，与她手上那个内置的 <code>perm</code> 工具；其它地方只读，装载、判定、查看都不写。</p>
+            <p>任何一次写命令都会把<b>已有的权限文件按这一版的形状重排一遍</b>（一份文件只写它自己的东西）。重排出来的文本与文件里现有内容逐字节相同，就跳过这一次写。所以回执里的“已写入 X”指的是<b>这条规则归属的那份文件</b>，不等于“只有 X 被写”。</p>
+            <p>随仓库的部署脚本会<b>跳过这些权限文件</b>（按文件名跳过，所以技能目录里那几份也一起跳），所以升级不会覆盖线上已有的授权清单。</p>
           </div>
         </div>
 
-        <h3 class="sec">条目形态（照这个写就不会错）</h3>
+        <h3 class="sec">文件的形态（照这个写就不会错）</h3>
         <div class="code" data-lang="json">
-          <div class="code-head"><span class="lang">json</span><span class="path">&lt;数据根&gt;\perms.json（写法示意）</span><button class="copy" type="button">复制</button></div>
+          <div class="code-head"><span class="lang">json</span><span class="path">&lt;数据根&gt;\skills\&lt;技能名&gt;\perms.jsonc（写法示意）</span><button class="copy" type="button">复制</button></div>
           <pre><code>{
-  "version": 3,
-  "entries": [
-    "T[\"User123456\",\"&lt;工具名&gt;\",\"X\"]",        // 只给这个人这一把工具的入口
-    "E[\"User123456\",\"send_group_msg\",\"X\"]",    // 允许他发群消息（E 类：外部交互）
-    "A[\"Group121873503\",\"D:/share\",\"RW\"]",     // 这个群里的人可读可写 D:/share
-    "C[\"User123456\",\"&lt;数据根&gt;/files\",\"RWX\"]", // 让这个人能读写数据根的 files 目录
-    "B[\"ALLUSER\",\"\",\"\"]"                      // 全体用户在 B 类：空位 = 明确拒绝
-  ]
+  "version": 6,
+  "_readme": "…（这是什么文件、怎么读）…",
+
+  "Skill": {
+    // ── 查某城市（weather）
+    ["weather.report"]: ["ALLUSER"]
+  },
+
+  "DB": { },
+  "File": { }
 }</code></pre>
         </div>
-        <p class="t-cap">写法要点：类字母是 A / B / C / E / T；主体可以写 <code>User&lt;QQ号&gt;</code>、<code>Group&lt;群号&gt;</code>、<code>SYSTEM</code>、<code>ALLUSER</code>；范围里的空串表示“整个这一类”；位可以写 <code>R</code> / <code>W</code> / <code>X</code> 的任意组合，空串表示拒绝。路径类条目里的路径会做规范化处理，所以同一个目标不会因为斜杠方向不同而变成两条。</p>
+        <p class="t-cap">写法要点：域在<b>最外面</b>一层（<code>Skill</code> / <code>DB</code> / <code>File</code>），域里是<b>它自己那几层</b>（技能只有 <code>Run</code> / <code>Ban</code>；数据与文件是 <code>Run</code> / <code>Read</code> / <code>Ban</code>；在某一域里写它没有的那一层、或者把层名拼错，整层忽略并点名），层里是规则 —— <b>规则层的键一律带中括号</b>，<code>["a"]</code> 与 <code>["a", "b"]</code> 都这么写，值就是身份数组，一个键可以一次写几个（<code>["memory.remember", "memory.recall"]: ["ALLUSER"]</code>）。以 <code>//</code> 开头的整行是注释，写在内容的前一行，基板读之前整行丢掉。身份键的规范写法只有 <code>user:&lt;QQ号&gt;</code> / <code>group:&lt;群号&gt;</code> / <code>ALLUSER</code> 三种，裸 QQ 号等于 <code>user:&lt;QQ号&gt;</code>；另外还接受几种等价写法：<code>全体</code> / <code>所有人</code> / <code>全部</code> 等于 <code>ALLUSER</code>，<code>qq:</code> 前缀等于 <code>user:</code>，<code>用户…</code> 等于 <code>user:</code>，<code>群号…</code> / <code>群…</code> 等于 <code>group:</code>。<code>_readme</code> 那一行只给人看，基板读的时候会跳过。技能那份文件只认它自己提供的工具（以及属于它自己的数据键），写了别人的、或者基板内置工具的 op，那一条会被忽略，并在启动时点名一行；也没有一份给人看的旁注 Markdown，能看、能改的就是这些 <code>.jsonc</code> 文件。</p>
 
         <div class="note bad reveal">
-          <p><span class="n-title">改账本前先备份</span>：把 <code>perms.json</code> 复制一份带时间戳的副本再动手，是最省事的退路。形态认不出的条目会被跳过并给一行提示，不会被“猜着用”；已经退休的旧字段也会被忽略。</p>
+          <p><span class="n-title">改文件前先备份</span>：把 <code>perms-core.jsonc</code> 与要用到的技能目录里的 <code>perms.jsonc</code> 各复制一份带时间戳的副本再动手，是最省事的退路。认不出的写法会被原样留着并点名，而且<b>一律不生效</b>，不会被“猜着用”。</p>
+        </div>
+
+        <h3 class="sec">数据键：就那几类，认不出的一律点名</h3>
+        <p><code>DB</code> 域的键是<b>数据类别</b>。表级就是表名：<code>dialog</code>、<code>grouplog</code>、<code>memory</code>、<code>note</code>、<code>pref</code>、<code>emotion</code>、<code>group_impression</code>、<code>sticker</code>、<code>favor</code>、<code>favor_event</code>、<code>alarm</code>、<code>task</code>、<code>skill_index</code>、<code>sent</code>。表里还有更细的子类与一批 <code>kv.*</code> 抽屉，一共 35 类。</p>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>数据键</th><th>怎么认它</th><th>归谁</th></tr></thead>
+            <tbody>
+              <tr><td><code>memory</code></td><td>长期记忆那一张表</td><td>技能「记忆」</td></tr>
+              <tr><td><code>memory.impression</code></td><td><code>memory</code> 里来源是印象蒸馏的那些行</td><td>技能「印象蒸馏」</td></tr>
+              <tr><td><code>note</code></td><td><code>note</code> 里由知识笔记写下的那些行</td><td>技能「知识笔记」</td></tr>
+              <tr><td><code>note.correct</code></td><td><code>note</code> 里来源是修正记录的那些行</td><td>技能「修正记录」</td></tr>
+              <tr><td><code>note.experience</code></td><td><code>note</code> 里来源是经验蒸馏的那些行</td><td>技能「经验蒸馏」</td></tr>
+              <tr><td><code>pref.donation</code></td><td><code>pref</code> 里键名以可配置前缀（默认 <code>donation:</code>）开头的那些行</td><td>技能「捐赠」</td></tr>
+              <tr><td><code>sticker</code></td><td>表情包那一张表</td><td>技能「表情包」</td></tr>
+              <tr><td><code>emotion</code></td><td>情绪那一张表</td><td>技能「情绪」</td></tr>
+              <tr><td><code>group_impression</code></td><td>群印象那一张表</td><td>技能「群印象」</td></tr>
+              <tr><td colspan="3">以上之外的表级键（<code>dialog</code> / <code>grouplog</code> / <code>favor</code> / <code>favor_event</code> / <code>alarm</code> / <code>task</code> / <code>skill_index</code> / <code>sent</code> 等），以及<b>全部</b> <code>kv.*</code> 抽屉，都归基板 —— 只许写在 <code>perms-core.jsonc</code> 里。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">写到技能文件里的数据键不属这个技能，就是越界：那一条被忽略、启动时点名一行（<code>DB</code> 块与 <code>File</code> 块同一口径）。另外三条<b>不是数据键</b> —— 附加媒体、轮次、聊天窗口那三段是上下文事实行的前缀，不落任何库，写进 <code>DB</code> 块会被当成认不出的键点名。认不出的键<b>一律不生效</b>，方向只会更严。</p>
+
+        <h3 class="sec">路径键：目录末尾带斜杠 = 整棵子树</h3>
+        <p><code>File</code> 域的键是路径，正斜杠与反斜杠都写得进（装载时会归一化：反斜杠统一成正斜杠、去掉重复的斜杠、解掉 <code>.</code> 与 <code>..</code>；Windows 上比大小写不敏感）。<b>目录写成末尾带斜杠就是它的整棵子树</b>，不带斜杠就是那一个文件。判定按<b>最长路径优先</b>：<code>["D:/data/"]</code> 放行、<code>["D:/data/runonly/"]</code> 禁止，那么后者那一棵树就是碰不了。不认通配符 —— 要整棵子树就把目录写成末尾带斜杠，别写 <code>*</code>。</p>
+        <div class="note warn reveal">
+          <p><span class="n-title">路径块只写在基板那份</span>：路径属于部署，不属于某个技能。技能目录里的 <code>perms.jsonc</code> 里写了 <code>File</code> 块，整块被忽略并点名一行；而且重排那份文件时它会被丢掉 —— 写出来的每一份文件，都必须能被读回来时不报越界。</p>
         </div>
       </section>
 
@@ -183,8 +218,8 @@
       <section class="chapter" id="query">
         <header class="chapter-head reveal">
           <span class="chapter-tag">04 / 查</span>
-          <h2>怎么查：<code>ai/acl</code> 看权限，<code>ai/perm</code> 看好感度</h2>
-          <p class="chapter-desc">这两个命令名字很像，含义完全不同。一句话记住：<b><code>ai/acl</code> 管“能不能做”（只读），<code>ai/perm</code> 管好感度数值</b>。</p>
+          <h2>怎么查：<code>ai/perm</code> 看表，<code>ai/favor</code> 看好感度</h2>
+          <p class="chapter-desc">这两个命令名字很像，含义完全不同。一句话记住：<b><code>ai/perm</code> 管“能不能做”（技能管控表），<code>ai/favor</code> 管好感度数值</b>。旧名字 <code>ai/acl</code> 已经退休，只留一句指路。</p>
         </header>
 
         <div class="tw scroll reveal">
@@ -192,24 +227,30 @@
             <thead><tr><th>命令</th><th>干什么</th><th>会看到什么</th><th>能不能改</th></tr></thead>
             <tbody>
               <tr>
-                <td><code>ai/acl</code></td>
-                <td>看权限账本：<b>默认分配 + 逐条例外（带主体层级）</b></td>
-                <td>两段汇总 —— 一行“默认分配（一条例外都没命中时，按资源类型）”、一行“她自己的默认分配（SYSTEM）”；然后是账本条目逐条列出，空串范围会标注“（空串 = 整个 X 类）”，条目多到超出上限时会写“还有 N 条”</td>
+                <td><code>ai/perm</code></td>
+                <td>看合并后的技能管控表：<b>技能、数据、文件三个域，每个域里是自己的层</b></td>
+                <td>整张表逐条原文 + 一行摘要（几 <code>Run</code>、几 <code>Ban</code>、覆盖多少个 op、有没有认不出的键）+ <b>数据与文件那两个域的规则行</b>（域 → 层 → 键，同一个键先取并集再打印）+ <b>一行“未声明 Read、按默认能读的类别”</b> + <b>装载汇总一行</b> + <b>来源汇总</b>（<code>core</code> 几条、技能几份共几条，再逐份列出路径与条数）+ 一行「另有 N 个动作没在表里（= 未授权）」+ 一段怎么用；一份权限文件都没有时会直说“一切未授权”，并提示敲 <code>ai/perm run</code> 开口子</td>
+                <td><b>只读</b>（<code>run</code> / <code>ban</code> / <code>db</code> / <code>file</code> / <code>revoke</code> / <code>gen</code> 才写盘，而且只有主人能跑）</td>
+              </tr>
+              <tr>
+                <td><code>ai/perm list [op]</code></td>
+                <td>按 op 看谁能用</td>
+                <td>不给 op 就把表里每个 op 逐行列全；给一个 op 就只看它那一条</td>
                 <td><b>只读</b></td>
               </tr>
               <tr>
-                <td><code>ai/perm</code></td>
+                <td><code>ai/favor</code></td>
                 <td>看 / 设 / 重置<b>好感度</b></td>
-                <td>好感度数值与榜单口径</td>
+                <td>好感度榜单（前 20 名）与单人的数值、档位</td>
                 <td>能改好感度（<b>不是权限</b>）</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p class="t-cap"><b>好感度不参与任何权限判定</b>：它是一份数据，也是事实块里 <code>caller.favor</code> 的来源，但“能不能做”只由账本说了算。所以给某人放开能力，靠的是写例外条目，而不是把好感度调高。</p>
+        <p class="t-cap"><b>好感度不参与任何权限判定</b>：它是一份数据，也是事实块里 <code>caller.favor</code> 的来源，但“能不能做”只由技能管控表说了算。所以给某人放开能力，靠的是在对应那一层里补一个身份，而不是把好感度调高。</p>
 
         <div class="note reveal">
-          <p><span class="n-title">她在每一轮都能看到你的权限事实</span>：事实块里有三个键 —— <code>caller.kind</code>（你属于哪类主体）、<code>caller.bits</code>（你对五类资源的<b>有效位</b>，也就是结论）、<code>caller.rules</code>（<b>能命中你的例外条目</b>，也就是依据）。她据此判断“这件事能不能答应你”，而这三个键的取值都直接问账本，基板不另算一套。</p>
+          <p><span class="n-title">她在每一轮都能看到你的权限事实</span>：事实块里有三个键 —— <code>caller.kind</code>（你属于哪类身份）、<code>caller.ops</code>（<b>你能用的 op 清单</b>，也就是结论；恒全权写 <code>"ALL"</code>，一个都没授权写 <code>[]</code>）、<code>caller.rules</code>（<b>能命中你的管控表条目</b>，也就是依据）。她据此判断“这件事能不能答应你”，而这三个键的取值都直接问权限面，基板不另算一套。</p>
         </div>
       </section>
 
@@ -217,133 +258,194 @@
       <section class="chapter" id="change">
         <header class="chapter-head reveal">
           <span class="chapter-tag">05 / 改</span>
-          <h2>怎么授权与撤销</h2>
-          <p class="chapter-desc">控制台<b>不直接改账本</b>：授权、撤销、查询、验算都走<b>她那边的 <code>perm</code> 工具</b>（基板内置工具，随基板走，对主人开放）。</p>
+          <h2>怎么授权与封禁</h2>
+          <p class="chapter-desc">控制台<b>不直接改文件</b>：看表、授权、封禁、撤回、重排、重读都走 <code>ai/perm</code> 这一族命令，写命令只有主人能跑。写进去落到哪一份由<b>归属</b>决定 —— 回执里会写明是哪个文件。</p>
         </header>
 
         <div class="grid-2">
           <div class="panel reveal">
-            <h4 class="sub" style="margin-top:0">三条路，各管一段</h4>
+            <h4 class="sub" style="margin-top:0">八条子命令，各管一段</h4>
             <ul class="plain">
-              <li><b>授权 / 撤销 / 查询 / 验算</b>：用她的 <code>perm</code> 工具；</li>
-              <li><b>看结果</b>：<code>ai/acl</code>（只读，账本怎么判就怎么显示）；</li>
-              <li><b>看数值</b>：<code>ai/perm</code>（好感度，与权限无关）。</li>
+              <li><b>看表</b>：<code>ai/perm</code>（整张表）、<code>ai/perm list [op]</code>（按 op 看谁能用）；</li>
+              <li><b>授权</b>：<code>ai/perm run &lt;op&gt; &lt;身份…&gt;</code>，落进 <code>Skill</code> 那一层的 <code>Run</code>，并写进该 op 归属的那份文件（回执里写明，例如 <code>已授权：weather ← ALLUSER（已写入 …）</code>）；</li>
+              <li><b>封禁</b>：<code>ai/perm ban &lt;op&gt; &lt;身份…&gt;</code>，写的是 <code>Skill</code> 那一层的 <code>Ban</code>；</li>
+              <li><b>数据</b>：<code>ai/perm db run|read|ban &lt;数据键&gt; &lt;身份…&gt;</code>，写的是 <code>DB</code> 这一域的对应层（<code>run</code> = 谁能改、<code>read</code> = 谁能读、<code>ban</code> = 谁都不能）；</li>
+              <li><b>路径</b>：<code>ai/perm file run|read|ban &lt;路径&gt; &lt;身份…&gt;</code>，写的是 <code>File</code> 这一域的对应层（目录末尾带斜杠 = 整棵子树）；路径里含空格时整段用一对双引号包起来，没配对会直接拒掉；</li>
+              <li><b>撤回</b>：<code>ai/perm revoke &lt;键&gt; &lt;身份&gt;</code>，<b>键会自动认它属于哪一块</b>（op / 数据 / 路径），一次把这个身份在该键上的全部条目摘干净；</li>
+              <li><b>重排</b>：<code>ai/perm gen</code>，<b>只在已有的权限文件里</b>重排与补注释（不新建文件），并把“这些 op 还没有权限文件（= 不授权）”列出来；</li>
+              <li><b>重读</b>：<code>ai/perm reload</code>，外面手改了权限文件之后，重新合并装载一遍（顺手重新取一次工具归属）。</li>
             </ul>
-            <p>授权与撤销会顺手落盘，所以写完就是账本里的既成事实，不用再手动保存。</p>
+            <p>授权与封禁写完即落盘、当场生效，不用再手动保存，也不用重载。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">覆盖还是追加</h4>
-            <p>定位一条条目的键是“<b>主体 + 类 + 规范化范围</b>”：已经有一条同键的，就<b>就地覆盖</b>；没有的，追加到末尾。撤销就是把那一条删掉。</p>
-            <p>给 <code>SYSTEM</code> 写例外时，工具会额外提醒一行 —— 因为改的是她自己的自主行为，值得确认一次。</p>
+            <p>定位一条规则的键是“<b>域 + 层 + 键 + 身份</b>”：同一个键上同一个身份只留最后写的那一条（先撤旧的再写新的），同一行里其余的身份原样留着；同一个键在两个地方都写了，判定时取<b>并集</b>（同名键上 <code>Ban</code> 照样赢）。</p>
+            <p><code>gen</code> 会把已有的那几份权限文件重新产出一遍 —— 手改过的排版会被它排回来，而哪些身份在各自那一层里会原样保留。它不新建文件、不发明新的数据或路径条目、也不给宽身份新增授权；技能文件里<b>不会写出路径块</b>。</p>
+            <p>身份写法认不出来时，一个字都不会写 —— 先全验、再动文件。控制台写命令里写 <code>MASTER</code> 或 <code>SYSTEM</code> 会被直接回绝（他们恒全权，不用写进表）。</p>
           </div>
         </div>
 
-        <h3 class="sec">可照抄的例子（每条都写“在 <code>ai/acl</code> 里会看到什么”）</h3>
+        <h3 class="sec">可照抄的例子（每条都写“敲完会在 <code>ai/perm</code> 里看到什么”）</h3>
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>目标</th><th>写这一条</th><th>在 <code>ai/acl</code> 里会看到</th></tr></thead>
+            <thead><tr><th>目标</th><th>敲这一条</th><th>在 <code>ai/perm</code> 里会看到</th></tr></thead>
             <tbody>
               <tr>
                 <td>让<b>所有人</b>都能用某一项工具</td>
-                <td><code>T["ALLUSER","&lt;工具名&gt;","X"]</code></td>
-                <td>账本段多出一行 <code>T["ALLUSER","&lt;工具名&gt;","X"]</code>（主体 <code>ALLUSER</code>，层级 1）</td>
+                <td><code>ai/perm run weather ALLUSER</code></td>
+                <td><code>Skill</code> 的 <code>Run</code> 里多一条 <code>["weather"]: ["ALLUSER"]</code>；这一条写进了「天气查询」技能目录里的 <code>perms.jsonc</code></td>
               </tr>
               <tr>
                 <td>只给<b>某一个 QQ</b>开某一项工具</td>
-                <td><code>T["User&lt;QQ号&gt;","&lt;工具名&gt;","X"]</code></td>
-                <td>多出一行 <code>T["User…"]</code>（层级 3）；同一工具如果 <code>ALLUSER</code> 另有条目，<b>层级高的先算</b></td>
+                <td><code>ai/perm run weather 123456</code></td>
+                <td>那一行的身份数组里多一个 <code>user:123456</code>；原来的 <code>ALLUSER</code> 不受影响，两个人各算各的</td>
               </tr>
               <tr>
-                <td>允许某人<b>对外发群消息</b>（E 类动作）</td>
-                <td><code>E["User&lt;QQ号&gt;","send_group_msg","X"]</code></td>
-                <td>多出一行 <code>E[…]</code>；E 类默认对 <code>ALLUSER</code> 是“无”，所以这一行就是唯一来源</td>
+                <td>只放开一把工具里的<b>某一个动作</b></td>
+                <td><code>ai/perm run memory.remember 123456</code></td>
+                <td><code>Skill</code> 的 <code>Run</code> 里多一条 <code>["memory.remember"]: ["user:123456"]</code>；这把工具别的动作照旧没给</td>
               </tr>
               <tr>
-                <td>把 B 类对<b>全体用户</b>关掉（明确拒绝，压过默认）</td>
-                <td><code>B["ALLUSER","",""]</code></td>
-                <td>多出一行范围为空串的 <code>B</code> 条目（会标注“（空串 = 整个 B 类）”），位是空的 ⇒ 拒绝</td>
+                <td>放开<b>某一类数据</b>给别人改</td>
+                <td><code>ai/perm db run pref.donation ALLUSER</code></td>
+                <td><code>DB</code> 的 <code>Run</code> 里多一条 <code>["pref.donation"]: ["ALLUSER"]</code>；命中之后还要看那一行是不是他自己的</td>
               </tr>
               <tr>
-                <td>把某一类资源<b>整类放开读</b></td>
-                <td><code>A["ALLUSER","","R"]</code></td>
-                <td>多出整类条目；A 类默认一位都不给，这一行就是“例外突破默认”</td>
+                <td>让某一类数据<b>谁都不能读</b></td>
+                <td><code>ai/perm db ban sent ALLUSER</code></td>
+                <td><code>DB</code> 的 <code>Ban</code> 里多一条 <code>["sent"]: ["ALLUSER"]</code>；这一类也就不再出现在“按默认能读”的清单里</td>
               </tr>
               <tr>
-                <td>让某人能读写数据根的 <code>files</code>（C 类特例）</td>
-                <td><code>C["User&lt;QQ号&gt;","&lt;数据根&gt;/files","RWX"]</code></td>
-                <td>多出一行 <code>C["User…","&lt;数据根&gt;/files","RWX"]</code>；范围是路径式，只命中 <code>files</code> 下面的文件</td>
+                <td>放开一整棵<b>目录子树</b></td>
+                <td><code>ai/perm file read "D:/data/share/" ALLUSER</code></td>
+                <td><code>File</code> 的 <code>Read</code> 里多一条 <code>["D:/data/share/"]: ["ALLUSER"]</code>；末尾那个斜杠就是“整棵子树”，路径含空格所以要加引号</td>
+              </tr>
+              <tr>
+                <td>把某一项能力对<b>某个人</b>关掉（压过任何放行）</td>
+                <td><code>ai/perm ban weather 123456</code></td>
+                <td><code>Skill</code> 的 <code>Ban</code> 里多一条 <code>["weather"]: ["user:123456"]</code>；同一把键上 <code>Ban</code> 压过 <code>Run</code></td>
+              </tr>
+              <tr>
+                <td>把已有的权限文件<b>重排</b></td>
+                <td><code>ai/perm gen</code></td>
+                <td>已有的那几份权限文件被按域、层、键重排一遍；每一层里哪些身份原样保留。它<b>不新建文件</b>，还会列出“这些 op 还没有权限文件（= 不授权）”</td>
+              </tr>
+              <tr>
+                <td>把某个身份<b>整个撤回</b></td>
+                <td><code>ai/perm revoke weather 123456</code></td>
+                <td>那一行里不再有 <code>user:123456</code>；若一行里因此一个人都不剩，整条就被删掉（不会留一条空壳）</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p class="t-cap">具体有哪些工具名，看 <code>ai/tools</code> 就知道当前可见的那一批；命令的完整参数见<a href="commands.html#perm-cmds">命令参考 · 权限类</a>。</p>
+        <p class="t-cap">具体有哪些工具名与动作名，看 <code>ai/tools</code> 就知道当前可见的那一批；命令的完整参数见<a href="commands.html#perm-cmds">命令参考 · 权限类</a>。</p>
       </section>
 
       <!-- ============ 6 ============ -->
       <section class="chapter" id="defaults">
         <header class="chapter-head reveal">
-          <span class="chapter-tag">06 / 默认</span>
-          <h2>默认分配与例外：谁说了算</h2>
-          <p class="chapter-desc">判定只有一条实现：<b>按类默认分配 + 例外突破默认</b>。一条例外都没命中时，位就来自这张“资源类型 → 默认位”的表。</p>
+          <span class="chapter-tag">06 / 摆法</span>
+          <h2>表怎么摆：分组、释义、身份数组</h2>
+          <p class="chapter-desc">层次的形状固定四层：最外面是 <code>version</code> 与 <code>_readme</code>，接着是<b>域</b>（<code>Skill</code> / <code>DB</code> / <code>File</code>），域里是<b>它自己那几层</b>（技能只有 <code>Run</code> / <code>Ban</code>；数据与文件是 <code>Run</code> / <code>Read</code> / <code>Ban</code>），层里是<b>规则</b> —— 键写成中括号数组，值写成身份数组。</p>
         </header>
 
         <div class="tw scroll reveal">
           <table>
-            <thead><tr><th>主体</th><th><code>A</code> 本机</th><th><code>B</code> SFW</th><th><code>C</code> 数据</th><th><code>E</code> 外部交互</th><th><code>T</code> 工具</th></tr></thead>
+            <thead><tr><th>层</th><th>长什么样</th><th>基板怎么读</th></tr></thead>
             <tbody>
-              <tr><td><code>MASTER</code></td><td colspan="5"><b>全权 <code>RWX</code>（恒定，任何条目都影响不到）</b></td></tr>
-              <tr><td><code>SYSTEM</code>（她自己）</td><td><code>R</code></td><td><code>RW</code></td><td><code>RWX</code></td><td><code>RWX</code></td><td><code>RWX</code></td></tr>
-              <tr><td><code>ALLUSER</code>（所有人）</td><td><b>无</b></td><td><b>无</b></td><td><code>R</code></td><td><b>无</b></td><td><b>无</b></td></tr>
+              <tr><td><code>version</code></td><td><code>"version": 6</code></td><td>读到上一版的 5 会按旧语义读并留一行提示；比这一版新也留一行提示，认得的字段照读</td></tr>
+              <tr><td><code>_readme</code></td><td>一段给人看的用法说明</td><td>不参与任何判定</td></tr>
+              <tr><td>域</td><td><code>Skill</code> / <code>DB</code> / <code>File</code></td><td>拼错的域名整块忽略并点名</td></tr>
+              <tr><td>层</td><td><code>Run</code> / <code>Read</code> / <code>Ban</code></td><td><code>Skill</code> 只有 <code>Run</code> / <code>Ban</code>；另外两域三个都有。拼错的层名整层忽略并点名</td></tr>
+              <tr><td>规则键</td><td><code>["a", "b"]</code>（op / 数据类别 / 路径）</td><td>键数组合成一个键读进来；<code>["a"]</code> 与裸写 <code>"a"</code> 等价，重排只输出带括号的那一种。认不出的键点名且不生效</td></tr>
+              <tr><td>身份数组</td><td><code>["ALLUSER"]</code> 或 <code>["user:123456","group:123456"]</code></td><td>数组里有这个身份就算命中；<b>空数组是一条“谁都不给”的决定</b>（按域收尾，见第 01 节），不再回落到更宽的键</td></tr>
             </tbody>
           </table>
         </div>
-        <p class="t-cap">这张表就是整套权限的“出厂设置”：她能读本机、能改 SFW 里的东西、数据的读写执行都有、对外动作与工具也都有；普通用户则只有 C 类的读，其余全部为空 —— 想放开哪一格，就写一条命中那一格的例外。</p>
+        <h3 class="sec">三道闸门：技能 / 数据 / 文件</h3>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h4 class="sub" style="margin-top:0">技能门</h4>
+            <p>先判一次“这把工具交不交到他手上”：整把工具那一条放行，或者它任一动作放行，这把工具才会出现在这个身份的调用者面前 —— 没放行，对他来说它在工具面里根本不存在。工具内部每个动作再判一次自己的 op，两道都过了才真的执行。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h4 class="sub" style="margin-top:0">数据门与文件门</h4>
+            <p><b>数据门</b>在通用库口上：改一类数据要先过那一域的 <code>Run</code>，命中之后还要看<b>这一行是不是他自己的</b>；读一类数据过 <code>Read</code>（没声明时按默认能读，写成空表则不能读）。</p>
+            <p><b>文件门</b>在碰路径的地方：改路径过 <code>Run</code>、读路径过 <code>Read</code>，按<b>最长路径优先</b> —— 子目录里的禁止压过父目录里的允许。</p>
+          </div>
+        </div>
+
+        <p class="t-cap">表里列出哪些 op、按什么顺序、配什么释义，都以 <code>ai/perm gen</code> 重排出来的为准；它按技能装载时声明的 op 清单给出分组、释义与顺序，清单只增不减地跟着技能走。写一个注册表里<b>还没有</b>的动作名，本身是可以的：在基板那份文件里写<b>精确键</b>（<code>["perm.nowhere"]</code>）就是<b>预先授权</b> —— 写工具名的键只覆盖装载时已经注册的动作，而精确键一旦有人原样拿这个动作名来问判定就会命中，主人可以这样提前给一个将来才会注册的动作开权限。技能那份文件则是另一条口径：注册表里没有的动作<b>连装都装不进去</b>，那一条会被整条丢弃并点名；写了不属于它的 op 同样会被忽略并点名。</p>
 
         <div class="grid-2">
           <div class="panel reveal">
-            <h4 class="sub" style="margin-top:0">两层“连例外也不开”的受保护资源</h4>
-            <ul class="plain">
-              <li><b>第一层</b>：账本自身（<code>perms.json</code> 与它的临时文件）、授权动作本身（<code>mem:acl</code>）、账号凭据（登录态）。<b>只有主人</b>拿得到，连 <code>SYSTEM</code> 也是空的 —— 否则“诱导她自己改权限”就成了绕过主人的路。</li>
-              <li><b>第二层</b>：受限配置文件与脚本（按后缀认定的那几类，<b>只对 B 类路径生效</b>）—— 对 <code>ALLUSER</code> 连读都不给，例外也不开。后缀清单是 <code>.json</code> / <code>.ini</code> / <code>.conf</code> / <code>.properties</code> / <code>.yml</code> / <code>.yaml</code> / <code>.toml</code> / <code>.bat</code> / <code>.cmd</code> / <code>.ir</code> / <code>.xml</code> / <code>.env</code> / <code>.key</code> / <code>.pem</code> / <code>.p12</code>，匹配到后缀为止、大小写不敏感，所以 <code>export.jsonl</code> 不算 <code>.json</code>。</li>
-            </ul>
+            <h4 class="sub" style="margin-top:0">没列到，就是没给</h4>
+            <p>表里没提过的键，对普通用户一律按该域“没列到”的默认值走。装载新技能会让 op 清单变长，但新技能目录里还没有那份 <code>perms.jsonc</code> 时，它的 op 一样不授权 —— 要开就敲 <code>ai/perm run</code>。</p>
+            <p>只放行一个动作时，另外那些动作照旧没给 —— 所以“允许他记一笔”与“允许他翻别人的记忆”能分成两件事。工具级的那一条键只覆盖它<b>已经注册的动作</b>（没注册过的动作不会被旧授权顺手放行）。</p>
           </div>
           <div class="panel reveal d1">
-            <h4 class="sub" style="margin-top:0">为什么默认是“拒绝”</h4>
-            <p>A 类是 SFW 数据根之外的任意本机路径加上本机进程，所以对普通用户<b>一位都不给</b>（连读也不给）。要放开只能写例外。</p>
-            <p>判定在拿不准时按更严的那一类走：比如路径的真身化不可靠时仍判 A 类，执行本机程序也始终算 A 类。换句话说，“默认拒绝”不是保守，而是这套模型的本意。</p>
+            <h4 class="sub" style="margin-top:0">键怎么对上：宽的、更具体的</h4>
+            <p>判定时先把覆盖这个键的规则<b>从最具体往最宽</b>排一遍，看第一把给出决定的：精确同键最具体；数据按点分往上看（<code>pref.donation</code> 比 <code>pref</code> 具体）；路径按最长优先。<b>更具体的键没给这个身份任何决定时，才落到更宽的键。</b></p>
+            <p><b>数据与文件两域</b>的宽键按它自己的身份表命中 —— 以后新登记的、以及表里的键空间还没一一列出的子键，都会被宽键照常判（例如 <code>DB</code> 里写了 <code>["pref"]: ["user:123456"]</code>，那么 <code>pref</code> 底下那些更细的键对这个身份也按这一条判）。</p>
+            <p><b>技能那一域不一样</b>：写工具名的宽键只覆盖<b>装载时这把工具已经注册的动作</b>；而且<b>在技能文件里</b>，没注册过的动作连装都装不进去 —— 那一条会被整条丢弃并点名，以后技能新加的动作也不会被旧授权顺手放行（这正是“默认拒绝”的兜底）。</p>
+            <p>只有一件事另算：这个键<b>完全没有得到任何决定</b>，而且<b>没有被任何一个已知的宽键覆盖</b>，才会得到“不认识的权限键”这句拒绝 —— 它对应的就是装载时已经点过名的那些认不出的键。</p>
+            <p>同一把键上命中多条时取<b>并集</b>（要收窄只能用 <code>Ban</code>）。另外，数据那一域的读判定里，“显式写下的空身份表”与“<code>Ban</code>”一样会拦住读 —— 只有确实没声明的键才吃“默认能读”那一口。</p>
           </div>
+        </div>
+
+        <div class="note reveal">
+          <p><span class="n-title">早先那张统一的权限表</span>已经按归属拆到各技能目录与 <code>perms-core.jsonc</code> 了 —— 现在没有单独的一份账本，看的时候是合并视图。旧格式照读：上一版的嵌套写法与那份旧的统一表都还能读进来，装载时会提示建议敲 <code>ai/perm gen</code> 重排一次；更早那版按资源分类的权限账本，启动时还会读一次做迁移（<b>只读不写</b>，条目里带 <code>X</code> 的转成允许，按资源分类的那几行在新语义里没有意义、直接略过）。老文件里没写 <code>DB</code> / <code>File</code> 两域时，就按该域“没列到”的默认值走 —— 不会因为“没写”而放宽。</p>
         </div>
       </section>
 
       <!-- ============ 7 ============ -->
       <section class="chapter" id="deny">
         <header class="chapter-head reveal">
-          <span class="chapter-tag">07 / 拒绝</span>
-          <h2>被拒时长什么样</h2>
-          <p class="chapter-desc">拒绝不是一句干巴巴的“没权限”，而是一句<b>可读的说明</b>：它写清缺哪一位、该类默认给什么、当前有效位是什么。它同时也会被算作一次失败，连续失败闸门靠它计数。</p>
+          <span class="chapter-tag">07 / 不可用</span>
+          <h2>不可用时长什么样</h2>
+          <p class="chapter-desc">不可用不是一句干巴巴的“没权限”，而是一句<b>可读的说明</b>：它写清挡在哪一域、哪一层。它们同时也会被算作一次失败，连续失败闸门靠它计数。</p>
         </header>
 
         <div class="code" data-lang="text">
-          <div class="code-head"><span class="lang">text</span><span class="path">拒绝文案的形态（位名前缀 + 账本原文）</span><button class="copy" type="button">复制</button></div>
-          <pre><code>缺 W 位 —— [权限阻断] 需要 &lt;资源&gt; 的 W 位（默认分配 &lt;…&gt;，当前有效位 &lt;…&gt;）</code></pre>
+          <div class="code-head"><span class="lang">text</span><span class="path">不可用文案的几种形态</span><button class="copy" type="button">复制</button></div>
+          <pre><code>[权限阻断] 「weather」在技能管控表的黑名单里
+[权限阻断] 「weather」没有授权给你（未列到 = 未授权）
+[权限阻断] 这类数据（sent）你不能读
+[权限阻断] 这条记录不属于你（只能改你自己那一份）
+[权限阻断] 这个路径不在允许范围（D:/…）</code></pre>
         </div>
-        <p class="t-cap">这句话由两段拼起来：前半段是基板 <code>need*</code> 产出的位名前缀（形如 <code>缺 W 位 —— </code>），后半段是账本给出的原文，开头固定是 <code>[权限阻断] </code>。工具入口、命令面、面板看到的是同一种形态。</p>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>场景</th><th>文案形态</th></tr></thead>
+            <tbody>
+              <tr><td>技能：没授权</td><td><code>[权限阻断] 「memory.remember」没有授权给你（未列到 = 未授权）</code></td></tr>
+              <tr><td>技能：列出来了但空表</td><td><code>[权限阻断] 「memory.remember」没有授权给你（列出来了，但谁都没给）</code></td></tr>
+              <tr><td>技能：被禁</td><td><code>[权限阻断] 「memory.remember」在技能管控表的黑名单里</code></td></tr>
+              <tr><td>数据：不能改</td><td><code>[权限阻断] 这类数据（memory）你不能改 —— 只有主人与她本人能改</code></td></tr>
+              <tr><td>数据：不是他的行</td><td><code>[权限阻断] 这条记录不属于你（只能改你自己那一份）</code></td></tr>
+              <tr><td>数据：不能读</td><td><code>[权限阻断] 这类数据（sent）你不能读</code></td></tr>
+              <tr><td>路径：不能碰</td><td><code>[权限阻断] 这个路径不在允许范围（D:/…）</code></td></tr>
+              <tr><td>键认不出</td><td><code>[权限阻断] 不认识的权限键「xxx」（装载时已点名）</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap">每一句都以 <code>[权限阻断] </code> 开头，尾部说明是<b>哪一层</b>挡的；文案本身<b>不透露</b>白名单里有什么（路径那一句只说“不在允许范围”）。这个前缀一字不改 —— 这一版只是在它后面补了分层说明。工具入口、命令面、面板看到的是同一种形态。</p>
 
-        <h3 class="sec">三种拒绝形态都能被认出来</h3>
+        <h3 class="sec">三种形态都能被认出来</h3>
         <div class="tw scroll reveal">
           <table>
             <thead><tr><th>形态</th><th>长什么样</th><th>说明</th></tr></thead>
             <tbody>
-              <tr><td>① 现代判据</td><td>正文里<b>包含</b> <code>[权限阻断]</code></td><td>ACL 内核的产出，唯一现代判据（可能出现在 <code>缺 X 位 —— </code> 之后）</td></tr>
+              <tr><td>① 现行判据</td><td>正文里<b>包含</b> <code>[权限阻断]</code></td><td>权限面的产出，唯一现行判据</td></tr>
               <tr><td>② 兼容识别</td><td>出现 <code>[auth] 权限阻断</code></td><td>旧写法，只用于识别兼容，新的产出文案里不会再出现</td></tr>
-              <tr><td>③ 信息性前缀</td><td>以 <code>缺 R 位 —— </code> / <code>缺 W 位 —— </code> / <code>缺 X 位 —— </code> 开头</td><td>基板 <code>need*</code> 的位名前缀；它本身不是拦下的证据，但识别面会保留它</td></tr>
+              <tr><td>③ 历史前缀</td><td>以 <code>缺 R 位 —— </code> / <code>缺 W 位 —— </code> / <code>缺 X 位 —— </code> 开头</td><td>早期基板留下的前缀，新口径已经不再产出；识别面留着它，只为不把历史文案误认成成功</td></tr>
             </tbody>
           </table>
         </div>
-        <p class="t-cap">识别用的是“<b>包含</b> <code>[权限阻断]</code>”而不是“以它开头”，所以前半段有没有位名前缀都不影响判断。为什么这件事值得留意：权限阻断要被算作“失败”，连续失败闸门才数得到它；只认旧串的话，ACL 面的拒绝会被漏掉，她就可能不再补一句正确的回复。</p>
+        <p class="t-cap">识别用的是“<b>包含</b> <code>[权限阻断]</code>”而不是“以它开头”，所以前面带不带那几个字都不影响判断。为什么这件事值得留意：权限阻断要被算作“失败”，连续失败闸门才数得到它；只认旧串的话，权限面的拒绝会被漏掉，她就可能不再补一句正确的回复。</p>
 
         <div class="note ok reveal">
-          <p><span class="n-title">自己怎么确认一句拒绝</span>：拿到那句文案之后，到 <code>ai/acl</code> 里比对三件事 —— ① 该类对该主体的<b>默认分配</b>；② 能命中你的<b>例外条目</b>（事实块里的 <code>caller.rules</code>）；③ 当前<b>有效位</b>（<code>caller.bits</code>）。三者一致，就说明判得没错。</p>
+          <p><span class="n-title">自己怎么确认一句不可用</span>：拿到那句文案之后，到 <code>ai/perm</code> 里对两件事 —— ① 这个 op 在他能用的清单里吗（事实块里的 <code>caller.ops</code>）；② 有没有一条 <code>Ban</code> 命中他（<code>caller.rules</code>）。两者一致，就说明判得没错。</p>
         </div>
       </section>
 
@@ -352,27 +454,34 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">08 / 实现</span>
           <h2>技术实现（想看代码就从这里进）</h2>
-          <p class="chapter-desc">权限面集中在 <code>auth</code> 包；另外几处是“接线口”—— 工具入口、拒绝文案产出、失败识别、事实行。</p>
+          <p class="chapter-desc">权限面集中在 <code>auth</code> 包；另外几处是“接线口”—— 工具入口、命令面、失败识别、事实行。</p>
         </header>
 
         <div class="tw scroll reveal">
           <table>
             <thead><tr><th>要做的事</th><th>实现</th><th>入口</th></tr></thead>
             <tbody>
-              <tr><td>资源命名与分类</td><td>五类常量与自动判定（路径 / 进程 / 库 / 内存 / 动作 / 工具），含 <code>files</code> 特例</td><td><code>auth\Res.java</code></td></tr>
-              <tr><td>账本读写</td><td>解析条目、授权覆盖 / 追加、撤销、原子落盘（先写 <code>.tmp</code> 再改名）</td><td><code>auth\Acl.java</code></td></tr>
-              <tr><td>唯一判定</td><td><code>Acl.bitsOf(caller, res)</code>：按类默认分配 + 例外突破默认；受保护资源对普通用户恒空</td><td><code>auth\Acl.java</code></td></tr>
-              <tr><td>依据与结论分列</td><td><code>Acl.ruleLines()</code> / <code>rulesFor()</code> 给“能命中的例外”，<code>bitsOf</code> 给结论，两者互不代算</td><td><code>auth\Acl.java</code>、<code>ctx\CtxBuild.java</code></td></tr>
-              <tr><td>接线：工具入口</td><td>工具能不能用只判 <code>T</code> 类的 <code>X</code> 位；不可见的名字不进模型面</td><td><code>tool\Registry.java</code></td></tr>
-              <tr><td>接线：拒绝文案</td><td><code>Host.need()</code> / <code>needTag()</code> 产出 <code>缺 X 位 —— </code>，账本原文跟在后面</td><td><code>src\sair\v4\skill\Host.java</code></td></tr>
+              <tr><td>合并装载</td><td><code>Acl.loadMerged</code> 把 <code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code> 读成一份视图：<code>//</code> 整行注释先丢掉，技能文件里的 op 越界、数据键越界、路径块三种情况都忽略并点名一行；认不出的键一律点名且不生效</td><td><code>auth\Acl.java</code></td></tr>
+              <tr><td>文件读写</td><td>解析三域四层、授权 / 封禁 / 撤回；按归属分文件写回（技能 op → 该技能目录，其余 → core），重排时技能文件不产出路径块、数据块只在真有规则时写；逐字节相同则跳过写，落盘是原子替换（先写 <code>.tmp</code> 再改名）</td><td><code>auth\Acl.java</code></td></tr>
+              <tr><td>op 清单</td><td>技能装载时声明工具名与动作名；重排时的分组、释义与顺序都从这份清单来，工具级的那条键覆盖它已注册的动作</td><td><code>auth\Ops.java</code>、<code>auth\OpList.java</code></td></tr>
+              <tr><td>判定：技能</td><td><code>Acl.allow(caller, op)</code>：先看 <code>Ban</code>、再看 <code>Run</code>、都没有就是未授权；主人与她本人直接放行</td><td><code>auth\Acl.java</code></td></tr>
+              <tr><td>判定：数据</td><td><code>Acl.dbDeny(caller, 数据键, 行归属)</code> 管改（命中后还要比这一行归谁）；<code>Acl.dbReadDeny(caller, 数据键)</code> 管读（没声明时能读，显式空表则是不能读）</td><td><code>auth\Acl.java</code></td></tr>
+              <tr><td>判定：文件</td><td><code>Acl.fileDeny(caller, 路径, write)</code>：<code>write</code> 为真看 <code>Run</code>、为假看 <code>Read</code>，按最长路径优先</td><td><code>auth\Acl.java</code></td></tr>
+              <tr><td>域内怎么比</td><td>同一域里把覆盖这个键的规则<b>从最具体往最宽</b>过一遍，第一把给出决定的说了算；同一把键上 <code>Ban</code> 先于允许，身份取并集</td><td><code>auth\Acl.java</code></td></tr>
+              <tr><td>结论与依据分列</td><td><code>Acl.opsFor()</code> 给“能用哪些 op”（结论），权限文件里的条目配合 <code>ctx\CtxBuild.java</code> 给“能命中他的条目”（依据），两者互不代算</td><td><code>auth\Acl.java</code>、<code>ctx\CtxBuild.java</code></td></tr>
+              <tr><td>接线：工具入口</td><td>整把工具或它任一动作放行，工具才可见；调用时入口再判一次，工具内部每个动作又判一次</td><td><code>tool\Registry.java</code></td></tr>
+              <tr><td>接线：通用库口</td><td>六库的读写与整库动作都先过数据那一道（整库动作把它覆盖到的每一类都过一遍），行归属按类别各自映射成 <code>user:&lt;QQ&gt;</code> / <code>group:&lt;群号&gt;</code></td><td><code>Builtins.java</code></td></tr>
+              <tr><td>接线：文件口</td><td>本地文件改写、外链地址产出、导出与导入这几条取路径的写口都过路径那一道</td><td><code>Builtins.java</code>、<code>qq\Relay.java</code>、<code>qq\Api.java</code></td></tr>
+              <tr><td>接线：命令面</td><td>看表用 <code>ai/perm</code>，写表用 <code>run</code> / <code>ban</code> / <code>db</code> / <code>file</code> / <code>revoke</code> / <code>gen</code>；旧名字只留一句退休指路</td><td><code>term\Cmd.java</code></td></tr>
+              <tr><td>护栏：技能不能给自己开口子</td><td><code>skill_write</code> 的写入路径拒收 <code>perms.jsonc</code>，回的原话是“拒绝写入 <code>perms.jsonc</code>：… —— 权限文件（谁能用这个技能）只能由主人用控制台 <code>ai/perm</code> 写，技能不能给自己开口子。”</td><td><code>Builtins.java</code></td></tr>
               <tr><td>接线：失败识别</td><td><code>Loop.deniedResult()</code> 认三种形态，权限阻断计入连续失败</td><td><code>agent\Loop.java</code></td></tr>
-              <tr><td>接线：事实行</td><td>事实块里的 <code>caller.kind</code> / <code>caller.bits</code> / <code>caller.rules</code> 三个键</td><td><code>ctx\CtxBuild.java</code></td></tr>
+              <tr><td>接线：事实行</td><td>事实块里的 <code>caller.kind</code> / <code>caller.ops</code> / <code>caller.rules</code> 三个键</td><td><code>ctx\CtxBuild.java</code></td></tr>
             </tbody>
           </table>
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">设计上只有一处判定</span>：面板、命令、事实行都调同一份实现（<code>Acl.bitsOf</code> 与 <code>Acl.source</code>），各自不另算一套；账本自己也只负责“存条目”，不下“有没有权限”的结论。这样 <code>ai/acl</code> 显示的和实际拦你的一定是同一个答案。</p>
+          <p><span class="n-title">判定只有一套实现</span>：命令面、工具入口、通用库口、文件口、事实行都问同一份实现（<code>Auth</code> 与 <code>Acl</code> 上那几个入口），各自不另算一套；权限文件这一层也只负责“存规则”，不下“能不能用”的结论。这样 <code>ai/perm</code> 显示的和实际拦你的一定是同一个答案。</p>
         </div>
       </section>
 
@@ -381,7 +490,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">09 / 排错</span>
           <h2>常见误用与排错</h2>
-          <p class="chapter-desc">权限问题大多来自三件事：写错了类、给错了位、或者<b>压根没写</b>。下面这几条按“先看什么”的顺序排，照着走一般就找到了。</p>
+          <p class="chapter-desc">权限问题大多来自三件事：op 写错了、身份写错了、或者<b>压根没写</b>。下面这几条按“先看什么”的顺序排，照着走一般就找到了。</p>
         </header>
 
         <div class="tw scroll reveal">
@@ -389,41 +498,51 @@
             <thead><tr><th>现象</th><th>先看什么</th><th>原因与处理</th></tr></thead>
             <tbody>
               <tr>
-                <td>写了例外但不生效</td>
-                <td><code>ai/acl</code> 里有没有那一行、位是不是你要的</td>
-                <td>① 主体写错：<code>MASTER</code> 会被拒收，写成 <code>User&lt;QQ号&gt;</code> 就好；② 类写错：<code>T</code> 是工具、<code>E</code> 是外部交互动作；③ 位写空就是拒绝，建议再确认一次那一格。</td>
+                <td>给了身份但不生效</td>
+                <td><code>ai/perm list &lt;op&gt;</code> 里有没有他</td>
+                <td>① op 写错：整把工具写 <code>工具名</code>，单个动作写 <code>工具名.动作名</code>；② 身份写错：在控制台写 <code>MASTER</code> 与 <code>SYSTEM</code> 会被直接回绝（手写进文件里则是整行忽略、不生效），写成 <code>user:&lt;QQ号&gt;</code> 就好；③ 同一个 op 上他命中了 <code>Ban</code>，那就先 <code>ai/perm revoke</code> 再放行；④ 这个 op 属于某个技能，而它的目录里还没有 <code>perms.jsonc</code> —— 走 <code>ai/perm run</code> 就会顺手建起来。</td>
               </tr>
               <tr>
-                <td>同一资源有人能用、有人不能</td>
-                <td>事实块里的 <code>caller.rules</code>（能命中的例外）</td>
-                <td>层级高的先算：<code>User(3) &gt; Group(2) &gt; ALLUSER(1)</code>，同级里后面的覆盖前面的。给某个人单独开时，<code>User&lt;QQ号&gt;</code> 那条才压得住群条目。</td>
+                <td>同一项能力有人能用、有人不能</td>
+                <td>事实块里的 <code>caller.rules</code>（能命中他的条目）</td>
+                <td>一个人身上的条目与一个群上的条目各算各的，<code>Ban</code> 压过 <code>Run</code>。给某个人单独开的时候，先确认没有一条更宽的身份（<code>ALLUSER</code>）把他封了。</td>
               </tr>
               <tr>
-                <td>改了账本要不要重启</td>
-                <td>用 <code>ai/acl</code> 再问一次，看判定有没有变</td>
-                <td>账本在首次判定时装载，另有显式重载口；取值与判定共用同一份实现，文件变了会被重读。手改文件之后，<b>建议用 <code>ai/acl</code> 再问一次</b>：显示对了，判定就是对的。</td>
+                <td>改了表要不要重启</td>
+                <td>用 <code>ai/perm</code> 再看一次，或对某个 op 敲 <code>ai/perm list</code></td>
+                <td>走 <code>run</code> / <code>ban</code> / <code>db</code> / <code>file</code> / <code>revoke</code> / <code>gen</code> 写完即生效；只有外面手改了权限文件（<code>perms-core.jsonc</code> 或某个技能目录里的 <code>perms.jsonc</code>），才需要敲一次 <code>ai/perm reload</code>。</td>
               </tr>
               <tr>
-                <td>条目形态写坏</td>
-                <td>那一行提示</td>
-                <td>形态认不出的条目会被跳过并给一行提示，不会影响其余条目；部署脚本遇到形态非法也会明确报出来。写完照一下 <a href="#ledger">第 03 节</a>的样例即可。</td>
+                <td>表里多出一条不认识的写法</td>
+                <td>那一行点名</td>
+                <td>认不出的键会原样留着并点名，而且<b>一律不生效</b>（不影响其余条目）；照<a href="#defaults">第 06 节</a>的四层形状改回来，或者敲一次 <code>ai/perm gen</code> 重排。</td>
+              </tr>
+              <tr>
+                <td>技能里给别的能力开了口子</td>
+                <td>启动时那一行 <code>[acl] 越界忽略：…</code></td>
+                <td>技能那份文件只认它自己提供的工具与数据键：写了别人的、或者基板内置工具的 op，整条都会被忽略并点名一行，原句形如 <code>[acl] 越界忽略：技能「天气查询」的 perms.jsonc 里写了不属于它的 op「send.group」（属技能「消息发送」）—— 这一条不生效</code>。写数据键越界、或者写了 <code>File</code> 块，也是同一句话的两种变体（数据键那一条不生效、路径那一整块不生效）。要开就写到那个键归属的那份文件里。</td>
+              </tr>
+              <tr>
+                <td>技能好像想给自己开权限</td>
+                <td><code>skill_write</code> 的回执</td>
+                <td>技能的写入路径碰到 <code>perms.jsonc</code> 会被直接挡回，回一句“权限文件（谁能用这个技能）只能由主人用控制台 <code>ai/perm</code> 写”—— 所以技能没法给自己开口子。</td>
               </tr>
               <tr>
                 <td>她“答应不了”某件事</td>
                 <td>那句 <code>[权限阻断]</code> 说明</td>
-                <td>说明里点明了资源、该类默认分配与当前有效位。按<a href="#deny">第 07 节</a>的三步对一遍，就能确认是差一条例外，还是差一个位。</td>
+                <td>说明里点明了是哪一域、哪一层挡的。按<a href="#deny">第 07 节</a>那张表对一遍，就能确认是差一条允许，还是被一条 <code>Ban</code>、一条行归属、或者一个路径挡住了。</td>
               </tr>
               <tr>
                 <td>不确定谁能动什么</td>
-                <td><code>ai/acl</code> 开头那两段“默认分配”</td>
-                <td>先读默认、再读条目：<b>没写的一律按默认，而默认基本是拒绝</b>。这样推出来的结论与实际判定同源。</td>
+                <td><code>ai/perm</code> 打出来的整张表</td>
+                <td>先读禁止再读允许：<b>没写到的一律按该域的默认值算</b>（技能不能、数据能读不能改、文件不能碰）。这样推出来的结论与实际判定同源。</td>
               </tr>
             </tbody>
           </table>
         </div>
 
         <div class="note reveal">
-          <p><span class="n-title">相邻内容在别处</span>：本页只写基板的权限模型、账本、命令与实现口。命令的完整参数见<a href="commands.html#perm-cmds">命令参考 · 权限类</a>；键的逐条含义见<a href="config.html#keys">配置键面</a> —— 权限不在配置里，它是一本独立账本。外挂扩展层具体有哪些单元、各自做什么，不在本页范围。</p>
+          <p><span class="n-title">相邻内容在别处</span>：本页只写基板的权限模型、权限文件、命令与实现口。命令的完整参数见<a href="commands.html#perm-cmds">命令参考 · 权限类</a>；键的逐条含义见<a href="config.html#keys">配置键面</a> —— 权限不在配置里，它是一份份独立的小文件，按归属分散在数据根与各技能目录里。外挂扩展层具体有哪些单元、各自做什么，不在本页范围。</p>
         </div>
       </section>
 

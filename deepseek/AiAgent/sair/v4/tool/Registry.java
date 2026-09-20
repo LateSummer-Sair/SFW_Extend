@@ -13,9 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import sair.v4.Conf;
 import sair.v4.auth.Acl;
 import sair.v4.auth.Auth;
-import sair.v4.auth.Bits;
 import sair.v4.auth.Caller;
-import sair.v4.auth.Res;
 import sair.v4.ctx.Turn;
 import sair.v4.kit.J;
 import sair.v4.kit.Out;
@@ -27,7 +25,7 @@ import sair.v4.kit.Str;
  *
  * <p><b>工具面按 T 类的 {@code X} 位筛</b>（主人裁定 2026-09-15："工具"从 C 类拆出来独立成 T 类，
  * 只有<b>入口</b>受权限管控：{@code R} 看工具 / {@code W} 改·注册 / {@code X} 执行）：
- * {@link #visible(Caller)} 只把 {@code auth.bits(c, Res.tool(名))} 含 {@code X} 的工具交出去。
+ * {@link #visible(Caller)} 只把技能管控表放行（工具级 op 或其任一动作级 op）的工具交出去。
  * 拿不到调用者（{@code null}，诊断路径）或权限面没装配（{@code auth == null}）时不筛，
  * 交全量（见 {@link #all()}）—— 这是"没有权限面就不假装有权限面"的老口径，一字未改。
  * <p><b>执行过程不判位</b>：能不能碰某个资源，仍由"要碰资源那一刻"的 ACL 判定说了算
@@ -120,6 +118,11 @@ public final class Registry implements sair.v4.skill.ToolView {
             return;
         }
         tools.put(t.name(), t);
+        // 顺手把"这把工具是干什么的"登记进 op 清单：写技能管控表时，每个工具分组头就用它 —— 表是给人看的
+        try {
+            if (auth != null && auth.ops() != null) auth.ops().tool(t.name(), Str.oneLine(t.desc()));
+        } catch (Throwable ignored) {
+        }
     }
 
     /** 便捷：直接收构造器（免去每处 .build()）。 */
@@ -152,6 +155,26 @@ public final class Registry implements sair.v4.skill.ToolView {
         return l;
     }
 
+    /**
+     * <b>工具名 → 技能名</b>（只含技能提供的工具；内置工具不在表里）。
+     *
+     * <p>这是"权限文件按归属分散"的唯一判据：技能目录里的 {@code perms.jsonc} 只认
+     * owner 等于该目录名的 op（越界忽略）；写回时也按这张表决定 op 该落到哪个文件。
+     * 内置工具不登记 = 它们归 core。</p>
+     *
+     * <p>返回的是当场快照：技能装载/卸载之后立刻反映最新归属（技能重扫完记得重读权限文件）。</p>
+     */
+    public Map<String, String> toolOwners() {
+        Map<String, String> m = new java.util.LinkedHashMap<String, String>();
+        for (Tool t : tools.values()) {
+            if (t == null || !t.skill()) continue;
+            String owner = t.owner();
+            if (Str.blank(owner) || Str.blank(t.name())) continue;
+            m.put(t.name(), owner);
+        }
+        return m;
+    }
+
     /** 全部工具（不做权限过滤，仅内部/诊断用）。 */
     public List<Tool> all() {
         List<Tool> l = new ArrayList<Tool>(tools.values());
@@ -160,16 +183,14 @@ public final class Registry implements sair.v4.skill.ToolView {
     }
 
     /**
-     * 该调用者可见的工具 = <b>他在 T 类上拿到 {@code X} 的那些工具</b>（主人裁定 2026-09-15）。
+     * 该调用者可见的工具 = <b>技能管控表里放行给他的那些</b>。
      *
-     * <p>"工具"从 C 类拆出来独立成 <b>T 类</b>：{@code R} 看工具（= 可见性）、{@code W} 改·注册工具、
-     * {@code X} 执行。这里判的就是<b>入口</b>的那一位 ——
-     * 逐把工具问 {@code auth.bits(c, Res.tool(名))}，含 {@code X} 才交出去；
-     * 因而"看得到"和"执行得了"在入口处是同一件事（{@link #miss} 的候选也因此跟着筛）。</p>
+     * <p>判据两条：工具级 op（{@code 工具名}）放行，<b>或者</b>它的任一动作级 op
+     * （{@code 工具名.动作名}）放行 —— 后者是为了"只放开某个动作"时，模型仍然看得见这把工具去调它
+     * （其余动作由技能内部各判各的 op 拦下）。"看得到"与"执行得了"在入口处仍是同一件事。</p>
      *
-     * <p>默认位表下：MASTER 恒全权、SYSTEM（她自己的自主行为）{@code T=RWX}、{@code ALLUSER}
-     * {@code T=NONE} —— 所以普通用户的回合看到的工具面是<b>空的</b>（要放开只能由主人写
-     * {@code T["User<QQ>","","X"]} 这类例外条目）。</p>
+     * <p>默认表下：{@code MASTER} 与她本人（{@code SYSTEM}）恒全权；{@code ALLUSER} 一条
+     * {@code Run} 都没写就是空 = 未授权 —— 普通用户回合看到的工具面是<b>空的</b>。</p>
      *
      * <p><b>不筛的两种情况</b>（与旧行为一字不差，别把它们当成"漏判"）：
      * ① {@code c == null}（没有调用者 —— 诊断 / 控制台的"全量"视图，{@link #describe} 走的就是它）；
@@ -187,49 +208,52 @@ public final class Registry implements sair.v4.skill.ToolView {
     }
 
     /**
-     * 这把工具的"入口"给不给这个调用者（T 类的 {@code X} 位）。
-     * <p>判据只有一条：{@code auth.bits(c, Res.tool(t.name()))} 含 {@code X}；
+     * 这把工具的"入口"给不给这个调用者。
+     * <p>判据只有一条：技能管控表放行（工具级 op 或其任一动作级 op）；
      * 拿不到调用者 / 拿不到权限面 → 放行（全量视图，见 {@link #visible}）；
      * 判定抛异常 → 不放行。</p>
-     *
-     * <p><b>例外：对外公开的工具</b>（{@link #PUBLIC}）谁都点得动 —— 见那个常量的说明。</p>
      */
     private boolean mayEnter(Caller c, Tool t) {
         if (t == null) return false;
-        if (PUBLIC.contains(t.name())) return true;
         if (c == null || auth == null) return true;
         try {
-            return Bits.has(auth.bits(c, Res.tool(t.name())), 'X');
+            if (auth.allowed(c, t.name())) return true;
+            for (String op : auth.ops().of(t.name())) {
+                if (auth.allowed(c, op)) return true;
+            }
+            return false;
         } catch (Throwable ignored) {
             return false;
         }
     }
 
     /**
-     * <b>对外公开的工具</b>：入口不按 T 位筛，谁都能点（内部仍按归属 / 配额 / 资源位管）。
+     * 入口闸门的拒文（{@code null} = 放行）—— 与 {@link #mayEnter} 同一个判据，
+     * 只是走权限面的正规出口，好让拒绝原文与别处<b>一字不差</b>（识别面 {@link #isDenyText} 直接认）。
+     * 不筛的两种情况见 {@link #call}。
      *
-     * <p>只有一把：{@code alarm}（到点的事）。理由：<b>别人委托的事必须由委托人自己记、自己查</b>
-     * —— 普通用户的回合按 D43 是"工具面为空"，如果 {@code alarm} 也被筛掉，
-     * 他既托不成事、也问不到"我托你的事办妥了没"。它的写口按 SYSTEM 判（她自己的账本），
-     * 归属按委托人 QQ 硬判（只看得到自己的、别人的一个字都看不到），另有每人/全场配额。</p>
-     */
-    private static final java.util.Set<String> PUBLIC =
-            java.util.Collections.unmodifiableSet(
-                    new java.util.HashSet<String>(java.util.Arrays.asList("alarm")));
-
-    /**
-     * 入口闸门的拒文（{@code null} = 放行）—— 与 {@link #mayEnter} 同一个判据（T 类的 {@code X} 位），
-     * 只是走 ACL 的正规出口，好让拒绝原文与别处<b>一字不差</b>（{@code 缺 X 位 —— [权限阻断] …}，
-     * 识别面 {@link #isDenyText} 直接认）。不筛的两种情况见 {@link #call}。
+     * <p><b>顺序（GM 裁定，情绪 v2 §4）</b>：① <b>权限面先判</b> —— 一条位都没放行就返回它的拒文
+     * （"权限阻断"那句优先，不许被情绪盖掉）；② 放行之后才轮到<b>罢工硬干活闸</b> ——
+     * {@code strike} 态下这把工具（除 {@code perm} 一族）直接拒，回执由
+     * {@link sair.v4.Builtins#strikeDeny} 统一产出（同一处判据 / 措辞 / 真源，这里不写第二套）。
+     * 技能 op 也走这道入口 ⇒ 技能体在闸之后，一次都不执行。</p>
      */
     private String mayEnterDeny(Caller c, String tool) {
         if (c == null || auth == null) return null;
-        if (PUBLIC.contains(tool)) return null;
         try {
-            return auth.allowRes(c, Res.tool(tool), 'X');
+            if (auth.allowed(c, tool)) return entryStrikeDeny(c, tool);
+            for (String op : auth.ops().of(tool)) {
+                if (auth.allowed(c, op)) return entryStrikeDeny(c, tool);
+            }
+            return auth.allow(c, tool);
         } catch (Throwable ignored) {
             return Acl.DENY_PREFIX + "工具入口判定异常：" + tool;
         }
+    }
+
+    /** 入口放行之后的罢工闸（唯一调用点；判据/措辞只有 {@link sair.v4.Builtins#strikeDeny} 那一处）。 */
+    private static String entryStrikeDeny(Caller c, String tool) {
+        return sair.v4.Builtins.strikeDeny(c, tool);
     }
 
     public List<String> visibleNames(Caller c) {
@@ -252,9 +276,10 @@ public final class Registry implements sair.v4.skill.ToolView {
      * 本函数决定"<b>点不点得动</b>"（模型或技能即便喊出一个没位的工具名，也在这里被拒）。
      * 只做前者会被"喊一个不在清单里的工具名"整个绕过去。</p>
      *
-     * <p><b>工具内部执行过程不判位</b>（主人裁定的口径："只管入口"）：真正的资源判定发生在
-     * <b>工具碰到资源的那一刻</b> —— 文件读写在 {@code h.needPath}、库在 {@code h.needDb}、
-     * 平台动作在 {@code h.needPlatform}。</p>
+     * <p><b>入口与动作两道判定</b>：这里判"这把工具交不交给他"（工具级 op，或其任一动作级 op
+     * 放行即可）；工具内部<b>每个动作分支再判一次自己的 op</b>（{@code h.need("memory.remember")}）——
+     * 所以"允许他记一笔"与"允许他删别人的"能分开。资源没有位：资源对主人与她本人完全可见可改可执行，
+     * 对 {@code ALLUSER} 是黑盒，唯一的路就是这两道判定放行的那个 op。</p>
      *
      * <p>不筛的两种情况与 {@link #visible} 一致：{@code c == null}（内部 / 诊断，没有调用者）与
      * {@code auth == null}（权限面没装配 —— 装配失败时基板<b>不假装</b>自己有权限面）。
@@ -431,31 +456,30 @@ public final class Registry implements sair.v4.skill.ToolView {
     }
 
     /**
-     * 控制台/诊断用清单：工具名 + <b>该调用者在这把工具上的有效位</b>（<b>T 类</b>资源
-     * {@code Res.tool(名)} 的 {@code RWX} 掩码）+ 来源 + 一句话描述。
-     *
-     * <p>P9b-2：这一列原来是旧档位（{@code Auth.keyOf/effectiveLevel/describe} 算出的
-     * {@code 仅主人} / {@code 好感度≥N}）。旧档位 facade 已随 {@code PermTable} 删除，改印 ACL 的
-     * <b>有效位</b> —— 与"能不能碰看 {@code bits}"的现行口径同源。{@code c == null}
-     * （{@code /tools all}：不按调用者筛，走 {@link #all()}）或权限面没装配时印 {@code "-"}。</p>
+     * 控制台/诊断用清单：工具名 + <b>该调用者在技能管控表里的状态</b>
+     * （{@code Run} 可用 / {@code Ban} 封禁 / {@code -} 未授权或没在判）+ 来源 + 一句话描述。
      */
     public String describe(Caller c) {
         StringBuilder sb = new StringBuilder();
         List<Tool> list = c == null ? all() : visible(c);
         for (Tool t : list) {
             sb.append("  ").append(t.name()).append("  [")
-              .append(bitsText(c, t))
+              .append(permText(c, t))
               .append(t.skill() ? " · 技能:" + t.owner() : " · 基板")
               .append("]  ").append(Str.cut(Str.oneLine(t.desc()), 60)).append("\n");
         }
         return sb.toString();
     }
 
-    /** 一把工具对某个调用者的有效位（{@code RWX} / {@code NONE}）；问不出来时 {@code "-"}。 */
-    private String bitsText(Caller c, Tool t) {
+    /** 一把工具对某个调用者的管控状态：{@code Run} / {@code Ban} / {@code -}（未判）。 */
+    private String permText(Caller c, Tool t) {
         if (auth == null || c == null || t == null) return "-";
         try {
-            return Bits.format(auth.bits(c, Res.tool(t.name())));
+            if (auth.allowed(c, t.name())) return "Run";
+            for (String op : auth.ops().of(t.name())) {
+                if (auth.allowed(c, op)) return "Run";
+            }
+            return "Ban";
         } catch (Throwable ignored) {
             return "-";
         }

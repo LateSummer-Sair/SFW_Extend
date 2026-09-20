@@ -30,7 +30,8 @@
     <a href="files.html"><span class="n">08</span>文件</a>
     <a href="architecture.html"><span class="n">09</span>实现</a>
     <a href="migration.html"><span class="n">10</span>升级</a>
-    <a href="changelog.html"><span class="n">11</span>更新日志</a>
+    <a href="skills.html"><span class="n">11</span>技能开发</a>
+    <a href="changelog.html"><span class="n">12</span>更新日志</a>
   </nav>
   <div class="topbar-meta">
     <span class="chip live">纯静态</span>
@@ -62,8 +63,8 @@
         <h3 class="sec">键面是什么</h3>
         <p><code>Conf.knownKeys()</code>（<code>src\sair\v4\Conf.java</code>）返回的是<b class="hl">全部已知配置键</b>，顺序就是书写顺序。它满足两条硬口径：</p>
         <ul>
-          <li><b>含"只靠默认值生效"的键</b>：<code>config.json</code> 里没写、靠出厂默认跑起来的键（例如 <code>agentMaxRounds</code>、<code>subagentMaxRounds</code>、<code>historyLimit</code>）也在表里，值就是"出厂默认照原样生效"的那个值；缺省值一律从 <code>Conf</code> 自己的 getter 来，表里不重抄一份常数（<code>Conf.java</code>）。</li>
-          <li><b>只登记"有人读"的键</b>：每个键都有活着的消费者，getter 就是那个消费者的同一个口（<code>Conf.java</code>）。</li>
+          <li><b>含"只靠默认值生效"的键</b>：<code>config.json</code> 里没写、靠出厂默认跑起来的键（例如 <code>agentMaxRounds</code>、<code>subagentMaxRounds</code>、<code>visionModel</code>）也在表里，值就是"出厂默认照原样生效"的那个值；缺省值一律从 <code>Conf</code> 自己的 getter 来，表里不重抄一份常数（<code>Conf.java</code>）。</li>
+          <li><b>只登记"有人读"的键</b>：其中 6 个媒体类键目前还没有读取方（见「其余键」那一节的清单），其余每个键都有活着的消费者，getter 就是那个消费者的同一个口（<code>Conf.java</code>）。</li>
         </ul>
         <p><code>knownKeys()</code> 给的是<b>已生效</b>的值；<code>fileKeys()</code>（<code>Conf.java</code>）给的是<b>文件</b>里的值，多一位 <code>pending()</code> 标记。控制台 <code>config</code> 与模型侧 <code>config</code> 工具读的都是文件面。</p>
 
@@ -72,13 +73,11 @@
         </div>
 
         <div class="code reveal" data-lang="powershell">
-          <div class="code-head"><span class="lang">powershell</span><span class="path">C:\Sair\Local\AiAgent-V4</span><button class="copy" type="button">复制</button></div>
-          <pre><code>(Select-String -Path src\sair\v4\Conf.java -Pattern 'add\(out, "' |
-  Where-Object { $_.LineNumber -ge 1173 -and $_.LineNumber -le 1288 }).Count
-# 结果：94（首行 1176，末行 1282）
+          <div class="code-head"><span class="lang">powershell</span><span class="path">&lt;项目目录&gt;（本仓根）</span><button class="copy" type="button">复制</button></div>
+          <pre><code>(Select-String -Path src\sair\v4\Conf.java -Pattern 'add\(out,\s*"').Count
+# 结果：94
 
-(Select-String -Path src\sair\v4\Conf.java -Pattern '^\s*set\("' |
-  Where-Object { $_.LineNumber -ge 1329 -and $_.LineNumber -le 1405 }).Count
+(Select-String -Path src\sair\v4\Conf.java -Pattern 'set\("').Count
 # 结果：61（Conf.ensureDefaults() 首次运行落盘的那批）</code></pre>
         </div>
 
@@ -224,9 +223,9 @@
           <div class="keyrow reveal">
             <div class="k-head"><span class="k-name">masterQQ</span><span class="k-def">默认 0</span><span class="badge mute">出厂写盘</span></div>
             <dl>
-              <dt>含义</dt><dd>主人 QQ。权限判定里 SYSTEM 主体、优先道判定、控制台身份都取它（<code>Boot.java</code>、<code>Cmd.java</code>、<code>QqGateway.java</code>）。</dd>
+              <dt>含义</dt><dd>主人 QQ。权限判定里的主人（<code>MASTER</code>）、优先道判定、控制台身份都取它（<code>Boot.java</code>、<code>Cmd.java</code>、<code>QqGateway.java</code>）。</dd>
               <dt>怎么调</dt><dd><code>config set masterQQ 1284688456</code>（纯数字会被解析成长整型，<code>Cmd.java</code>）。</dd>
-              <dt>调错的后果</dt><dd class="risk">写错号 = 主人不再是 SYSTEM，很多"只有主人能改"的动作会被拒；反过来，把这个号写成别人，等于把主人权限给了那个人。权限模型本身见 <a href="capabilities.html#perm">基板能力 · 权限</a>。</dd>
+              <dt>调错的后果</dt><dd class="risk">写错号 = 真正的主人不再被认成主人，很多"只有主人能改"的动作会被拒；反过来，把这个号写成别人，等于把主人那份恒全权的身份给了那个人。权限模型本身见 <a href="capabilities.html#perm">基板能力 · 权限</a>。</dd>
             </dl>
           </div>
           <div class="keyrow reveal">
@@ -385,7 +384,7 @@
             </dl>
           </div>
           <div class="keyrow rose reveal">
-            <div class="k-head"><span class="k-name">relayPublicHost</span><span class="k-def">默认 ""</span><span class="badge info">出厂不写盘</span></div>
+            <div class="k-head"><span class="k-name">relayPublicHost</span><span class="k-def">默认 ""</span><span class="badge info">出厂写盘</span></div>
             <dl>
               <dt>含义</dt><dd>对外主机名／地址，NapCat 那台机器用它来取文件（<code>Conf.java</code>、<code>Relay.java</code>）。</dd>
               <dt>怎么调</dt><dd><code>config set relayPublicHost 192.168.1.254</code>。留空 = 用本机探测到的地址。</dd>
@@ -796,7 +795,7 @@
             <dl>
               <dt>含义</dt><dd>身份提示词所在的相对路径。装配时按它建 <code>PromptFile</code>（<code>src\sair\v4\prompt\Prompts.java</code>）。</dd>
               <dt>怎么调</dt><dd><code>config set identityFile prompts/identity.md</code>；换路径后要 <code>ai/restart</code>。文件类操作都在 <a href="capabilities.html#prompt">基板能力 · 提示词</a> 与 <a href="files.html#prompts">文件 · 提示词</a>。</dd>
-              <dt>调错的后果</dt><dd class="risk">指到不存在的文件 = 身份为空（空文件与文件不存在在提示词层语义一致，<code>Boot.java</code>），此后她就没有身份设定。指到数据根之外会先过资源判定。</dd>
+              <dt>调错的后果</dt><dd class="risk">指到不存在的文件 = 身份为空（空文件与文件不存在在提示词层语义一致，<code>Boot.java</code>），此后她就没有身份设定。指到提示词目录之外（绝对路径或 <code>..</code>）会被路径检查挡下，取不到文件 —— 后果同上。</dd>
             </dl>
           </div>
           <div class="keyrow reveal">
@@ -824,7 +823,7 @@
             </dl>
           </div>
         </div>
-        <p class="t-cap">技能这一层可以自己长：怎么写、怎么装见 <a href="capabilities.html#skill-dev">06 · 能力</a> 里的「自己写一个技能」。</p>
+        <p class="t-cap">技能这一层可以自己长：怎么写、怎么装见 <a href="skills.html">11 · 技能开发</a>。</p>
         <div class="note reveal">
           <p><span class="n-title">本页少列 2 个已知键</span>：键面里还有 2 个键管的是外挂层的目录与编译时机，键名本身含外挂层字样，按本文档口径不逐字列出 —— 出厂默认与读口分别在 <code>Conf.java</code>、<code>Conf.java</code> 与 <code>Conf.java</code>。所以这一章的逐键块覆盖 27 个键，键面总数仍是 94。</p>
         </div>
@@ -1069,7 +1068,7 @@
         </div>
         <p><span class="n-title">"没有读者"怎么证明</span>：在 <code>src\</code> 下按 getter 名做全量检索，命中的只有"getter 自己的定义"与"<code>knownKeys()</code> 里的登记"两处，没有任何第三方调用点。命令与结果：</p>
         <div class="code reveal" data-lang="powershell">
-          <div class="code-head"><span class="lang">powershell</span><span class="path">C:\Sair\Local\AiAgent-V4</span><button class="copy" type="button">复制</button></div>
+          <div class="code-head"><span class="lang">powershell</span><span class="path">&lt;项目目录&gt;</span><button class="copy" type="button">复制</button></div>
           <pre><code>foreach($k in @('mediaRender','mediaRenderMaxChars','mediaExpandForward',
                'mediaExpandMaxNodes','mediaExpandMaxDepth','mediaExpandMaxChars')){
   $h = Select-String -Path src\sair\v4\*.java,src\sair\v4\*\*.java `
@@ -1092,7 +1091,7 @@
         <h3 class="sec">未知键与已退休键</h3>
         <ul>
           <li><b>未知键</b>：写进 <code>config.json</code> 也不会有人读，唯一后果是"看起来改了"。控制台与模型侧都会当场说明这一点（<code>Cmd.java</code>、<code>Builtins.java</code>）。</li>
-          <li><b>已退休的权限键</b>：旧的按档位权限矩阵那个键已随旧档位体系删除，写进去会被当成未知键忽略、不参与任何判定；另外两个退休键会在启动时被点一次名（<code>Conf.java</code>、<code>Conf.java</code>）。权限现在只看数据根下的例外账本（见 <a href="capabilities.html#perm">基板能力 · 权限</a>）。</li>
+          <li><b>已退休的权限键</b>：旧的按档位权限矩阵那个键已随旧档位体系删除，写进去会被当成未知键忽略、不参与任何判定；另外两个退休键会在启动时被点一次名（<code>Conf.java</code>、<code>Conf.java</code>）。权限现在只看那几份按归属分散的权限文件（基板侧那份是数据根下的 <code>perms-core.jsonc</code>，每个技能写自己目录里的 <code>perms.jsonc</code>；装载时合并成一张表，三个域各自分层 —— 技能看 op、数据看类别、文件看路径），见 <a href="capabilities.html#perm">基板能力 · 权限</a>。</li>
           <li><b>本机调试口的四个键</b>：端口、凭据、仿真端口、仿真开关四个键<b>已整条撤出配置面</b> —— 它们不再进键表、不进 <code>ensureDefaults()</code>、也不写进 <code>config.json</code>；两个口的起停只看控制台那条调试口命令（<code>Conf.java</code>、<code>Conf.java</code>、<code>Conf.java</code>）。凭据落在数据根的运行现场凭据文件里，不在这份配置里。</li>
         </ul>
 

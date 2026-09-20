@@ -7,10 +7,12 @@ import java.util.List;
 import java.util.concurrent.Future;
 
 import sair.v4.Boot;
+import sair.v4.Builtins;
 import sair.v4.Conf;
 import sair.v4.Tick;
 import sair.v4.auth.Acl;
 import sair.v4.auth.Caller;
+import sair.v4.auth.Favor;
 import sair.v4.hot.Sk;
 import sair.v4.kit.J;
 import sair.v4.kit.Out;
@@ -163,8 +165,16 @@ public final class Cmd {
                 perm(a, caller());
                 return null;
             }
+            if ("favor".equals(f)) {
+                favor(a, caller());
+                return null;
+            }
             if ("acl".equals(f)) {
-                aclCmd();
+                // 旧名退休：权限账本 → 按归属分散的权限文件。名字留着只为给一句可读的指路（命令表里已不列它）
+                out.warn("acl 已退休：权限改成了按归属分散的权限文件（数据根 " + Acl.CORE_FILE_NAME
+                        + " + 每个技能的 " + Acl.SKILL_FILE_NAME + "）—— 看表与改表都在 "
+                        + name() + "/perm，下面就是它。");
+                if (boot != null && boot.auth() != null) perm("", caller());
                 return null;
             }
             if ("config".equals(f)) {
@@ -211,7 +221,7 @@ public final class Cmd {
             if ("execs".equals(f) || "execq".equals(f) || "execfc".equals(f) || "orchestrate".equals(f)) {
                 out.warn("命令 " + f + " 属于已删除的「通道」概念：V4 只有一条入口，直接用 "
                         + name() + "/chat <内容>。");
-                out.dim("  工具能不能用完全由权限决定（主人 = MASTER 一律全放行），不再有按通道裁剪的工具表。");
+                out.dim("  工具能不能用完全由技能管控表决定（主人与她本人恒全权），不再有按通道裁剪的工具表。");
                 if (!Str.blank(a)) chat(a);
                 return null;
             }
@@ -640,82 +650,956 @@ public final class Cmd {
         }
     }
 
+    // 旧面已清：`perm set/reset|list|<QQ>`（好感度控制台口）与更早的 `perm levels/setlevel`（旧档位注册表）
+    // 都随这一轮权限整改下线 —— 好感度不是权限、也不参与任何判定（notes\perm-rework-spec.md）。
+    // 新的 `perm` 只管一件事：身份 × op → Ban / Run / 空，权限文件按归属分散
+    // （data\perms-core.jsonc + 每个技能的 data\skills\<技能名>\perms.jsonc）。
+
+    /**
+     * {@code perm}：<b>权限面</b> —— 控制台唯一的权限视图（读的是<b>合并后</b>的整张表）。
+     *
+     * <p>判定只剩一条：<b>身份 × op → Ban / Run / 空</b>。{@code Run} 白名单 = 可用，
+     * {@code Ban} 黑名单 = 不可用，<b>空</b>（{@code Run["op"]} 没写身份，或账本里根本没有这一行）
+     * = 未授权 = 不可用；优先级 <b>Ban &gt; Run &gt; 空</b>。主人与她本人（SYSTEM）恒全权，
+     * 不受这张表影响。</p>
+     *
+     * <p>权限文件按<b>归属</b>分散存放：基板内置工具（{@code napcat}/{@code console}/{@code exec}/
+     * {@code perm}/…）写数据根下的 {@code perms-core.jsonc}；每个技能可以在自己的目录里写一份
+     * {@code perms.jsonc}（只写它自己提供的工具，越界条目忽略）。技能目录里没有那份文件 =
+     * 该技能全部 op 一律不授权；写回时按归属落到对应的那个文件。</p>
+     *
+     * <p>子命令：</p>
+     * <ul>
+     *   <li>{@code perm}            逐行打印<b>合并后</b>的整张表 + {@link Acl#stat()} + 来源汇总；</li>
+     *   <li>{@code perm list [op]}  按 op 看谁能用（合并视图）；</li>
+     *   <li>{@code perm gen}        只在<b>已有</b>权限文件里重排/补注释（<b>不新建文件</b>）；</li>
+     *   <li>{@code perm run|ban <op> <身份>…}  白名单（授权）/ 黑名单（封禁），写回该 op 归属的文件；</li>
+     *   <li>{@code perm db run|read|ban <数据键> <身份>…}   <b>DB 块</b>：这类数据谁能改 / 谁能读 / 谁不能；</li>
+     *   <li>{@code perm file run|read|ban <路径> <身份>…}   <b>File 块</b>：这个路径谁能碰（目录末尾带斜杠 = 整棵子树）；</li>
+     *   <li>{@code perm revoke <键> <身份>}    撤掉该身份在这个键上的全部条目（op / DB / File 自动认）；</li>
+     *   <li>{@code perm reload}     重新合并装载（重新取工具归属之后重读全部权限文件）。</li>
+     * </ul>
+     *
+     * <p><b>写命令（{@code gen}/{@code run}/{@code ban}/{@code db}/{@code file}/{@code revoke}）只有主人能跑</b>；
+     * 身份先过 {@link Acl#principalReason(String)}，整行再让 {@link Acl#reason(String)} 用自己的原话回绝
+     * —— 写法认不出来就一个字都不写（先全验、再动账本，绝不猜）。{@code db}/{@code file} 还要先过
+     * <b>键空间</b>（{@link Acl#dbClasses()} / {@link Acl#fileKeys()}）：认不出的键在控制台就拒掉，
+     * 绝不交给 {@link Acl#grantKey} 去猜（那会把认不出的数据键当成 op 静默写进 Skill 块）。</p>
+     */
     private void perm(String a, Caller me) {
-        if (boot == null) {
-            out.warn("perm 不可用：基板未创建");
+        if (boot == null || boot.auth() == null) {
+            out.warn("perm 不可用：权限面未装配（" + why() + "）");
             return;
         }
         String[] v = Str.verb(a);
-        if (v[0].isEmpty()) {
-            out.print(boot.permissions(me), Out.Tone.NORMAL);
+        String sub = v[0].toLowerCase();
+        if (sub.isEmpty()) {
+            permTable();
             return;
         }
-        if (boot.favor() == null) {
-            out.warn("perm 不可用：好感度存储未装配（" + why() + "）");
+        if ("list".equals(sub)) {
+            permList(v[1]);
             return;
         }
-        if ("set".equalsIgnoreCase(v[0])) {
-            String[] p = v[1].split("\\s+");
-            if (p.length < 2) {
-                out.warn("用法：perm set <QQ> <好感度>");
-                return;
-            }
-            long qq = Long.parseLong(p[0].trim());
-            double val = Double.parseDouble(p[1].trim());
-            boot.favor().setValue(qq, val, "控制台直改", "console");
-            out.ok("已设置 " + qq + " 好感度 = " + (long) val + "（" + boot.favor().levelName(val) + "）");
+        if ("gen".equals(sub)) {
+            permGen(me);
             return;
         }
-        if ("reset".equalsIgnoreCase(v[0])) {
-            out.ok("已清空 " + boot.favor().resetAll() + " 条好感度记录");
+        if ("run".equals(sub)) {
+            permWrite(me, false, v[1]);
             return;
         }
-        if ("list".equalsIgnoreCase(v[0])) {
-            out.print(J.pretty(Boot.arr(boot.favor().top(20))) + "\n", Out.Tone.NORMAL);
+        if ("ban".equals(sub)) {
+            permWrite(me, true, v[1]);
             return;
         }
-        // P9b-1：这里原来还有 perm levels / perm setlevel 两个分支（旧档位注册表的读写口）—— 整组已删除。
-        // 它们背靠 Boot.permTableText/permLevelText/setPerm，而那是旧档位体系写 perms.json（= ACL 账本）
-        // 的入口（notes\acl-decisions.md D11）；perm 工具侧也早已没有 levels/setlevel 这些 op。
+        if ("db".equals(sub)) {
+            permKeyWrite(me, true, v[1]);
+            return;
+        }
+        if ("file".equals(sub)) {
+            permKeyWrite(me, false, v[1]);
+            return;
+        }
+        if ("revoke".equals(sub)) {
+            permRevoke(me, v[1]);
+            return;
+        }
+        if ("reload".equals(sub)) {
+            permReload();
+            return;
+        }
+        out.warn("未知子命令：" + v[0]);
+        out.dim("  用法：" + name() + "/perm [list [op]|gen|run <op> <身份> [身份…]|"
+                + "ban <op> <身份> [身份…]|db run|read|ban <数据键> <身份> [身份…]|"
+                + "file run|read|ban <路径> <身份> [身份…]|revoke <键> <身份>|reload]");
+    }
+
+    /** 取账本；取不到给一句可读的失败，绝不抛异常。 */
+    private Acl aclOrWarn() {
+        if (boot == null) {
+            out.warn("技能管控表不可用：基板未创建");
+            return null;
+        }
+        if (boot.auth() == null) {
+            out.warn("技能管控表不可用：权限面未装配（" + why() + "）");
+            return null;
+        }
+        Acl a = boot.auth().acl();
+        if (a == null) out.warn("技能管控表不可用：账本没能装载（" + why() + "）");
+        return a;
+    }
+
+    /** 权限文件的落点路径（回执里用）。 */
+    private static String fileText(Acl a) {
+        if (a == null) return "(内存账本，没落盘)";
+        List<File> ws = a.writtenFiles();
+        if (!ws.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < ws.size(); i++) sb.append(i == 0 ? "" : "、").append(permPath(a, ws.get(i)));
+            return sb.toString();
+        }
+        return permPath(a, a.file());
+    }
+
+    /**
+     * 权限文件的人读路径：<b>数据根下用相对路径</b>（{@code data\skills\天气查询\perms.jsonc}），
+     * 根外或取不到根就给全路径。
+     */
+    private static String permPath(Acl a, File f) {
+        if (f == null) return "(无)";
+        File root = a == null ? null : a.dataRoot();
         try {
-            long qq = Long.parseLong(v[0]);
-            out.print(J.pretty(boot.favor().snapshot(qq)) + "\n", Out.Tone.NORMAL);
-        } catch (Exception e) {
-            out.warn("用法：perm [list|set <QQ> <值>|reset|<QQ>]");
+            if (root == null) return f.getAbsolutePath();
+            String r = root.getAbsolutePath();
+            String p = f.getAbsolutePath();
+            if (p.startsWith(r + File.separator)) {
+                // 带上数据根自己的名字（"data\"），主人一眼知道是哪个目录
+                return root.getName() + File.separator + p.substring(r.length() + 1);
+            }
+        } catch (Throwable ignored) {
+        }
+        return f.getAbsolutePath();
+    }
+
+    /** 这个 op 是不是当前注册表里的（只用于提示，不拦写入）。 */
+    private boolean knownOp(String op) {
+        try {
+            return boot != null && boot.auth() != null && boot.auth().ops().known(op);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 写账本的命令只有主人能跑（控制台调用者就是主人；别人一律拒）。 */
+    private boolean masterOnly(Caller me, String what) {
+        if (me != null && me.master()) return true;
+        out.warn(what + " 只有主人能跑（当前调用者：" + (me == null ? "(无)" : me.label())
+                + "）—— 本次什么都没改。");
+        return false;
+    }
+
+    /**
+     * {@code perm}（无参数）：<b>合并后</b>的整张表逐行 + 摘要 + 来源汇总 + 一段怎么用。
+     * <p>v6 追加（只是追加，上面那几行一个字都没动）：DB / File 两块（{@link Acl#ruleList()}，
+     * 域 → 侧 → 键、同键已取并集）、"未声明 Read、按默认能读"的点名披露（{@link Acl#readDefaultList()}）、
+     * 以及那一行装载汇总（{@link Acl#summary()}）。</p>
+     */
+    private void permTable() {
+        Acl a = aclOrWarn();
+        if (a == null) return;
+        out.print("技能管控表（合并视图：core + 每个技能的 perms.jsonc；身份 × op → Ban / Run / 空；"
+                + "主人与她本人恒全权）\n", Out.Tone.NORMAL);
+        List<Acl.Entry> es = a.entries();
+        if (es.isEmpty()) {
+            out.dim("  （一条都没有 = 一切未授权；还没进表的动作在下面那行）");
+        }
+        for (Acl.Entry e : es) out.print("  " + permLine(e) + "\n", e.ban() ? Out.Tone.WARN : Out.Tone.NORMAL);
+        for (Acl.Reject r : a.rejects()) {
+            out.warn("  认不出的条目（原样留着，改完 " + name() + "/perm reload）：" + r.text());
+        }
+        out.print("  " + a.stat() + "\n", Out.Tone.DIM);
+        permRules(a);
+        permSources(a);
+        permUnauthorized(a);
+        permHowTo();
+    }
+
+    /**
+     * <b>DB / File 两块</b>（v6 新增面）+ 规格 §2 要求的"未声明 Read 的类别"披露 + 装载汇总那一行。
+     *
+     * <p>三样都走 {@code Acl} 的现成口：{@link Acl#ruleList()}（域 → 侧 → 键 → 身份，同键先并集）、
+     * {@link Acl#readDefaultList()}（没有显式 Read 声明、也没在任何 Ban 里出现过的数据类别）、
+     * {@link Acl#summary()}（{@code 权限：Skill N 条 / DB M 条 / File K 条；…}）。</p>
+     *
+     * <p>Skill 域不在这里打（它走上面那一段，格式冻结）—— 这一个是纯追加，不改任何既有行的顺序。</p>
+     */
+    private void permRules(Acl a) {
+        List<String> rs = a.ruleList();
+        List<String> db = new java.util.ArrayList<String>();
+        List<String> fl = new java.util.ArrayList<String>();
+        for (String line : rs) {
+            if (line.startsWith("[DB.")) db.add(line);
+            else if (line.startsWith("[File.")) fl.add(line);
+        }
+        out.print("  DB（数据类别：Run 谁能改 / Read 谁能读 / Ban 谁都不能；没列到 = 能读不能改；"
+                + "改命中后还要看那一行是不是他自己的）\n", Out.Tone.NORMAL);
+        if (db.isEmpty()) out.dim("    （DB 块还没有任何规则）");
+        for (String line : db) {
+            out.print("    " + line + "\n", line.startsWith("[DB.Ban]") ? Out.Tone.WARN : Out.Tone.NORMAL);
+        }
+        out.print("  File（路径：目录末尾带斜杠 = 整棵子树，最长路径优先；没列到 = 不能碰）\n", Out.Tone.NORMAL);
+        if (fl.isEmpty()) out.dim("    （File 块还没有任何规则）");
+        for (String line : fl) {
+            out.print("    " + line + "\n", line.startsWith("[File.Ban]") ? Out.Tone.WARN : Out.Tone.NORMAL);
+        }
+        // 规格 §2 要求的披露：DB 的"未定义 = 能读"是全表唯一默认放开的地方，必须点名列清单
+        List<String> dflt = a.readDefaultList();
+        if (dflt.isEmpty()) {
+            out.dim("  未声明 Read、按默认能读的类别：无（每一类都有显式 Read 或 Ban 声明）");
+        } else {
+            out.print("  未声明 Read、按默认能读的类别（规格 §2 唯一的默认放开）："
+                    + Str.join(dflt, "、") + "\n", Out.Tone.WARN);
+        }
+        out.print("  " + a.summary() + "\n", Out.Tone.DIM);
+        out.dim("  改 DB / File 块（只有主人能跑）：" + name() + "/perm db run|read|ban <数据键> <身份> [身份…]；"
+                + name() + "/perm file run|read|ban <路径> <身份> [身份…]"
+                + "（认不出的键会被拒，不会静默写进表）");
+    }
+
+    /**
+     * <b>来源汇总</b>：这一遍是从哪几份权限文件合并出来的、各几条。
+     * <p>一行总数（{@code 权限文件：core 79 条；技能 22 份共 92 条}）+ 每份文件一条明细。</p>
+     */
+    private void permSources(Acl a) {
+        out.dim("  " + a.sourceStat());
+        for (File f : a.sources()) {
+            out.dim("    " + permPath(a, f) + "  " + a.entriesOf(f) + " 条");
         }
     }
 
     /**
-     * {@code acl}：<b>只读</b>打印权限账本（ACL）。
-     *
-     * <p>账本 = 数据根的 {@code perms.json}（{@code {"version":3,"entries":[…]}}），权限的唯一判据。
-     * 输出四段：{@link Acl#stat()} 的一行摘要（<b>条目数量</b> + 分类计数 + 默认分配 + 文件名）、
-     * {@link Acl#defaultText()} / {@link Acl#systemText()} 的<b>默认分配行</b>（按资源类型 + 她自己那份）、
-     * {@link Acl#list()} 的<b>逐条原文</b>（带主体层级、命中时生效位、范围匹配串与顺序说明）、
-     * 以及被跳过的非法条目（有才打 —— 写错了要看得见，不能静默失效）。</p>
-     *
-     * <p><b>本命令不写盘、不改任何状态</b>：授权/撤销/查询/验算都在她那边的 {@code perm} 工具
-     * （{@code op=grant/revoke/acl/whoami…}）。控制台这里只给主人一个"现在到底放开了什么"的窗口
-     * （{@code notes/acl-decisions.md} D34 遗留项②）。</p>
+     * 注册表里有、表里没提过的动作（= 未授权）。<b>不写进文件</b>（没列到就等于未授权），
+     * 只在这里给人看 —— 要看全都有哪些能开，就看这一行。
      */
-    private void aclCmd() {
-        if (boot == null || boot.auth() == null) {
-            out.warn("acl 不可用：权限面未装配（" + why() + "）");
-            return;
+    private void permUnauthorized(Acl a) {
+        try {
+            if (boot == null || boot.auth() == null || boot.auth().ops() == null) return;
+            List<String> miss = new java.util.ArrayList<String>();
+            for (String op : boot.auth().allOps()) {
+                boolean hit = false;
+                for (Acl.Entry e : a.entries()) {
+                    if (e.op().equals(op)) { hit = true; break; }
+                    String tool = sair.v4.auth.Ops.toolOf(op);
+                    if (e.op().equals(tool)) { hit = true; break; }
+                }
+                if (!hit) miss.add(op);
+            }
+            if (miss.isEmpty()) return;
+            int show = Math.min(12, miss.size());
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < show; i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(miss.get(i));
+            }
+            out.dim("  另有 " + miss.size() + " 个动作没在表里（= 未授权 = 不可用）：" + sb
+                    + (miss.size() > show ? " …" : ""));
+            out.dim("  要给谁开哪一项：" + name() + "/perm run <op> <身份>"
+                    + "（写进该 op 归属的那个权限文件；看全部动作：" + name() + "/perm list）");
+        } catch (Throwable ignored) {
         }
-        Acl a = boot.auth().acl();
-        if (a == null) {
-            out.warn("acl 不可用：账本没能装载（" + why() + "）");
-            return;
-        }
-        out.print(a.stat() + "\n", Out.Tone.NORMAL);
-        out.print("默认分配 " + Acl.defaultText() + " · 她自己的默认分配（SYSTEM）" + Acl.systemText() + "\n",
-                Out.Tone.NORMAL);
-        for (String line : a.list()) out.print(line + "\n", Out.Tone.NORMAL);
-        for (Acl.Reject r : a.rejects()) out.warn("非法条目已跳过：" + r);
-        out.dim("账本文件：" + (a.file() == null ? "(内存账本，没落盘)" : a.file().getAbsolutePath()));
-        out.dim("只读命令：授权/撤销/查询/验算请让她用 perm 工具（op=grant/revoke/acl/whoami…）。");
     }
+
+    /** 技能管控表的「怎么用」短说明。 */
+    private void permHowTo() {
+        String n = name();
+        out.dim("  怎么用（写命令只有主人能跑）：");
+        out.dim("    " + n + "/perm gen                       已有权限文件重排：按工具分组、补中文释义（不新建文件）");
+        out.dim("    " + n + "/perm run <op> <身份> [身份…]    白名单：授权（写进该 op 归属的那个文件）");
+        out.dim("    " + n + "/perm ban <op> <身份> [身份…]    黑名单：封禁（优先级 Ban > Run > 空）");
+        out.dim("    " + n + "/perm db run|read|ban <数据键> <身份> [身份…]   DB 块：这类数据谁能改 / 谁能读 / 谁不能");
+        out.dim("    " + n + "/perm file run|read|ban <路径> <身份> [身份…]  File 块：这个路径谁能碰"
+                + "（目录末尾带斜杠 = 整棵子树；路径含空格时整段用双引号包起来）");
+        out.dim("    " + n + "/perm revoke <op> <身份>          撤掉该身份在这个 op 上的全部条目");
+        out.dim("    " + n + "/perm revoke <键> <身份>          键会自动认属于哪一块（op / DB / File），一次摘干净");
+        out.dim("    " + n + "/perm list [op]                  按 op 看谁能用（合并视图）");
+        out.dim("    " + n + "/perm reload                     重新合并装载（外面手改了权限文件之后）");
+        out.dim("  权限文件按归属分散：基板工具写数据根 " + Acl.CORE_FILE_NAME + "；每个技能写自己的 "
+                + "skills\\<技能名>\\" + Acl.SKILL_FILE_NAME + "（只写它自己提供的工具，越界条目忽略；"
+                + "技能没有那份文件 = 它的全部 op 不授权）。");
+        out.dim("  身份写法：user:<QQ> / group:<群号> / ALLUSER（裸 QQ 号 = user:<QQ>）；"
+                + "写工具名（memory）覆盖它全部动作；主人与她本人恒全权，不用写进表。");
+    }
+
+    /** {@code perm list [op]}：表里每个 op 逐行 + 每个 op 谁能用；给了 op 就只看它（合并视图）。 */
+    private void permList(String rawOp) {
+        Acl a = aclOrWarn();
+        if (a == null) return;
+        String op = Str.trim(rawOp);
+        if (op.isEmpty()) {
+            java.util.Map<String, List<Acl.Entry>> by = a.byOp();
+            if (by.isEmpty()) {
+                out.dim("技能管控表里还没有任何 op（没有权限文件 = 一切未授权；要开口敲 "
+                        + name() + "/perm run <op> <身份>）");
+                return;
+            }
+            out.print("技能管控表按 op 逐行：\n", Out.Tone.NORMAL);
+            for (java.util.Map.Entry<String, List<Acl.Entry>> e : by.entrySet()) {
+                out.print("  " + e.getKey() + "\n", Out.Tone.NORMAL);
+                for (Acl.Entry en : e.getValue()) {
+                    out.print("    " + permLine(en) + "\n", en.ban() ? Out.Tone.WARN : Out.Tone.NORMAL);
+                }
+            }
+            out.print("  " + a.stat() + "\n", Out.Tone.DIM);
+            out.dim("  " + a.sourceStat());
+            out.dim("  说明：Ban > Run > 空；空 = 未授权 = 不可用；条目写工具名（memory）时覆盖它全部动作。");
+            return;
+        }
+        out.print("op " + op + "\n", Out.Tone.NORMAL);
+        String tool = sair.v4.auth.Ops.toolOf(op);
+        int n = 0;
+        for (Acl.Entry en : a.entries()) {
+            String et = sair.v4.auth.Ops.toolOf(en.op());
+            if (!en.op().equals(op) && !en.op().equals(tool) && !et.equals(op)) continue;
+            out.print("    " + permLine(en) + "\n", en.ban() ? Out.Tone.WARN : Out.Tone.NORMAL);
+            n++;
+        }
+        if (n == 0) out.dim("    （账本里没有它的条目 = 未授权 = 谁都不能用）");
+        File tf = a.targetOf(op);
+        if (tf != null) out.dim("  这个 op 归属的权限文件：" + permPath(a, tf)
+                + (tf.isFile() ? "" : "（还不存在：敲 " + name() + "/perm run 会创建它）"));
+        if (!tool.equals(op)) {
+            out.dim("  条目写工具名（" + tool + "）时覆盖它全部动作 —— 上面 op 是 " + tool + " 的行都管它。");
+        } else {
+            out.dim("  （按工具名过滤：它的动作级条目都列在上面。）");
+        }
+        if (!knownOp(op)) {
+            out.dim("  注意：这个 op 不在当前注册表里（装上新技能后才会出现）；账本里的条目先留着无妨。");
+        }
+    }
+
+    /**
+     * {@code perm gen}：<b>只在已有的权限文件里重排 / 补注释</b>（不新建文件）——
+     * 按工具分组、把注册表里的中文释义补进注释，每份文件只重写它自己管的那些 op。
+     */
+    private void permGen(Caller me) {
+        if (!masterOnly(me, "perm gen")) return;
+        Acl a = aclOrWarn();
+        if (a == null) return;
+        a.reload();                        // 先重读：主人可能手改过文件，别拿旧内容盖掉
+        // gen 的口径：只在**已有**权限文件里重排/补注释，**不新建文件**（没有文件 = 一切未授权）
+        boolean saved = a.saveAll(boot.auth(), false);
+        List<File> wrote = a.writtenFiles();
+        if (!saved) {
+            out.warn("重排没落盘：权限文件写盘失败（" + fileText(a) + "）");
+            return;
+        }
+        if (wrote.isEmpty()) {
+            // wrote 为空有两种情形：一份已有文件都没有（真话就是"没有文件"），
+            // 或者已有文件的内容与要写的文本逐字节相同（saveAll 的 sameText 跳过了）—— 这时说
+            // "都不存在"是假话。sources 里可能有盘上不存在的文件，所以用 isFile() 数。
+            int onDisk = 0;
+            for (File f : a.sources()) if (f != null && f.isFile()) onDisk++;
+            if (onDisk == 0) {
+                out.dim("没有任何权限文件可重排（" + Acl.CORE_FILE_NAME + " 与技能目录里的 "
+                        + Acl.SKILL_FILE_NAME + " 都不存在）—— gen 不新建文件。");
+            } else {
+                out.dim("已有 " + onDisk + " 份权限文件，本次没有需要重排的内容 —— gen 不新建文件。");
+            }
+        } else {
+            out.ok("已重排 " + wrote.size() + " 份权限文件：" + fileText(a));
+        }
+        List<String> miss = a.unwrittenOps();
+        if (!miss.isEmpty()) {
+            int show = Math.min(12, miss.size());
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < show; i++) sb.append(i == 0 ? "" : "、").append(miss.get(i));
+            out.dim("  这些 op 还没有权限文件（= 不授权）：" + sb + (miss.size() > show ? " …" : ""));
+        }
+        out.dim("  要给谁开哪一项：" + name() + "/perm run <op> <身份>（会写进该 op 归属的那个文件，"
+                + "不存在就创建；没列到的 op = 未授权 = 不可用）。");
+    }
+
+    /** {@code perm run|ban <op> <身份> [身份…]}：写白名单（授权）或黑名单（封禁）并落盘。 */
+    private void permWrite(Caller me, boolean ban, String rest) {
+        String word = ban ? "ban" : "run";
+        if (!masterOnly(me, "perm " + word)) return;
+        String[] p = Str.trim(rest).split("\\s+");
+        if (p.length < 2 || Str.blank(p[0])) {
+            out.warn("用法：" + name() + "/perm " + word + " <op> <身份> [身份…]"
+                    + "（身份：user:<QQ> / group:<群号> / ALLUSER，裸 QQ 号也行）");
+            return;
+        }
+        String op = p[0].trim();
+        // 第一道：身份逐个过 principalReason（主人/她自己会得到"恒全权"那句，原话回）
+        for (int i = 1; i < p.length; i++) {
+            String raw = p[i].trim();
+            if (raw.isEmpty()) continue;
+            String why = Acl.principalReason(raw);
+            if (!why.isEmpty()) {
+                out.warn("身份写法不能用：" + raw + " —— " + why);
+                out.dim("  身份只认 user:<QQ> / group:<群号> / ALLUSER（裸 QQ 号 = user:<QQ>）；"
+                        + "主人（MASTER）与她本人（SYSTEM）恒全权，不用写进表。");
+                return;
+            }
+        }
+        StringBuilder sb = new StringBuilder(ban ? "Ban[\"" : "Run[\"").append(op).append("\"");
+        for (int i = 1; i < p.length; i++) {
+            if (Str.blank(p[i])) continue;
+            sb.append(",\"").append(p[i].trim()).append("\"");
+        }
+        sb.append("]");
+        String raw = sb.toString();
+        // 第二道：整行让 Acl.reason 判（它的原话就是回绝文案；认不出来一个字都不写）
+        String why = Acl.reason(raw);
+        if (!why.isEmpty()) {
+            out.warn("写法不能用：" + why);
+            return;
+        }
+        Acl.Entry entry = Acl.parse(raw);
+        if (entry == null) {
+            out.warn("写法不能用：" + Acl.reason(raw));
+            return;
+        }
+        Acl a = aclOrWarn();
+        if (a == null) return;
+        for (String principal : entry.principals()) a.grant(op, principal, ban, boot.auth().ops().noteOf(op));
+        if (!a.saveAll(boot.auth())) {
+            a.reload();                    // 没落盘就别在内存里留下"看着改了"的假象
+            out.warn("写盘失败 —— 本次" + (ban ? "封禁" : "授权") + "没落盘（" + permPath(a, a.targetOf(op)) + "）");
+            return;
+        }
+        String where = wroteText(a, op);
+        for (String principal : entry.principals()) {
+            out.ok("已" + (ban ? "封禁" : "授权") + "：" + op + " ← " + principal + "（已写入 " + where + "）");
+        }
+        if (!knownOp(op)) {
+            out.dim("  注意：op " + op + " 不在当前注册表里（装上新技能后才会出现）—— 条目先留着无妨。");
+        }
+    }
+
+    /**
+     * {@code perm db|file run|read|ban <键> <身份> [身份…]}：给 <b>DB / File 块</b>加一条决定并落盘。
+     *
+     * <p>两道校验，<b>先全验、再动账本</b>：</p>
+     * <ol>
+     *   <li><b>键空间</b>（本波次新增的那一道）：{@code db} 的键必须在 {@link Acl#dbClasses()}
+     *       （数据类别白名单）里；{@code file} 的键要么已经在 {@link Acl#fileKeys()} 里，要么
+     *       长得像一个路径（带 {@code /} 或 {@code \}，不带通配符）。<b>认不出的一律拒</b> ——
+     *       这一道不能省：{@link Acl#grantKey} 对"既不是已知数据类别、又不像路径"的键会
+     *       <b>当成 op</b> 静默写进 Skill 块（{@code db run kv.attach ALLUSER} 会变成一条
+     *       永远不会被用到的 Skill 条目），那是"静默写进去"，规格 §3 明确不许。</li>
+     *   <li><b>身份</b>：逐个过 {@link Acl#principalReason(String)}（主人/她自己会得到"恒全权"那句原话）。</li>
+     * </ol>
+     *
+     * <p>拒绝一律直接搬 {@link Acl#DENY_PREFIX} 开头的原文（键认不出用规格 §5 那一句），
+     * <b>不拼新前缀、不列白名单内容</b>。落盘走 {@link Acl#saveAll(Auth)}：DB / File 规则写回它
+     * <b>读自的那份文件</b>（读自旧统一表时退回 core），回执写明落到哪一份。</p>
+     */
+    private void permKeyWrite(Caller me, boolean db, String rest) {
+        String word = db ? "db" : "file";
+        String domain = db ? "DB" : "File";
+        if (!masterOnly(me, "perm " + word)) return;
+        Args ar = splitArgs(rest);                     // 先剥一层成对的双引号，再按空白切词
+        if (ar.badQuote) {
+            out.warn("引号没配对 —— 这一条不执行（键里含空格时整段用一对双引号包起来）");
+            out.dim("  " + keyUsage(word, db));
+            return;
+        }
+        if (ar.toks.size() < 3) {
+            out.warn(keyUsage(word, db));
+            return;
+        }
+        String side = ar.toks.get(0).toLowerCase();
+        if (!"run".equals(side) && !"read".equals(side) && !"ban".equals(side)) {
+            out.warn("侧只认 run / read / ban：" + ar.toks.get(0));
+            out.dim("  run = " + (db ? "谁能改" : "谁能碰") + "；read = 谁能读；ban = 谁不能（压过 run 与 read）。");
+            return;
+        }
+        String key = ar.toks.get(1);
+        Acl a = aclOrWarn();
+        if (a == null) return;
+        // 第一道：键要在白名单里（认不出的一律拒 + 说清为什么；绝不静默写进别的块）
+        String bad = keyProblem(a, db, key);
+        if (!bad.isEmpty()) {
+            out.warn(Acl.DENY_PREFIX + "不认识的权限键「" + key + "」（装载时已点名）");
+            out.dim("  " + bad + " —— 认不出的键一律不写进表（本次什么都没改）。");
+            out.dim("  " + keyUsage(word, db));
+            return;
+        }
+        // 第二道：身份写法（先全验、再动账本）
+        List<String> ids = new java.util.ArrayList<String>();
+        for (int i = 2; i < ar.toks.size(); i++) {
+            String raw = ar.toks.get(i);
+            // 看着像路径的一段 = 键里含空格却没加引号：明确拒掉并给写法，绝不静默写一条错规则
+            if (!db && (raw.indexOf('/') >= 0 || raw.indexOf('\\') >= 0)) {
+                out.warn("身份写法不能用：" + raw + " —— 这一段看着像路径（键里含空格时整段要用双引号包起来）");
+                out.dim("  写法：" + name() + "/perm file " + side + " \"<路径>\" <身份> [身份…]");
+                return;
+            }
+            if (raw.isEmpty()) continue;
+            String why = Acl.principalReason(raw);
+            if (!why.isEmpty()) {
+                out.warn("身份写法不能用：" + raw + " —— " + why);
+                out.dim("  身份只认 user:<QQ> / group:<群号> / ALLUSER（裸 QQ 号 = user:<QQ>）；"
+                        + "主人（MASTER）与她本人（SYSTEM）恒全权，不用写进表。");
+                if (!db) {
+                    out.dim("  提示：路径里含空格时整段用双引号包起来（\"" + "D:/a b/" + "\"）；"
+                            + "不加引号会被切成两段 —— 键会写错。");
+                }
+                return;
+            }
+            String id = Acl.principalKey(raw);           // 统一成规范身份（裸 QQ → user:<QQ>），同一个人只写一次
+            if (id != null && !ids.contains(id)) ids.add(id);
+        }
+        if (ids.isEmpty()) {
+            out.warn(keyUsage(word, db));
+            return;
+        }
+        List<String> before = db ? new java.util.ArrayList<String>() : a.fileKeys();
+        int n = 0;
+        for (String id : ids) if (a.grantKey(key, id, side)) n++;
+        if (n != ids.size()) {
+            a.reload();                                  // 别在内存里留下"看着改了"的假象（一个字都还没落盘）
+            out.warn("这条没被收下（本次什么都没写）：" + "[" + domain + "." + sideName(side) + "] " + key
+                    + " ← " + ids);
+            return;
+        }
+        if (!a.saveAll(boot.auth())) {
+            a.reload();
+            out.warn("写盘失败 —— 本次没落盘（" + permPath(a, a.targetOfKey(key)) + "）");
+            return;
+        }
+        String where = permPath(a, a.targetOfKey(key));
+        String shown = shownKey(a, db, key, before);
+        String act = "ban".equals(side) ? "已封禁" : ("read".equals(side) ? "已开放读" : "已授权");
+        for (String id : ids) {
+            out.ok(act + "：[" + domain + "." + sideName(side) + "] " + shown + " ← " + id
+                    + "（已写入 " + where + "）");
+        }
+    }
+
+    /** 侧名（{@code run} / {@code read} / {@code ban} → {@code Run} / {@code Read} / {@code Ban}）。 */
+    private static String sideName(String side) {
+        return "run".equals(side) ? "Run" : ("read".equals(side) ? "Read" : "Ban");
+    }
+
+    /** {@code perm db|file} 的用法一行（不列白名单内容）。 */
+    private String keyUsage(String word, boolean db) {
+        return "用法：" + name() + "/perm " + word + " run|read|ban <" + (db ? "数据键" : "路径")
+                + "> <身份> [身份…]（" + (db
+                ? "数据键要是已知的数据类别（先敲 " + name() + "/perm 看表）"
+                : "路径带 / 或 \\，目录末尾带斜杠 = 整棵子树，不带通配符；"
+                        + "路径含空格时整段用双引号包起来（\"" + "D:/a b/" + "\"）")
+                + "；身份：user:<QQ> / group:<群号> / ALLUSER）";
+    }
+
+    /** 切词结果：{@code toks} = 剥掉一层成对双引号后的词；{@code badQuote} = 有没配对的引号。 */
+    private static final class Args {
+        final List<String> toks = new java.util.ArrayList<String>();
+        boolean badQuote;
+    }
+
+    /**
+     * 按空白切词，<b>先剥一层成对的双引号</b>：{@code "D:/a b/"} 这样含空格的键才写得进来
+     * （Windows 上 {@code C:\Program Files\…} 这种很常见）。
+     *
+     * <p>不带引号的老写法与 {@code split("\\s+")} <b>完全一致</b>（引号只在"词首"才特殊）；
+     * 只开不闭的引号一律 {@code badQuote=true}（调用方拒掉 —— 否则后面的身份会被吞进路径里，
+     * 那就成了"静默写错"）。</p>
+     */
+    private static Args splitArgs(String s) {
+        Args r = new Args();
+        String t = Str.trim(s);
+        int i = 0;
+        while (i < t.length()) {
+            char c = t.charAt(i);
+            if (c == ' ' || c == '\t') { i++; continue; }
+            StringBuilder sb = new StringBuilder();
+            if (c == '"') {
+                i++;
+                boolean closed = false;
+                while (i < t.length()) {
+                    char d = t.charAt(i);
+                    if (d == '"') { closed = true; i++; break; }
+                    if (d == '\n' || d == '\r') break;
+                    sb.append(d);
+                    i++;
+                }
+                if (!closed) r.badQuote = true;
+                while (i < t.length() && t.charAt(i) != ' ' && t.charAt(i) != '\t') {
+                    sb.append(t.charAt(i));                // 闭引号后紧跟的字符算同一个词（"a b"x → a bx）
+                    i++;
+                }
+            } else {
+                while (i < t.length() && t.charAt(i) != ' ' && t.charAt(i) != '\t') {
+                    sb.append(t.charAt(i));
+                    i++;
+                }
+            }
+            if (sb.length() > 0) r.toks.add(sb.toString());
+        }
+        return r;
+    }
+
+    /**
+     * 这个键能不能进对应的块：能用返回空串，不能用返回"为什么"（<b>只说理由，不列白名单</b>）。
+     * <p>口径与 {@code Acl} 装载时的那两道完全同源：数据键必在 {@link Acl#dbClasses()} 里；
+     * 路径键要么已在 {@link Acl#fileKeys()} 里，要么是"带分隔符、不带通配符"的路径写法。</p>
+     */
+    private static String keyProblem(Acl a, boolean db, String key) {
+        if (db) {
+            if (a.dbClasses().contains(key)) return "";
+            return "它不在数据类别表里（DB 块的键只能是已知的数据类别）";
+        }
+        if (a.fileKeys().contains(key)) return "";
+        if (key.indexOf('/') < 0 && key.indexOf('\\') < 0) {
+            return "它不像一个路径（File 块的键要带 / 或 \\；目录末尾带 / = 整棵子树）";
+        }
+        if (key.indexOf('*') >= 0 || key.indexOf('?') >= 0) {
+            return "路径不认通配符（要整棵子树就把目录写成末尾带斜杠）";
+        }
+        if (key.indexOf('\u0000') >= 0) return "路径里有 NUL";
+        return "";
+    }
+
+    /** 回执里显示的键：File 用表里的规范写法（刚写进去的那一个优先）。 */
+    private static String shownKey(Acl a, boolean db, String key, List<String> before) {
+        if (db) return key;
+        for (String fk : a.fileKeys()) if (!before.contains(fk)) return fk;
+        return matchFileKey(a.fileKeys(), key);
+    }
+
+    /**
+     * 在<b>表里已有的路径键</b>里认出这个入参的规范写法（回执用）。
+     *
+     * <p>只把"确实是同一个键"的几种等价写法认出来：原样、反斜杠 → 正斜杠、重复斜杠折叠；
+     * Windows 下再加一条大小写不敏感（与 {@code Acl} 的路径比对口径一致，Linux 下不做，
+     * 免得把 {@code /A/} 与 {@code /a/} 认成同一个）。认不出就原样返回。</p>
+     *
+     * <p><b>调用时机有讲究</b>：{@code revoke} 必须在<b>撤销之前</b>问这一句 —— 撤销之后那一行
+     * 可能已经不在表里，那时候再问 {@link Acl#fileKeys()} 就只能回退成原样入参（回执会不一致）。</p>
+     */
+    private static String matchFileKey(List<String> keys, String raw) {
+        if (keys == null || keys.isEmpty() || raw == null) return raw;
+        for (String k : keys) if (k.equals(raw)) return k;
+        String alt = canonPath(raw);
+        for (String k : keys) if (k.equals(alt)) return k;
+        if (File.separatorChar == '\\') {
+            for (String k : keys) if (k.equalsIgnoreCase(alt)) return k;
+        }
+        return raw;
+    }
+
+    /** 只折叠"反斜杠 → 正斜杠"与重复斜杠（{@code ..} 的解析归 Acl，这里只认表里已有的键）。 */
+    private static String canonPath(String p) {
+        String s = p == null ? "" : p.replace('\\', '/');
+        while (s.indexOf("//") >= 0) s = s.replace("//", "/");
+        return s;
+    }
+
+    /**
+     * 回执里"写到哪个文件"：按<b>归属</b>算出来的那个落点（技能 op → 该技能的 perms.jsonc，其余 → core）；
+     * 没有具体 op（例如"撤他名下全部条目"）就把这次真正写了的文件都列出来。
+     */
+    private static String wroteText(Acl a, String op) {
+        if (a == null) return "(无)";
+        if (op != null && !op.trim().isEmpty()) {
+            File tf = a.targetOf(op);
+            if (tf != null) return permPath(a, tf);
+        }
+        List<File> ws = a.writtenFiles();
+        if (ws.isEmpty()) return permPath(a, a.file());
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ws.size(); i++) sb.append(i == 0 ? "" : "、").append(permPath(a, ws.get(i)));
+        return sb.toString();
+    }
+
+    /**
+     * {@code perm revoke <键> <身份> [身份…]}：撤掉该身份在这个<b>键</b>上的全部条目 / 规则。
+     *
+     * <p>键<b>自动认属于哪一块</b>（规格 §6）：{@link Acl#revoke(String, String)} 一次把命中的 op 条目
+     * 与 DB / File 规则里的那个身份都摘掉（Ban 与 Run / Read 一起撤）。控制台这一层只做两件事：
+     * <b>先全验</b>（键三选一：数据类别 / 路径 / op 名；身份过 {@link Acl#principalReason(String)}），
+     * 落盘后按 {@link Acl#targetOfKey(String)} 写明落到哪一份文件。</p>
+     */
+    private void permRevoke(Caller me, String rest) {
+        if (!masterOnly(me, "perm revoke")) return;
+        Args ar = splitArgs(rest);                     // 键也可能是路径：同样认一层成对的双引号
+        if (ar.badQuote) {
+            out.warn("引号没配对 —— 这一条不执行（键里含空格时整段用一对双引号包起来）");
+            out.dim("  用法：" + name() + "/perm revoke <键> <身份> [身份…]");
+            return;
+        }
+        if (ar.toks.size() < 2) {
+            out.warn("用法：" + name() + "/perm revoke <键> <身份> [身份…]"
+                    + "（键 = op / 数据类别 / 路径，自动认；身份：user:<QQ> / group:<群号> / ALLUSER）");
+            return;
+        }
+        String key = ar.toks.get(0);
+        Acl a = aclOrWarn();
+        if (a == null) return;
+        String keyWhy = revokeKeyProblem(a, key);      // 键先全验：认不出就不动账本
+        if (!keyWhy.isEmpty()) {
+            out.warn("键写法不能用：" + keyWhy);
+            return;
+        }
+        List<String> ids = new java.util.ArrayList<String>();
+        for (int i = 1; i < ar.toks.size(); i++) {
+            String one = ar.toks.get(i);
+            if (one.isEmpty()) continue;
+            String why = Acl.principalReason(one);
+            if (!why.isEmpty()) {
+                out.warn("身份写法不能用：" + one + " —— " + why);
+                out.dim("  只认 user:<QQ> / group:<群号> / ALLUSER（裸 QQ 号 = user:<QQ>）。");
+                return;                    // 一个身份不合法就整条不执行（先全验再动账本）
+            }
+            // 统一成规范身份再动手（裸 QQ → user:<QQ>），同一个人写两遍只撤一次
+            String id = Acl.principalKey(one);
+            if (id != null && !ids.contains(id)) ids.add(id);
+        }
+        if (ids.isEmpty()) {
+            out.warn("用法：" + name() + "/perm revoke <键> <身份> [身份…]");
+            return;
+        }
+        // ★ 回执要显示**规范化后的键**：必须在**撤销之前**先认出来 —— 撤销之后那一行可能已经
+        //   不在表里（"摘空 = 整条删"落地后就是如此），到那时再问 fileKeys() 只能回退成原样入参，
+        //   于是 `revoke D:\gm\rev\` 的回执会显示反斜杠原文（庚 钉的低危缺陷）。
+        String shown = a.dbClasses().contains(key) ? key : matchFileKey(a.fileKeys(), key);
+        List<String> hit = new java.util.ArrayList<String>();
+        List<String> miss = new java.util.ArrayList<String>();
+        for (String one : ids) {
+            if (a.revoke(key, one)) hit.add(one);
+            else miss.add(one);
+        }
+        for (String m : miss) out.warn("没撤：" + shown + " ← " + m + " 不在账本里（这条没动）");
+        if (hit.isEmpty()) {
+            out.dim("  本次什么都没改，也没落盘。");
+            return;
+        }
+        if (!a.saveAll(boot.auth())) {
+            a.reload();
+            out.warn("写盘失败 —— 本次撤销没落盘（" + permPath(a, a.targetOfKey(key)) + "）");
+            return;
+        }
+        String where = permPath(a, a.targetOfKey(key));
+        for (String h : hit) out.ok("已撤销：" + shown + " ← " + h + "（已写入 " + where + "）");
+    }
+
+    /** {@code perm revoke} 的键能不能用：能用返回空串，不能用返回原因（不列白名单内容）。 */
+    private static String revokeKeyProblem(Acl a, String key) {
+        if (a.dbClasses().contains(key)) return "";                 // DB 数据类别
+        if (keyProblem(a, false, key).isEmpty()) return "";          // File 路径（已知的或路径写法）
+        String opWhy = Acl.reason("Run[\"" + key + "\"]");           // op 名：走 Acl 自己的原话
+        return opWhy.isEmpty() ? "" : opWhy;
+    }
+
+    /** {@code perm reload}：<b>重新合并装载</b>（外面手改了 core / 技能权限文件之后）。 */
+    private void permReload() {
+        if (boot == null || boot.auth() == null) {
+            out.warn("perm reload 不可用：权限面未装配（" + why() + "）");
+            return;
+        }
+        // 重新 bind 工具注册表：技能重扫之后"哪个 op 属哪个技能"可能变了，
+        // 而归属决定技能权限文件里的哪些条目算越界（越界忽略）与写回落到哪个文件。
+        try {
+            sair.v4.tool.Registry r = boot.registry();
+            if (r != null) {
+                boot.auth().bind(r, boot.conf() == null ? null : boot.conf().skillsDir());
+            }
+        } catch (Throwable ignored) {
+            // 拿不到注册表 = 退回只读 core（加载器自己会 warn 一行）
+        }
+        Acl a = boot.auth().reloadAcl();
+        if (a == null) {
+            out.warn("perm reload 没成功：账本没能装载（" + why() + "）");
+            return;
+        }
+        out.ok("已重读权限文件（合并装载）：" + a.stat() + " / " + a.sourceStat());
+        // 规格 §2.5-7：装载汇总那一行由 ②波次启动汇总（Boot）与 ai/perm 负责打印 —— reload 也是
+        // "装载了一次"，所以这里追加同一行（既有那两行一字不动，这一行只往后加）。
+        out.dim("  " + a.summary());
+    }
+
+    // ==================== 好感度（与权限无关） ====================
+
+    /** 榜单上限（沿用旧 `perm list` 的口径：`top(20)`）。 */
+    private static final int FAVOR_TOP = 20;
+
+    /**
+     * {@code favor}：<b>好感度</b>（她对每个人的关系值）—— 与技能管控表彻底分开：
+     * 它不判任何权限，只表达"她跟这个人处得怎么样"，影响回话的热络程度。
+     *
+     * <p>甲方口径（本命令存在的理由）：「好感度由 SYSTEM 主导，<b>主人可直改数值</b>」——
+     * 她自己只能在单次区间里小步加减，主人这一支不受限。</p>
+     *
+     * <p>子命令：</p>
+     * <ul>
+     *   <li>{@code favor}                 榜单：逐行 {@code QQ/昵称 ← 数值 · 档位}（最多 {@link #FAVOR_TOP} 行）；</li>
+     *   <li>{@code favor get <QQ>}        某人当前数值与档位；</li>
+     *   <li>{@code favor set <QQ> <数值>}  <b>主人直改</b>（写命令）；</li>
+     *   <li>{@code favor reset <QQ>}      清成初值（0 = 初识）；不给 QQ = 清空全部记录（写命令）。</li>
+     * </ul>
+     *
+     * <p><b>{@code set}/{@code reset} 只有主人能跑</b>（{@link #masterOnly}）。数值与档位一律走
+     * {@code boot.favor()} 的现有 API（{@link Favor#of(long)} / {@link Favor#setValue} /
+     * {@link Favor#resetAll()} / {@link Favor#levelName(double)}）——这里自己不算档、
+     * 不碰技能管控表、也不新增任何判定。</p>
+     */
+    private void favor(String a, Caller me) {
+        if (boot == null || boot.favor() == null) {
+            out.warn("favor 不可用：好感度存储未装配（" + why() + "）");
+            return;
+        }
+        String[] v = Str.verb(a);
+        String sub = v[0].toLowerCase();
+        if (sub.isEmpty()) {
+            favorTop();
+            return;
+        }
+        if ("get".equals(sub)) {
+            long qq = favorQq(v[1]);
+            if (qq <= 0L) {
+                out.warn("用法：" + name() + "/favor get <QQ>");
+                return;
+            }
+            out.print(favorLine(qq, null) + "\n", Out.Tone.NORMAL);
+            return;
+        }
+        if ("set".equals(sub)) {
+            favorSet(me, v[1]);
+            return;
+        }
+        if ("reset".equals(sub)) {
+            favorReset(me, v[1]);
+            return;
+        }
+        out.warn("未知子命令：" + v[0]);
+        out.dim("  用法：" + name() + "/favor [get <QQ>|set <QQ> <数值>|reset [QQ]]");
+    }
+
+    /** {@code favor}（裸）：榜单（数值降序，最多 {@link #FAVOR_TOP} 行）。 */
+    private void favorTop() {
+        List<JsonObject> rows = boot.favor().top(FAVOR_TOP);
+        if (rows == null || rows.isEmpty()) {
+            out.dim("好感度还没有记录：她对谁都没建过账（第一次打交道时自动建一行，初值 0 = 初识）。");
+            return;
+        }
+        out.print("好感度榜单（数值降序，最多 " + FAVOR_TOP + " 行）：\n", Out.Tone.NORMAL);
+        int n = 0;
+        for (JsonObject r : rows) {
+            if (r == null) continue;
+            out.print("  " + favorLine(J.l(r, "qq", 0L), r) + "\n", Out.Tone.NORMAL);
+            n++;
+        }
+        out.dim("  共 " + n + " 行" + (n >= FAVOR_TOP ? "（到上限 " + FAVOR_TOP + " 行，可能还有别人没列出）" : "")
+                + "；改数值：" + name() + "/favor set <QQ> <数值>。");
+    }
+
+    /** 一行：{@code QQ/昵称 ← 数值 · 档位}（行里有昵称字段就带上，没有就只给 QQ）。 */
+    private String favorLine(long qq, JsonObject row) {
+        double v = row == null ? boot.favor().of(qq) : J.d(row, "value", boot.favor().of(qq));
+        return favorWho(qq, row) + " ← " + favorNum(v) + " · " + boot.favor().levelName(v);
+    }
+
+    /** 一行里的"谁"：{@code QQ}；行里有昵称字段就 {@code QQ/昵称}（favor 表本身没有昵称列）。 */
+    private static String favorWho(long qq, JsonObject row) {
+        StringBuilder sb = new StringBuilder(String.valueOf(qq));
+        if (row != null) {
+            for (String k : new String[] {"name", "nick", "nickname", "card"}) {
+                com.google.gson.JsonElement el = row.get(k);
+                if (el == null || el.isJsonNull() || !el.isJsonPrimitive()) continue;
+                String s = Str.trim(el.getAsString());
+                if (!s.isEmpty()) {
+                    sb.append('/').append(s);
+                    break;
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /** 数值打印：整数不带小数点（与旧控制台观感一致），小数原样。 */
+    private static String favorNum(double v) {
+        return v == Math.rint(v) && !Double.isInfinite(v) ? String.valueOf((long) v) : String.valueOf(v);
+    }
+
+    /** 解析一个 QQ 号；不是正整数返回 {@code -1}（调用方给可读的用法）。 */
+    private static long favorQq(String raw) {
+        String s = Str.trim(raw);
+        if (s.isEmpty()) return -1L;
+        try {
+            long qq = Long.parseLong(s);
+            return qq > 0L ? qq : -1L;
+        } catch (Throwable t) {
+            return -1L;
+        }
+    }
+
+    /** 解析一个数值；不是有限数返回 {@code null}（调用方给可读的用法）。 */
+    private static Double favorValue(String raw) {
+        String s = Str.trim(raw);
+        if (s.isEmpty()) return null;
+        try {
+            double v = Double.parseDouble(s);
+            return Double.isNaN(v) || Double.isInfinite(v) ? null : Double.valueOf(v);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * {@code favor set <QQ> <数值>}：主人直改。
+     * <p>校验口径就是 {@link Favor#setValue} 那一支的现有口径：QQ 必须是正整数、数值必须
+     * {@code ≥ 0}（上不封顶）——越界在这里回一句可读的拒绝，绝不抛、也绝不写。</p>
+     */
+    private void favorSet(Caller me, String rest) {
+        if (!masterOnly(me, "favor set")) return;
+        String[] p = Str.trim(rest).split("\\s+");
+        long qq = p.length > 0 ? favorQq(p[0]) : -1L;
+        Double want = p.length > 1 ? favorValue(p[1]) : null;
+        if (qq <= 0L || want == null) {
+            out.warn("用法：" + name() + "/favor set <QQ> <数值>（QQ 是正整数；数值 ≥ 0，可带小数）");
+            return;
+        }
+        if (want.doubleValue() < 0.0D) {
+            out.warn("数值越界：" + favorNum(want.doubleValue())
+                    + " —— 好感度的下界是 0（负值不收；要降就设一个更小的非负数）。");
+            out.dim("  上不封顶：≥900 就是最高档「" + boot.favor().levelName(900) + "」；下界 0 = 「"
+                    + boot.favor().levelName(0) + "」。");
+            return;
+        }
+        Favor.Change c = boot.favor().setValue(qq, want.doubleValue(), "控制台直改", "console");
+        out.ok("已直改：" + qq + " 好感度 " + favorNum(c.before) + " → " + favorNum(c.after)
+                + "（" + boot.favor().levelName(c.after) + "）");
+        out.dim("  主人定值不受她自己单次加减区间（加 [1,3] / 减 [5,10]）限制；她自己的加减照旧由基板夹死。");
+    }
+
+    /**
+     * {@code favor reset <QQ>}：清成初值（0 = 初识）；不给 QQ = 清空全部记录。
+     * <p>单人重置走 {@link Favor#setValue}（= 她心里的"初值"就是 0，见 {@link Favor#of(long)} 的缺省）；
+     * 全清走 {@link Favor#resetAll()}。两条都只有主人能跑。</p>
+     */
+    private void favorReset(Caller me, String rest) {
+        if (!masterOnly(me, "favor reset")) return;
+        String s = Str.trim(rest);
+        if (s.isEmpty()) {
+            out.ok("已清空全部好感度记录（" + boot.favor().resetAll() + " 条）");
+            return;
+        }
+        long qq = favorQq(s);
+        if (qq <= 0L) {
+            out.warn("用法：" + name() + "/favor reset <QQ>（不给 QQ = 清空全部记录）");
+            return;
+        }
+        double before = boot.favor().of(qq);
+        Favor.Change c = boot.favor().setValue(qq, 0.0D, "控制台重置", "console");
+        out.ok("已重置：" + qq + " 好感度 " + favorNum(before) + " → " + favorNum(c.after)
+                + "（" + boot.favor().levelName(c.after) + "）");
+    }
+
+    // aclCmd() 已删：旧账本（perms.jsonc）那一套随本轮权限整改消失 —— 看表/写表都在上面的 perm
+    //（skillctl.json）；旧命令名 ai/acl 只在 route 里留了一句退休指路。
 
     /**
      * 装配还没走到第①步时用的"壳配置"：直接按数据根读 {@code config.json}。
@@ -1101,7 +1985,7 @@ public final class Cmd {
      * 待生效键的可读清单（{@code pending=<N>} + 最多 8 个键名 + "还有 M 个"）。
      * <p>主人 2026-09-16 的口径：{@code ai/status} 不只要个数，还要<b>点名</b>——
      * 写完 config.json 要能看见是哪几个键待生效，{@code ai/start}/{@code ai/restart} 之后
-     * 要能看见这份清单变空。上限口径与 {@code ai/acl} 的账本块一致（8 行 + 余数）。</p>
+     * 要能看见这份清单变空。上限口径：最多 8 行 + 余数（控制台清单的一贯做法）。</p>
      */
     private String pendingText(java.util.List<String> pend) {
         if (pend == null || pend.isEmpty()) return "pending=0";
@@ -1335,7 +2219,31 @@ public final class Cmd {
         }
         if ("import".equals(op)) {
             String[] p = v[1].split("\\s+", 2);
-            int n = boot.store().importJson(p[0], new File(p[1]));
+            if (p.length < 2 || Str.blank(p[0]) || Str.blank(p[1])) {
+                out.warn("用法：" + name() + "/store import <库> <路径>"
+                        + "（路径从参数取 ⇒ 这个写口要过 File 判定）");
+                return;
+            }
+            File src = new File(p[1].trim());
+            // ★ import 的语义是"把本机那份文件读进来"：两道判定都按工具面 store_admin.import 同一套口径。
+            // 判定主体取法与 Cmd 里既有判定同源：caller()（控制台 = 主人；主人与她本人恒全权，
+            // 所以控制台这一条永远放行 —— 但"过不过判定"这件事必须是显式的两行，不能靠没人问）。
+            Acl acl = aclOrWarn();
+            if (acl == null) return;                      // 拿不到权限面 = 不判 = 不写（fail-closed）
+            // ★ DB 域：整库覆盖（没有逐行归属可验）⇒ rowOwner=null；库名 → 数据键复用工具面那一份
+            // 现成映射 Builtins.dbKeyOf（同一个库名在各处必须是同一个键，不许另起一套）。
+            String dbDeny = acl.dbDeny(caller(), Builtins.dbKeyOf(p[0]), null);
+            if (dbDeny != null) {
+                out.warn(dbDeny);
+                return;
+            }
+            // ★ File 域：import 读的是本机那份文件（路径从参数取）⇒ write=false 看 Read。
+            String deny = acl.fileDeny(caller(), src.getAbsolutePath(), false);
+            if (deny != null) {
+                out.warn(deny);
+                return;
+            }
+            int n = boot.store().importJson(p[0], src);
             out.ok(n >= 0 ? ("已导入 " + n + " 条") : "导入失败");
             return;
         }
@@ -1354,8 +2262,8 @@ public final class Cmd {
         try {
             String n = name();
             return new String[] {
-                    "AiAgent V4.1 —— 基板只做九件事：存储 / 热插拔 / 提示词 / Agent / 上下文 / 权限 / 模型 / NapCat / 控制台",
-                    "本地控制台交互 ≡ QQ 中的主人交互；主人 = MASTER，工具一律全放行。",
+                    "AiAgent V4.2 —— 基板只做九件事：存储 / 热插拔 / 提示词 / Agent / 上下文 / 权限 / 模型 / NapCat / 控制台",
+                    "本地控制台交互 ≡ QQ 中的主人交互；主人（MASTER）与她本人（SYSTEM）恒全权，工具一律放行。",
                     "对话：",
                     "\t" + n + "/chat <内容>      和 AI 说话（与 QQ 主人消息同一条链路）",
                     "\t" + n + "/stop             中断当前输出",
@@ -1371,7 +2279,7 @@ public final class Cmd {
                     "\t" + n + "/status 会列出「待生效」的键（文件里是新值、跑着的基板还是旧值）。",
                     "基板状态：",
                     "\t" + n + "/status           运行状态（未启动会说 ready=0 reason=not_started；装配失败时给出失败步骤）",
-                    "\t" + n + "/tools [all]      当前可见工具（all=含被权限挡住的名字）",
+                    "\t" + n + "/tools [all]      当前可见工具（all=含没授权/被封禁的名字）",
                     "\t" + n + "/config [键 [值]]  看/改配置（读的是 config.json 这个文件；config set 只写文件，不生效）",
                     "\t" + n + "/config reload    已退休：热重载没了，改动只有 " + n + "/start 或 " + n + "/restart 才生效",
                     "\t" + n + "/tick             手动跑一次心跳（on_timer + 定时唤醒）",
@@ -1380,8 +2288,17 @@ public final class Cmd {
                     "\t" + n + "/skill [list|reload|validate|read 名]   技能库（外挂层）",
                     "\t" + n + "/prompt [show|list|sections|read 名|stat|reload]  提示词",
                     "\t" + n + "/prompt inject <slot> <key> <文本>      注入到 system/context/tool/arg",
-                    "\t" + n + "/perm [list|set QQ 值|reset|QQ]        好感度（权限已改由 ACL 账本管）",
-                    "\t" + n + "/acl                              权限账本（ACL）：条目 + 按类默认分配（只读）",
+                    "\t" + n + "/perm [list [op]|reload]           权限表（合并视图）：逐行看表 / 按 op 看谁能用 / 重新合并装载",
+                    "\t" + n + "/perm gen                          只在已有权限文件里重排：按工具分组、补中文释义（不新建文件）",
+                    "\t" + n + "/perm run|ban <op> <身份> [身份…]   白名单（授权）/ 黑名单（封禁）—— 只有主人能跑",
+                    "\t" + n + "/perm db run|read|ban <数据键> <身份…>   DB 块：这类数据谁能改 / 谁能读 / 谁不能 —— 只有主人能跑",
+                    "\t" + n + "/perm file run|read|ban <路径> <身份…>  File 块：这个路径谁能碰（目录末尾带 / = 整棵子树；路径含空格用双引号）—— 只有主人能跑",
+                    "\t" + n + "/perm revoke <键> <身份>           撤掉该身份在这个键上的全部条目（op / DB / File 自动认）—— 只有主人能跑",
+                    "\t" + n + "/acl                              已退休（旧权限账本）：看表请用 " + n + "/perm",
+                    "\t" + n + "/favor                            好感度榜单（数值降序，最多 20 行）",
+                    "\t" + n + "/favor get <QQ>                     某人当前数值与档位",
+                    "\t" + n + "/favor set <QQ> <数值>              主人直改数值（不受她自己加减区间限制）—— 只有主人能跑",
+                    "\t" + n + "/favor reset <QQ>                   清成初值（0 = 初识）；不给 QQ 就清空全部记录 —— 只有主人能跑",
                     "\t" + n + "/napcat [status|on|off|list|send group 群号 内容]",
                     "\t" + n + "/napcat relay [status|on|off]       文件外链中转（本地文件怎么交给 NapCat）",
                     "\t" + n + "/store [stat|maintain|export 库|import 库 路径]",
@@ -1390,8 +2307,16 @@ public final class Cmd {
                     "\t" + n + "/status 的 boot.failed_step 会指出是哪一步失败、因为什么。",
                     "说明：业务能力（发图/禁言/搜索/天气/审核/主动发言……）不在控制台命令里，",
                     "\t它们由 data/skills 提供为 AI 工具；技能目录整体删掉，基板照常运转。",
-                    "说明：权限 = 资源 ACL（数据根的 perms.json 账本 + 按资源类型的默认分配 + 例外突破默认）；",
-                    "\t授权/撤销/查询/验算走她那边的 perm 工具。控制台 ai/acl 只看账本，ai/perm 只管好感度。",
+                    "说明：权限 = 按归属分散的权限文件（数据根 " + Acl.CORE_FILE_NAME + " + 每个技能自己的 "
+                            + Acl.SKILL_FILE_NAME + "）：身份 × op → Ban / Run / 空；"
+                            + "主人与她本人恒全权；ALLUSER 按文件判，没列到 = 未授权 = 不可用。",
+                    "\t身份写法 user:<QQ> / group:<群号> / ALLUSER（裸 QQ 号 = user:<QQ>）；"
+                            + "条目写工具名（memory）覆盖它全部动作；Ban > Run > 空。",
+                    "\t技能目录里没有 " + Acl.SKILL_FILE_NAME + " = 该技能全部 op 不授权；"
+                            + "技能文件里写了不属于它的 op 会被忽略（启动日志里有一行告警）。",
+                    "\t看表与改表都在控制台 " + n + "/perm；授权/撤销/查询也可以让她用 perm 工具。",
+                    "说明：好感度不是权限，也不参与任何判定 —— 只影响回话热络；主人可直改"
+                            + "（" + n + "/favor set <QQ> <数值>）。",
             };
         } catch (Throwable t) {
             return fallbackHelp();
@@ -1401,7 +2326,7 @@ public final class Cmd {
     /** 最底线的命令表（构造/装配都不可用时的兜底；静态常量，不可能失败）。 */
     public static String[] fallbackHelp() {
         return new String[] {
-                "AiAgent V4.1（降级命令表）",
+                "AiAgent V4.2（降级命令表）",
                 "控制台可用：help / status / tools / config；其余命令需要基板装配成功。",
                 "如果 status 也不可用，请查看组件日志里 [v4] 开头的错误行。",
         };
@@ -1438,5 +2363,18 @@ public final class Cmd {
             n += (c > 0x2E80) ? 2 : 1;
         }
         return n;
+    }
+    /** 表里的一行 + op 的中文释义（人看；取不到释义就只打 op）。 */
+    private String permLine(Acl.Entry e) {
+        String t = e.text();
+        String g = "";
+        try {
+            if (boot != null && boot.auth() != null && boot.auth().ops() != null) g = boot.auth().ops().noteOf(e.op());
+        } catch (Throwable ignored) {
+        }
+        if (g == null || g.isEmpty()) return t;
+        int k = g.indexOf('（');
+        if (k > 1) g = g.substring(0, k);
+        return t + "（" + g + "）";
     }
 }

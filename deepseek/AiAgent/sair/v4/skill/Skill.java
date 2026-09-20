@@ -39,4 +39,25 @@ public interface Skill {
      * 就不会注册任何工具，模型看不到它）。基板会扫该插件的<b>每个顶层类</b>，谁实现了谁来声明。</p>
      */
     default void declare(Libs libs) {}
+
+    /**
+     * <b>装载期</b>声明自己有哪些 op（动作）—— 技能管控表就是按这些名字放行或封禁的。
+     *
+     * <p>时机与 {@link #declare(Libs)} 相同（实例化入口类之后、注册工具之前，只调一次）。</p>
+     *
+     * <p><b>为什么要声明</b>：{@code ai/perm gen} 要按这份清单把每个 op 列进账本
+     * （默认空 = 未授权，等主人补身份）；判定侧也靠它知道"这个工具下面有哪些动作"。多动作技能
+     * （一个工具名 + 一个选择子参数）把每个动作各声明一条，并在<b>每个分支开头判自己那个 op</b>
+     * （{@code String deny = h.need("memory.remember");}）—— 这样"允许他记一笔"与
+     * "允许他删别人的"才能分开。单动作工具声明工具名即可（{@code action} 传空串）。</p>
+     *
+     * <pre>
+     * public void declareOps(sair.v4.auth.OpList ops) {
+     *     ops.add("memory", "remember", "记一件事");
+     *     ops.add("memory", "recall", "回想");
+     *     ops.add("memory", "forget", "忘掉一条");
+     * }
+     * </pre>
+     */
+    default void declareOps(sair.v4.auth.OpList ops) {}
 }

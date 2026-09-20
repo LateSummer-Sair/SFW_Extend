@@ -328,17 +328,18 @@ public final class Loop {
     /**
      * 工具结果是不是"被权限拦下"（拦下不算说过话）。
      *
-     * <p><b>D12 ★4：三种形态都要认</b> —— ACL 内核产出的 {@code [权限阻断] }（唯一现代判据）、
-     * 旧档位面写死的 {@code [auth] 权限阻断}（只作兼容识别），以及基板 {@code Host.need*} 的信息性
-     * 前缀 {@code 缺 [RWX] 位 —— }（它的产出形态是 {@code 缺 W 位 —— [权限阻断] 需要 …}）。
-     * 只认旧串时，ACL 面的拒绝会被当成"说过话了"。</p>
+     * <p><b>D12 ★4：现代形态 + 历史形态都要认</b> —— 技能管控表的拒绝原文一律以
+     * {@code [权限阻断] } 开头（{@link sair.v4.auth.Acl#DENY_PREFIX}，唯一现代判据）；
+     * 旧档位面写死的 {@code [auth] 权限阻断}（{@link sair.v4.auth.Auth#DENY_PREFIX}）只作兼容识别。
+     * 另外三种 {@code 缺 [RWX] 位 —— } 是资源位时代的基板前缀：资源不再有位之后<b>没有任何代码
+     * 会产出它</b>，留着只为认历史文案。只认现代串时，管控表的拒绝会被当成"说过话了"。</p>
      */
     private static boolean deniedResult(String result) {
         if (result == null) return false;
         String s = result.trim();
-        return s.startsWith(sair.v4.auth.Auth.DENY_PREFIX)
-                || s.contains(sair.v4.auth.Acl.DENY_PREFIX)
-                || s.startsWith("缺 R 位 —— ")
+        return s.startsWith(sair.v4.auth.Auth.DENY_PREFIX)     // 历史形态：旧档位面（兼容识别）
+                || s.contains(sair.v4.auth.Acl.DENY_PREFIX)    // 现代形态：[权限阻断]
+                || s.startsWith("缺 R 位 —— ")                  // 历史形态（新口径不再产出）
                 || s.startsWith("缺 W 位 —— ")
                 || s.startsWith("缺 X 位 —— ");
     }
@@ -357,14 +358,14 @@ public final class Loop {
     /**
      * 结果算不算失败：只看<b>结构前缀</b>与<b>结构标记</b>，不看内容关键词 ——
      * 首行形如 {@code [<工具名>]…}（工具自报结果）、{@code [tool]…}（未命中/无实现/执行异常）、
-     * {@code [auth]…}（旧的档位面权限阻断）、以及基板 <b>ACL 面</b>产出的三种拒绝形态
-     * （见 {@link #deniedResult}：{@code [权限阻断] } / {@code [auth] 权限阻断} / {@code 缺 [RWX] 位 —— }）。
+     * {@code [auth]…}（旧档位面的权限阻断）、以及权限面的拒绝形态
+     * （见 {@link #deniedResult}：{@code [权限阻断] } / {@code [auth] 权限阻断} / 三种历史 {@code 缺 [RWX] 位 —— }）。
      * 这些都不需要任何硬编码关键词表。
      *
      * <p><b>为什么权限阻断必须算失败</b>（P9b-1 补的第四处识别面）：连续失败闸门靠它计数，
-     * 只认旧前缀时 ACL 面的拒绝一次都不计数 ⇒ {@code failStop} 永不触发（她可以无限撞权限墙）。
+     * 只认旧前缀时权限面的拒绝一次都不计数 ⇒ {@code failStop} 永不触发（她可以无限撞权限墙）。
      * 判据仍只看<b>首行</b>（截断 60 字）：拒绝文案的标记一定在首位
-     * （{@code [权限阻断] } 或 {@code 缺 X 位 —— }），所以首行足够；也避免"正文里引用了一句拒文"
+     * （{@code [权限阻断] } 或历史前缀），所以首行足够；也避免"正文里引用了一句拒文"
      * 被误算成这次调用失败了。</p>
      *
      * <p><b>自报结果里的 {@code ok=0|1} 是结构标记，不是关键词表</b>（B8，2026-09-16 真机事故）：
@@ -385,7 +386,7 @@ public final class Loop {
         String head = nl > 0 ? s.substring(0, nl) : s;
         if (head.length() > 60) head = head.substring(0, 60);
         if (head.startsWith("[tool]") || head.startsWith("[auth]")) return true;
-        if (deniedResult(head)) return true;                  // ACL 面：三种形态（含 缺 X 位 —— [权限阻断] …）
+        if (deniedResult(head)) return true;                  // 权限面：现代 [权限阻断] + 历史前缀（见 deniedResult）
         if (!Str.has(tool) || !head.startsWith("[" + tool + "]")) return false;
         return okMark(head) != 1;          // 自报前缀命中：ok=1 才是成功；ok=0 与"没有标记"都算失败
     }
