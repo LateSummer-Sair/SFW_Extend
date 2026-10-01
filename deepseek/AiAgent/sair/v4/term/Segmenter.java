@@ -8,7 +8,7 @@ import sair.v4.qq.Seg;
 /**
  * 分段发送的口径（<b>配置驱动</b>）：一条回复拆几条、每条多长、条与条之间停多久。
  *
- * <p>四个键（都能在 config.json 里改，改完即时生效）：</p>
+ * <p>六个键（都能在 config.json 里改，改完即时生效）：</p>
  * <ul>
  *   <li>{@code replySplit}（默认 true）：总开关。关掉 = 一条发完（只有极端超长才硬切）。</li>
  *   <li>{@code replyMaxChars}（默认 1000）：单条上限；超过就按"空行段落"拆（V3 的 {@code MAX_MSG_LEN}）。</li>
@@ -16,6 +16,12 @@ import sair.v4.qq.Seg;
  *       {@code 0} = 群聊不加这一层。</li>
  *   <li>{@code replySplitDelayMs} + {@code replySplitJitterMs}（默认 800 + 最多 1200）：
  *       条与条之间的停顿；两个都设 0 = 立刻连发。</li>
+ *   <li>{@code replyMaxParts}（默认 {@value #DEF_MAX_PARTS}）：<b>一轮最多发几条</b>（爆炸半径的硬上限，
+ *       {@code <=0} = 不限制）。它不改变分段结果，只在<b>发送之前</b>把超出上限的尾巴丢掉（见
+ *       {@link #maxParts()} 与 {@code Sinks} 里的那道闸）—— 依据是真机事故 2026-09-22 09:06：
+ *       一轮 14 条里 4 条撞上 QQ「本群每分钟只能发 10 条」被拒收；全库 2151 条回复的条数分布是
+ *       {@code 1→1902 / 2→126 / 3→61 / 4→33 / 5→15 / 6→2 / 7→4 / 8→4 / 9→3 / 14→1}
+ *       ⇒ {@code >9} 只有事故那 1 条，阈值 9 的历史误伤 0。</li>
  * </ul>
  *
  * <p>显式标记优先：模型自己写了 {@code <split>} 就只按标记拆（它分好的段最贴合语气），
@@ -34,6 +40,15 @@ public final class Segmenter {
     public static final int DEF_GROUP_MAX_CHARS = 180;
     public static final int DEF_DELAY_MS = 800;
     public static final int DEF_JITTER_MS = 1200;
+    /**
+     * 出厂默认：<b>一轮最多发 9 条</b>（{@code replyMaxParts} 的默认值）。
+     *
+     * <p>为什么是 9 而不是人设里写的 3：9 是<b>实测</b>选出来的 —— 全库 2151 条回复的条数分布
+     * {@code 1→1902 / 2→126 / 3→61 / 4→33 / 5→15 / 6→2 / 7→4 / 8→4 / 9→3 / 14→1}
+     * 里 {@code >9} 只有事故那 1 条（历史误伤 0）；照人设的 3 设会误伤 62 条。
+     * 顺带：QQ 每群每分钟 10 条的硬限流也在这个上限以内。</p>
+     */
+    public static final int DEF_MAX_PARTS = 9;
 
     /** 是否开了分段。 */
     public boolean on() {
@@ -77,6 +92,21 @@ public final class Segmenter {
             return conf == null ? DEF_JITTER_MS : conf.getInt("replySplitJitterMs", DEF_JITTER_MS);
         } catch (Throwable t) {
             return DEF_JITTER_MS;
+        }
+    }
+
+    /**
+     * 一轮最多发几条（{@code replyMaxParts}，默认 {@value #DEF_MAX_PARTS}；{@code <=0} = 不限制）。
+     *
+     * <p>它<b>不参与</b> {@link #plan}：分段结果一个字不变，超限只在发送之前把尾巴丢掉
+     * （判据与 warn 在 {@code term.Sinks} 那一处，QqSink / TaskSink 共用）。这样"分段口径"
+     * 与"爆炸半径上限"是两件可分别解释、分别回滚的事。</p>
+     */
+    public int maxParts() {
+        try {
+            return conf == null ? DEF_MAX_PARTS : conf.getInt("replyMaxParts", DEF_MAX_PARTS);
+        } catch (Throwable t) {
+            return DEF_MAX_PARTS;
         }
     }
 

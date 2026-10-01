@@ -355,4 +355,282 @@ public interface Host {
      * <p>群聊没有这个动作（直接 no-op）；NapCat 没连上也是 no-op；<b>不抛异常</b>。</p>
      */
     default void typing(boolean on) { }
+
+    // ==================== 媒体出口：以「她自己」（SYSTEM）的身份说出去 ====================
+
+    /**
+     * <b>把一段媒体（图 / 语音）以「她自己」的身份发进当前会话</b>。
+     *
+     * <p><b>为什么需要它</b>（2026-09-24 真机 P0，批 10 头号修复）：技能层的 op
+     * （{@code sticker.send} / {@code sendimage} / {@code send.record}）已经是"她能不能发"的
+     * <b>唯一授权闸门</b>，而<b>内层平台动作</b> {@code napcat.send_group_msg} 对 {@code ALLUSER}
+     * 是黑名单（技能管控表 {@code Skill.Ban}）⇒ 群友触发的回合里她<b>自己</b>想顺手发一张表情包，
+     * 会被内层动作按"当轮调用者 = 群友"判死。真机逐字证据：
+     * {@code [tool] sticker ms=5 chars=49 ok=0 → 表情包没发出去：[权限阻断] 「napcat.send_group_msg」
+     * 在技能管控表的黑名单里} —— 而同一张图在主人的回合里 {@code ok=1}。
+     * <b>她的正文发得出去、她的图发不出去，这个不对称就是本条要消掉的东西。</b></p>
+     *
+     * <p><b>口径与基板替她说话那条同源</b>：内层平台动作改按 {@code SYSTEM}（她本人恒全权）判 ——
+     * 与 {@code Boot#sinkForDeliver} 里"基板替机器人发一句话属于她自己说话"（那里传的也是
+     * {@code guardedApi}、闸门按"没有绑定调用者 = SYSTEM"判）是同一条，<b>不新开任何绕过闸门的口</b>。</p>
+     *
+     * <p><b>判据一个字没放宽</b>：</p>
+     * <ul>
+     *   <li>① 技能 op 仍由<b>技能自己</b>判（本口不判、也不放宽任何技能 op）；</li>
+     *   <li>② 要走出去的本地文件仍只经 {@code Api.call} 那一层（{@code rewriteLocalFile} 的外链中转
+     *       改写 + {@code File} 域路径判定）⇒ 交给 NapCat 的仍是 {@code http://…/<token>/…}，
+     *       不是盘符路径（NapCat 在另一台机器上）；</li>
+     *   <li>③ {@code Api.call} 里的自我记账头 / SILENT / 标记族 / 红线那几道闸一道都不绕。</li>
+     * </ul>
+     *
+     * <p><b>补一道（W7/批 13）</b>：{@code type="record"} 时，本地件先按<b>当轮调用者</b>过一遍
+     * {@code File} 域（{@link #localFileDeny}），过了才换 {@code SYSTEM} 出门 —— 不补的话下面那句
+     * SYSTEM 绑定会把 {@code File} 域判定<b>一起</b>绕过去（批 10 独立复核实测的那条外延：普通群友能让
+     * 机器人把本机任意可读文件变成中转 URL）。{@code type="image"} 与没有权限面的老宿主
+     * <b>逐字节不变</b>。</p>
+     *
+     * <p><b>只发当前会话</b>：{@code (group,target)} 必须就是调用者此刻所在的会话 ——
+     * 对不上（或控制台、没有调用者、NapCat 面没装配、类型不认）一律<b>返回 {@code null}</b>，
+     * 调用方按原路（{@code h.napcat()}）发。所以这条口不是"能发给任意人"的新路，
+     * 也不需要任何新权限。</p>
+     *
+     * <p><b>可观测</b>：由本口发出去的那一次打一行结构事实
+     * {@code [say] <type> ok=1 via=self as=SYSTEM by=<谁的回合> session=… target=… ms=… file=…}
+     * （失败时 {@code ok=0} 并带 {@code error=}）。落点是 {@link #out()} 的 <b>{@code skill}</b> 类别
+     * —— 出厂 {@code logConsole="tool,model"} ⇒ <b>默认不打</b>（要看就加 {@code skill}，或
+     * {@code logVerbose=true}）；{@code ok=0} 另有一处默认可见的痕迹：工具结果那行 {@code [tool] … ok=0}
+     * （类别 {@code tool}，出厂就是开的）。回退那条路由调用点自己打（同一形状、{@code via=old}）。</p>
+     *
+     * <p><b>默认实现 = 全部实现</b>：本口只用 {@link #caller()} / {@link #napcat()} /
+     * {@link #conf()} / {@link #out()} 这几个既有面，所以任何宿主（含老宿主与桩）直接得到它。
+     * 对"那份没有闸门的 {@code napcat()}"（老宿主）这层 {@code SYSTEM} 绑定是<b>空操作</b>，
+     * 产物与加这条口之前逐字节相同 —— 这就是"与旧行为逐字一致"的兜底。</p>
+     *
+     * @param group  落点是不是群
+     * @param target 群号 / QQ（必须就是当前会话那一个）
+     * @param type   媒体类型：只认 {@code "image"} 与 {@code "record"}（其余一律返回 null）
+     * @param file   写法：本地绝对路径 / {@code http(s)} / {@code base64://} / NapCat fileid
+     * @return 与 {@link #napcat()} 同形的响应对象（判错仍用 {@link Api#ok(JsonObject)} /
+     *         {@link Api#error(JsonObject)}）；{@code null} = 本口不承接，调用方按改前那条路原样发
+     */
+    default JsonObject sayMedia(boolean group, long target, String type, String file) {
+        final String f = sair.v4.kit.Str.trim(file);
+        final String kind = sair.v4.kit.Str.lower(sair.v4.kit.Str.trim(type));
+        if (f.isEmpty() || target <= 0L) return null;
+        if (!"image".equals(kind) && !"record".equals(kind)) return null;   // 只承接这两种形态
+        final Caller me = caller();
+        if (me == null || me.isConsole()) return null;                      // 当前会话不是 QQ 会话
+        if (me.toGroup() != group) return null;
+        final long mine = group ? me.groupId() : me.qq();
+        if (mine <= 0L || mine != target) return null;                      // 只发当前会话，不接别的落点
+        // ★ W7/批 13：语音（record）多一道"按当轮调用者过 File 域"的前置判定。
+        //   为什么必须补：下面那句 Ctx.of(SYSTEM) 会把**内层动作与 File 域判定一起**改按她本人判，
+        //   于是"该不该读这个本地文件"就没人问了 —— 批 10 独立复核实测的那条外延正是它
+        //   （普通群友能让机器人把本机任意可读文件变成中转 URL 交给 NapCat；见 消息发送\perms.jsonc
+        //   里把 send.record 收窄成 Ban 的那段原话）。补上以后，本地件必须先按**触发者**的档位过
+        //   File 域（含好感度档的只读放行，见 Acl.fileDeny），过了才换 SYSTEM 出门。
+        //   今天这一步是空操作：send.record 对 ALLUSER 是 Ban（技能那一判先挡掉了），能走到这儿的
+        //   只有主人 / 她本人，而他们的 fileDeny 本来就恒 null。image 那一路<b>一个字没动</b>
+        //   （表情包 / 发图片的本地件走的仍是老口径）。
+        if ("record".equals(kind)) {
+            String pd = localFileDeny(me, f);
+            if (pd != null) return sair.v4.kit.J.obj("error", pd);
+        }
+        final Api api = napcat();
+        if (api == null) return null;                                       // NapCat 面没装配：按原路
+        final long t0 = System.currentTimeMillis();
+        JsonObject r;
+        // ★ 这一句是整条口的要点：把判定主体显式钉成 SYSTEM（她本人恒全权），与基板替她说话那条同源。
+        //   作用域只在这一次动作内，结束即还原（异常也还原）—— 技能自己那句 need(...) 早就判完了，
+        //   这里的绑定绝不改变"技能 op 由当轮调用者判"这件事。
+        // ★ 批 15（2026-09-26 甲方 CEO 令 · 落点规则）：钉子换成 {@code me.withSystem(true)}。
+        //   为什么必须换：旧写法 `Caller.systemActor(masterQQ)` 会把**会话本身**抹成控制台
+        //   （entry=CONSOLE / groupId=0 / qq=主人号），于是 NapCat 闸门里新加的那道落点判定
+        //   （{@code Boot.destDeny}）在这一跳再也看不出"其实是在给 私聊A / 群G 发东西"——
+        //   合法的自主出口会被它当成"没有当前会话"整条拒掉。两者对 ACL 与 File 域**逐条等价**
+        //   （{@code kind()} 都是 SYSTEM ⇒ 恒全权，判定只看 kind），差的只有 session()/qq()/groupId()
+        //   这几格——而落点规则要的正是它们。
+        sair.v4.ctx.Ctx.Scope sc = sair.v4.ctx.Ctx.of(me.withSystem(true));
+        try {
+            if ("record".equals(kind)) {
+                r = group ? api.sendGroupRecord(target, f) : api.sendPrivateRecord(target, f);
+            } else {
+                r = group ? api.sendGroupImage(target, f) : api.sendPrivateImage(target, f);
+            }
+        } catch (Throwable t) {
+            // 绝不外抛、也绝不假装成功：按 Api 的统一形状回一个 error 对象（与 call 的失败形状同源）。
+            r = sair.v4.kit.J.obj("error", String.valueOf(t));
+        } finally {
+            sc.close();
+        }
+        try {
+            Out o = out();
+            if (o != null) {
+                boolean ok = Api.ok(r);
+                // 脱敏：日志里绝不出现"外链中转"的 token —— NapCat 的回执完全可能把刚发出去的 URL 原样带回来。
+                String scrub = "";
+                try {
+                    sair.v4.qq.Relay rl = api.relay();
+                    if (rl != null && rl.running()) scrub = rl.baseUrl();
+                } catch (Throwable ignored) {
+                }
+                String fLog = sair.v4.kit.Str.cut(sair.v4.kit.Str.oneLine(f), 120);
+                if (!scrub.isEmpty() && fLog.indexOf(scrub) >= 0) fLog = fLog.replace(scrub, "<relay>");
+                String line = "[say] " + kind + " ok=" + (ok ? 1 : 0) + " via=self as=SYSTEM by=" + me.kind()
+                        + ":" + me.qq() + " session=" + session()
+                        + " target=" + (group ? "group:" : "qq:") + target
+                        + " ms=" + (System.currentTimeMillis() - t0)
+                        + " file=" + fLog;
+                if (!ok) {
+                    String eLog = sair.v4.kit.Str.cut(sair.v4.kit.Str.oneLine(Api.error(r)), 120);
+                    if (!scrub.isEmpty() && eLog.indexOf(scrub) >= 0) eLog = eLog.replace(scrub, "<relay>");
+                    line = line + " error=" + eLog;
+                }
+                o.dim(line);
+            }
+        } catch (Throwable ignored) {
+            // 事实行只是可观测：它自己绝不改变这次发送的结果
+        }
+        return r;
+    }
+
+    /**
+     * <b>按当轮调用者过一遍 File 域（本地件专属）</b>：{@code null} = 过 / 不归它管，否则是拒绝原文。
+     *
+     * <p>只对"像本机文件"的写法起作用（{@link sair.v4.auth.FavorGate#looksLocal}）：
+     * {@code http(s)} / {@code base64://} / fileid / 相对路径一律直接放行 —— 那些不是本机文件，
+     * 不归 {@code File} 域管，硬判会把一条本来合法的外链判死。</p>
+     *
+     * <p><b>权限面没装配（{@code acl() == null}，老宿主 / 桩）时返回 {@code null}</b>：
+     * 那种宿主底下 {@code napcat()} 根本没有闸门，这里凭空加一道拒绝只会把老宿主的行为改掉 ——
+     * 而 {@code sayMedia} 的口径是"对那份没有闸门的 {@code napcat()}，本口与加它之前逐字节相同"。</p>
+     */
+    default String localFileDeny(Caller who, String file) {
+        if (!sair.v4.auth.FavorGate.looksLocal(file)) return null;   // 不是本机文件：不归 File 域
+        sair.v4.auth.Auth a = acl();
+        if (a == null) return null;                                  // 没有权限面：与加这道口之前一致
+        if (who == null) return sair.v4.auth.Acl.DENY_PREFIX + "没有主体，按拒绝处理：" + file;
+        try {
+            sair.v4.auth.Acl acl = a.acl();
+            if (acl == null) return sair.v4.auth.Acl.DENY_PREFIX + "权限面没有装配（acl == null），按拒绝处理：" + file;
+            return acl.fileDeny(who, file, false);                   // 交出去 = 读文件 ⇒ 看 Read
+        } catch (Throwable t) {
+            return sair.v4.auth.Acl.DENY_PREFIX + "路径判定异常，按拒绝处理：" + file + "（" + t + "）";
+        }
+    }
+
+    /**
+     * <b>把一份文件 / 一段语音以「她自己」的身份发进当前会话</b>（主人令 2026-09-26：{@code favor >= 500}
+     * 放权"本地文件读取 + QQ 文件发送 / 语音发送"）。
+     *
+     * <p><b>与 {@link #sayMedia} 同一条思路、同一套兜底</b>：内层平台动作
+     * （{@code send_group_msg} / {@code upload_group_file}）对 {@code ALLUSER} 是黑名单，
+     * 所以"她替这个人发一份文件"必须把主体显式钉成 {@code SYSTEM}；而<b>技能 op
+     * （{@code send.file} / {@code send.fileto} / {@code send.record}）仍然是唯一授权闸门</b> ——
+     * 本口不判技能 op、也不放宽任何技能 op。</p>
+     *
+     * <h3>四条硬口径</h3>
+     * <ol>
+     *   <li><b>落点只能是当前会话</b>：{@code (group,target)} 与调用者此刻所在的会话对不上
+     *       （或控制台、没有调用者、NapCat 面没装配）⇒ <b>返回 {@code null}</b>，调用方按原路
+     *       （{@code h.napcat()}）发。所以它不是"能发给任意人"的新路。</li>
+     *   <li><b>第二道闸先过</b>：{@link sair.v4.auth.FavorGate#lift(String, Caller)} 对这个 op
+     *       放行才承接（{@code favor >= favorFileMin}，出厂 500；主人 / 她本人恒全权、豁免此闸）。
+     *       不放行 ⇒ {@code null} 走回退路，由原路上的 ACL 判定照旧拒掉（fail-closed）。</li>
+     *   <li><b>本地件先按当轮调用者过 File 域</b>（{@link #localFileDeny}）—— 这一句不许省：
+     *       下面那句 {@code Ctx.of(SYSTEM)} 会把 File 域判定一起改按她本人判，省掉就是
+     *       "任何人都能让她把本机任意文件发出去"（批 10 实测过的外延）。
+     *       过不了 ⇒ 返回一个 {@code error} 对象（<b>不是</b> {@code null}）：本口承接了、但这件事被拒，
+     *       调用方不该再拿它去回退重试。</li>
+     *   <li><b>外链中转改写一个字不改</b>：真正的发送仍只经 {@code Api.call} 那一层
+     *       （{@code rewriteLocalFile} 把本地路径换成 {@code http://…/<token>/…}）——
+     *       交给 NapCat 的永远是 URL，<b>绝不是盘符路径</b>。</li>
+     * </ol>
+     *
+     * <p><b>可观测</b>：由本口发出去的那一次打一行结构事实
+     * {@code [say] file ok=1 via=self as=SYSTEM by=<谁的回合> session=… target=… file=…}
+     * （{@code type} = {@code file} 或 {@code record}；失败时 {@code ok=0} 并带 {@code error=}）。
+     * 落点与 {@link #sayMedia} 一样是 {@link #out()} 的 {@code skill} 类别（出厂默认不打）。</p>
+     *
+     * <p><b>默认实现 = 全部实现</b>：只用 {@link #caller()} / {@link #napcat()} / {@link #conf()} /
+     * {@link #out()} / {@link #acl()} 这几个既有面。老宿主（没有闸门的 {@code napcat()}）上它与
+     * 加这条口之前逐字节相同 —— 这就是"与旧行为一致"的兜底。</p>
+     *
+     * @param op     替哪个技能 op 干活：只认 {@code "send.file"} / {@code "send.fileto"} /
+     *               {@code "send.record"}（其余一律返回 {@code null}）；前三者一律发<b>当前会话</b>，
+     *               {@code fileto} 的"指定的人"必须就是当前私聊那一个
+     * @param group  落点是不是群
+     * @param target 群号 / QQ（必须就是当前会话那一个）
+     * @param file   写法：本地绝对路径 / {@code http(s)} / {@code base64://} / NapCat fileid
+     * @param name   上传文件名（{@code send.file} / {@code send.fileto} 用；空 = 由基板按路径取）
+     * @return 与 {@link #napcat()} 同形的响应对象；{@code null} = 本口不承接，调用方按改前那条路原样发
+     */
+    default JsonObject sayFile(String op, boolean group, long target, String file, String name) {
+        final String o = sair.v4.kit.Str.trim(op);
+        if (!"send.file".equals(o) && !"send.fileto".equals(o) && !"send.record".equals(o)) return null;
+        final String f = sair.v4.kit.Str.trim(file);
+        if (f.isEmpty() || target <= 0L) return null;
+        final Caller me = caller();
+        if (me == null || me.isConsole()) return null;                      // 当前会话不是 QQ 会话
+        if (me.toGroup() != group) return null;
+        final long mine = group ? me.groupId() : me.qq();
+        if (mine <= 0L || mine != target) return null;                      // ★ 只发当前会话，不接别的落点
+        final boolean free = me.kind() == Caller.Kind.MASTER || me.kind() == Caller.Kind.SYSTEM;
+        // ★ 第二道闸（好感度档位）：主人 / 她本人豁免（本来就恒全权），其余人必须被它放行才承接。
+        if (!free && sair.v4.auth.FavorGate.lift(o, me) == null) return null;
+        // ★ 本地件先按"当轮调用者"过 File 域（含好感度档的只读放行）——见上面第 ③ 条。
+        String pd = localFileDeny(me, f);
+        if (pd != null) return sair.v4.kit.J.obj("error", pd);
+        final Api api = napcat();
+        if (api == null) return null;                                       // NapCat 面没装配：按原路
+        final boolean asRecord = "send.record".equals(o);
+        final long t0 = System.currentTimeMillis();
+        JsonObject r;
+        // ★ 与 sayMedia 同一句要点：把判定主体显式钉成 SYSTEM（她本人恒全权），作用域只在这一次动作内。
+        // ★ 批 15（2026-09-26 甲方 CEO 令 · 落点规则）：钉子换成 {@code me.withSystem(true)} ——
+        //   与 sayMedia 那边同一条理由：落点判定（{@code Boot.destDeny}）要看出"这一次是在给哪一个会话
+        //   发东西"，而 {@code Caller.systemActor(masterQQ)} 会把会话抹成控制台。两者对 ACL/File 域
+        //   逐条等价（kind() 都是 SYSTEM）。
+        sair.v4.ctx.Ctx.Scope sc = sair.v4.ctx.Ctx.of(me.withSystem(true));
+        try {
+            if (asRecord) {
+                r = group ? api.sendGroupRecord(target, f) : api.sendPrivateRecord(target, f);
+            } else {
+                r = group ? api.sendGroupFile(target, f, name) : api.sendPrivateFile(target, f, name);
+            }
+        } catch (Throwable t) {
+            r = sair.v4.kit.J.obj("error", String.valueOf(t));
+        } finally {
+            sc.close();
+        }
+        try {
+            Out o2 = out();
+            if (o2 != null) {
+                boolean ok = Api.ok(r);
+                // 脱敏：日志里绝不出现"外链中转"的 token（NapCat 的回执可能把刚发出去的 URL 原样带回来）。
+                String scrub = "";
+                try {
+                    sair.v4.qq.Relay rl = api.relay();
+                    if (rl != null && rl.running()) scrub = rl.baseUrl();
+                } catch (Throwable ignored) {
+                }
+                String fLog = sair.v4.kit.Str.cut(sair.v4.kit.Str.oneLine(f), 120);
+                if (!scrub.isEmpty() && fLog.indexOf(scrub) >= 0) fLog = fLog.replace(scrub, "<relay>");
+                String line = "[say] " + (asRecord ? "record" : "file") + " ok=" + (ok ? 1 : 0)
+                        + " via=self as=SYSTEM by=" + me.kind() + ":" + me.qq() + " session=" + session()
+                        + " target=" + (group ? "group:" : "qq:") + target
+                        + " ms=" + (System.currentTimeMillis() - t0)
+                        + " file=" + fLog;
+                if (!ok) {
+                    String eLog = sair.v4.kit.Str.cut(sair.v4.kit.Str.oneLine(Api.error(r)), 120);
+                    if (!scrub.isEmpty() && eLog.indexOf(scrub) >= 0) eLog = eLog.replace(scrub, "<relay>");
+                    line = line + " error=" + eLog;
+                }
+                o2.dim(line);
+            }
+        } catch (Throwable ignored) {
+            // 事实行只是可观测：它自己绝不改变这次发送的结果
+        }
+        return r;
+    }
 }

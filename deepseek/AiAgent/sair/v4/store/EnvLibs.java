@@ -7,7 +7,9 @@ import java.util.List;
  * 基板自己声明的那几张<b>可查询的库</b>（其余环境表不走这里，见下）。
  *
  * <h3>为什么只有这两张</h3>
- * <p>今天的 {@code store} 工具面 = 6 张库（{@code memory/note/dialog/grouplog/sticker/pref}）。
+ * <p>今天的 {@code store} 工具面 = <b>六库</b>（{@code memory/note/dialog/grouplog/sticker/pref}）
+ * <b>外加插件声明的业务库</b>（情绪状态表、群印象表等就在"插件库"那一档，见 {@code Builtins} 的
+ * {@code store} 工具说明）。
  * S2 之后：{@code memory}/{@code note}/{@code sticker}/{@code pref} 是**业务表**，
  * 由各自的插件声明（谁写入谁声明）；只有 {@code dialog}/{@code grouplog} 留基板 ——
  * **消息流就是环境**，基板是它们唯一的写入者（{@code Agent}/{@code QqGateway} 落行、

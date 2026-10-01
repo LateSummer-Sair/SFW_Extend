@@ -78,9 +78,10 @@ import sair.v4.store.Store;
  * <pre>
  * chat_window: {"session":"group:123","source":"grouplog","size":30,"rows":12,"chars":812,…}
  * 【本会话最近 12 条聊天记录】
- * [09-16 12:03:11] 张三: 你好
+ * [09-16 12:03:11] 张三(QQ 10001): 你好
  * </pre>
- * <p>一行一条：{@code [时间] 谁: 说了什么}。群行的人名取 {@code nickname}（没有就退 {@code #user_id}）；
+ * <p>一行一条：{@code [时间] 谁: 说了什么}。<b>群行的"谁"每一行都带 QQ</b>（{@code 昵称(QQ 10001)}；
+ * 昵称为空、或昵称与 {@link #ME}/{@link #PEER} 撞车时退 {@code #QQ} —— 见 {@link #who}）；
  * 对话表的两行按角色标 {@link #ME}（{@code assistant} = 她自己说的）/ {@link #PEER}（{@code user}）。
  * 非文本消息（{@code content} 为空串或 NULL）如实标 {@link #EMPTY_TEXT}，不编内容。
  * 窗口里那些消息<b>已有的标记</b>若存在，末尾再跟一行 {@code marks: [...]}（见 {@link #marksOf}）。</p>
@@ -99,6 +100,21 @@ public final class ChatWindow {
     public static final String ME = "我";
     /** 对方说的话（{@code dialog.role = user}）在窗口里的标注。 */
     public static final String PEER = "对方";
+    /**
+     * <b>外部来源</b>（本账号下<b>另一个机器人服务</b>发出来的消息）在窗口里的标注（D1）。
+     *
+     * <p>为什么要有第三种标注：三家机器人服务共用同一个 QQ 账号（{@code selfId}），
+     * 别家发出去的消息在我们这边收到的是<b>逐字同形</b>的 {@code message_sent} 帧（{@code user_id == selfId}）。
+     * 只按 {@code user_id} 判"谁"会让它显示成「我」—— 那是"别家机器人的话被当成她说的"。
+     * 所以归属判据是 {@code extra.foreign == true}（只有 {@code QqGateway.foreignEcho} 会写，
+     * 见 {@link #markedForeign}），显示成这一个词。</p>
+     *
+     * <p><b>逐字冻结</b>：值就是「其他」两个字，与 {@link #ME}/{@link #PEER} 同一处定义 ——
+     * 提示词层与技能线读的是这一串。<b>不带 QQ 后缀、不带任何昵称</b>：这个 id 下没有"某个人"，
+     * 补一个 {@code (QQ <selfId>)} 只会把"账号自己的号"混进来（组行 {@code 昵称(QQ n)} 那个形状
+     * 是为"群里的人"定的，这里没有那个人）。</p>
+     */
+    public static final String FOREIGN = "其他";
 
     /**
      * 非文本消息（图片/表情/语音/文件…）在 {@code grouplog.content} 里是空串甚至是 NULL。
@@ -471,6 +487,13 @@ public final class ChatWindow {
         // 只在真的压掉过时才出现 —— 与 dropped_repeat / dropped_dup 同一口径
         // （没有这一格时，事实块的字节与加这个特性之前**完全一致**）。
         if (selfDup > 0) meta.addProperty("dropped_self_dup", selfDup);
+        // ★ D1：这一窗里有几行是**外部来源**（本账号另一个机器人服务发的，标「其他」）。
+        //   只在真的有时才出现 —— 与 dropped_repeat / dropped_dup / dropped_self_dup 同一口径
+        //   （没有外部行时，这一行的字节与加这个特性之前**完全一致**）。
+        //   唯一的读方是 ctx\CtxBuild.facts 的 `clients:` 事实行（经 foreignRows 解析这一格）。
+        int foreign = 0;
+        for (JsonObject r : rows) if (markedForeign(r)) foreign++;
+        if (foreign > 0) meta.addProperty("foreign", foreign);
         // 私聊/控制台：窗口与历史同源，去重故意不做 —— 写字符串而不是 0，别让人读成"没有重复"
         if (dup < 0) meta.addProperty("dup_history", "same-table");
 
@@ -483,7 +506,43 @@ public final class ChatWindow {
     }
 
     /**
-     * 一条记录里的"谁"。群看昵称（没有就退 {@code #user_id}）；对话表按角色标"我/对方"。
+     * 窗口块里<b>外部来源行</b>的条数（读 {@link #META_PREFIX} 那一行的 {@code foreign} 键）。
+     *
+     * <p>给 {@code ctx\CtxBuild.facts} 的 {@code clients:} 事实行用（"这一轮的窗口里出现了别家的发言"）。
+     * 产法与读法同一处（{@link #render} 写、这里读），所以不可能漂开。任何畸形输入 ⇒ {@code 0}
+     * （绝不抛、绝不让事实块消失）：读不出来就当"这窗里没有外部行"。</p>
+     */
+    public static int foreignRows(String windowBlock) {
+        try {
+            String s = Str.nz(windowBlock);
+            int i = s.indexOf(META_PREFIX);
+            if (i < 0) return 0;
+            int nl = s.indexOf('\n', i);
+            String line = nl < 0 ? s.substring(i) : s.substring(i, nl);
+            JsonObject o = J.obj(line.substring(META_PREFIX.length()).trim());
+            return o == null ? 0 : J.i(o, "foreign", 0);
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /**
+     * 一条记录里的"谁"。
+     *
+     * <p><b>ID-FIX-D1（2026-09-27，甲方铁律"不能串身份"）</b>：群行（{@code grouplog}）
+     * <b>每一行都带 QQ</b>，形状 {@code 昵称(QQ 123)}。理由是昵称只是<b>群名片</b>
+     * （{@code sender.card} 优先，写的人自己就能改、且零权限），而 QQ 是从帧里来、群成员改不动的
+     * 客观锚点。改之前昵称非空就直接当标签用 ⇒ 群里任何人把群名片改成「我」（{@link #ME}）
+     * 或「对方」（{@link #PEER}），他的行就会渲染成 {@code 我: …}，<b>与她自己的行逐字同形</b>。</p>
+     *
+     * <p><b>防撞</b>：昵称等于 {@link #ME}/{@link #PEER} 时<b>不许</b>拿它当标签，
+     * 一律退回 {@code #<QQ>}（这一形状本身已经带 QQ，不再补后缀）。昵称为空同此；
+     * {@code user_id} 取不到（{@code <= 0}）时按 {@code (QQ ?)} 如实标未知，<b>绝不编一个号</b>。</p>
+     *
+     * <p><b>探针钉子（测试线，本车道不改 {@code probe\}）</b>：群行的字面形状被
+     * {@code ProbeQuote} §8 逐字钉过（{@code probe\ProbeQuote.java:893}）——
+     * 旧 needle {@code "窗口甲: 窗口里那条引用了谁（引用了：…）"} 必须同步改成
+     * {@code "窗口甲(QQ 100065358): 窗口里那条引用了谁（引用了：…）"}。<b>只换形状，不许放宽</b>。</p>
      *
      * <p><b>P0-1</b>：群里她自己的那一行标既有的常量 {@link #ME}（{@code "我"}）——
      * 靠"她自己知道她叫椰羊"是不够的（群里别人也都有名字，而且群名片可以被别人改成同一个名字），
@@ -502,16 +561,31 @@ public final class ChatWindow {
      * 它<b>没有</b> {@code extra.self} ⇒ 它<b>继续显示原样</b>（昵称 {@code 椰羊}），不会被改写成"我"。
      * 这是刻意的：那一行的来源无法证明，宁可显示它自称的名字。</p>
      *
-     * <p>{@code selfId <= 0}（配置取不到 / 探针没配）⇒ 判据自动失效，回到改之前<b>逐字节相同</b>
-     * 的行为（fail-safe：取不到自身 QQ 就绝不猜哪一行是自己）。</p>
+     * <p><b>私聊/控制台那一支不动</b>：{@code dialog} 是一对一会话，"我/对方"就是准确的角色标注，
+     * 且形状被 {@code ProbeChatWindow} §(d) 与 {@code ProbeNotices} §7/§10 逐字钉着。</p>
+     *
+     * <p>{@code selfId <= 0}（配置取不到 / 探针没配）⇒ 判据自动失效，回到改之前<b>逐字节相同</b> 的
+     * 行为（fail-safe：取不到自身 QQ 就绝不猜哪一行是自己）。</p>
+     *
+     * <p><b>★ D1（2026-09-28）二元标签：只有「我」与「其他」</b> —— 别家的行<b>先</b>判：
+     * {@code extra.foreign == true} ⇒ {@link #FOREIGN}（{@code "其他"}），与 {@code selfId} 取没取到无关
+     * （同 {@code markedSelf} 那一路的理由：判据只认 {@code extra}，内容伪造不出来）。
+     * 顺序刻意放在"我"之前：外部行的 {@code user_id} 也是 selfId（三家共用），
+     * 先判 {@code extra.foreign} 才不会被"我"那支抢走。<b>私聊/控制台那一支同样先判它</b>
+     * （能力②要求私聊也看得见「其他」；{@code dialog} 里外部行的 role 是
+     * {@code QqGateway.DIALOG_ROLE_FOREIGN}，不是 {@code assistant}）。</p>
      */
     private static String who(JsonObject r, String source, long selfId) {
+        if (markedForeign(r)) return FOREIGN;                  // ★ D1：二元标签的另一半（先判、Two sources 同判）
         if ("grouplog".equals(source)) {
-            if (selfId > 0L && J.l(r, "user_id", 0L) == selfId && markedSelf(r)) return ME;
-            String name = Str.oneLine(Str.nz(J.s(r, "nickname", "")));
-            if (!name.isEmpty()) return Str.cut(name, 32);
             long uid = J.l(r, "user_id", 0L);
-            return uid > 0 ? ("#" + uid) : "?";
+            String tag = uid > 0L ? ("(QQ " + uid + ")") : "(QQ ?)";
+            if (selfId > 0L && uid == selfId && markedSelf(r)) return ME + tag;
+            String name = Str.oneLine(Str.nz(J.s(r, "nickname", "")));
+            // 防撞（ID-FIX-D1）：昵称与 ME/PEER 逐字相同 ⇒ 不许直接当标签，退回 #QQ
+            if (ME.equals(name) || PEER.equals(name)) return uid > 0L ? ("#" + uid) : "?";
+            if (!name.isEmpty()) return Str.cut(name, 32) + tag;
+            return uid > 0L ? ("#" + uid) : "?";
         }
         return "assistant".equals(Str.trim(Str.nz(J.s(r, "role", "")))) ? ME : PEER;
     }
@@ -524,14 +598,40 @@ public final class ChatWindow {
      * （那里已经有现成的"两种形态都认"）。任何畸形值 ⇒ {@code false}，绝不抛、绝不让整块窗口消失。</p>
      */
     private static boolean markedSelf(JsonObject r) {
+        JsonObject x = extraOf(r);
+        return x != null && J.b(x, "self", false);
+    }
+
+    /**
+     * 这一行的 {@code extra.foreign} 是不是 {@code true}（D1 的<b>唯一</b>身份判据，见 {@link #who}）。
+     *
+     * <p>{@code extra} 的解析写法与 {@link #markedSelf} 逐字同一套（对象 / JSON 字符串两种形态都认，
+     * 畸形一律 {@code false}）—— 两处共用 {@link #extraOf}，不会漂开。
+     * 这个键<b>只有</b> {@code QqGateway.foreignEcho} 会写 ⇒ 内容伪造不出它（与 {@code extra.self} 同理）；
+     * 而 {@code extra.foreign} 与 {@code extra.self} <b>永远不同时出现</b>（两个产法各自只写自己那个键）
+     * ⇒ "她自己"与"外部来源"两个显示集合构造性互斥。</p>
+     */
+    private static boolean markedForeign(JsonObject r) {
+        JsonObject x = extraOf(r);
+        return x != null && J.b(x, "foreign", false);
+    }
+
+    /**
+     * 这一行的 {@code extra} 列（TEXT 的 JSON 串，或已被 {@code Db.decode} 解析成对象）；解析不出来 {@code null}。
+     *
+     * <p>{@code extra} 是"历史与新写混居"的列（真机非空 95.8%，以 {@code {"v3_id":N}} 为主），
+     * 而且既可能是<b>对象</b>也可能是<b>字符串</b> —— 解析写法与 {@link #quoteSuffix} 逐字同一套。
+     * 任何畸形值 ⇒ {@code null}，绝不抛、绝不让整块窗口消失。</p>
+     */
+    private static JsonObject extraOf(JsonObject r) {
         try {
+            if (r == null) return null;
             com.google.gson.JsonElement e = J.get(r, "extra");
-            if (e == null || e.isJsonNull()) return false;
-            JsonObject x = e.isJsonObject() ? e.getAsJsonObject()
+            if (e == null || e.isJsonNull()) return null;
+            return e.isJsonObject() ? e.getAsJsonObject()
                     : (e.isJsonPrimitive() ? J.obj(e.getAsString()) : null);
-            return x != null && J.b(x, "self", false);
         } catch (Throwable t) {
-            return false;
+            return null;
         }
     }
 

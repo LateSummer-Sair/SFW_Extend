@@ -48,10 +48,13 @@
       <span class="eyebrow">权限管理 · 技能管控表</span>
       <h1>谁能用什么<br><span class="grad">一张表就说得清</span></h1>
       <p class="lede">
-        权限是基板九件事里的一件，也是<b>唯一决定“给不给能力”的地方</b>。它的判据是一份份<b>按归属分散</b>的权限文件 —— 基板内置工具的那份在数据根下的 <code>perms-core.jsonc</code>，
+        权限是基板九件事里的一件，也是<b>决定“给不给能力”的主判据</b>（另有一道与它平行、只管 4 个只读 op 的<b>好感度档位闸</b>，见<a href="#query">第 04 节</a>）。它的判据是一份份<b>按归属分散</b>的权限文件 —— 基板内置工具的那份在数据根下的 <code>perms-core.jsonc</code>，
         每个技能自己那份在 <code>skills\&lt;技能名&gt;\perms.jsonc</code>。装载时它们合并成一张表，也就是控制台里看到的<b>技能管控表</b>。这张表分<b>三个域</b>：<b>技能</b>（谁能用哪个 op）、<b>数据</b>（谁能改、谁能读哪类数据）、<b>文件</b>（谁能碰哪些路径）；每个域各看自己那一层。
         规则都写成 <code>["键"]: [身份…]</code> 的中括号形式，一个键也能这么写；<code>//</code> 开头的整行是注释。没列到时按该域自己的默认值收尾 —— 技能不能、数据能读不能改、文件不能碰；注意区分：<b>写出来了却给一个空身份数组</b>不是“没列到”，它是一条“谁都不给”的决定（那两个域的读侧因此就是不能读）。技能目录里没有那份 <code>perms.jsonc</code>，它的全部 op 对普通用户就一律不授权。
       </p>
+      <div class="note warn reveal">
+        <p><span class="n-title">表放行了也可能被另一道闸挡住：罢工</span>：情绪到 <code>strike</code>（罢工）档时，op 判定在<b>权限放行之后</b>再看一眼本场合的情绪，<code>strike</code> 态下除 <code>perm</code> 一族外一律拒，回执是 <code>[罢工中] 我正忙着，这事等会儿再说。</code>（权限面拒的时候仍回 <code>[权限阻断] …</code>，两个前缀不会混）。它读的是 <code>kv</code> 的 <code>mood:&lt;场合&gt;</code> 行，<b>不在这份表里、也不改这份表</b>；取不到场合 / 读库异常时按不拦处理（fail-open）。看到"某条明明放行了却调不动"时，先想一下是不是她正在罢工（<code>Builtins.strikeDeny</code>、<a href="capabilities.html#perm">基板能力 · 权限</a>）。</p>
+      </div>
       <div class="hero-actions">
         <a class="btn" href="#query">先看看现在的表 →</a>
         <a class="btn amber" href="#change">我想给别人开权限</a>
@@ -102,6 +105,7 @@
             <h4 class="sub" style="margin-top:0">结论只有三种，按域收尾</h4>
             <p>每一域只问一件事：<b>这个域上的这个键，给不给这个身份</b>。答案三种 —— 允许（<code>Run</code>，数据与文件另有 <code>Read</code>）、禁止（<code>Ban</code>）、空。<b>“空”是两回事</b>：<b>没列到</b>的时候按上面三域表最后一列收尾；<b>写出来了却是一个字面空数组</b>（<code>["sent"]: []</code>）则是一条<b>决定</b> —— 它表示“列出来了，但谁都不给”，判定到这里就停，<b>不再回落到更宽的键、也不吃该域“没列到”的默认值</b>。所以数据与路径两域的读侧一旦写成空表，结论就是不能读，不会被“数据默认能读”那一口吃掉。</p>
             <p><b>优先级 <code>Ban</code> &gt; <code>Run</code> / <code>Read</code> &gt; 空</b>：同一把键上，只要这个身份命中任何一条 <code>Ban</code> 就拒；没有 <code>Ban</code>，才轮到看有没有给他允许。</p>
+            <p><b>这条优先级只说到这张表为止</b>：表判完之后还有<b>一道与它平行的第二道闸</b>（不写表、不改表）—— 好感度档位够（<code>favorFileMin</code>，出厂 <code>500</code>）时，<code>file.read</code> / <code>file.list</code> / <code>send.file</code> / <code>send.record</code> 这 <b>4 个只读 op</b> 会被放行，<b>连表里的 <code>Ban</code> 也一起顶掉</b>；那 4 个之外一个字都不放宽（没有通配、没有前缀）。见<a href="#query">第 04 节</a>。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">主人与她不写进表</h4>
@@ -133,12 +137,12 @@
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">对 <code>ALLUSER</code></h4>
-            <p>资源是一个<b>黑盒</b>：读 / 写 / 执行唯一的路是技能（工具）这条手脚。所以“他能做什么”就等于“表放行了他哪些 op”。</p>
+            <p>资源是一个<b>黑盒</b>：读 / 写 / 执行唯一的路是技能（工具）这条手脚。所以“他能做什么”基本就等于“表放行了他哪些 op”—— 只多一处<b>平行的档位放权</b>：好感度到 500 档以上时，那 4 个只读 op 与两处只读允许根会被额外放开（见<a href="#query">第 04 节</a>）。</p>
           </div>
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">数据根的 <code>files</code> 目录</span>：它也是一份<b>普通资源</b>，没有自己的位。想让某人能看、能写它下面的东西，路只有一条 —— 在 <code>Run</code> 块里给文件那一组的对应动作补上他的身份；这一条会写进这个 op 归属的那份权限文件（回执里会写清是哪一个）。</p>
+          <p><span class="n-title">数据根的 <code>files</code> 目录</span>：它也是一份<b>普通资源</b>，没有自己的位。<b>写</b>它下面的东西，路只有一条 —— 在 <code>Run</code> 块里给文件那一组的对应动作补上他的身份；这一条会写进这个 op 归属的那份权限文件（回执里会写清是哪一个）。<b>读</b>则多一条：好感度到 500 档时，档位闸会把数据根下的 <code>files\</code> 与 <code>D:/share/</code> 这两处<b>只读</b>允许根一起放开（<code>file.read</code> / <code>file.list</code>）。但<b>硬禁名单里的名字在任何深度都读不到</b> —— <code>config.json</code>、<code>debug-port.json</code>、<code>v4.db</code>（前缀，连带 <code>-wal</code> / <code>-shm</code>）、<code>logs/</code>、<code>SFW-BOT.ir</code>（前缀，连带 <code>.bak-*</code>），以及数据根之外的 <code>D:/share/SairFrameWork/</code>；这几条与权限表、与档位都无关，<b>表里显式写成 <code>Read</code> / <code>Run</code> 也翻不过来</b>（<code>auth\FavorGate.java</code> 的硬禁名单，<code>auth\Acl.java</code> 的 <code>fileDeny</code> 在返回放行之前最后过它一遍）。也正因为 <code>files\</code> 是「≥500 的人读得到」的那一格，<b>整库导出不落这里</b>：<code>ai/store export</code> 与 <code>store_admin op=export</code> 的默认落点是 <code>tmp\</code>（<code>term\Cmd.java</code>、<code>Builtins.java</code>）。</p>
         </div>
       </section>
 
@@ -219,7 +223,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">04 / 查</span>
           <h2>怎么查：<code>ai/perm</code> 看表，<code>ai/favor</code> 看好感度</h2>
-          <p class="chapter-desc">这两个命令名字很像，含义完全不同。一句话记住：<b><code>ai/perm</code> 管“能不能做”（技能管控表），<code>ai/favor</code> 管好感度数值</b>。旧名字 <code>ai/acl</code> 已经退休，只留一句指路。</p>
+          <p class="chapter-desc">这两个命令名字很像，含义完全不同。一句话记住：<b><code>ai/perm</code> 管“能不能做”（技能管控表）</b>，<b><code>ai/favor</code> 管好感度数值</b>。数值本身不是权限，但<b>档位是一道只读放权闸</b> —— 本节末尾那两张表讲的就是它。旧名字 <code>ai/acl</code> 已经退休，只留一句指路。</p>
         </header>
 
         <div class="tw scroll reveal">
@@ -242,15 +246,27 @@
                 <td><code>ai/favor</code></td>
                 <td>看 / 设 / 重置<b>好感度</b></td>
                 <td>好感度榜单（前 20 名）与单人的数值、档位</td>
-                <td>能改好感度（<b>不是权限</b>）</td>
+                <td>能改好感度数值（<b>数值本身不是权限</b>；但<b>档位</b>是一道只读放权闸，见下）</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p class="t-cap"><b>好感度不参与任何权限判定</b>：它是一份数据，也是事实块里 <code>caller.favor</code> 的来源，但“能不能做”只由技能管控表说了算。所以给某人放开能力，靠的是在对应那一层里补一个身份，而不是把好感度调高。</p>
+        <p class="t-cap"><b>好感度不是权限三域里的第四个域</b>：它是一份数据（事实块里 <code>caller.favor</code> 的来源），<b>不写进任何权限文件</b>，也没有通配 —— 但它<b>确实参与一次判定</b>：这是一道与技能管控表<b>平行</b>的闸（<code>auth\FavorGate.java</code>；总开关是配置键 <code>favorGateEnabled</code>，出厂开着）。表把某个 <code>ALLUSER</code> 判拒<b>之后</b>，<code>Acl</code> 才回头问它一次：<b>档位够 + 这个 op 在那张写死的窄表里</b>就按放行处理，并打一行可审计的 <code>[favor] lift …</code>。它的清单<b>恰好 4 条、不许通配、不许前缀</b>。</p>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>档位（<code>tier</code>）</th><th>门槛</th><th>这一档放什么</th></tr></thead>
+            <tbody>
+              <tr><td><code>stranger</code>（初识 / 陌生） / <code>friend</code>（眼熟，&ge;100） / <code>invite</code>（朋友，&ge;300）</td><td>不到 <b>500</b></td><td><b>一个 op 都不放宽</b> —— 那 4 条逐条仍被拒（<code>320</code> 档实测：<code>lifted</code> 是空的）</td></tr>
+              <tr><td><code>files</code>（信重）</td><td><code>favorFileMin</code>，出厂 <b>500</b></td><td>恰好这 <b>4 个只读 op</b>：<code>file.read</code>、<code>file.list</code>、<code>send.file</code>、<code>send.record</code>；别的动作一条都不在内（<code>file.find</code> / <code>file.write</code> / <code>send.fileto</code> / 全部 <code>napcat.*</code> 内层动作照旧拒）</td></tr>
+              <tr><td><code>respect</code>（敬重） / <code>cap</code>（挚友）</td><td><code>favorNoAngerMin</code>，出厂 <b>700</b>；上限 <b>1000</b></td><td>与上一行<b>同一张表</b>：档位更高不会多放别的（900 档实测就只放这 4 条）</td></tr>
+              <tr><td><code>MASTER</code> / <code>SYSTEM</code></td><td>—</td><td>恒全权，这道闸对他们一律返回“不适用” —— 主人与她本人的结论与加这层之前<b>逐字节一致</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="t-cap"><b>路径那一侧还有一条只读放权</b>（<code>FavorGate.liftPath</code>）：<b>ACL 一把覆盖键都没列到</b>这个路径、且这一次是<b>读</b>（<code>write=false</code>）、档位够、又落在允许根之内（<code>favorFileRoots</code>，出厂 <code>D:/share/;{root}/files/</code>），才放行。表里<b>显式</b>写下的 <code>Read</code> / <code>Ban</code>（含空身份表）不被它翻案。<b>唯一能压过这两条放行来源的是硬禁名单</b>：命中它的路径，靠表里显式授权也好、靠档位放行也好，<b>一律拒</b>，拒文是 <code>[权限阻断] 这个路径在硬禁名单里（与权限表无关）：…</code>；主人与她本人不受影响（<code>auth\Acl.java</code> 的 <code>fileDeny</code>、<code>auth\FavorGate.java</code> 的 <code>banned</code>）。</p>
 
         <div class="note reveal">
-          <p><span class="n-title">她在每一轮都能看到你的权限事实</span>：事实块里有三个键 —— <code>caller.kind</code>（你属于哪类身份）、<code>caller.ops</code>（<b>你能用的 op 清单</b>，也就是结论；恒全权写 <code>"ALL"</code>，一个都没授权写 <code>[]</code>）、<code>caller.rules</code>（<b>能命中你的管控表条目</b>，也就是依据）。她据此判断“这件事能不能答应你”，而这三个键的取值都直接问权限面，基板不另算一套。</p>
+          <p><span class="n-title">她在每一轮都能看到你的权限事实</span>：事实块里有三个键 —— <code>caller.kind</code>（你属于哪类身份）、<code>caller.ops</code>（<b>你能用的 op 清单</b>，也就是结论；恒全权写 <code>"ALL"</code>，一个都没授权写 <code>[]</code>）、<code>caller.rules</code>（<b>能命中你的管控表条目</b>，也就是依据），另有 <code>caller.favor</code>（你的数值与档位）与 <code>caller.favorGate</code>（<code>enabled</code> / <code>tier</code> / <code>tiers</code> 档位线 / <code>table</code> 那张放行清单的原文 / <code>lifted</code> 这一档<b>此刻真的</b>放行了哪几条）。她据此判断“这件事能不能答应你”，而这些键的取值都直接问权限面，基板不另算一套。</p>
         </div>
       </section>
 
@@ -403,7 +419,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">07 / 不可用</span>
           <h2>不可用时长什么样</h2>
-          <p class="chapter-desc">不可用不是一句干巴巴的“没权限”，而是一句<b>可读的说明</b>：它写清挡在哪一域、哪一层。它们同时也会被算作一次失败，连续失败闸门靠它计数。</p>
+          <p class="chapter-desc">不可用不是一句干巴巴的“没权限”，而是一句<b>可读的说明</b>：它写清挡在哪一域、哪一层；另外两类<b>不是权限</b>但同样以 <code>[权限阻断]</code> 开头的拒绝（硬禁名单、落点规则）也在下面逐条列出。它们同时也会被算作一次失败，连续失败闸门靠它计数。</p>
         </header>
 
         <div class="code" data-lang="text">
@@ -412,7 +428,10 @@
 [权限阻断] 「weather」没有授权给你（未列到 = 未授权）
 [权限阻断] 这类数据（sent）你不能读
 [权限阻断] 这条记录不属于你（只能改你自己那一份）
-[权限阻断] 这个路径不在允许范围（D:/…）</code></pre>
+[权限阻断] 这个路径不在允许范围（D:/…）
+[权限阻断] 这个路径在硬禁名单里（与权限表无关）：D:/…/v4.db
+[权限阻断] 不许把东西从一个人的私聊转到另一个人的私聊：「send」要发的 user_id=… 不是当前会话（当前私聊 …）
+[权限阻断] 落点不是当前会话：「send」要发的 group_id=… 不是当前群 …</code></pre>
         </div>
         <div class="tw scroll reveal">
           <table>
@@ -425,11 +444,14 @@
               <tr><td>数据：不是他的行</td><td><code>[权限阻断] 这条记录不属于你（只能改你自己那一份）</code></td></tr>
               <tr><td>数据：不能读</td><td><code>[权限阻断] 这类数据（sent）你不能读</code></td></tr>
               <tr><td>路径：不能碰</td><td><code>[权限阻断] 这个路径不在允许范围（D:/…）</code></td></tr>
+              <tr><td>路径：命中硬禁名单</td><td><code>[权限阻断] 这个路径在硬禁名单里（与权限表无关）：D:/…/v4.db</code>（<b>不是权限表挡的</b>：表里显式授权也翻不过来）</td></tr>
+              <tr><td>落点：私聊转投</td><td><code>[权限阻断] 不许把东西从一个人的私聊转到另一个人的私聊：「send」要发的 user_id=… 不是当前会话</code></td></tr>
+              <tr><td>落点：群不是当前群</td><td><code>[权限阻断] 落点不是当前会话：「send」要发的 group_id=… 不是当前群 …</code></td></tr>
               <tr><td>键认不出</td><td><code>[权限阻断] 不认识的权限键「xxx」（装载时已点名）</code></td></tr>
             </tbody>
           </table>
         </div>
-        <p class="t-cap">每一句都以 <code>[权限阻断] </code> 开头，尾部说明是<b>哪一层</b>挡的；文案本身<b>不透露</b>白名单里有什么（路径那一句只说“不在允许范围”）。这个前缀一字不改 —— 这一版只是在它后面补了分层说明。工具入口、命令面、面板看到的是同一种形态。</p>
+        <p class="t-cap">每一句都以 <code>[权限阻断] </code> 开头，尾部说明是<b>哪一层</b>挡的；文案本身<b>不透露</b>白名单里有什么（路径那一句只说“不在允许范围”）。这个前缀一字不改 —— 这一版只是在它后面补了分层说明。<b>但要注意它是全库拒绝面的共同前缀，不只权限表在用</b>：硬禁名单（与权限表无关）与<b>落点规则</b>（<code>Boot.destDeny</code>：带“东西”载荷的动作只许落在当前会话；控制台里的主人算“他自己的私聊”；<b>没有对手方时私聊落点一律拒 = fail-closed</b>；纯文字不判）产出的拒文也以它开头，所以它们同样会被 <code>Loop.deniedResult()</code> 算作一次失败。工具入口、命令面、面板看到的是同一种形态。</p>
 
         <h3 class="sec">三种形态都能被认出来</h3>
         <div class="tw scroll reveal">
@@ -464,9 +486,9 @@
               <tr><td>合并装载</td><td><code>Acl.loadMerged</code> 把 <code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code> 读成一份视图：<code>//</code> 整行注释先丢掉，技能文件里的 op 越界、数据键越界、路径块三种情况都忽略并点名一行；认不出的键一律点名且不生效</td><td><code>auth\Acl.java</code></td></tr>
               <tr><td>文件读写</td><td>解析三域四层、授权 / 封禁 / 撤回；按归属分文件写回（技能 op → 该技能目录，其余 → core），重排时技能文件不产出路径块、数据块只在真有规则时写；逐字节相同则跳过写，落盘是原子替换（先写 <code>.tmp</code> 再改名）</td><td><code>auth\Acl.java</code></td></tr>
               <tr><td>op 清单</td><td>技能装载时声明工具名与动作名；重排时的分组、释义与顺序都从这份清单来，工具级的那条键覆盖它已注册的动作</td><td><code>auth\Ops.java</code>、<code>auth\OpList.java</code></td></tr>
-              <tr><td>判定：技能</td><td><code>Acl.allow(caller, op)</code>：先看 <code>Ban</code>、再看 <code>Run</code>、都没有就是未授权；主人与她本人直接放行</td><td><code>auth\Acl.java</code></td></tr>
-              <tr><td>判定：数据</td><td><code>Acl.dbDeny(caller, 数据键, 行归属)</code> 管改（命中后还要比这一行归谁）；<code>Acl.dbReadDeny(caller, 数据键)</code> 管读（没声明时能读，显式空表则是不能读）</td><td><code>auth\Acl.java</code></td></tr>
-              <tr><td>判定：文件</td><td><code>Acl.fileDeny(caller, 路径, write)</code>：<code>write</code> 为真看 <code>Run</code>、为假看 <code>Read</code>，按最长路径优先</td><td><code>auth\Acl.java</code></td></tr>
+              <tr><td>判定：技能</td><td><code>Acl.allow(caller, op)</code>：先看 <code>Ban</code>、再看 <code>Run</code>、都没有就是未授权；主人与她本人直接放行。<b>表判拒之后</b>才回头问一次第二道闸 <code>FavorGate.lift(op, caller)</code>（只认那 4 个只读 op；命中就按放行并打一行 <code>[favor] lift …</code>）</td><td><code>auth\Acl.java</code>、<code>auth\FavorGate.java</code></td></tr>
+              <tr><td>判定：数据</td><td><code>Acl.dbDeny(caller, 数据键, 行归属)</code> 管改（命中后还要比这一行归谁）；<code>Acl.dbReadDeny(caller, 数据键)</code> 管读（没声明时能读，显式空表则是不能读）。<b>这一域不吃好感度档位闸</b>（档位表里没有数据类动作）</td><td><code>auth\Acl.java</code></td></tr>
+              <tr><td>判定：文件</td><td><code>Acl.fileDeny(caller, 路径, write)</code>：<code>write</code> 为真看 <code>Run</code>、为假看 <code>Read</code>，按最长路径优先；表里一把覆盖键都没列到时才问 <code>FavorGate.liftPath</code>（只读 + 落在允许根内）；<b>两个放行来源在返回放行之前都要过一次 <code>FavorGate.banned(路径, 数据根)</code></b>，命中硬禁名单就一律拒</td><td><code>auth\Acl.java</code>、<code>auth\FavorGate.java</code></td></tr>
               <tr><td>域内怎么比</td><td>同一域里把覆盖这个键的规则<b>从最具体往最宽</b>过一遍，第一把给出决定的说了算；同一把键上 <code>Ban</code> 先于允许，身份取并集</td><td><code>auth\Acl.java</code></td></tr>
               <tr><td>结论与依据分列</td><td><code>Acl.opsFor()</code> 给“能用哪些 op”（结论），权限文件里的条目配合 <code>ctx\CtxBuild.java</code> 给“能命中他的条目”（依据），两者互不代算</td><td><code>auth\Acl.java</code>、<code>ctx\CtxBuild.java</code></td></tr>
               <tr><td>接线：工具入口</td><td>整把工具或它任一动作放行，工具才可见；调用时入口再判一次，工具内部每个动作又判一次</td><td><code>tool\Registry.java</code></td></tr>
@@ -474,8 +496,10 @@
               <tr><td>接线：文件口</td><td>本地文件改写、外链地址产出、导出与导入这几条取路径的写口都过路径那一道</td><td><code>Builtins.java</code>、<code>qq\Relay.java</code>、<code>qq\Api.java</code></td></tr>
               <tr><td>接线：命令面</td><td>看表用 <code>ai/perm</code>，写表用 <code>run</code> / <code>ban</code> / <code>db</code> / <code>file</code> / <code>revoke</code> / <code>gen</code>；旧名字只留一句退休指路</td><td><code>term\Cmd.java</code></td></tr>
               <tr><td>护栏：技能不能给自己开口子</td><td><code>skill_write</code> 的写入路径拒收 <code>perms.jsonc</code>，回的原话是“拒绝写入 <code>perms.jsonc</code>：… —— 权限文件（谁能用这个技能）只能由主人用控制台 <code>ai/perm</code> 写，技能不能给自己开口子。”</td><td><code>Builtins.java</code></td></tr>
-              <tr><td>接线：失败识别</td><td><code>Loop.deniedResult()</code> 认三种形态，权限阻断计入连续失败</td><td><code>agent\Loop.java</code></td></tr>
-              <tr><td>接线：事实行</td><td>事实块里的 <code>caller.kind</code> / <code>caller.ops</code> / <code>caller.rules</code> 三个键</td><td><code>ctx\CtxBuild.java</code></td></tr>
+              <tr><td>护栏：硬禁名单绝对</td><td><code>FavorGate.banned(路径, 数据根)</code>：绝对前缀（<code>D:/share/SairFrameWork/</code>）＋ 数据根相对（<code>config.json</code> / <code>debug-port.json</code> / <code>v4.db</code> / <code>logs/</code> / <code>SFW-BOT.ir</code>），后者在数据根之内<b>按路径段边界、任意深度</b>也命中（<code>{root}/files/v4.db</code> 这种同名件照样拒）。它是 <code>Acl.fileDeny</code> 的<b>最后一道</b>：表里显式 <code>Read</code> / <code>Run</code> 与档位放行<b>两个来源都要从它下面过</b>；主人 / 她本人 / <code>c == null</code> 在它之前就返回了，不受影响</td><td><code>auth\FavorGate.java</code>、<code>auth\Acl.java</code></td></tr>
+              <tr><td>护栏：落点规则</td><td><code>Boot.destDeny(action, params, caller)</code>：只判带“东西”载荷的动作（上传类，以及消息里带 <code>file</code> / <code>record</code> / <code>image</code> / <code>video</code> 段；<b>纯文字不判</b>）；私聊落点必须等于当前对手方，<b>没有对手方时 fail-closed</b>；群落点必须是当前群；<b>控制台里的主人算“他自己的私聊”</b>。它排在 ACL 与罢工闸<b>之后</b>，只挂在平台动作的唯一出口（<code>Boot.guardedNapcat()</code>），技能侧那两条出口不另写判据</td><td><code>Boot.java</code>、<code>skill\Host.java</code></td></tr>
+              <tr><td>接线：失败识别</td><td><code>Loop.deniedResult()</code> 认三种形态，权限阻断计入连续失败（硬禁与落点那两句同前缀，同样计数）</td><td><code>agent\Loop.java</code></td></tr>
+              <tr><td>接线：事实行</td><td>事实块里的 <code>caller.kind</code> / <code>caller.ops</code> / <code>caller.rules</code> 三个键，加上 <code>caller.favor</code> 与 <code>caller.favorGate</code>（<code>enabled</code> / <code>tier</code> / <code>tiers</code> / <code>table</code> / <code>lifted</code>）</td><td><code>ctx\CtxBuild.java</code>、<code>auth\FavorGate.java</code></td></tr>
             </tbody>
           </table>
         </div>
@@ -530,7 +554,12 @@
               <tr>
                 <td>她“答应不了”某件事</td>
                 <td>那句 <code>[权限阻断]</code> 说明</td>
-                <td>说明里点明了是哪一域、哪一层挡的。按<a href="#deny">第 07 节</a>那张表对一遍，就能确认是差一条允许，还是被一条 <code>Ban</code>、一条行归属、或者一个路径挡住了。</td>
+                <td>说明里点明了是哪一域、哪一层挡的。按<a href="#deny">第 07 节</a>那张表对一遍，就能确认是差一条允许，还是被一条 <code>Ban</code>、一条行归属、或者一个路径挡住了。<b>但有两种拒不是权限表挡的</b>：拒文写“在硬禁名单里（与权限表无关）” ⇒ 谁都翻不过来（表里显式授权也不行）；拒文写“落点不是当前会话 / 不许把东西从一个人的私聊转到另一个人的私聊” ⇒ 那是<b>落点规则</b>，要发的东西只许落在当前会话。</td>
+              </tr>
+              <tr>
+                <td>好感度够（≥500）却还是拒</td>
+                <td>拒文点名的是哪一道</td>
+                <td>① 命中<b>硬禁名单</b>（拒文里写着）⇒ 与表、与档位都无关；② 这个 op 不在那张写死的 4 条窄表里（<code>file.write</code> / <code>file.find</code> / <code>send.fileto</code> / 全部 <code>napcat.*</code> 内层动作）；③ 目标路径不在允许根内（出厂 <code>D:/share/</code> 与数据根下的 <code>files/</code>，键 <code>favorFileRoots</code>）；④ 要的东西落点不是当前会话 ⇒ 落点规则。想看这一档到底放了哪几条，看事实块里 <code>caller.favorGate.lifted</code>（<code>ai/facts</code> 能逐字打出来）。</td>
               </tr>
               <tr>
                 <td>不确定谁能动什么</td>

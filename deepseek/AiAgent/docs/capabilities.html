@@ -57,24 +57,25 @@
       <span class="chapter-tag">SKILLS</span>
       <h2>技能清单</h2>
     </div>
-    <p class="chapter-desc">下面这 32 个技能是随包一起装上的外挂层，装在这个基板上，业务上的事都在这一层：记事、看人、管群、看图、查资料。一句一个，先说清它是干什么的；想细看某一条，直接在对话里问她就行。</p>
+    <p class="chapter-desc">下面这 33 个技能是随包一起装上的外挂层（<b>其中「出站红线」是「纪律技能」，不是业务技能</b> —— 它只负责"上一条被拦"那条给人看的会话提示，红线判据与词表在基板），装在这个基板上，业务上的事都在这一层：记事、看人、管群、看图、查资料。一句一个，先说清它是干什么的；想细看某一条，直接在对话里问她就行。</p>
     <ul class="plain">
       <li><b>表情包</b>：按语境挑一张表情发出去，也能收藏、整理表情库。</li>
+      <li><b>出站红线</b>：只挂一条出站提示 —— 上一条被拦时往会话里留一行给人看的回执；<b>判据与词表已在基板</b>（<a href="#outgate">输出分流 · 出站最后一道闸</a>），它的开关管不到红线本身。</li>
       <li><b>触发词</b>：说到设定的词，她就主动接一句。</li>
       <li><b>待处理申请</b>：列出待办的好友申请与群邀请，你点头才批。</li>
       <li><b>点名引用</b>：她自己决定 @ 谁、引用哪条消息。</li>
       <li><b>发图片</b>：往当前会话发图，也能把一段文字渲成图片。</li>
-      <li><b>辅助识图</b>：让她看图：按消息里的图取内容描述。</li>
+      <li><b>辅助识图</b>：让她看图：按消息里的图取内容描述（看图手）；描述先过<b>图片内容审查</b>（涉政 / 黄赌毒两张表），看图顺带把表情候选写进 <code>sticker:cand/&lt;md5&gt;</code>。</li>
       <li><b>好友管理</b>：好友列表、看资料、拉黑、点赞、改自己的昵称签名。</li>
       <li><b>记忆</b>：长期记忆的记住、回想、忘掉（跨群同一个人）。</li>
-      <li><b>记忆召回</b>：每轮把跟她这轮相关的旧记忆翻出来。</li>
+      <li><b>记忆召回</b>：每轮把跟她这轮相关的旧记忆翻出来 —— 查询串是「本轮正文 + 最近 8 条本会话对话」拼的（整串上限 600 字，超了留最新，本轮正文一个字不截），门槛判在这个合并串上（最小 2 字），所以「还有吗」这类没有关键词的短追问在活跃会话里也会去查；取回量 12 条记忆 / 8 条跨群群聊、本段预算 2000 字、单条上限 300 字，并且把<b>本轮窗口里已经有</b>的行按<b>行身份</b>剔掉（同一句不会在两处各注入一遍） —— 这些键都在 <code>data\skills\记忆召回\prompt.md</code>（热读，改完保存下一轮生效）。</li>
       <li><b>经验蒸馏</b>：把做成功的做法沉淀成可复用的经验。</li>
       <li><b>捐赠</b>：记捐赠台账、看榜单。</li>
       <li><b>联网搜索</b>：必应搜索，给标题、链接与摘要。</li>
       <li><b>拟人化</b>：发出去之前洗掉"AI 腔"（去头尾套话）。</li>
       <li><b>批量处理</b>：批量改名、图片批量转格式（默认先试运行）。</li>
       <li><b>偏好设定</b>：记"以后都这样"的偏好，分个人、群、全局三层。</li>
-      <li><b>情绪</b>：按人按群攒怒气、亲疏与情绪标签，影响说话口气。</li>
+      <li><b>情绪</b>：14 个状态（平淡 / 生气 / 高兴 / 伤心 / 失落 / <b>罢工</b>，外加戒备 / 委屈 / 心虚 / 吃醋 / 得意 / 害羞 / 期待 / 疲惫），按人按群攒怒气、亲疏与情绪标签，改说话口气，也改这一轮让不让干活；对方最近一条消息的<b>情绪标签</b>如实交还给她（含"怎么用"的引导句，判不判交给她），好感度到 <b>≥700</b> 另有一档「<b>敬重</b>」（语气面盖过生气 / 罢工：不发火、用敬重平稳的口气）。</li>
       <li><b>群成员映射</b>：每轮告诉她这个群里谁是谁。</li>
       <li><b>群管理</b>：群查询与群管动作：禁言、踢人、改名、退群等。</li>
       <li><b>群审核</b>：命中违规词就禁言并警告（默认词表为空）。</li>
@@ -162,7 +163,7 @@
           <a class="tile reveal d1" href="deploy.html#napcat">
             <span class="t-num">08 / NAPCAT</span>
             <h3><span class="dot"></span>NapCat</h3>
-            <p>反向 WebSocket 服务端（纯 JDK 手写）；48 个动作；本地文件跨机时经外链中转变成 URL。</p>
+            <p>反向 WebSocket 服务端（纯 JDK 手写）；63 个动作；本地文件跨机时经外链中转变成 URL。</p>
             <span class="t-meta"><span>出厂端口 8082</span><span>唯一出口带闸门</span></span>
           </a>
           <a class="tile reveal d2" href="architecture.html">
@@ -215,7 +216,7 @@
               </tr>
               <tr>
                 <td><b>NapCat</b></td>
-                <td><b>能</b>：反向连接服务端 + 48 个动作的目录与封装；事件按 OneBot v11 形状解析；本地文件按"中转在跑→外链 URL，否则同机 URI"统一裁定。<b>界</b>：所有动作只有一个出口，改写层在那里统一处理要发出去的本地文件。<b>败</b>：未连接时统一话术；无响应/超时/非 JSON/返回码非 0 一律补一个 <code>error</code></td>
+                <td><b>能</b>：反向连接服务端 + 63 个动作的目录与封装；事件按 OneBot v11 形状解析；本地文件按"中转在跑→外链 URL，否则同机 URI"统一裁定。<b>界</b>：所有动作只有一个出口，改写层在那里统一处理要发出去的本地文件。<b>败</b>：未连接时统一话术；无响应/超时/非 JSON/返回码非 0 一律补一个 <code>error</code></td>
                 
               </tr>
               <tr>
@@ -360,6 +361,7 @@
 
         <h3 class="sec">NapCat 未连接</h3>
         <p>抽象层只有一个统一话术：<code>NOT_CONNECTED = "Napcat 没有连接"</code>（<code>qq\Api.java</code>），判错统一走允许/错误两个助手 <code>Api.java</code>。事实层每轮都写一行连接状态 <code>napcat: connected | disconnected</code>（<code>ctx\CtxBuild.java</code>）。监听起不来也不影响别处：日志只说"端口被占用？本地交互照常可用"或"未启用" <code>Boot.java</code>。</p>
+        <p><b>降级打印不是降纪律</b>：NapCat 未连接、<code>caller</code> 没有落点、后台任务没有目标这三类"只打进控制台"的路，与本地控制台（共五处调用点）走的是<b>同一支闸</b>（<code>Sinks.degradedPrint</code>）：先判"正文写成了基板事实块"整条丢，再走逐条那六条 —— 协议暗号、自我记账头、<code>[[mood:…]]</code> 标记、工具调用标记、出站红线在这里同样不许当正文打出来。以前这五处只看逐条那道闸，事实块判据不在这条路上（<code>Sinks.java</code>）。</p>
         <div class="note ok reveal">
           <p><span class="n-title">永不失联</span>：不依赖模型 / 库 / 连接的四条命令永远可用 —— <code>help</code>、<code>status</code>、<code>config</code>、<code>tools</code>；<code>status</code> 在装配部分失败时指出是哪一步失败、因为什么 <code>term\Cmd.java</code>。最底线还有一张静态降级命令表 <code>Cmd.java</code>。</p>
         </div>
@@ -425,6 +427,25 @@
           <p><span class="n-title">降级要看得见</span>：丢掉的每一张都带序号与原因（超张数 / 超体积 / URL 不可用）；一张都没挂上时产出一行状态事实，原因取值覆盖"识图关了""这一轮走 relay""挂图关了""全被丢"。绝不静默 —— 她要是不知道图没挂上来，就会凭空描述图里有什么（<code>MediaAttach.java</code>）。挂上之后追加一句"图已在本轮第 1 次请求里看过，后续请求只有文字" <code>MediaAttach.java</code>。</p>
         </div>
 
+        <h3 class="sec">看图与图片内容审查</h3>
+        <p>真看图有两条路：<code>mode=native</code> 时把图直接挂进主模型请求（上面那一节），或者交给<b>看图手</b>（技能 <code>辅助识图</code>）取一份内容描述再贴回上下文。审查只覆盖<b>图片内容</b>这一层，不碰聊天正文。</p>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h3>两张表、两类红线</h3>
+            <p>判据真源是 <code>data\skills\辅助识图\prompt.md</code> 里的两张表：<code>禁图-涉政</code>（16 个词形）与 <code>禁图-黄赌毒</code>（9 个词形），逗号分隔（半角 / 全角都认）。审的是<b>模型对这张图的整条回执</b> —— 描述正文 + trailer 那四行（"图中文字"也是图上的字，一并审）。命中 = 出现任一词形（<b>子串、大小写不敏感</b>） <code>图片审查</code>（<code>辅助识图\VisionAgent.java</code> 的 <code>imgScreen</code> / <code>imgGate</code>）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h3>命中之后与审查失败方向</h3>
+            <p>命中 ⇒ 描述<b>一个字都不交出去</b>、表情候选行<b>不写</b>、账本不落，回执换成固定的一句「<code>[识图·已拦截] 这张图的内容按红线不转述。</code>」，并记一行 warn（<b>只带类目名与图 id，不带描述正文</b>）。<b>失败方向是 fail-open</b>：词表读不到（缺行 / 整份 <code>prompt.md</code> 读不到）⇒ <b>放行</b>并记一行 warn —— 识图是功能，不能因为读不到词表就把所有图都禁了 <code>VisionAgent.java</code>。</p>
+          </div>
+        </div>
+        <div class="note reveal">
+          <p><span class="n-title">审查点只有一处，但账本那条也过它</span>：<code>imgGate</code> 全仓只有<b>两个调用点</b>，都在看图手内部 —— 新回执产出时一次、<b>账本命中</b>时再一次。第二次是必须的：改表之前就落进账本的旧描述（或改表之后才命中的词）会在缓存期内被原样转述出去，只挡新回执挡不住它。拦住的是"交付"，账本条目本身不动 <code>VisionAgent.java</code>。</p>
+        </div>
+        <div class="note ok reveal">
+          <p><span class="n-title">看图顺带产一行候选（跨技能接口）</span>：看图手在 <code>state=ok</code> 且回执 trailer 的三项（<code>表情数量</code> / <code>图中文字</code> / <code>安全判定</code>）都读得到且认得时，往 <code>kv</code> 写一行 <code>sticker:cand/&lt;md5&gt;</code>（<code>md5 = md5(url 非空 ? url : file)</code>）—— 这是<b>跨技能接口键</b>，消费方是技能 <code>表情包</code>（逐条<b>读到即删</b> → 判定 → 下载入库）。<b>只有逐字"正常"才算安全</b>，读不到 / 写错 / 表情数量不在枚举里 ⇒ <b>不写候选</b>（fail-closed），描述照旧返回。这条顺带是<b>纯计算 + 一次 kv 写</b>：零模型调用、零网络、零新增配置键 <code>辅助识图\VisionAgent.java</code>、<code>表情包\StickerCollect.java</code>。</p>
+        </div>
+
         <h3 class="sec">模型面的边界</h3>
         <div class="grid-2">
           <div class="panel reveal">
@@ -442,7 +463,7 @@
       <section class="chapter" id="qq">
         <header class="chapter-head reveal">
           <span class="chapter-tag">05 / NAPCAT</span>
-          <h2>QQ 面：反向 WebSocket 服务端 + 48 个动作</h2>
+          <h2>QQ 面：反向 WebSocket 服务端 + 63 个动作</h2>
           <p class="chapter-desc">基板是服务端，NapCat 主动连过来。只用 JDK 与 json 库：纯 <code>java.net.ServerSocket</code> + 手写 WebSocket，不引第三方网络框架（<code>src\sair\v4\qq\Link.java</code>）。</p>
         </header>
 
@@ -453,10 +474,10 @@
           <div class="panel reveal d2"><h3>未启用</h3><p>配置里关掉时完全不监听，日志只说一句"未启用 —— 本地交互照常可用" <code>Boot.java</code>。</p></div>
         </div>
 
-        <h3 class="sec">动作面：48 个</h3>
+        <h3 class="sec">动作面：63 个</h3>
         <p>动作目录是给模型看的"能力形状"清单 —— 一条动作附一句话说明与参数名表，工具侧据此让模型选动作、填参数（<code>src\sair\v4\qq\Api.java</code>）。计数方法与结果：</p>
         <div class="code" data-lang="powershell"><div class="code-head"><span class="lang">powershell</span><span class="path">计数口径（只读源码）</span><button class="copy" type="button">复制</button></div><pre><code>$t = Get-Content 'src\sair\v4\qq\Api.java' -Raw
-([regex]::Matches($t,'c\.add\("([a-z_0-9]+)"')).Count      # =&gt; 48</code></pre></div>
+([regex]::Matches($t,'c\.add\("([a-z_0-9]+)"')).Count      # =&gt; 63</code></pre></div>
         <div class="tw scroll reveal">
           <table>
             <thead><tr><th>组</th><th>动作（数量）</th></tr></thead>
@@ -468,12 +489,16 @@
               <tr><td>群管（12）</td><td><code>set_group_ban</code> / <code>set_group_whole_ban</code> / <code>set_group_admin</code> / <code>set_group_card</code> / <code>set_group_name</code> / <code>set_group_leave</code> / <code>set_group_kick</code> / <code>set_group_sign</code> / <code>get_group_at_all_remain</code> / <code>group_poke</code> / <code>_get_group_notice</code> / <code>_send_group_notice</code></td></tr>
               <tr><td>请求与好友（5）</td><td><code>set_friend_add_request</code> / <code>set_group_add_request</code> / <code>delete_friend</code> / <code>send_like</code> / <code>friend_poke</code></td></tr>
               <tr><td>账号与系统（5）</td><td><code>set_qq_profile</code> / <code>set_self_longnick</code> / <code>get_status</code> / <code>get_version_info</code> / <code>get_cookies</code></td></tr>
+              <tr><td>自定义表情（4）</td><td><code>fetch_custom_face_detail</code> / <code>add_custom_face</code> / <code>delete_custom_face</code> / <code>set_custom_face_desc</code></td></tr>
+              <tr><td>群管理边缘（8）</td><td><code>complete_group_todo</code> / <code>cancel_group_todo</code> / <code>get_group_signed_list</code> / <code>set_group_member_invite_policy</code> / <code>set_group_member_permissions</code> / <code>set_group_new_member_history_visibility</code> / <code>get_group_share_link</code> / <code>cancel_group_album_media_like</code></td></tr>
+              <tr><td>QQ 空间（2）</td><td><code>send_qzone_msg</code> / <code>delete_qzone_msg</code></td></tr>
+              <tr><td>语音转写（1）</td><td><code>fetch_ptt_text</code></td></tr>
             </tbody>
           </table>
         </div>
-        <p>目录之外还有一组类型化封装，落在 30 个不同动作名上，是控制台与工具面调用的便捷入口（<code>Api.java</code>）。其中"取登录态 Cookies"自己占一个 op（<code>napcat.get_cookies</code>），放不放行由技能管控表定（<code>auth\Acl.java</code>）。</p>
+        <p>上面四组（自定义表情 / 群管理边缘 / QQ 空间 / 语音转写）是按 NapCat 版本陆续补进来的，目录里逐条写了对应的上游版本（<code>Api.java</code> 的 <code>catalog()</code>）。默认权限与其余动作一样：每个动作各占一个 <code>napcat.&lt;动作名&gt;</code> 的 op，未登记 = 未授权 —— 也就是说这一层今天只有主人与她本人能动；技能可以再包一层自己的 op（例如群管理的 <code>group.signedlist</code>、<code>group.sharelink</code>），但它最后仍要落到这个动作上，放不放行还是这张表说了算。目录之外还有一组类型化封装，落在 30 个不同动作名上，是控制台与工具面调用的便捷入口（<code>Api.java</code>）。其中"取登录态 Cookies"自己占一个 op（<code>napcat.get_cookies</code>），放不放行由技能管控表定（<code>auth\Acl.java</code>）。</p>
         <div class="note warn reveal">
-          <p><span class="n-title">唯一出口与强制层</span>：动作调用是所有动作的<b>唯一出口</b>。它在把参数交出去之前统一改写"要发出去的本地文件"：上传类动作的文件参数、发送类动作消息段里的文件字段与 CQ 串里的文件参数。只要值长得像本地路径（盘符路径、正斜杠路径、文件 URI）就换成中转 URL；中转没开或不是普通文件就保留原值并警告一句"跨机读不到本地路径" <code>Api.java</code>。</p>
+          <p><span class="n-title">唯一出口与强制层</span>：动作调用 <code>Api.call</code> 是<b>会触达"要交出去的本地文件"</b>那一条路，也是所有动作的<b>唯一</b>下水口（静默口 <code>Api.callQuiet</code> 刻意不下沉这一层，见 <a href="architecture.html#qq-impl">实现页 · 动作出口</a>）。它在把参数交出去之前统一改写"要发出去的本地文件"：上传类动作的文件参数、发送类动作消息段里的文件字段与 CQ 串里的文件参数。只要值长得像本地路径（盘符路径、正斜杠路径、文件 URI）就换成中转 URL；中转没开或不是普通文件就保留原值并警告一句"跨机读不到本地路径" <code>Api.java</code>。</p>
         </div>
 
         <h3 class="sec">事件解析与"群里只有 @ 才触发"</h3>
@@ -484,6 +509,9 @@
     return ev.atSelf();                   // 群里：只认被 @
 }</code></pre></div>
         <p>判定是"基板最小判定"：私聊一律回，群里一律要求被 @。主人在这里<b>不再有豁免</b> —— 群里要么 @ 它、要么走另一条路由，主人也一样（<code>QqGateway.java</code>；<code>return ev.atSelf()</code> 就是群里那唯一判据）。入站去重窗口由配置决定，<code>0</code> = 关闭判重 <code>QqGateway.java</code>。</p>
+        <div class="note reveal">
+          <p><span class="n-title">只 @ 一下、没有正文也起一轮（空@兜底）</span>：判据是"除 @ 之外还有没有别的内容段"，通过就照样起一个回合，这一轮的全部输入是<b>上下文快照</b>（窗口到这条 @ 为止），让模型自己读一遍再接。给模型的用户轮文本来自外挂键 <code>被单@时的输入</code>（<code>prompts\tools-index.md</code>），<b>缺这个键</b>时只在控制台报缺键、这一条消息<b>不起回合</b> —— 基板不编兜底话（<code>QqGateway.java</code>）。回什么由提示词定；那一行现在教她"看不出就只发一个「？」"。</p>
+        </div>
 
         <h3 class="sec">普通消息段：哪些有内容、哪些只有标签</h3>
         <p>一条消息的内容段会被翻成确定性的<b>人话标签</b>（纯函数：无模型、无网络、无副作用、无随机、无时钟），"有内容段就必定非空"，未知段型也有标签（<code>src\sair\v4\qq\MediaRender.java</code>）。逐类现状：</p>
@@ -508,6 +536,9 @@
 
         <h3 class="sec">通知也留痕</h3>
         <p>通知事件被翻成一行确定性标签（例如"撤回"那类会带上操作者、群号与消息 id），与消息<b>同表</b>：群通知落群聊历史、私聊通知落对话历史。认不出的通知类型也给一行带类型与子类型的标签，绝不静默丢弃；撤回事件自成一行，不去改那条被撤回的原行（<code>qq\NoticeRender.java</code>；<code>QqGateway.java</code>）。</p>
+        <div class="note ok reveal">
+          <p><span class="n-title">通知分支里唯一会往外说话的一条：戳一戳应答</span>：有人<b>戳的是她本人</b>（判据是结构字段 <code>notice_type=notify</code> + <code>sub_type=poke</code> + <code>target_id == self_id</code>）⇒ 直接回一个「？」，<b>不走模型</b>。同一会话、同一个人 <b>60 秒只回一次</b>（窗口键 = 会话 + 人，纯内存，进程重启即清空）；被压掉的那几次只记进同一行结构事实的 <code>suppressed=</code> 里。这个字<b>冻结写死在 Java 里、不新增配置键</b>（<code>QqGateway.java</code> 的 <code>POKE_REPLY</code>）。同一条事实行 <code>[qq] poke reply=…</code> 只受"有没有输出面"约束，不受 <code>logQq</code> / <code>logConsole</code> 的类别开关影响（<code>QqGateway.java</code>）。</p>
+        </div>
 
         <h3 class="sec">本地文件外链中转（跨机部署）</h3>
         <p>部署事实是：NapCat 与插件<b>不一定在同一台机器</b>，而上传动作的文件参数如果是本地路径，只有同机的 NapCat 读得到。所以"把本地文件变成 URL"被算作<b>连接 NapCat</b> 这件事的一部分，不是业务能力（<code>src\sair\v4\qq\Relay.java</code>）。</p>
@@ -535,13 +566,13 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">06 / AUTH</span>
           <h2>权限面：技能 / 数据 / 路径三个域</h2>
-          <p class="chapter-desc">权限模型一句话：<b>按归属分散的权限文件（基板内置工具写数据根下的 <code>perms-core.jsonc</code>，每个技能写自己目录里的 <code>perms.jsonc</code>；装载时合并成一张技能管控表）+ 三个域各自的判定</b>。三个域是<b>技能</b>（谁能用哪个 op）、<b>数据</b>（谁能改、谁能读哪类数据）、<b>文件</b>（谁能碰哪些路径）；没列到的按该域的默认值走 —— 技能不能、数据能读不能改、文件不能碰。</p>
+          <p class="chapter-desc">权限模型一句话：<b>按归属分散的权限文件（基板内置工具写数据根下的 <code>perms-core.jsonc</code>，每个技能写自己目录里的 <code>perms.jsonc</code>；装载时合并成一张技能管控表）+ 三个域各自的判定</b>。三个域是<b>技能</b>（谁能用哪个 op）、<b>数据</b>（谁能改、谁能读哪类数据）、<b>文件</b>（谁能碰哪些路径）；没列到的按该域的默认值走 —— 技能不能、数据能读不能改、文件不能碰。放行之后还有一道<b>罢工闸</b>（情绪到 <code>strike</code> 时除 <code>perm</code> 一族外一律拒）。</p>
         </header>
 
         <h3 class="sec">三个身份</h3>
         <div class="grid-3">
           <div class="panel reveal"><h3>MASTER</h3><p>主人 / 本地控制台。<b>恒全权，任何条目都影响不到他</b>；把 <code>MASTER</code> 写进表里会被忽略（不报错、不生效）<code>auth\Caller.java</code>、<code>Acl.java</code>。</p></div>
-          <div class="panel reveal d1"><h3>SYSTEM</h3><p>她自己的自主行为：定时任务、钩子、维护、她自己发出去的话。<b>同样恒全权</b>，表不用管她 <code>Caller.java</code>、<code>Acl.java</code>。主体判定顺序是"显式自主标志 &gt; 主人 &gt; 其它" <code>Caller.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>SYSTEM</h3><p>她自己的自主行为：定时任务、钩子、维护、她自己发出去的话。<b>同样恒全权</b>，表不用管她 <code>Caller.java</code>、<code>Acl.java</code>。主体判定顺序是"显式自主标志 &gt; 主人 &gt; 其它" <code>Caller.java</code>。<b>但罢工闸不豁免她</b> —— <code>strike</code> 态下她自己发的 op 一样被拒（见下面「罢工」那一节）。</p></div>
           <div class="panel reveal d2"><h3>ALLUSER</h3><p>除主人与她之外的所有人（单人与群两种身份的底稿）：只能用表里放行的 op、只能改属于自己的那类数据、只能碰放行的路径 <code>Caller.java</code>。"其他"这个旧叫法已退休，等价于它 <code>Caller.java</code>。</p></div>
         </div>
 
@@ -599,8 +630,27 @@
           <p><span class="n-title">事实块每轮带上权限</span>：事实里的调用者带<b>主体种类</b>（<code>caller.kind</code>）、<b>这个身份能用的 op 清单</b>（<code>caller.ops</code>，恒全权写 <code>"ALL"</code>、一个都没授权写 <code>[]</code>）、以及能命中的管控表条目（原样带出）。清单一律问权限面，基板不重算任何一次判定 <code>ctx\CtxBuild.java</code>。</p>
         </div>
 
+        <h3 class="sec">罢工：op 级的第二道硬闸</h3>
+        <p>情绪那一档 <code>strike</code>（罢工）不只是语气 —— 它在<b>权限判定之后</b>另插了一道 op 级硬闸：<b>放行了才看情绪</b>，<code>strike</code> 态下除 <code>perm</code> 一族外一律拒，回执只有一行 <code>[罢工中] 我正忙着，这事等会儿再说。</code>，并且<b>不调用任何下游</b>（不发消息、不写库、不联网）。权限面没放行时返回的还是 ACL 那句拒文 —— <b>"权限阻断"优先，不许被情绪盖掉</b> <code>Builtins.java</code>。</p>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th>问题</th><th>事实</th></tr></thead>
+            <tbody>
+              <tr><td>判据真源</td><td>只有一处：<code>kv</code> 里 <code>mood:&lt;场合&gt;</code> 那一行的 <code>state</code> 字段（群 = <code>mood:group:&lt;群号&gt;</code>、私聊 = <code>mood:private:&lt;QQ&gt;</code>）。不读情绪表、不造第二套状态；<code>state</code> 不是 <code>strike</code> 时这一层返回值与改前逐字节相同 <code>Builtins.java</code>、<code>情绪\EmotionMood.java</code></td></tr>
+              <tr><td>白名单</td><td><code>perm</code> 一族（按<b>工具名那一段</b>比：<code>perm</code> / <code>perm.*</code> 放行，<code>permx.*</code> 不放行）—— 主人改权限是系统级动作，罢工不挡 <code>Builtins.java</code></td></tr>
+              <tr><td>拦在哪三处</td><td>内置 op 判定（<code>needOpAs</code>）、技能 op（<code>skill\Host.need</code>）、工具入口（<code>tool\Registry.mayEnterDeny</code>）—— 三处同一个判据、同一句措辞 <code>Builtins.java</code>、<code>Host.java</code>、<code>Registry.java</code></td></tr>
+              <tr><td>NapCat 动作出口</td><td><code>h.napcat()</code> 是直连、不经工具面，所以动作出口另判一次（场合从动作参数现算）。<b>说话动作豁免</b>：<code>send_msg</code> / <code>send_group_msg</code> / <code>send_private_msg</code> / 两个合并转发 —— 罢工 = 不干活，但要继续骂人；群管、公告、上传、点赞、戳一戳照旧拦 <code>Builtins.java</code>、<code>Boot.java</code></td></tr>
+              <tr><td>失败方向</td><td><b>fail-open</b>：取不到场合（当轮没有 caller / 动作参数与会话都没有群号或 QQ）/ 读库异常 ⇒ <b>不拦</b>，只记一行 warn（同场合同原因只记第一行）。罢工是可用性功能，内部错误不许把全部 op 打死；但"能读到 strike"时必须拦。<b>不豁免 SYSTEM</b> —— 她自己的钩子与定时任务发的 op 同样被拒 <code>Builtins.java</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note reveal">
+          <p><span class="n-title">工具面上的影响</span>：罢工期间模型看到的那把工具仍可能在工具表里，<b>但点不动</b> —— 入口闸会直接回那行回执；技能动作走 <code>Host.need</code> 拿到的也是同一行。另外情绪那一层的语气只是提示（"不接活"），<b>真正把 op 拦下来的是这道基板硬闸</b>，所以技能关掉 / 卸掉也拦得住 <code>Builtins.java</code>。</p>
+        </div>
+
         <h3 class="sec">好感度与权限的关系</h3>
-        <p>好感度子系统只做一件事：记一个人的数值与档位，供回话时拿捏热络程度。<b>它不是权限，也不参与任何判定</b> —— 一个工具能不能用只看技能管控表（<code>src\sair\v4\auth\Favor.java</code>）。数值带一层内存缓存，写操作直接落库并刷新缓存 <code>Favor.java</code>。<b>数值 → 关系名只做展示，比较一律用数值</b>：≥900 挚友 / ≥600 亲近 / ≥300 朋友 / ≥200 熟人 <code>Favor.java</code>。</p>
+        <p>好感度子系统记一个人的数值与档位，供回话时拿捏热络程度；她自己每次加减都按<b>来往类别</b>走那张 13 类的区间表（友好 = 夸赞 / 帮忙 / 怜悯 / 投喂 / 陪伴 / 普通，非友好 = 无厘头 / 羞辱 / 撒谎 / 吵架 / 越界 / 发怒 / 背叛，逐类目夹取；不写类别才回落到总区间 加 1~7 / 减 1~12；类别认不出或方向对不上 ⇒ <b>整条不执行</b>）<code>src\sair\v4\auth\Favor.java</code>。数值带一层内存缓存，写操作直接落库并刷新缓存 <code>Favor.java</code>。<b>数值 → 关系名只做展示，比较一律用数值</b>：0 初识 / &gt;0 陌生 / 100 眼熟 / 300 朋友 / 500 信重 / 700 敬重 / 1000 挚友 <code>Favor.java</code> 的 <code>levelName</code>。</p>
+        <p><b>它自己不是权限表，但档位会开一道只读的口子</b>：谁能用哪个 op 仍然只看技能管控表（技能那一域与好感度无关，一个字节都没动）；另有一道与 ACL 平行的<b>档位放权闸</b> —— 好感度过<b>文件档</b>（出厂 <code>favorFileMin</code> = 500）<b>且</b>这个 op 在那张写死的窄表里（只有 <code>file.read</code> / <code>file.list</code> / <code>send.file</code> / <code>send.record</code> 四个，<b>没有通配、没有前缀匹配</b>）才把 ACL 的拒转成放行，而且<b>只放读</b>（写一个字节都不放宽）<code>auth\FavorGate.java</code>。<b>硬禁名单压过一切</b>：档位再高也读不了 <code>D:/share/SairFrameWork/</code> 这一条绝对前缀，以及数据根之内按<b>路径段边界、任意深度</b>命中的 <code>config.json</code> / <code>debug-port.json</code> / <code>v4.db</code> / <code>logs/</code> / <code>SFW-BOT.ir</code> —— 这一判是最后一道，权限表里写了明文放行也翻不过来（主人与她本人照旧全权）<code>FavorGate.java</code> 的 <code>banned</code>、<code>auth\Acl.java</code>。</p>
         <div class="note reveal">
           <p><span class="n-title">好感度表不进"可查询的库"</span>：它用自定义主键、没有统一行形状，进不了库注册表 —— 这也是刻意的：把好感度做成"库"就等于让技能绕过授权动作直接改这个数值 <code>store\EnvLibs.java</code>。</p>
         </div>
@@ -770,6 +820,7 @@ $i = $lib.IndexOf('RUN_COLS = {'); $j = $lib.IndexOf('};', $i)
 
         <h3 class="sec">装配骨架</h3>
         <p>外挂块来自扩展点，内容与文案全在单元里；基板负责顺序与段位 <code>ctx\CtxBuild.java</code>。历史按字符预算裁剪，预算 <code>≤0</code> 或行数为 0 时原样返回（不改行为）<code>CtxBuild.java</code>。</p>
+        <p><b>本轮说话人锚点</b>：每一轮还在「本轮 user 消息」<b>前面最近处</b>固定插一条 system 事实 —— <code>【本轮说话人】&lt;昵称&gt;(QQ n)——本轮就他在说话；窗口/历史/记忆里别人的行，别算他头上。</code> 号码只取<b>本轮真正的触发者</b>（不从窗口 / 历史 / 记忆里认人、不编号、不硬编码任何人；取不到就如实写 <code>(QQ ?)</code>）；昵称与窗口里的角色标注词（<code>我</code> / <code>对方</code>）逐字相同时不许当标签用、退回 <code>#QQ</code>。收尾回合（<code>assembleSystem</code>，本来就没有本轮 user）<b>不插</b>；没有调用者时那一句如实写成「本地控制台(没有 QQ)」，她自己的自主行为（SYSTEM）另有自己的一句 —— 两句都不写成某个 QQ 的事；<b>本地控制台那一支仍是主人本人，带他的 QQ</b>。它每一轮都进上下文，所以是固定成本：≈ 42 字符 + 昵称 + QQ 位数 <code>ctx\CtxBuild.java</code> 的 <code>speakerAnchor</code> / <code>ANCHOR_BASE_CHARS</code>。</p>
 
         <h3 class="sec">每轮都会出现的事实行</h3>
         <div class="tw scroll reveal">
@@ -777,8 +828,10 @@ $i = $lib.IndexOf('RUN_COLS = {'); $j = $lib.IndexOf('};', $i)
             <thead><tr><th>事实行</th><th>内容</th></tr></thead>
             <tbody>
               <tr><td>时间</td><td>当前时间</td></tr>
-              <tr><td>调用者</td><td>入口（控制台或 QQ）、账号、昵称、是不是主人、会话键、群号与群内角色、非主人时的好感度、<b>主体种类</b>、<b>这个身份能用的 op 清单</b>（恒全权是 <code>"ALL"</code>、一个都没有是 <code>[]</code>）、能命中的管控表条目</td></tr>
-              <tr><td>人物</td><td>"正在说话的这个人"是谁：跨群同一人的客观聚合数据。只给数据不给文案</td></tr>
+              <tr><td>调用者</td><td>入口（控制台或 QQ）、账号、昵称、是不是主人、会话键、群号与群内角色、非主人时的好感度、<b>主体种类</b>、<b>这个身份能用的 op 清单</b>（恒全权是 <code>"ALL"</code>、一个都没有是 <code>[]</code>）、能命中的管控表条目、<b>好感度档位事实</b>（<code>favorGate</code>：档位表 / 他这一档 / 这一档此刻放行的只读 op，只搬数据不算判定）</td></tr>
+              <tr><td>被叫到的方式</td><td><code>addressed:</code> <b>这一轮是怎么被叫到的</b>，六个封闭枚举：<code>at</code>（群里被 @）／<code>private</code>（私聊）／<code>master</code>（主人那条没有 QQ 地址的控制台／面板入口）／<code>trigger</code>（触发词或插件投票起的那一轮）／<code>self</code>（她自己的自主／内部回合）／<code>system</code>（定时／闹钟／任务投递）。由起这一轮的那个产者塞进回合、基板只渲染；没有产者塞过就<b>整行不出现</b>，绝不写空值、也绝不出现自由文本（渲染前过白名单）。键 <code>addressedFacts=false</code> 可关掉这一行</td></tr>
+              <tr><td>好感度类别</td><td><code>favorKinds:</code> 一行可机读的"来往类别 → 加减区间"（13 类，与她记账时真正夹取用的那一份同源；键 <code>favorKindFacts=false</code> 可关掉这一行）</td></tr>
+              <tr><td>人物</td><td>"正在说话的这个人"是谁：跨群同一人的客观聚合数据，外加一格 <code>aka</code>（<b>同一 QQ 在别的群里叫什么</b>，最多 3 条、每条 ≤24 字、顺序确定；只列本群之外的群，拿不到就一个字符都不加）。只给数据不给文案</td></tr>
               <tr><td>媒体</td><td>本轮的媒体段元数据（只有媒体段的消息才有这一行）</td></tr>
               <tr><td>连接状态</td><td>已连接 / 未连接</td></tr>
               <tr><td>模型</td><td>八个字段，语义见 <a href="#model">模型面</a></td></tr>
@@ -786,9 +839,14 @@ $i = $lib.IndexOf('RUN_COLS = {'); $j = $lib.IndexOf('};', $i)
               <tr><td>在跑任务</td><td>后台任务数（只在大于 0 时出现）</td></tr>
               <tr><td>能力索引</td><td>一行事实（类别 → 工具 + 一句话），帮模型在几十个工具里定位；子 Agent 只给名字</td></tr>
               <tr><td>轮数预算</td><td>第几轮 / 还剩几轮 / 这一轮的上限是谁的；值与她真正被掐停时用的上限同源</td></tr>
+              <tr><td>同账号的别的机器人</td><td><code>clients:</code> <b>本账号另有机器人服务在发言</b> —— 只在<b>这一轮的窗口里确实有外部来源行</b>时才出现（没有就一个字节都不出现）。逐字文案冻结在基板里，<b>只说"窗口里标「其他」的行不是人、也不是你说的"，不写"可能是谁"</b>（帧里没有识别来源客户端的字段）。键 <code>clientsFacts=false</code> 可关掉这一行</td></tr>
+              <tr><td>指令形状</td><td><code>cmdish: '#'</code>（或 <code>cmdish: '/'</code>）<b>只报形状</b>：这一轮的正文以 <code>#</code> 或 <code>/</code> 开头。<b>不给归属结论、不判"这像别家指令"、也不影响这一轮要不要回</b>；基板侧没有关键词表、也没有忽略名单（判据只有"第一个字符"这一条）。键 <code>cmdishFacts=false</code> 可关掉这一行</td></tr>
               <tr><td>动态窗口</td><td>本会话最近 N 条聊天记录（窗口一行 + 标签行 + 一行一条），事实块的最后一段</td></tr>
             </tbody>
           </table>
+        </div>
+        <div class="note ok reveal">
+          <p><span class="n-title">本批的三个事实行与三个开关（她由此多知道三件事）</span>：三个键 <code>clientsFacts</code> / <code>cmdishFacts</code> / <code>addressedFacts</code> 都在 <code>Conf.knownKeys()</code> 里登记（<code>ai/config</code> 看得见、能 get／set），出厂值都是 <b>true</b>，并且<b>都不进 <code>ensureDefaults()</code></b> —— 出厂不写进 <code>config.json</code>，靠默认值生效；关掉任意一个只少对应那一行事实，<b>不改变任何一次判定</b>。对应的三件对用户可见的事：① <b>别家机器人的话不再被当成她说的</b> —— 那些行在窗口里标「其他」（不是「我」），不进对话历史（私聊那侧落 <code>dialog.role=foreign</code>，而 <code>CtxBuild.appendHistory</code> 只收 <code>user</code>／<code>assistant</code>），<code>person</code> 那行的六库聚合里也被 Java 侧剔掉（<code>store\Person.java</code> 的 <code>mayOwnForeignRows</code>／<code>foreign</code>），提示词层还写明"不当自己的、不说'我发过'、不据此记账记印象"（<code>data\prompts\identity.md</code>）。归属只有<b>二元</b>：「我」 vs 「其他」，<b>不告诉她是哪一家</b>，因为帧里没有识别来源客户端的字段。② <b>她看得出"像别家指令"的形状</b>（<code>cmdish:</code> 只说"以 <code>#</code> 或 <code>/</code> 开头"这一个形状），归属结论由她自己下 —— 基板侧没有关键词表、也没有忽略名单。③ <b>她知道这一轮是怎么被叫到的</b>（<code>addressed:</code> 六个封闭枚举），于是 <code>data\prompts\identity.md</code> 的「这个号不止我一个」一节才立得住：<b>在叫我、这条像别家指令、记忆里又没有"这类不是给我的" ⇒ 先疑惑地问一句"这条是发给我的吗？群里回我时 @ 我一下，不然我收不到"</b>（措辞她自己定；不许静默、不许先答内容）；他答"不是给我的"就记进记忆，此后这类指令不再重复问。</p>
         </div>
 
         <h3 class="sec">动态聊天窗口</h3>
@@ -796,6 +854,9 @@ $i = $lib.IndexOf('RUN_COLS = {'); $j = $lib.IndexOf('};', $i)
           <div class="panel reveal"><h3>每触发一次就现取</h3><p>不再有游标、不再有"上次触发点到这次触发点"的增量、不再有落库的进度状态 —— 每一轮都重新取最近 N 条，大小只有一个旋钮，出厂 30 条，私聊与群一视同仁 <code>ctx\ChatWindow.java</code>；<code>CtxBuild.java</code>。</p></div>
           <div class="panel reveal d1"><h3>两个源，不对称</h3><p>群读群聊历史表；私聊与控制台读对话历史表。这不是取巧：群聊表里从来没有一行群号 ≤ 0，私聊消息根本不在那张表里 <code>ChatWindow.java</code>。</p></div>
           <div class="panel reveal d2"><h3>一条查询</h3><p>每回合就这一条查询：按 ts DESC, id DESC 取尾部 N 行，读满就停，窗口外有多少历史都不扫 <code>ChatWindow.java</code>。</p></div>
+        </div>
+        <div class="note ok reveal">
+          <p><span class="n-title">群里的每一行都带 QQ</span>：群聊记录行的"谁"写成 <code>昵称(QQ n)</code> —— 昵称只是群名片（写的人自己就能改、零权限），QQ 才是从帧里来、群成员改不动的客观锚点；昵称与角色标注词（<code>我</code> / <code>对方</code>）逐字相同、或昵称为空时，一律退回 <code>#QQ</code>（这一形状本身已经带 QQ，不再补后缀），取不到 QQ 就如实标 <code>(QQ ?)</code>、绝不编一个号。她自己那一行仍标 <code>我</code>，判据是<b>两个都要满足</b>：<code>user_id</code> 等于自身 QQ，<b>且</b>那一行带基板自己写的自报标记（<code>extra.self</code>，只有她自己的回声会写）—— 只看号码的话，能连上端口的人推一条假帧就能冒充她。<b>「谁」是二元标签，第三个词是「其他」</b>：本账号下别家机器人服务发出来的行（<code>extra.foreign=true</code>）<b>先</b>判、直接标 <code>其他</code>，与 <code>selfId</code> 取没取到无关 —— 否则它会被"我"那一支抢走（群里与私聊／控制台两支<b>同判</b>）；这一格<b>不带 QQ 后缀、不带昵称</b>，因为那个 id 下没有"某个人"。私聊与控制台那一支其余情况照旧标"我" / "对方" —— 一对一里角色标注就是准确的 <code>ctx\ChatWindow.java</code> 的 <code>who()</code> / <code>FOREIGN</code> / <code>markedForeign</code>。</p>
         </div>
         <div class="note reveal">
           <p><span class="n-title">代价是说清楚的</span>：窗口按定义会在两次触发之间<b>重叠</b>（同一条消息可能被看两遍），消息密集时也可能<b>漏掉</b> N 条之外的部分 —— 而且它<b>不谎报</b>"还有多少条没带"（那需要第二条查询）。换来的是她一定看得见"最近发生了什么"，包括没有被放行判据选中的那些话 <code>ChatWindow.java</code>。</p>
@@ -836,11 +897,43 @@ $i = $lib.IndexOf('RUN_COLS = {'); $j = $lib.IndexOf('};', $i)
           <p><span class="n-title">无界面环境不报错</span>：控制台窗体是类加载即建窗体的单例，无界面环境里它静态初始化会失败。捕获器所有入口都包在异常兜底里：装不上就标记未安装，读返回空、写返回一句可读原因，<b>绝不把异常抛给基板</b> <code>ConsoleTap.java</code>。</p>
         </div>
 
-        <h3 class="sec">输出分流</h3>
+        <h3 class="sec" id="outgate">输出分流</h3>
         <p>输出落点有四种，各自独立实现：静默、控制台、QQ（群与私聊）、定时任务（<code>term\Sinks.java</code>）。发送前还有两道：</p>
         <div class="grid-2">
           <div class="panel reveal"><h3>出站改写管线</h3><p>分段之后、发送之前跑一遍。注入口默认是空的 —— 没人注入过就等于零改写，行为与加这一层之前逐字节一致；改写层自己炸了这一条按原样发（"改不动的东西，不能因为它坏了就丢话"）<code>Sinks.java</code>。</p></div>
-          <div class="panel reveal d1"><h3>出站最后一道闸</h3><p>拦"正文里混进了模型的工具调用标记"这一种情况：判据是<b>结构</b>（标签形状 + 结构词），不是关键词表；命中就<b>整条不发</b>，绝不"正则删字符后照发"（半剥的残留比一条都不发更像乱码，还会把残缺内容写进聊天记忆）。要拦的那一条丢了，其余条照发 <code>Sinks.java</code>。</p></div>
+          <div class="panel reveal d1"><h3>出站最后一道闸</h3><p>全树的出站纪律只有这一支 <code>gate(part)</code>，<b>逐条</b>判（位置=分段之后）：QQ、定时任务、降级打印、本地控制台都从这里过。命中就<b>只丢这一条</b>（其余条照发），绝不"正则删字符后照发"——半剥的残留比一条都不发更像乱码，还会把残缺内容写进聊天记忆。只有两处是"剥掉再发"而不是"整条丢"：开头的<b>自我记账头</b>、贴着首 / 尾的<b>协议暗号</b> —— 剥完都还要接着走后面几道闸（见下表）。判据全部住在别处、各有唯一产法，这一层只做决定 <code>Sinks.java</code>。</p></div>
+        </div>
+        <div class="tw scroll reveal">
+          <table>
+            <thead><tr><th class="num">#</th><th>逐条这一道判什么</th><th>怎么落</th></tr></thead>
+            <tbody>
+              <tr><td class="num">①</td><td><b>工具调用标记</b>：模型把工具调用标记当正文吐了出来。判据是<b>结构</b>（标签形状 + 竖线 / DSML / 结构词），不是关键词表 <code>qq\ToolMarkup.java</code></td><td>整条不发</td></tr>
+              <tr><td class="num">②</td><td><b>自我记账头</b>（<code>[我发的 msg_id=N]</code> 那一行标签，含方括号 / 圆括号变体）：那是记账行的行标签，不是她要说的话 <code>qq\SelfEcho.java</code></td><td>头在<b>开头</b>（连续多个一起剥）⇒ 剥掉再发；头在<b>中段</b> / 剥完什么都不剩 / 头残缺 ⇒ 整条不发</td></tr>
+              <tr><td class="num">③</td><td><b>协议暗号</b>（<code>&lt;silent&gt;</code> 一类"这一条不出声"的记号）：判据是「<b>整条相等</b>」<b>加</b>「<b>贴边</b>」两半 —— 贴边（正文首 / 尾）的只剥<b>带括号的那六种写法</b>（尖 / 方 / 圆，全角半角、大小写、半角空格都认），<b>夹在句子中间的一律不动</b>、<b>裸词</b>（<code>silent</code> / <code>不语</code> / <code>不发言</code>）也一律不动；剥完还要接着走后面几道闸（红线等），不是"剥完就放行"。另有<b>接缝</b>：长度分段正好把暗号劈成两半（<code>… &lt;sil</code> + <code>ent&gt;</code>）时，两个残片一起剪掉，谁也不单独进群 <code>agent\Agent.java</code>、<code>term\Sinks.java</code>、<code>qq\Api.java</code></td><td>整条正文就是它 ⇒ 整条不发；贴边 ⇒ 剥掉那个 token 再发（剥完什么都不剩也整条不发）；夹在正常句子里 ⇒ 照发</td></tr>
+              <tr><td class="num">④</td><td><b>半截自报标记</b>：分段（<code>&lt;split&gt;</code> 或长度硬切）正好切在 <code>[[mood:…]]</code> 中间，两半各自都不满足标记形状 <code>qq\MoodMarks.java</code></td><td><b>这一条不发</b>（fail-closed）</td></tr>
+              <tr><td class="num">⑤</td><td><b><code>[[mood:…]]</code> 自报标记族</b>（协议级；唯一实现 <code>qq\MoodMarks.java</code>）：提示词每轮都在教她写这一行，它是基板与模型之间的约定，用户不该看到字面量。<b>标记 = 止语点</b> <code>MoodMarks.java</code></td><td>标记所在行<b>连同它之后的全部正文</b>一起丢弃、只保留标记之前的文字；剥完什么都不剩 ⇒ 整条不发</td></tr>
+              <tr><td class="num">⑥</td><td><b>出站红线</b>（常开族；唯一实现 <code>term\Redline.java</code>，词表 = <code>prompts\redline.md</code> 热读）</td><td><b>不可替换</b>类目（威胁 / 自伤）⇒ 整条不发；<b>可替换</b>类目（隐私 / 机密键）⇒ 就地换词再发</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="grid-2">
+          <div class="panel reveal">
+            <h3>还有两条不在"逐条"这一层</h3>
+            <p>① <b>整条口</b>（分段<b>之前</b>，<code>wholeGate</code>）：正文里<b>至少两行</b>各自呈现"基板事实块的写法"（键紧跟冒号 + 值以结构化记号开头，全角 / 大小写 / 空白都归一化）⇒ <b>整批不发</b>（判据 <code>qq\InternalFacts.java</code>，理由 <code>rule=internal_fact</code>）。行级 fail-closed —— 逐段看会漏掉一半，所以它必须在这道口上。<br>同一个整条口还判三条"分段把纪律劈开"的写法：整条视图命中威胁 / 自伤 ⇒ 整批不发；可替换类目正好跨在切点上（整条能换、逐条一条都换不到）⇒ 整批不发；<code>&lt;split&gt;</code> 正好落在某枚标记的跨度里 ⇒ 整批不发（判据是<b>位置</b>不是形状，见 <code>Sinks.java</code> 的 <code>splitMarkFact</code>）。<br>② <b>一轮条数上限</b>（分段<b>之后</b>、发送之前，<code>capParts</code>）：这就是爆炸半径的硬上限 —— 内容判据全部漏掉时仍把一轮钉在 <code>replyMaxParts</code> 条以内（默认 <b>9</b>，<code>&le;0</code> = 不限制），超限只发前 N 条并留一行 warn（<code>rule=parts_cap</code>）。它不改内容、也不改落库 —— 只影响投递 <code>term\Segmenter.java</code>、<code>Sinks.java</code>。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h3>止语点跨段生效与降级打印</h3>
+            <p><b>止语点跨段</b>（<code>markStopTail</code>，位置=分段之后、出站 stage 之前）：第一段带标记的段<b>之后的每一段一起丢弃</b>。理由是分段发生在 stage / 闸<b>之前</b>，标记后面那几段本来在逐段闸看不见的文本里；同一条纪律也管"被劈开的标记"与"被劈开的协议暗号"（<code>seamSilent</code>；相邻两段拼起来恰好是一个完整括号暗号就剪掉，后半截碎片不会单独进群）。刻意放在 stage 之前 —— 情绪那层会把标记剥掉，之后这里就看不见它了。<br><b>降级打印</b>（<code>degradedPrint</code>，<b>五处调用点共用</b>）：<code>QqSink</code> 两处（NapCat 未连接 / <code>caller</code> 缺群号·QQ）、<code>TaskSink</code> 两处（NapCat 未连接 / 没有目标）、<code>ConsoleSink</code> 一处（本地交互面）—— 这五处"没有 QQ 落点、只打进控制台"的路走的是<b>同一支</b>闸：先判事实块整条丢，再走逐条那六条。<b>降级不是降纪律</b>：口径与线上逐字一样，以后再加降级落点也只改这一处 <code>Sinks.java</code>。</p>
+          </div>
+        </div>
+        <div class="note ok reveal">
+          <p><span class="n-title">判据住在基板，不随技能开关生死</span>：<code>[[mood:…]]</code> 标记族与出站红线这两族原先<b>只有</b>一个实现、住在可选技能（情绪 / 出站红线）里 ⇒ 技能被移走 / 编译失败 / <code>config.json: extEnabled=false</code>（整条 stage 管线不跑）/ 工具发送路这四种形态必现外泄（工具路完全不过 stage）。现在两族的唯一实现都在基板（<code>qq\MoodMarks.java</code>、<code>term\Redline.java</code>），技能那一侧只保留"上一条被拦"那条给人看的会话提示 —— <b>关掉它不会让红线失效</b>。红线还是<b>唯一</b>覆盖"无 caller 落点"（定时任务 / 闹钟，<code>caller</code> 恒为 null）的安全闸，所以它不需要 caller、不需要场合 <code>Redline.java</code>、<code>MoodMarks.java</code>、<code>Sinks.java</code>。</p>
+        </div>
+        <div class="note warn reveal">
+          <p><span class="n-title">工具发送路另有一道同源闸</span>：<code>消息发送</code>、<code>群管理</code>、<code>表情包</code>、<code>发图片</code>、<code>申请审批</code> 这些技能走 <code>h.napcat()</code> → <code>qq\Api.java</code>，<b>完全不过 stage</b>。所以 <code>Api.call</code> / <code>callQuiet</code> / <code>sendText</code> 上另有一道内容级闸，判据与本层<b>同源</b>（同一个自我记账头、同一个协议暗号、同一个标记族、同一个红线、同一个事实行判据），不是第二套规则；口径同样是"<b>整条拦 / 贴边剥</b>"—— 整条正文就是暗号 ⇒ 整条拒发，贴边 ⇒ 就地剥掉那个 token 再往下判（改字符串本体；段数组只动首 / 尾的 text 段），段数组那种剥不干净的（token 跨两个 text 段、改完验不回"拼起来 = 整条剥"）⇒ <b>整条拒发</b>（<code>residual=split</code>，宁可不发半句）。这两个公开出口的 ACL、罢工与落点判定也是<b>同一个</b> <code>Guard</code>（<code>Boot</code> 装配，三腿顺序固定：ACL 腿 <code>Auth.allow(主体, "napcat.&lt;动作名&gt;")</code> → 罢工腿 <code>Builtins.strikeDenyAction</code> → 落点腿 <code>Boot.destDeny</code>），位置排在内容级闸<b>之前</b>，拒文都原样作为 <code>error</code> 返回 —— <b>静默口不是后门</b>；它与 <code>call</code> 只差"不下沉文件改写层、不记台账"（<code>Api.java</code>）。落点腿管的是"带东西的动作只能落在当前会话"：群 A 的回合不许把东西放进群 B，私聊不许把东西从一个人的私聊转到另一个人的私聊（当前没有对手方时私聊落点一律拒，fail-closed，只许发给主人本人），控制台里的主人算"他自己的私聊"（只放宽 <code>master() &amp;&amp; isConsole()</code> 这一种形状）<code>Boot.java</code>。覆盖面是"<b>任意动作 × 任意字符串叶子</b>"（递归对象 / 数组），逐叶子判 + 就地改写；四条例外：查询类动作（<code>get_*</code> / <code>_get_*</code>）、<code>file</code> / <code>image</code> 键、<code>type</code> 键、协议令牌 <code>flag</code> 键 <code>Api.java</code>。深度与字符预算双闸，超限 fail-closed。</p>
+        </div>
+        <div class="note reveal">
+          <p><span class="n-title">红线词表长什么样</span>：<code>prompts\redline.md</code> 是<b>唯一事实源</b>，五组键 —— <code>禁词常开</code>（哪些类目任何状态都要处理）、<code>禁词不替换</code>（只否决、绝不替换的那几个：今天 = 威胁 / 自伤）、<code>禁词-&lt;类目&gt;</code>（逐类目词表，逗号分隔）、<code>禁词替换-&lt;类目&gt;</code>（配了它就改走"就地换词"，今天 = 隐私 / 机密键）、<code>禁词例外-&lt;类目&gt;</code>（<b>成对</b>写法 <code>上下文短语=被豁免的词</code>：只有正文里出现那个短语时，才豁免<b>被点名的那一个词在这一次命中</b>，继续扫其余词；它不是词表、不进词数，缺键 / 有坏项 / 整份表读不到都按"这一类目没有任何例外"处理，也就是照旧拦；只对"不可替换"类目起作用，给可替换类目配例外 = 那一行空转）。类目名不在 <code>禁词常开</code> 里 = 那一格空转；不在 <code>禁词不替换</code> 里且配了替换串 = 走软替换。它是<b>热读</b>的（mtime + 字节数双失效）：改完保存下一条消息就生效，不用重编译、不用重启。词表是<b>子串匹配</b>，所以不许往里放能在正常句里当子串出现的短词 —— 命中不可替换类目的代价是<b>整条静默</b> <code>redline.md</code>、<code>Redline.java</code>。</p>
         </div>
         <p>分段的段位口径：显式分段标记优先 → 按长度分段 → 群聊再压短一档；长度切点依次找换行、句末标点、次级标点，尽量不把句子劈成两半 <code>qq\Seg.java</code>。</p>
 
@@ -974,7 +1067,7 @@ if (aclDeny != null) return aclDeny;</code></pre></div>
           <p><span class="n-title">这些键现在写进配置也不会改变行为</span>：折叠转发展开的四个键（开关、节点数上限、深度上限、字符上限）已在配置面登记，但当前<b>没有任何代码读它们</b> <code>Conf.java</code>；同一批里只有引用展开总开关与缓存有效期被真正读取 <code>Conf.java</code>。所以"转发内容自动展开"这项能力<b>计划中／未实现</b>，现状是一行 <code>[折叠转发 id=… 未展开]</code> 标签 <code>qq\MediaRender.java</code>。</p>
         </div>
         <div class="note reveal">
-          <p><span class="n-title">另外两条已知的能力边界</span>：① 识图组件的计数是<b>内存计数</b> —— 跨日归零、进程重启后从 0 重计、不落盘，别把它当持久账本用，也别拿它算"历史总量" <code>ctx\RecognizerState.java</code>；② 动态聊天窗口<b>不报</b>"还有多少条更早的"，因为那要额外一条统计查询 —— 她看到的是"窗口里有几行、多少字符" <code>ctx\ChatWindow.java</code>。</p>
+          <p><span class="n-title">另外三条已知的能力边界</span>：① 识图组件的计数是<b>内存计数</b> —— 跨日归零、进程重启后从 0 重计、不落盘，别把它当持久账本用，也别拿它算"历史总量" <code>ctx\RecognizerState.java</code>；② 动态聊天窗口<b>不报</b>"还有多少条更早的"，因为那要额外一条统计查询 —— 她看到的是"窗口里有几行、多少字符" <code>ctx\ChatWindow.java</code>；③ <b>群里被引用不算"被叫到"</b>：一条<b>没有 @ 她</b>的普通群消息不起回合（地址判定在群里只认 <code>ev.atSelf()</code>，私聊一律算），所以群友用<b>引用她的消息</b>来接她的问、却没 @ 她时，这条到不了她那里，控制台只留一行 <code>skip reason=not_addressed</code> —— 私聊不受影响 <code>QqGateway.java</code> 的 <code>shouldAnswer</code>。</p>
         </div>
 
         <h3 class="sec">一条判据：找不到那个抽象，就是真的没有</h3>
@@ -985,7 +1078,7 @@ if (aclDeny != null) return aclDeny;</code></pre></div>
         <div class="grid-3">
           <a class="tile reveal" href="architecture.html"><span class="t-num">NEXT</span><h3><span class="dot"></span>看实现</h3><p>分层、线程、各面的内部结构。</p><span class="t-meta"><span>07 · 技术实现</span></span></a>
           <a class="tile reveal d1" href="commands.html"><span class="t-num">NEXT</span><h3><span class="dot"></span>看命令</h3><p>这些能力怎么从控制台与工具面驱动。</p><span class="t-meta"><span>04 · 控制台命令</span></span></a>
-          <a class="tile reveal d2" href="config.html"><span class="t-num">NEXT</span><h3><span class="dot"></span>看配置</h3><p>94 个键分别在哪个面上生效。</p><span class="t-meta"><span>03 · 配置</span></span></a>
+          <a class="tile reveal d2" href="config.html"><span class="t-num">NEXT</span><h3><span class="dot"></span>看配置</h3><p>114 个键分别在哪个面上生效。</p><span class="t-meta"><span>03 · 配置</span></span></a>
         </div>
       </section>
 

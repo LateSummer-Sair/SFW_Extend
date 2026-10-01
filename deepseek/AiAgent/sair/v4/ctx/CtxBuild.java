@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
 import java.io.File;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -87,6 +88,130 @@ public final class CtxBuild {
      * 由 {@code Loop.run} 在<b>第 1 次请求返回之后</b>读出来追加进 messages —— 见 {@link #user} 的注释。
      */
     public static final String ST_ATTACH = "attach";
+
+    /**
+     * {@link Turn#state()} 里的键：<b>本轮的用户输入</b>（那一句话本身）—— 只给事实块的形状行
+     * {@code cmdish:} 当判据用（能力③：这一轮的正文是不是以 {@code #} 或 {@code /} 开头）。
+     *
+     * <p><b>谁写</b>：{@link #assemble}（它拿到就是这一轮的 {@code userText}；写在 {@link #facts}
+     * <b>之前</b>，因为事实块在 user 轮之前就要拼好）；{@link #assembleSystem}（收尾回合：写空串，
+     * 那一轮不是"会话里某个人在说话"，不许继承上一轮的形状事实）。
+     * <b>只用于这一个形状判据</b> —— 它不进任何归属判断，也不落库（输入的正文本就在同一轮
+     * user 轮里，这里再存一份只为"这一行在事实块里、user 轮在其后"的时序）。</p>
+     */
+    public static final String ST_INPUT = "input";
+
+    /**
+     * {@link Turn#state()} 里的键：<b>这一轮是怎么被叫到的</b>（能力③的事实来源，2026-10-01）。
+     *
+     * <p>取值是<b>封闭小集合</b>（见 {@link #AD_TRIGGER} … {@link #AD_SYSTEM}），由<b>起这一轮的那个产者</b>
+     * 在提交时塞进来：{@code qq.QqGateway.submitTurn}（{@code trigger}/{@code at}/{@code private}/{@code master}）、
+     * {@code Boot.askConsole} 与控制台 {@code Cmd}（{@code master}）、{@code Tick}（{@code system}）、
+     * {@code Agent.wake}（{@code self}）。{@link #facts} <b>只渲染</b>，一个字都不重推 ——
+     * 重推就是第二个产法（"这一轮为什么起来"只有产者知道）。</p>
+     *
+     * <p><b>取不到就不写这一行</b>（不是写个空值）：没有产者塞过（探针裸 {@code Turn}、子 Agent 的回合）⇒
+     * 事实块里没有 {@code addressed:} 这一行。</p>
+     */
+    public static final String ST_ADDRESSED = "addressed";
+
+    /**
+     * <b>能力③</b>的事实行前缀（如 {@code addressed: at}）—— 值只有下面六个<b>封闭枚举</b>，
+     * 渲染前还过一次白名单（{@link #isAddressed}）：产者塞进来的任何别的东西都不出现。
+     *
+     * <p><b>为什么是枚举而不是一句话</b>：这是<b>纯数据</b>（"怎么被叫到的"），不是结论；
+     * "要不要起疑、要不要问一句"由提示词层判（基板一个字都不判）。</p>
+     *
+     * <p><b>取值表（判据逐条，产者 = 谁说了算）</b></p>
+     * <ul>
+     *   <li>{@link #AD_TRIGGER} {@code trigger} —— <b>触发词/技能或插件投了"要回"那一票</b>起的轮
+     *       （{@code QqGateway}：{@code pluginVote==ANSWER} 或技能把 {@code payload._reply} 置 true）。
+     *       最具体的"为什么起这一轮"，压过地址规则；</li>
+     *   <li>{@link #AD_AT} {@code at} —— 群里<b>@ 到了自己</b>（{@code Ev.atSelf()}）；</li>
+     *   <li>{@link #AD_PRIVATE} {@code private} —— <b>私聊</b>（{@code Ev.isPrivate()}）；</li>
+     *   <li>{@link #AD_MASTER} {@code master} —— <b>主人</b>那条没有 QQ 地址的入口：本地控制台/面板
+     *       （{@code Boot.askConsole} 与 {@code Cmd} 的 {@code ai/chat}）。网关那一侧只有在
+     *       "既不是被 @、也不是私聊"时才落到它（兜底）。<b>渠道优先于身份</b>：主人的私聊读
+     *       {@code private}、主人在群里 @ 读 {@code at} —— "怎么被叫到的"问的是渠道，
+     *       身份本来就在 {@code caller.master} 那一格里；</li>
+     *   <li>{@link #AD_SELF} {@code self} —— <b>她自己的自主/内部回合</b>（{@code Agent.wake} 的收尾回合：
+     *       没有人发消息，是她自己在时间里跑的那一轮）；</li>
+     *   <li>{@link #AD_SYSTEM} {@code system} —— <b>基板定时/闹钟/任务投递</b>（{@code Tick}）：
+     *       到点了替某个人办那件事，不是"有人在会话里叫她"。</li>
+     * </ul>
+     */
+    public static final String ADDRESSED_LEAD = "addressed: ";
+
+    /** {@code addressed} 取值：触发词/技能或插件投票起的那一轮。 */
+    public static final String AD_TRIGGER = "trigger";
+    /** {@code addressed} 取值：群里被 @ 到。 */
+    public static final String AD_AT = "at";
+    /** {@code addressed} 取值：私聊。 */
+    public static final String AD_PRIVATE = "private";
+    /** {@code addressed} 取值：主人的控制台/面板那一条没有 QQ 地址的入口。 */
+    public static final String AD_MASTER = "master";
+    /** {@code addressed} 取值：她自己的自主/内部回合（{@code Agent.wake}）。 */
+    public static final String AD_SELF = "self";
+    /** {@code addressed} 取值：基板定时/闹钟/任务投递（{@code Tick}）。 */
+    public static final String AD_SYSTEM = "system";
+
+    /** {@code addressed} 的<b>白名单</b>（渲染前的最后一道：产者塞的别的东西一律不出现）。 */
+    public static boolean isAddressed(String v) {
+        return AD_TRIGGER.equals(v) || AD_AT.equals(v) || AD_PRIVATE.equals(v)
+                || AD_MASTER.equals(v) || AD_SELF.equals(v) || AD_SYSTEM.equals(v);
+    }
+
+    /**
+     * <b>能力①</b>的事实行（{@code clients:}，纯事实、不下结论）：本账号下另有机器人服务在发言。
+     *
+     * <p>文案要求：短（本行 {@value #CLIENTS_LINE_CHARS} 字），只说三件事 —— 账号另有机器人服务、
+     * 窗口里标「其他」、那不是人也不是你说的。<b>不写</b>"可能是谁"（没有证据，三家在帧上同形）。</p>
+     */
+    public static final String CLIENTS_LINE =
+            "clients: 本账号另有机器人服务在发言；窗口里标「其他」的行不是人，也不是你说的";
+    /** {@link #CLIENTS_LINE} 的字符数（冻结成一个数，便于断言"文案要短"）。 */
+    public static final int CLIENTS_LINE_CHARS = CLIENTS_LINE.length();
+
+    /**
+     * <b>能力③</b>的形状事实（{@code cmdish: '#'}）：这一轮的正文<b>以 {@code #} 或 {@code /} 开头</b>。
+     *
+     * <p><b>只给形状、不给归属</b>：基板一个字都不写"这可能是某个机器人的指令"（那是结论，
+     * 不是事实）。判据只有"第一个字符是 {@code #} 或 {@code /}"这一条字符串形状（{@link #cmdishOf}）——
+     * 没有任何关键词表、也没有"忽略名单"：<b>这一行不影响这一轮要不要回、要不要问</b>，
+     * 那是她（提示词层）的判断。</p>
+     */
+    public static final String CMDISH_LEAD = "cmdish: '";
+
+    /** 事实键 {@code clientsFacts}（默认开）：关掉 ⇒ 事实块里没有 {@code clients:} 这一行。 */
+    public static final String CFG_CLIENTS_FACTS = "clientsFacts";
+    /** 事实键 {@code cmdishFacts}（默认开）：关掉 ⇒ 事实块里没有 {@code cmdish:} 这一行。 */
+    public static final String CFG_CMDISH_FACTS = "cmdishFacts";
+    /** 事实键 {@code addressedFacts}（默认开）：关掉 ⇒ 事实块里没有 {@code addressed:} 这一行。 */
+    public static final String CFG_ADDRESSED_FACTS = "addressedFacts";
+    /** {@link #CFG_CLIENTS_FACTS} 的出厂值（唯一真源：读口与 {@code Conf.knownKeys()} 都取它）。 */
+    public static final boolean DEF_CLIENTS_FACTS = true;
+    /** {@link #CFG_CMDISH_FACTS} 的出厂值（唯一真源：读口与 {@code Conf.knownKeys()} 都取它）。 */
+    public static final boolean DEF_CMDISH_FACTS = true;
+    /** {@link #CFG_ADDRESSED_FACTS} 的出厂值（唯一真源：读口与 {@code Conf.knownKeys()} 都取它）。 */
+    public static final boolean DEF_ADDRESSED_FACTS = true;
+
+    /**
+     * 「本轮说话人」锚点行的<b>逐字前缀</b>（批 18 / ID-ANCHOR，2026-09-27）。
+     *
+     * <p>这一行每一轮都进上下文（贴在<b>本轮 user 消息之前最近</b>的一条 {@code system} 里，
+     * 见 {@link #assemble}），所以它是<b>固定成本</b>：约 {@value #ANCHOR_BASE_CHARS} 字符 + 昵称 + QQ 位数。</p>
+     */
+    public static final String ANCHOR_LEAD = "【本轮说话人】";
+
+    /**
+     * 锚点行里"前缀 + 固定尾巴 + {@code (QQ )}"的字符数（不含昵称与 QQ 数字）——
+     * 给"每轮固定代价"一个可断言的数（{@link #speakerAnchor} 的产出必然
+     * {@code = ANCHOR_BASE_CHARS + 昵称长度 + QQ 位数}）。
+     */
+    public static final int ANCHOR_BASE_CHARS = 42;
+
+    /** 锚点行里的昵称上限（与 {@code ChatWindow.who} 的 32 同一取向，这里更严：这一行每轮都进上下文）。 */
+    public static final int ANCHOR_NAME_MAX = 16;
 
     /** 基板需要知道的外部状态（由 Boot 提供，避免 ctx 反向依赖 qq/agent 包）。 */
     public interface Env {
@@ -307,6 +432,12 @@ public final class CtxBuild {
             // 好感度：**跟身份无关**地给她（主人裁 2026-09-17 —— 它不判权限、是"关系值"，
             // 每个人都能问她"我的好感度是多少"；她得先看得到，说不说完全由她定）
             c.addProperty("favor", (long) t.caller().favor());
+            // 好感度档位放权闸（W7/批 13，主人令 2026-09-26）：**档位表 + 当前说话人的档位 +
+            // 这一档此刻能为他做哪些只读的事**。上面那个 `favor` 是数值（既有键，一字不动），
+            // 这一行是"这个数值意味着什么" —— 两件事分开写，不重复、也不挤掉既有键。
+            // 形状、门槛与放行清单的唯一真源在 sair.v4.auth.FavorGate（facts 的 javadoc）；
+            // 这里只搬数据、不算任何一次判定（与 ops / rules 那两行同一口径）。
+            c.add("favorGate", sair.v4.auth.FavorGate.facts(t.caller()));
             // 权限事实（技能管控表）：主体种类 + 这个身份**能用哪些 op**（"ALL" = 恒全权）。
             // 提示词层拿这两个判断"能不能答应他" —— 资源对 ALLUSER 是黑盒，读 / 写 / 执行唯一的路
             // 是技能（op），所以"可用技能清单"就是权限事实的全部，不再有"资源位"这回事。
@@ -319,14 +450,51 @@ public final class CtxBuild {
             c.add("rules", callerRules(t.caller()));
             sb.append("caller: ").append(J.json(c)).append("\n");
         }
+        // ★ 能力③（2026-10-01）：**这一轮是怎么被叫到的** —— 纯数据、封闭枚举，只渲染不重推
+        //   （产者在提交那一刻塞进 Turn 的 state，见 ST_ADDRESSED 的取值表）。
+        //   取不到（没有产者塞过）或值不在白名单里 ⇒ **这一行不出现**（绝不写空值、也绝不写自由文本）。
+        //   关掉开关：配置 addressedFacts=false。位置在 caller 那一行之后 —— 它跟"谁在说话/怎么被叫到"
+        //   是同一簇事实；既有行的相对顺序一个字节都没动。
+        if (addressedFacts()) {
+            String ad = t == null ? "" : Str.trim(t.get(ST_ADDRESSED, ""));
+            if (isAddressed(ad)) sb.append(ADDRESSED_LEAD).append(ad).append("\n");
+        }
+        // 好感度加减规则（W7/批 13 追加，甲方/GM 2026-09-26 扩容）：**一行可机读的"来往类别 → 区间"**。
+        // 为什么进事实块而不是 identity.md：这张表有 13 条，identity.md 的 8000 字符预算已经顶住了
+        // （K7 正在压缩）；事实块本来就每轮都在，而这一行的唯一真源是 Favor.kindTable()
+        // （与 [favor] kind表 日志行、与真正夹取用的那一份表同源，不可能漂开）。
+        // 预算顶不住时把它关掉：配置键 favorKindFacts=false（关掉只少一行事实，判定与夹取一个字不变）。
+        if (sair.v4.auth.Favor.kindFacts()) {
+            String kt = sair.v4.auth.Favor.kindTable();
+            if (Str.has(kt)) {
+                sb.append("favorKinds: ").append(kt)
+                        .append("（记好感度用 <favor kind=\"…\"/>：加写 add、减写 sub，数值写正数；"
+                                + "不写 kind = 加 1~").append(sair.v4.auth.Favor.fmt(sair.v4.auth.Favor.addMax()))
+                        .append(" / 减 1~").append(sair.v4.auth.Favor.fmt(sair.v4.auth.Favor.subMax()))
+                        .append("；kind 不认识、或与 add/sub 方向不符 ⇒ 整条不记）").append("\n");
+            }
+        }
         // 人格化事实：「正在说话的这个人」是谁（跨群同一人）——六库聚合出来的客观数据，纯事实。
         // 只给数据不给文案：认不认识、在哪些群见过、聊过多少，全部由提示词层的模型自己解读。
         // 构建失败（库不可用等）就当这一行不存在，绝不让事实块把回合拖垮。
         if (t != null && t.caller() != null && store != null && t.caller().qq() > 0L) {
             try {
+                // ★ 能力②/D1（2026-09-28）：把**本账号 QQ** 一并交给 Person —— 只有"问的正是本账号自己"
+                //   时，{@code grouplog} 的结果里才可能混进外部来源行（别家机器人也写 user_id=selfId）。
+                //   Person 因此在**那一支**上做 Java 侧过滤；别的 QQ 一个字都不过滤、SQL 保持覆盖索引
+                //   （为什么过滤必须在 Java 侧：见 Person.mayOwnForeignRows 的实测注释 —— 拼进 SQL 会把
+                //   5 万行话痨的单次构建从 <50ms 打到 183ms，那是门禁相位 20 抓到的真回归）。
                 JsonObject p = sair.v4.store.Person.facts(store, t.caller().qq(), t.caller().name(),
-                        t.caller().favor(), t.caller().master());
-                if (p != null && p.size() > 0) sb.append("person: ").append(J.json(p)).append("\n");
+                        t.caller().favor(), t.caller().master(), conf == null ? 0L : conf.selfId());
+                if (p != null && p.size() > 0) {
+                    // ★ 跨群合并（批 18 / ID-CROSS）：同一人在**别的群**里叫什么 —— 直接给她一格
+                    //   `aka`（"他在别的群里叫 X（群 n）"），不用她自己去比对两份名单。
+                    //   数据只从「已经加载的那份跨群快照」里取（见 akaOf）；取不到就不写这一格。
+                    JsonArray aka = akaOf(t.caller(), t.caller().groupId(),
+                            p.getAsJsonArray("known_groups"), ext);
+                    if (aka != null) p.add("aka", aka);
+                    sb.append("person: ").append(J.json(p)).append("\n");
+                }
             } catch (Throwable ignored) {
                 // 事实块少一行不影响这一轮
             }
@@ -382,8 +550,73 @@ public final class CtxBuild {
         // 事实块这条 system 之后紧接着就是 appendHistory() 拼的对话历史，
         // 窗口贴着它放，读起来就是"这是最近的原话，下面是按角色排的历史"。
         String win = t == null ? "" : t.get(ST_CHAT_WINDOW, "");
+        // ★ 能力①（D1）：本账号下**另有机器人服务**在发言 —— 纯事实、不下结论。
+        //   出现时机 = **这一轮的窗口里出现了外部来源行**（ChatWindow 在窗口 meta 里报的 foreign 计数，
+        //   见 ChatWindow.foreignRows）。选它的理由：省 token（没有外部行时一个字节都不出现，
+        //   于是既有事实行的字节逐字节不变），而外部行一旦进窗口就必然看得见这一行
+        //   （能力②要的"看得见"与能力①要的"知道那不是自己"同时成立）。
+        //   盲区如实记在报告里：窗口关掉（chatWindowSize<=0）或外部行只在窗口之外的历史段时，
+        //   这一行不出现。关掉开关：配置 clientsFacts=false。
+        if (clientsFacts() && ChatWindow.foreignRows(win) > 0) {
+            sb.append(CLIENTS_LINE).append("\n");
+        }
+        // ★ 能力③的形状事实：这一轮的正文以 # 或 / 开头（**只给形状、不给归属**，见 CMDISH_LEAD）。
+        //   判据来源 = assemble 写进 Turn 的这一轮输入（ST_INPUT）；收尾回合/无输入 ⇒ 空串 ⇒ 不出现。
+        //   关掉开关：配置 cmdishFacts=false。
+        if (cmdishFacts()) {
+            String pre = cmdishOf(t == null ? "" : t.get(ST_INPUT, ""));
+            if (Str.has(pre)) sb.append(CMDISH_LINE(pre)).append("\n");
+        }
         if (Str.has(win)) sb.append("\n").append(win.trim()).append("\n");
         return sb.toString().trim();
+    }
+
+    /** 形状事实那一行的整串（前缀 + 命中的字符 + 收尾引号；唯一产法）。 */
+    static String CMDISH_LINE(String prefixChar) {
+        return CMDISH_LEAD + prefixChar + "'";
+    }
+
+    /**
+     * 正文的第一个字符是不是 {@code #} 或 {@code /}（能力③的形状判据，唯一一处）。
+     *
+     * <p><b>只判字符串形状</b>：取<b>第一个字符</b>（不 trim、不跳过空白 —— 云崽认的指令就是"整条以它开头"，
+     * 前面有空格的那条在它那边也不成立），是 {@code #} 或 {@code /} 就返回那一个字符，否则空串。
+     * <b>{@code /} 为什么也算</b>：那是同一个指令面（云崽自己的配置把 {@code /} 折成 {@code #}），
+     * 只认 {@code #} 会让 {@code /帮助} 这一形状没有事实；而这一行<b>只给形状、不给归属</b>，
+     * 多给的也只是"它以 / 开头"这一个事实，判断留给提示词层。取不到（空正文）⇒ 空串 ⇒ 这一行不出现。</p>
+     */
+    static String cmdishOf(String text) {
+        String s = Str.nz(text);
+        if (s.isEmpty()) return "";
+        char c = s.charAt(0);
+        return (c == '#' || c == '/') ? String.valueOf(c) : "";
+    }
+
+    /** 事实键 {@code clientsFacts}（默认开）。读不到配置（探针裸建）⇒ 开。 */
+    private boolean clientsFacts() {
+        try {
+            return conf == null || conf.getBool(CFG_CLIENTS_FACTS, DEF_CLIENTS_FACTS);
+        } catch (Throwable t) {
+            return DEF_CLIENTS_FACTS;
+        }
+    }
+
+    /** 事实键 {@code cmdishFacts}（默认开）。读不到配置（探针裸建）⇒ 开。 */
+    private boolean cmdishFacts() {
+        try {
+            return conf == null || conf.getBool(CFG_CMDISH_FACTS, DEF_CMDISH_FACTS);
+        } catch (Throwable t) {
+            return DEF_CMDISH_FACTS;
+        }
+    }
+
+    /** 事实键 {@code addressedFacts}（默认开）。读不到配置（探针裸建）⇒ 开。 */
+    private boolean addressedFacts() {
+        try {
+            return conf == null || conf.getBool(CFG_ADDRESSED_FACTS, DEF_ADDRESSED_FACTS);
+        } catch (Throwable t) {
+            return DEF_ADDRESSED_FACTS;
+        }
     }
 
     // ---------------------------------------------------------------- 事实块里的权限事实（caller.kind / caller.ops / caller.rules）
@@ -560,18 +793,311 @@ public final class CtxBuild {
         return a;
     }
 
+    // ---------------------------------------------------------------- ★ 跨群合并（批 18 / ID-CROSS）
+
+    /**
+     * {@code aka} 里最多列几个<b>别群</b>名字（结构性上限，不是文案）。
+     * <p>取值理由：① 甲方要的是"一眼看出是同一个人"，一两个别群名字就够了；
+     * ② 这一格每轮都进事实块，是<b>固定成本</b>；③ 与 {@link sair.v4.store.Person#MAX_GROUPS} 的
+     * "列表不全没关系、但必须有界"同一取向。</p>
+     */
+    static final int AKA_MAX = 3;
+
+    /** {@code aka} 里一个名字的长度上限（与 {@code 群成员映射} 的「单名上限」默认 24 同一取向）。 */
+    static final int AKA_NAME_MAX = 24;
+
+    /**
+     * 跨群快照的<b>提供者类名</b>（唯一一处对某个插件的字面耦合，见 {@link #akaOf}）。
+     * <p>不是文案、也不是判据：它只用来在扩展点注册表里认出"哪一个是那份跨群快照的主人"。</p>
+     */
+    private static final String AKA_OWNER = "GroupMemberMapProvider";
+
+    /**
+     * ★ <b>跨群合并（批 18 / ID-CROSS，2026-09-27）</b>：把「本轮说话人<b>在别的群里</b>叫什么」
+     * 渲染成事实块 {@code person} 里的一格 {@code aka}。
+     *
+     * <p><b>治什么（甲方原话）</b>：「AI 在 a 群里面与用户 c 交流，换到 b 群里面与用户 c 交流，
+     * 因为群内用户 ID 不一样导致她无法识别此人。」—— QQ 号其实<b>一直是同一个</b>（{@code person.qq} 每轮都在），
+     * 她认不出的是<b>名字对不上</b>：名单里 a 群那个"张三"和 b 群这个"李四"是两个字符串。
+     * 这一格就是把两串名字显式钉到同一个 QQ 上。</p>
+     *
+     * <p><b>形状</b>（纯数据，读法归提示词层 —— 基板只给数据不给句子，与 {@code person} 其余各格同一口径）：</p>
+     * <pre>
+     *   "aka": ["群888888:张三", "群999999:老张"]
+     * </pre>
+     * <ul>
+     *   <li>元素 {@code "群<群号>:<名字>"} = <b>群号已知</b>（名字优先群名片、空则昵称）；</li>
+     *   <li>元素是<b>光名字</b>（没有 {@code 群<号>:} 前缀）= <b>只拿到名字、群号拿不到</b>
+     *       —— 这是数据本身在说"哪个群不确定"，不是缺字；</li>
+     *   <li><b>空就不写这一格</b>：拿不到跨群数据 / 没有别群名字 / 当前身份不该有时，
+     *       {@code person} 与没有这一格的旧版本<b>逐字节相同</b>。</li>
+     * </ul>
+     *
+     * <p><b>数据从哪来（这是本方法的全部约束）</b>：只读
+     * {@code 群成员映射} 插件<b>已经加载的那份内存快照</b> ——
+     * 即 {@code GroupMemberMapProvider} 的 {@code Cache.MAP}（群号 → 该群成员快照，
+     * 即本类注释里说的 {@code e.members} / {@code e.global} 那一层）与 {@code Nicks.MAP}
+     * （QQ → 最近一次见到的称呼）。两条读取路径都是<b>纯内存读</b>：</p>
+     * <ol>
+     *   <li><b>不新开查询</b>：本方法不碰 {@link Store}、不发 SQL、<b>一次都不调 {@code h.napcat()}</b>
+     *       —— 它拿到的只有 {@link #ext} 里那几个 provider 实例，以及它们自己静态表里的现成快照
+     *       （那张表的刷新时机由那个插件自己的后台守护线程 + TTL 决定，与本轮无关）；</li>
+     *   <li><b>不新增往返</b>：那份快照是<b>上一轮</b>（或更早）就取回来的，本方法只做遍历与挑选；
+     *       最坏成本 = 缓存里的群数 × 该群成员数 次 {@code getLong}（见"代价"）。</li>
+     * </ol>
+     *
+     * <p><b>为什么用反射</b>：那份快照在一个<b>运行时编译</b>的技能类里（{@code hot.SkClassLoader}
+     * 定义的子加载器），基板按名字 {@code Class.forName} 拿不到它，而且技能面上<b>没有</b>任何
+     * 只读口暴露它。唯一的合法通路是从 {@link sair.v4.ext.ExtRegistry#providers()} 拿<b>实例</b>
+     * （{@code Entry.impl}），再从实例的类上取静态表 —— 这也是本方法不碰任何文件、
+     * 不需要改那个插件一个字的原因。取不到（插件没装 / 换名 / 反射被挡）⇒ 返回 {@code null}，
+     * <b>安静降级</b>，绝不抛、绝不重试。</p>
+     *
+     * <p><b>退化（逐条）</b>：</p>
+     * <ul>
+     *   <li>{@code caller == null} / {@code qq <= 0}（她自己的自主行为）⇒ 不写；</li>
+     *   <li>本地控制台（{@link Caller#isConsole()}）与 {@link Caller.Kind#SYSTEM} ⇒ 不写
+     *       （"这一轮不是会话里某个人在说话"，与 {@link #speakerAnchor} 的退化口径一致）；</li>
+     *   <li>跨群快照拿不到 / 里面没有这个 QQ ⇒ 不写；</li>
+     *   <li>{@code aka} 的条数上限 {@value #AKA_MAX}，名字上限 {@value #AKA_NAME_MAX} 字；</li>
+     *   <li>任何取数异常 ⇒ 返回 {@code null}（少一格事实，绝不拖垮这一轮）。</li>
+     * </ul>
+     *
+     * <p><b>只报"别的群"</b>：{@code gid}（本轮这个群）那一份快照被跳过 —— 他<b>在这个群</b>叫什么
+     * 已经由事实块 {@code caller.name} 与 {@code 群成员映射} 的本群那一节给了。私聊（{@code gid <= 0}）
+     * 没有"本群"，所以所有缓存到的群都算"别的群"。</p>
+     *
+     * <p><b>顺序是确定的</b>：先按 {@code known_groups} 的次序（{@code Person} 的"最近在前"，
+     * 来自 {@code grouplog}），不在里面的按群号升序 —— 同一份快照 + 同一个 {@code known_groups}
+     * 必然渲染出同一串字节（前缀缓存友好；与 {@code GroupMemberMapProvider.ORDER} 同一取向）。</p>
+     *
+     * <p><b>代价（实测，见报告）</b>：整格只在"有内容"时才写，形如 {@code ,"aka":["群888888:张三"]}；
+     * 实测 2 条 = 28 字符、3 条满格（名字都顶到 {@value #AKA_NAME_MAX} 字、3 位群号）= 104 字符
+     * （群号 10 位时 ≤ 125 字符）；<b>没有可写内容时一个字符都不加</b>。</p>
+     *
+     * @param ext 扩展点注册表（基板自己的那份；{@code null} = 取不到快照）
+     * @return 一格 {@code aka}；没有可写内容时 {@code null}（调用方<b>不写</b>这一格）
+     */
+    static JsonArray akaOf(Caller c, long gid, JsonArray knownGroups, sair.v4.ext.ExtRegistry ext) {
+        try {
+            if (c == null) return null;
+            long qq = c.qq();
+            if (qq <= 0L) return null;                              // 没有 QQ ⇒ 空就不写
+            if (c.isConsole() || c.kind() == Caller.Kind.SYSTEM) return null;   // 控制台 / SYSTEM ⇒ 不加
+            AkaRef r = akaRef(ext);
+            if (r == null) return null;                             // 快照取不到（没装那个插件等）⇒ 不加
+
+            // ① 群号已知：遍历"别的群"的成员快照，找出这个 QQ 在该群里叫什么
+            Map<Long, String> hit = new LinkedHashMap<Long, String>();
+            Object cm = r.cache.get(null);
+            if (cm instanceof Map) {
+                for (Object o : ((Map<?, ?>) cm).entrySet()) {
+                    Map.Entry<?, ?> en = (Map.Entry<?, ?>) o;
+                    if (en == null) continue;
+                    long g = asLong(en.getKey());
+                    if (g <= 0L || g == gid) continue;              // 只报别的群（本轮这个群不算）
+                    String nm = inGroup(r, en.getValue(), qq);
+                    if (Str.has(nm)) hit.put(Long.valueOf(g), nm);
+                }
+            }
+            JsonArray arr = new JsonArray();
+            for (Long g : akaOrder(new ArrayList<Long>(hit.keySet()), knownGroups)) {
+                if (arr.size() >= AKA_MAX) break;
+                arr.add("群" + g.longValue() + ":" + hit.get(g));
+            }
+            if (arr.size() == 0) {
+                // ② 群号拿不到：那份快照只记得"QQ → 最近一次见到的称呼"（跨群的，没有群号）
+                //    ⇒ 只报名字。与**当前**称呼相同就不写（同一个名字不构成"认不出"这件事）。
+                String any = nickOf(r, qq);
+                if (Str.has(any) && !any.equals(Str.oneLine(Str.nz(c.name())))) arr.add(any);
+            }
+            return arr.size() == 0 ? null : arr;
+        } catch (Throwable ignored) {
+            return null;                                            // 少一格事实，绝不拖垮这一轮
+        }
+    }
+
+    /** 把 {@code gids} 排成"确定顺序"：先按 {@code known_groups} 次序，其余按群号升序。 */
+    private static List<Long> akaOrder(List<Long> gids, JsonArray known) {
+        final List<Long> pri = new ArrayList<Long>();
+        if (known != null) {
+            for (int i = 0; i < known.size(); i++) {
+                try {
+                    long g = known.get(i).getAsLong();
+                    if (g > 0L) pri.add(Long.valueOf(g));
+                } catch (Throwable ignored) {
+                    // 这一格读不出来就当它不在次序表里
+                }
+            }
+        }
+        Collections.sort(gids, new Comparator<Long>() {
+            @Override
+            public int compare(Long a, Long b) {
+                int ia = pri.indexOf(a);
+                int ib = pri.indexOf(b);
+                if (ia < 0) ia = Integer.MAX_VALUE;
+                if (ib < 0) ib = Integer.MAX_VALUE;
+                if (ia != ib) return ia < ib ? -1 : 1;
+                return a.longValue() < b.longValue() ? -1 : (a.longValue() == b.longValue() ? 0 : 1);
+            }
+        });
+        return gids;
+    }
+
+    /** 某个群快照里这个 QQ 的称呼（群名片优先、空则昵称）；没有 / 读不出 → 空串。 */
+    private static String inGroup(AkaRef r, Object entry, long qq) {
+        try {
+            Object ms = r.members.get(entry);
+            if (!(ms instanceof List)) return "";
+            for (Object m : (List<?>) ms) {
+                if (m == null) continue;
+                if (r.mqq.getLong(m) != qq) continue;
+                String card = Str.oneLine(Str.nz((String) r.mcard.get(m)));
+                if (Str.has(card)) return Str.cut(card, AKA_NAME_MAX);
+                String nick = Str.oneLine(Str.nz((String) r.mnick.get(m)));
+                return Str.has(nick) ? Str.cut(nick, AKA_NAME_MAX) : "";
+            }
+        } catch (Throwable ignored) {
+            // 这一条读不出来就当作"这个群里没有他"
+        }
+        return "";
+    }
+
+    /** 跨群昵称表里这个 QQ 的名字（<b>没有群号</b>）；没有 / 读不出 → 空串。 */
+    private static String nickOf(AkaRef r, long qq) {
+        try {
+            Object nm = r.nicks.get(null);
+            if (!(nm instanceof Map)) return "";
+            Object v = ((Map<?, ?>) nm).get(Long.valueOf(qq));
+            String s = Str.oneLine(Str.nz(v == null ? "" : String.valueOf(v)));
+            return Str.has(s) ? Str.cut(s, AKA_NAME_MAX) : "";
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    /** 认得出数字就当数字（缓存表的键是 {@code Long}，万一被别人换成字符串也不崩）。 */
+    private static long asLong(Object o) {
+        if (o instanceof Number) return ((Number) o).longValue();
+        try {
+            return Long.parseLong(String.valueOf(o).trim());
+        } catch (Throwable ignored) {
+            return 0L;
+        }
+    }
+
+    // ---------------------------------------------------------------- 跨群快照的反射入口（只读、只解析一次）
+
+    /** 解析出来的反射入口（换一个插件类就重解析一次 —— 技能可以热重载）。 */
+    private static final class AkaRef {
+        final Class<?> prov;
+        /** {@code GroupMemberMapProvider$Nicks.MAP}：QQ → 名字（<b>没有群号</b>）。 */
+        final Field nicks;
+        /** {@code GroupMemberMapProvider$Cache.MAP}：群号 → 该群那一次的成员快照。 */
+        final Field cache;
+        /** {@code Cache$Entry.members}：那一份成员表。 */
+        final Field members;
+        final Field mqq;
+        final Field mcard;
+        final Field mnick;
+
+        AkaRef(Class<?> prov, Field nicks, Field cache, Field members, Field mqq, Field mcard, Field mnick) {
+            this.prov = prov;
+            this.nicks = nicks;
+            this.cache = cache;
+            this.members = members;
+            this.mqq = mqq;
+            this.mcard = mcard;
+            this.mnick = mnick;
+        }
+    }
+
+    /** 上次解析出来的入口（基板是长活的，插件类通常也长活 ⇒ 解析只发生一次）。 */
+    private static volatile AkaRef akaRef;
+
+    /**
+     * 在扩展点注册表里找到那份跨群快照，解析出它的静态表。
+     *
+     * <p>认人的方式：注册项的实现类<b>短名</b>等于 {@link #AKA_OWNER}（{@code 群成员映射} 的插件类）。
+     * 找到之后按<b>形状</b>取三样东西：{@code Nicks.MAP} / {@code Cache.MAP} /
+     * {@code Cache$Entry.members} + {@code M.qq|card|nick}。形状对不上（插件改了内部结构）⇒ 返回
+     * {@code null} = 这一格不写，<b>不是错误、不记日志、不重试</b>。</p>
+     *
+     * <p>{@code setAccessible(true)} 在这里是必需的：那些类在技能自己的加载器里、成员是包级私有。
+     * 全在<b>无名模块</b>（不是 JDK 内部模块）上，所以不会被模块系统挡住；
+     * 万一被挡（将来的安全策略）也只是安静降级。</p>
+     */
+    private static AkaRef akaRef(sair.v4.ext.ExtRegistry e) {
+        if (e == null) return null;
+        try {
+            List<sair.v4.ext.ExtRegistry.Entry<sair.v4.ext.ContextProvider>> ps = e.providers();
+            if (ps == null) return null;
+            for (sair.v4.ext.ExtRegistry.Entry<sair.v4.ext.ContextProvider> en : ps) {
+                if (en == null || en.impl == null) continue;
+                Class<?> k = en.impl.getClass();
+                if (k == null || !AKA_OWNER.equals(k.getSimpleName())) continue;
+                AkaRef cur = akaRef;
+                if (cur != null && cur.prov == k) return cur;
+                AkaRef next = resolve(k);
+                akaRef = next;                       // 解析不出来也记下 null：不每轮重扫一遍
+                return next;
+            }
+        } catch (Throwable ignored) {
+            // 注册表读不出来 = 这一格不写
+        }
+        return null;
+    }
+
+    /** 按形状解析那个插件类里的三张静态表；少一样就返回 {@code null}。 */
+    private static AkaRef resolve(Class<?> prov) {
+        Class<?> nicks = null;
+        Class<?> cache = null;
+        Class<?> mm = null;
+        for (Class<?> n : prov.getDeclaredClasses()) {
+            String s = n == null ? "" : n.getSimpleName();
+            if ("Nicks".equals(s)) nicks = n;
+            else if ("Cache".equals(s)) cache = n;
+            else if ("M".equals(s)) mm = n;
+        }
+        if (nicks == null || cache == null || mm == null) return null;
+        Class<?> entry = null;
+        for (Class<?> n : cache.getDeclaredClasses()) {
+            if (n != null && "Entry".equals(n.getSimpleName())) entry = n;
+        }
+        if (entry == null) return null;
+        Field nf = field(nicks, "MAP");
+        Field cf = field(cache, "MAP");
+        Field em = field(entry, "members");
+        Field qq = field(mm, "qq");
+        Field card = field(mm, "card");
+        Field nick = field(mm, "nick");
+        if (nf == null || cf == null || em == null || qq == null || card == null || nick == null) return null;
+        return new AkaRef(prov, nf, cf, em, qq, card, nick);
+    }
+
+    /** 取一个（静态）字段并放开访问；取不到返回 {@code null}。 */
+    private static Field field(Class<?> k, String name) {
+        try {
+            Field f = k.getDeclaredField(name);
+            f.setAccessible(true);
+            return f;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     /**
      * 装配 messages 到 turn 上：{@code system(identity + 偏好) → 稳定块 → 内置事实块 → 易变块 → 历史 → 本轮 user}。
      *
-     * <p><b>零 provider 时</b>（今天的样子）产出与"没有这一层"完全相同：
+     * <p><b>挂零个 provider 时</b>产出与"没有这一层"完全相同：
      * 第一条 system 是稳定段、第二条是事实块、然后是历史与 user。</p>
      *
      * <p><b>为什么稳定块插在事实块之前</b>：前缀缓存按 messages 的前缀逐字节命中，
      * 稳定块紧贴系统提示词才进得了那段前缀；事实块第一行就是 {@code time:}（每轮都变），
      * 排在它后面的东西一律进不了前缀。</p>
      *
-     * <p><b>为什么易变块排在事实块之后</b>：让"内置事实块恒为第二条 system"这件事不受插件数量影响 ——
-     * 序号稳定，排障与断言才不会被"装了哪个插件"改变。</p>
+     * <p><b>为什么易变块排在事实块之后</b>：让事实块<b>后面</b>那一段不受"装了哪些插件"影响；<b>事实块本身不恒为第二条 system</b>
+     * —— 稳定块排在它之前（线上 {@code 用户画像}/{@code 群成员映射}/{@code 点名引用} 都是 {@code stable()}），故判它<b>只能认首行 {@code time: }</b>（批 15 改正）。</p>
      */
     public void assemble(Turn t, String userText) {
         if (t == null) return;
@@ -584,11 +1110,79 @@ public final class CtxBuild {
         // 它**刻意**不走 ExtRegistry 的超时与预算：事实块（时间/调用者/媒体/聊天记录窗口/能力索引）是基板骨架，
         // 外挂再多也不能把它挤掉 —— 否则一个插件就能让基板"看不见自己"，那正是"基板永不失联"要防的事。
         // 同理，它读的是整个 Turn，而扩展点的只读口刻意不给 Turn（见 BuildContext 的注释）。
+        // ★ 能力③：把"这一轮的正文"先落进 Turn（事实块里那条 `cmdish:` 形状事实的判据来源，
+        //   见 ST_INPUT）。就在 facts(t) 之前写 —— 事实块要在 user 轮之前拼好。
+        t.put(ST_INPUT, Str.nz(userText));
         String facts = facts(t);
         if (Str.has(facts)) msgs.add(sys(t, facts));
         addBlocks(msgs, t, blocks, false);
         appendHistory(t);
-        msgs.add(user(t, userText));
+        // ★ 本轮说话人锚点（批 18 / ID-ANCHOR，真机复现"串身份"）：**贴在"本轮 user 消息"前面最近的一条里**。
+        //   为什么放在这个位置：上面的历史是"按角色排的旧话"，这一轮的新话由最后一条 `user(...)` 承担；
+        //   锚点插在两者之间 ⇒ 它读到的顺序是「…历史… → 【本轮说话人】… → 本轮他说的话」，
+        //   "谁在说话"与"他说了什么"之间不再夹任何人（离得最近的位置就是这个）。
+        //   为什么是独立一条 system（而不是拼进 user 正文）：`user(...)` 的契约写着"未过闸时这一轮的
+        //   messages 与改之前逐字节相同"，改它的正文会破这条；而"本轮 user 之前补一条 system 事实"
+        //   在本文件已有先例（`user(...)` 自己补 `attach:` 那条），段位口径不变。
+        //   为什么先算 `user(...)`：它可能顺手补一条 `attach:` 事实（也是 system、也要在本轮 user 之前），
+        //   先把它落定，锚点才总是在"本轮 user 之前最近的那一条"。
+        JsonObject turnUser = user(t, userText);
+        String anchor = speakerAnchor(t);
+        if (Str.has(anchor)) msgs.add(sys(t, anchor));
+        msgs.add(turnUser);
+    }
+
+    /**
+     * <b>本轮说话人锚点行</b>（批 18 / ID-ANCHOR，2026-09-27）—— 真机复现出来的"串身份"的靶子。
+     *
+     * <p><b>治什么（真机 5 轮对照，群 121873503）</b>：老王问过"我养的那只叫什么"（她答团子）之后，
+     * 小李紧接着发一条<b>不带名字的 4 字短追问</b>「那我养的那只呢？」⇒ 她<b>顺着窗口最尾部那次问答</b>
+     * 把老王的猫安到了小李头上（小李的狗是大黄）。窗口行当时<b>已经带 QQ</b>（D1），信息在，
+     * 但"归属"没有被顶到<b>离本轮消息最近处</b> ⇒ 注意力漂到上一轮。这一行就是那个"顶到最近处"。</p>
+     *
+     * <p><b>硬约束（逐条可断言）</b>：
+     * <ol>
+     *   <li><b>必须带 QQ</b>：取值只来自当前 {@link Turn} 的 {@link Turn#caller()}（{@code caller.qq()}），
+     *       不从窗口/历史/记忆里认人，不编号；取不到（{@code <= 0}）按 {@code (QQ ?)} 如实标未知
+     *       （与 {@code ChatWindow.who} 同一取向）；</li>
+     *   <li><b>不硬编码任何人的名字或号码</b>：昵称也取自 {@code caller.name()}；</li>
+     *   <li><b>退化</b>：{@code caller == null}（控制台/无触发者）与 {@code kind() == SYSTEM}
+     *       （她自己的自主行为）各有不变态的一句，绝不写成某个 QQ 的事；</li>
+     *   <li><b>防撞</b>：昵称与窗口里的角色标注（{@code 我}/{@code 对方}）逐字相同时不许当标签用，
+     *       退回 {@code #<QQ>}（与 {@code ChatWindow.who} 的防伪造口径同源）；</li>
+     *   <li><b>短</b>：见 {@link #ANCHOR_BASE_CHARS}；</li>
+     *   <li><b>不抛</b>：任何取数异常 ⇒ 返回空串（这一轮少一行锚点，绝不拖垮回合）。</li>
+     * </ol></p>
+     *
+     * @return 一行锚点（永远不含换行）；{@code t == null} 或取数异常 = 空串
+     */
+    static String speakerAnchor(Turn t) {
+        if (t == null) return "";
+        try {
+            Caller c = t.caller();
+            if (c == null) {
+                // 控制台/没有触发者：这一轮不是"群里某个人"在说话 —— 不许把别人的行算到某个人头上
+                return ANCHOR_LEAD + "本地控制台(没有 QQ)——本轮说话的不是会话里某个人；"
+                        + "窗口/历史/记忆里别人的行，别算到某个人头上。";
+            }
+            if (c.kind() == Caller.Kind.SYSTEM) {
+                return ANCHOR_LEAD + "她自己(自主行为，无触发者)——本轮不是会话里某个人在说话；"
+                        + "窗口/历史/记忆里别人的行，别算到某个人头上。";
+            }
+            long qq = c.qq();
+            String nm = Str.oneLine(Str.nz(c.name()));
+            // 防撞（与 ChatWindow.who 同一取向）：角色标注词不许当标签用，退回 #QQ
+            if (ChatWindow.ME.equals(nm) || ChatWindow.PEER.equals(nm)) nm = "";
+            if (Str.has(nm)) nm = Str.cut(nm, ANCHOR_NAME_MAX);
+            String tag = qq > 0L ? ("(QQ " + qq + ")") : "(QQ ?)";
+            // 昵称为空 / 被防撞挡掉 ⇒ 退回 `#<QQ>`（这一形状本身已经带 QQ，不再补后缀）——
+            // 与 ChatWindow.who 的退回写法逐字同一口径，两处的"谁"长得一样。
+            String who = Str.has(nm) ? (nm + tag) : (qq > 0L ? ("#" + qq) : tag);
+            return ANCHOR_LEAD + who + "——本轮就他在说话；"
+                    + "窗口/历史/记忆里别人的行，别算他头上。";
+        } catch (Throwable x) {
+            return "";                                  // 少一行锚点，绝不拖垮这一轮
+        }
     }
 
     /** 只装配系统与上下文（供子 Agent 复用历史片段）；段位与 {@link #assemble} 完全一致。 */
@@ -597,6 +1191,9 @@ public final class CtxBuild {
         List<sair.v4.ext.ExtRegistry.Block> blocks = extBlocks(t, "");
         t.messages().add(sys(t, stable(t)));
         addBlocks(t.messages(), t, blocks, true);
+        // 收尾回合（内部记账）不是"会话里某个人在说话" ⇒ 清掉形状事实的判据来源，
+        // 免得这一轮继承上一轮那条 `cmdish:`（能力③的形状事实只对"真的有一句话进来"的那一轮成立）。
+        t.put(ST_INPUT, "");
         String facts = facts(t);
         if (Str.has(facts)) t.messages().add(sys(t, facts));
         addBlocks(t.messages(), t, blocks, false);

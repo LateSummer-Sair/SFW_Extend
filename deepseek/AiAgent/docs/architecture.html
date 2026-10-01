@@ -78,9 +78,9 @@
 <tr><td><code>ctx</code></td><td>上下文装配、事实块、回合状态、线程内调用者绑定</td><td><code>CtxBuild</code> · <code>ChatWindow</code> · <code>Turn</code> · <code>Ctx</code> · <code>RecognizerState</code></td></tr>
 <tr><td><code>agent</code></td><td>Agent 门面 + 主循环（工具闭环、失败闸门）</td><td><code>Agent</code> · <code>Loop</code></td></tr>
 <tr><td><code>ai</code></td><td>模型客户端、SSE 解析、消息与工具声明工厂</td><td><code>DeepSeek</code> · <code>Sse</code> · <code>Msg</code> · <code>Res</code> · <code>ToolSpec</code></td></tr>
-<tr><td><code>qq</code></td><td>反向 WS 链接、动作出口、事件模型、分段、渲染、引用、去重</td><td><code>Api</code> · <code>QuoteCache</code> · <code>Link</code> · <code>Relay</code> · <code>Seg</code> · <code>Seen</code></td></tr>
+<tr><td><code>qq</code></td><td>反向 WS 链接、动作出口、事件模型、分段、渲染、引用、去重、协议级判据（自报标记族、内部事实行）</td><td><code>Api</code> · <code>QuoteCache</code> · <code>Link</code> · <code>Relay</code> · <code>Seg</code> · <code>Seen</code> · <code>MoodMarks</code> · <code>InternalFacts</code></td></tr>
 <tr><td><code>auth</code></td><td>技能管控表与判定、op 清单、主体、好感度存储</td><td><code>Acl</code> · <code>Ops</code> · <code>Caller</code> · <code>Auth</code> · <code>Favor</code></td></tr>
-<tr><td><code>term</code></td><td>控制台命令面、控制台捕获、输出端点、分段器</td><td><code>Cmd</code> · <code>ConsoleTap</code> · <code>Sinks</code> · <code>BootProgress</code> · <code>SfwOut</code> · <code>Segmenter</code></td></tr>
+<tr><td><code>term</code></td><td>控制台命令面、控制台捕获、输出端点、分段器、出站红线判据</td><td><code>Cmd</code> · <code>ConsoleTap</code> · <code>Sinks</code> · <code>BootProgress</code> · <code>SfwOut</code> · <code>Segmenter</code> · <code>Redline</code></td></tr>
 <tr><td><code>ui</code></td><td>本地交流面板与挂载、面板输出端点、风格</td><td><code>TalkPanel</code> · <code>TalkMount</code> · <code>PanelSink</code> · <code>SfwStyle</code></td></tr>
 <tr><td><code>dev</code></td><td>本机调试口、模拟口、调试壳、调试日志</td><td><code>DebugPort</code> · <code>DebugSimPort</code> · <code>DebugLog</code> · <code>DebugShell</code></td></tr>
 <tr><td><code>kit</code></td><td>零依赖工具类：HTTP、网络护栏、文件、JSON、字符串、文本、线程、输出</td><td><code>Http</code> · <code>NetGuard</code> · <code>Fs</code> · <code>J</code> · <code>Th</code> · <code>GatedOut</code></td></tr>
@@ -120,13 +120,13 @@
 <tr><td>⑦</td><td>模型客户端</td><td><code>new DeepSeek</code> + 模型调用闸门 <code>new Semaphore(modelConcurrency, true)</code>；<code>new DynCode</code></td></tr>
 <tr><td>⑧</td><td>NapCat 连接</td><td><code>Link</code> + 事件执行池 + <code>Api</code>（无闸门）+ <code>Relay</code> + 带闸门的 <code>guardedApi</code>（装配的最后一行才交给字段）</td></tr>
 <tr><td>⑨</td><td>上下文装配</td><td><code>CtxBuild.Env</code> 匿名实现 + <code>ExtRegistry</code> + <code>Sinks.setExt</code> + <code>CtxBuild</code> + 识图状态载体的判定口注入</td></tr>
-<tr><td>⑩</td><td>外挂层装载壳</td><td>装载器 + 控制台输出端点 + 扩展点 + 库注册表 + 库落盘回调 + 钩子池</td></tr>
+<tr><td>⑩</td><td>外挂层装载壳（控制台步骤名 <code>技能库</code>）</td><td>装载器 + 控制台输出端点 + 扩展点 + 库注册表 + 库落盘回调 + 钩子池</td></tr>
 <tr><td>⑪</td><td>回合调度器</td><td><code>new Lanes(conf, out, texts)</code>；文案缺键只报错、不兜底</td></tr>
 <tr><td>⑫</td><td>Agent</td><td><code>new Agent(…)</code> + <code>setExt</code> + <code>setExecutor(lanes)</code>：后台回合与主回合共用同一套分道队列</td></tr>
 <tr><td>⑬</td><td>心跳</td><td><code>new Tick(…)</code>（库、装载器、Agent、带闸门的动作出口四样）</td></tr>
 <tr><td>⑭</td><td>QQ 网关</td><td><code>new QuoteCache</code>（构造不起线程）+ <code>new QqGateway</code></td></tr>
 <tr><td>⑮</td><td>基板工具面</td><td><code>Builtins.register(Boot.this)</code></td></tr>
-<tr><td>⑯</td><td>外挂层扫描</td><td>装载器扫描（或按外挂层后台装载开关起后台线程）；末尾调 <code>createLibTables()</code></td></tr>
+<tr><td>⑯</td><td>外挂层扫描（控制台步骤名 <code>技能扫描</code>）</td><td>装载器扫描（或按外挂层后台装载开关起后台线程）；末尾调 <code>createLibTables()</code></td></tr>
 <tr><td>⑰</td><td>NapCat 监听</td><td><code>link.setHandler(…)</code> → <code>gateway.onEvent</code>；按 <code>napcatEnabled</code> 决定要不要 <code>link.start()</code></td></tr>
 <tr><td>⑱</td><td>文件外链中转</td><td>按 <code>relayEnabled</code> 决定要不要 <code>relay.start()</code>；没起来就退回 <code>file:///</code></td></tr>
 <tr><td>⑲</td><td>心跳启动</td><td><code>tick.start()</code> + <code>mountTalkPanel()</code>；本机调试口不在这里自动起</td></tr>
@@ -401,31 +401,45 @@ handshake(sock): setSoTimeout(10000) -> 读头取 sec-websocket-key / authorizat
 <tr><td><code>request</code></td><td><code>handleRequest(raw, ev)</code></td><td>否</td></tr>
 <tr><td><code>message</code></td><td><code>handleMessage(raw, ev)</code> —— 唯一会起回合的入站</td><td><b>是</b></td></tr>
 <tr><td><code>notice</code></td><td><code>handleNotice(ev)</code>：<b>只落库然后 return</b>；一行一条、与消息同表（群通知 → <code>grouplog</code>、私聊 → <code>dialog</code>）</td><td><b>否（零触发）</b></td></tr>
-<tr><td><code>message_sent</code></td><td><code>handleMessageSent(ev)</code>：本账号自己发出去的消息，<b>不是入站</b>；写一行自我标记后 return</td><td><b>否（零触发）</b></td></tr>
+<tr><td><code>message_sent</code></td><td><code>handleMessageSent(ev)</code>：本账号自己发出去的消息，<b>不是入站</b>；认得出是她的就写一行自我标记，认不出（正向证据不足）就写<b>外部来源行</b>并标「其他」，两条路都只写一行然后 return</td><td><b>否（零触发）</b></td></tr>
 <tr><td>其它</td><td><code>facts("event=… ignored")</code></td><td>否</td></tr>
 </tbody></table></div>
 <p><b><code>message_sent</code> 为什么不当入站</b>：私聊分支对任何私聊都返回「该回」，一旦把它当入站，她就会对自己刚发的那条再起一个回合 —— 那也是「重复回答」的一条来源。所以它的处理与 <code>notice</code> 分支是同一份零触发纪律。通知去重键前缀 <code>n:</code>，并带 <code>notice_type|sub_type|group_id|user_id|operator_id|target_id|message_id|time</code>；撤回<b>不改</b>被撤回的原行，<code>[撤回]</code> 自成一行。</p>
+<p><b>「其他」归属（D1）：同一个账号下有三个机器人服务在发言</b>。我们、云崽、舞立方共用同一个 QQ 账号（<code>selfId</code>），NapCat 把 <code>message_sent</code> 广播给所有连接 —— 别家发出去的消息，在我们这边收到的是<b>与她自己发的逐字同形</b>的帧（<code>user_id == selfId</code>）。所以归属<b>只认正向证据</b>（<code>QqGateway.ownKind</code>）：① 这次发送自带 <code>sent</code> 台账行；② 本进程内存环里记过这个 <code>msg_id</code>；③ 台账点查命中；④ 台账已裁过时，目标会话近期行里已有这个 id 的<b>自我行</b>。拿得到 ⇒ 走 <code>selfEcho</code>（她的行）；拿不到 ⇒ 走 <code>foreignEcho</code>：<b>不写自我记账头、<code>extra.self</code> 不为 true、写 <code>extra.foreign=true</code>、窗口里标「其他」</b>，私聊那侧 <code>dialog.role=foreign</code>（既不是 <code>assistant</code> 也不是 <code>user</code>，所以它进不了对话历史 —— <code>CtxBuild.appendHistory</code> 只收 user／assistant）。台账"从没裁过"时不在台账里 = <b>确定不是我们发的</b>，不做任何猜测（把"我们自己的老消息被误判成外部"那个方向堵死）。<b>二元归属：「我」 vs 「其他」</b> —— 标签逐字冻结在 <code>ChatWindow.FOREIGN = "其他"</code>，<b>不带 QQ 后缀、不带昵称</b>：帧里没有识别"是哪一家"的字段，所以她也永远不被告诉是<b>哪一个</b>别的机器人在说话。这道归属闸的下游是三处读侧：窗口标注、技能素材、<code>store\Person</code>；<code>Person</code> 那条是 <b>Java 侧过滤</b>（<code>mayOwnForeignRows</code>：只有"问的正是本账号自己"时才可能混进外部行），拼进 SQL 会让覆盖索引回表 —— 实测话痨库单次构建从 &lt;50ms 打到 183ms（<code>QqGateway.java</code>、<code>ctx\ChatWindow.java</code>、<code>store\Person.java</code>）。</p>
+<p><b><code>notice</code> 分支上唯一会往外说话的一条：戳一戳应答</b>（<code>QqGateway.pokeReply</code>）。判据是<b>结构字段</b>（<code>NoticeRender.pokeAtSelf</code>：<code>notice_type=notify</code> + <code>sub_type=poke</code> + <code>target_id == self_id</code>），不拿文案当判据；命中 ⇒ 直接回一个「？」，<b>不走模型</b>。窗口是<b>纯内存</b>的 <code>ConcurrentHashMap</code>，键 = <code>Caller.session()</code> + <code>#</code> + <code>user_id</code>（<b>会话 + 人</b>，不同会话互不影响），<code>POKE_WINDOW_MS = 60000</code>，表超过 512 条顺手清一次过期项。回执字面量冻结在 Java 里（<code>POKE_REPLY</code>，<b>不新增配置键</b>：外挂会多出"缺键 ⇒ 连问号都不回"的失败面）；每次戳<b>至多一行</b>结构事实 <code>[qq] poke reply=1|0 … suppressed=</code>，它不受 <code>logQq</code> / <code>logConsole</code> 的类别开关影响（<code>QqGateway.java</code>）。</p>
 <h3 class="sec"><code>atSelf()</code> 判定与地址判定</h3>
 <p>自身 QQ 号从事件自带的 <code>self_id</code> 取，<b>不需要外部注入</b>；缺 <code>self_id</code> 时恒为 <code>false</code>（<code>qq\Ev.java</code>）。链路两跳：<code>isAt(long qq)</code> 在消息段数组里找 <code>type=at</code> 且 <code>data.qq</code> 相等的段，<code>atSelf()</code> = <code>isAt(selfId())</code>（<code>Ev.java</code>）。</p>
+<p><b>空@兜底</b>：判据是「除 @ 之外还有没有别的东西」（不是"media 事实行是不是空"—— at 段现在也进事实），<code>Str.blank(text) &amp;&amp; !hasContent(ev)</code> 且 <code>atSelf()</code> ⇒ 照样起一轮，这一轮的 <code>prompt</code> 取外挂键 <code>被单@时的输入</code>（<code>tool\ToolIndex.bareMentionText()</code>）；键缺失时只在控制台报缺键并 <b>return（这一条不起回合）</b>——基板不编兜底话。非 @ 的无正文消息仍旧 <code>skip reason=empty</code>（<code>QqGateway.java</code>）。</p>
 <p>地址判定两行（<code>QqGateway.java</code>）：<b>私聊一律回；群里一律要求被 @</b>。主人在这一层<b>没有豁免</b> —— 群里的主人也一样要被 @；不被 @ 的消息只能由<b>外挂层的触发投票</b>放行 —— 投票没人表态时按「没人表态」处理，接口在 <code>ext\TriggerVoter.java</code>。入站去重由 <code>qq\Seen.java</code> 维护时间窗，窗口取 <code>msgDedupWindowSec</code>，<code>0</code> = 关闭判重；统计口径 <code>seen=&lt;表大小&gt; dup_hit=&lt;命中&gt; window_s=&lt;秒&gt;</code>。</p>
 <p><b>触发投票</b>：按 <code>order, 插件名</code> 依次问，<b>第一个非弃权票生效</b>（不是多数决）（<code>QqGateway.java</code>、<code>ext\ExtRegistry.java</code>）；没人表态返回 <code>null</code>，网关走地址判定那条路；投票自己出错也按「没人表态」处理并打一行 warn —— 一条消息不会因为投票失败而消失。</p>
-<h3 class="sec">动作出口：<code>Api.call</code> 一条路</h3>
+<p><b>一条已知限制（照实记）</b>：群里一条<b>没有 @ 她</b>的普通消息不起回合 —— <code>shouldAnswer</code> 在群里只认 <code>ev.atSelf()</code>（私聊一律算）。所以群友用<b>引用她的消息</b>来接她的问、却没有 @ 她时，这条<b>到不了她那里</b>（引用本身只是消息段，不构成"被叫到"）；跳过时控制台留一行 <code>skip reason=not_addressed</code>。私聊不受影响。这一条属于"地址判定"的既有口径，不是缺陷修复项。</p>
+<h3 class="sec">动作出口：<code>Api.call</code> 与静默口 <code>Api.callQuiet</code></h3>
 <div class="code" data-lang="text"><div class="code-head"><span class="lang">text</span><span class="path">src\sair\v4\qq\Api.java</span><button class="copy" type="button">复制</button></div>
 <pre><code>call(action, params):                       // 所有本地文件都在这里被统一改写
   动作名为空 -> error("动作名为空")
   rewrite(action, params, deny)             // 文件外链中转：本地路径 -> URL 或 file:///
   文件改写层自己的读文件判定被拦 -> 直接返回拒文
-  guard != null 时问 Guard.deny(action, p)   // 对外动作闸门（op 判定）
+  guard != null 时问 Guard.deny(action, p)   // 对外动作闸门（ACL 腿 + 罢工腿）
+  自我记账头 / 协议暗号 / 内容级闸（标记族 · 红线 · 事实行）
   link.call(action, p)                      // 走 WS；超时/断开 -> error("Napcat 没有响应…")
   recordSent(action, p, o)                  // 台账：只有发送类动作且响应成功才记
 
+callQuiet(action, params):                  // 静默口：同一条判定链，只是响应原文不进控制台
+  同一个 Guard、同一条判空式子、同序（也排在内容级闸之前）-> 拒文原样作为 error 返回
+  同样过自我记账头 / 协议暗号 / 内容级闸
+  两个不同点：不下沉文件改写层（不 deepCopy、不做 needOp / pathDeny）、不记台账
+
 SEND_ACTIONS = {"send_group_msg","send_private_msg","send_msg"}
 ok(o)：没有 error ⇒ status=ok 且 retcode=0
-SentTap.sent(session, action, messageId, preview, params)
-callQuiet(...)：同路但跳过守卫与台账 —— 给基板自己的「不打扰」读动作用</code></pre></div>
-<p><b>两个实例，两种用途</b>：无闸门的 <code>api</code> 给基板自己的读动作（引用解析、入站落库这一类自主行为）；带闸门的 <code>guardedApi</code> 给模型与插件发起的动作。<code>sentTap</code> 两个实例都装 —— <code>Api.call</code> 是唯一出口。</p>
+SentTap.sent(session, action, messageId, preview, params)</code></pre></div>
+<p><b>两个实例，两种用途</b>：无闸门的 <code>api</code> 给基板自己的读动作（引用解析用 <code>get_msg</code>、入站落库这一类自主行为）；带闸门的 <code>guardedApi</code> 给模型与插件发起的动作 —— 技能面的 <code>Host.napcat()</code> 拿到的<b>只有</b>带闸门那一份，闸门没装好时给的是"任何动作都被拒"的兜底实例（fail-closed），<b>绝不回落到不带闸门的那份</b>。<code>sentTap</code> 两个实例都装。</p>
+<p><b>两个动作出口，判定是同一套</b>：<code>call</code> 与 <code>callQuiet</code> 用的是<b>同一个</b> <code>Guard</code> 字段、同一条判空式子（<code>deny != null &amp;&amp; !deny.trim().isEmpty()</code>）、同一句异常兜底，位置也同序 —— 闸门排在自我记账头 / 协议暗号 / 内容级闸<b>之前</b>，所以"两个出口同时命中时报的是 ACL 那条"这条口径对两者都成立。闸门体只有一处实现（<code>Boot</code> 装配的那个 <code>Api.Guard</code>：ACL 腿 = <code>Auth.allow(主体, "napcat.&lt;动作名&gt;")</code>，罢工腿 = <code>Builtins.strikeDenyAction</code>；<b>ACL 先判、罢工后判</b>），拒文都原样作为 <code>error</code> 返回。区别只剩文件改写层与台账这两件：<b>静默口刻意不下沉改写层</b>（<code>rewrite</code> / <code>needOp</code> / <code>pathDeny</code>）—— ① 它的既有契约是<b>不 deepCopy 参数</b>（改的是调用方自己那个对象，两个探针正是靠这一点观测"就地剥标记 / 就地换词"），而改写层的第一句就是 <code>deepCopy</code>，接上去等于把这个契约换掉；② 它实际用的动作是 <code>get_msg</code>，参数里没有任何本地文件。<b>边界照实写</b>：将来若有调用者拿它发<b>带本地文件参数</b>的动作，<code>needOp</code> / <code>pathDeny</code> 那两道<b>不会</b>生效 —— 那种用法要走 <code>call</code> 或另开裁定（<code>Api.java</code> 的 <code>callQuiet</code> 注释逐条写着这两条理由与这条边界）。</p>
 <h3 class="sec">出站：分段与渲染</h3>
 <p>正文先过 <code>qq\Seg.java</code> 分段：<code>plan(text, maxChar, groupMax, group)</code> 是统一入口 —— 按段落与语义单元切、超长单元单独切、再按群聊与私聊各自的归并尺度 <code>humanize</code> 成几条；带标记的行由 <code>byMarker(text)</code> 拆开，分好段的事实行由 <code>fact(parts)</code> 给出。渲染面各不相同：媒体走 <code>qq\MediaRender.java</code>、通知走 <code>qq\NoticeRender.java</code>、聊天标记走 <code>qq\ChatMarkers.java</code>、纯文本走 <code>qq\PlainText.java</code>；自己发出去的消息由 <code>qq\SelfEcho.java</code> 加一个自我标记头 <code>head(msgId)</code> —— 历史去重就是按这个头来认的。分段之后、发送之前这一段还能被 <code>OutboundStage</code> 改写（见 <a href="#index">扩展点与契约面</a>）。</p>
+<p><b>纪律的落点与顺序</b>（<code>term\Sinks.java</code>，<code>QqSink</code> / <code>TaskSink</code> 共用同一批函数）：<b>①整条口</b> <code>wholeGate</code> 在<b>分段之前</b> —— 判「基板事实块写法」（<code>qq\InternalFacts.java</code>：归一化 + 形状 + <b>至少两行</b>）以及三条"分段把纪律劈开"的写法（整条红线否决 / 可替换类目跨段换不到 / <code>&lt;split&gt;</code> 落在标记跨度里），命中就<b>整批不发</b>；<b>②分段</b>；<b>③接缝暗号</b> <code>seamSilent</code> 在<b>分段之后、下面那条之前</b> —— 相邻两段拼接归一化后<b>恰好等于一个完整括号暗号</b>时，从接缝的两半各剪掉那一段（被剪空的段不发），对不上一个字都不动；它必须排在下面那条之前，否则成对的一半被丢掉之后，另一半会孤零零地照发；<b>④止语点跨段</b> <code>markStopTail</code> 在<b>分段之后、stage 之前</b> —— 第一段带 <code>[[mood:…]]</code> 的段之后的每一段一起丢（放在 stage 之前是必须的：情绪那层会把标记剥掉）；<b>⑤好感度标记</b> <code>FavorTags.apply</code> 也在 stage 之前（stage 会把整批否决，而好感度是"她的判断"、不是"这句话的一部分"：话被拦下来，账照样要记）；<b>⑥stage 管线</b>；<b>⑦一轮条数上限</b> <code>capParts</code> 在<b>stage 之后、发送之前</b> —— <code>parts.size() &gt; cap</code> 只发前 <code>cap</code> 条并留一行 <code>rule=parts_cap</code>，<code>cap</code> = <code>replyMaxParts</code>（默认 9，<code>&le;0</code> = 不限制，见 <code>term\Segmenter.java</code>）；<b>⑧逐条过闸</b> <code>gate(part)</code>，命中只丢这一条，其余条照发。</p>
+<p><b>逐条闸 <code>gate(part)</code> 内部是一条顺序写死的链</b>（唯一实现 <code>term\Sinks.gate</code>；<code>QqSink</code> / <code>TaskSink</code> / 降级打印路共用），按判的先后：<b>①工具调用标记</b>（<code>qq\ToolMarkup</code>）整条不发；<b>②半截自报标记</b>（写全了 <code>[[mood:</code> 却没写收尾，或整条结尾只写到 <code>[[mo</code> 这种正前缀）也整条不发（fail-closed，两条判据只在 <code>MoodMarks.openMark</code> / <code>openTail</code> 一处）；<b>③<code>[[mood:…]]</code> 自报标记族</b>（<code>qq\MoodMarks.strip</code>）—— 带标记的行整行丢，剥完为空 ⇒ 整条不发；<b>④自我记账头</b>（<code>headGate</code>，判在<b>剥完标记之后</b>的正文上，判据 <code>qq\SelfEcho</code>）—— 头在可见开头就<b>剥掉再发</b>，头在中段 / 头残缺 / 剥完什么都不剩 ⇒ 整条不发；<b>⑤协议暗号 <code>&lt;silent&gt;</code> 一族</b>（判据只有 <code>agent\Agent.silent</code> / <code>stripSilent</code> 一处，本层不写第二套词表）—— <b>整条正文就是它</b>（含先剥掉自我记账头之后剩下的那句）⇒ 整条不发；夹在句子里 ⇒ 照发；<b>贴在首 / 尾的带括号写法</b>（2026-09-28 起）⇒ 就地剥掉 token，<b>剥完仍要过后面的闸</b>——不是剥完就放行，剥完什么都不剩同样整条不发；<b>⑥出站红线</b>（<code>term\Redline</code>，词表 <code>prompts\redline.md</code> 热读）—— 不可替换类目（威胁 / 自伤）命中 ⇒ 整条不发，可替换类目 ⇒ 就地换词。走完这一条链的正文才交给<b>落点</b>。被拦下的条数只在整批事实行里报一行结构事实，不打正文（<code>Sinks.java</code>）。</p>
+<p><b>降级打印路与本地控制台共用 <code>degradedPrint</code>（五处调用点）</b>：<code>QqSink</code> 两处（NapCat 未连接、<code>caller</code> 没有群号/QQ）、<code>TaskSink</code> 两处（NapCat 未连接、没有目标）、<code>ConsoleSink</code> 一处（本地交互面）—— 以前这五处只看逐条那道闸，整条口的事实块判据不在这条路上；现在判据同源、位置同序（<b>先判事实块整条丢，再走逐条闸</b>），"降级不是降纪律"，以后再加降级落点只改这一处。</p>
+<p><b>工具发送路的另一道同源闸</b>：<code>qq\Api.java</code> 的自我记账头闸 <code>selfHeadFact</code>（发送类动作的正文里出现自我记账头 ⇒ 整条拒发；<b>只拦不剥</b>，任意动作的任意字符串叶子都扫，深度 64 + 字符预算 200000，超限同样 fail-closed）、协议暗号闸 <code>silentFact</code>（整条正文就是暗号 ⇒ <b>整条拒发</b>；<b>贴在首 / 尾的带括号暗号 ⇒ 就地剥掉</b>，字符串形态改 <code>message</code>、段数组只动首 / 尾 text 段并验回，对不上 ⇒ <code>residual=split</code> <b>整条拒发</b> = fail-closed）、内容级闸 <code>contentFact</code>（发送类动作 × <code>message</code>，字符串与段数组两种形态：<code>[[mood:…]]</code> 就地剥、红线不可替换类目拦下 / 可替换类目就地换词，跨段劈开 ⇒ <code>residual=split</code> 拒发）与 <code>contentFactAny</code>（2026-09-23 起：<b>任意动作 × 任意字符串叶子</b>，逐叶子就地改写 + 折成"整条视图"再判一次，深度与字符预算双闸、超限 fail-closed）。四条例外：查询类动作（<code>get_*</code> / <code>_get_*</code>）、<code>file</code> / <code>image</code> 键、<code>type</code> 键、协议令牌 <code>flag</code> 键。判据与本层同源（<code>InternalFacts</code> / <code>MoodMarks</code> / <code>Redline</code> / <code>Agent.silent</code>），<b>不写第二套</b>；<b>剥了仍要接着判</b>（<code>silentFact</code> 剥完的正文继续走内容级闸，不是剥完就放行），"剥掉自我记账头再发"这个语义只留在 <code>Sinks</code> 那一层（<code>Api</code> 的这一支只拦不剥）。两个出口（<code>call</code> 与 <code>callQuiet</code>）用的是同一条链、同一序，区别只有文件改写层与台账（见上）。</p>
 <p><b>工具标记识别</b>：<code>qq\ToolMarkup.java</code> 用三个正则识别模型误写出来的「工具调用标记」—— 全角或半角 <code>|</code> 管道式、<code>&lt;|DSML|…&gt;</code> 式、结构化标签式；<code>has</code>／<code>rule</code>／<code>fact</code> 三个出口分别给判定、规则文案与事实行（<code>ToolMarkup.java</code>）。</p>
 <h3 class="sec">文件外链中转</h3>
 <p><code>qq\Relay.java</code> 用 JDK 自带的 <code>com.sun.net.httpserver.HttpServer</code>，把本地文件变成一个 URL 交给 NapCat。NapCat 不在同一台机器时才需要它 —— 未启用时本地文件按 <code>file:///</code> 直接交给同机 NapCat。</p>
@@ -475,7 +489,7 @@ callQuiet(...)：同路但跳过守卫与台账 —— 给基板自己的「不�
 越界    = 技能文件里写了不属于它的 op / 数据键（那一条不生效），或写了 File 块（整块不生效），启动日志都点名一行</code></pre></div>
 <p><b>三域的默认值与优先级</b>：<code>Skill</code> —— <code>Ban</code> &gt; <code>Run</code> &gt; 没列到 = 不能；<code>DB</code> —— 改：<code>Ban</code> &gt; <code>Run</code> &gt; 没列到 = 不能改；读：<code>Ban</code> &gt; <code>Read</code> &gt; 没列到 = <b>能读</b>（全表唯一默认放开的一处）；<code>File</code> —— 改：<code>Ban</code> &gt; <code>Run</code> &gt; 没列到 = 不能改；读：<code>Ban</code> &gt; <code>Read</code> &gt; 没列到 = 不能读。技能目录里没有那份 <code>perms.jsonc</code> 时，这个技能的全部 op 就落进“空”这一档 —— 默认拒绝。</p>
 <p><b>判定层次</b>：先看<b>域</b>（问的是 op、数据还是路径），再看<b>层</b>（写看 <code>Run</code>、读看 <code>Read</code>），层内把覆盖这个键的规则<b>从最具体往最宽</b>过一遍 —— 第一把给出决定的键说了算：同一把键上 <code>Ban</code> 压过 <code>Run</code> / <code>Read</code>，身份取并集；更具体的键（<code>pref.donation</code> 比 <code>pref</code>，路径按最长）没给这个身份任何决定时，才落到更宽的键；一把键都没有就按该域“没列到”的默认值收尾（<code>Acl.decide</code>）。</p>
-<p><b>没有位，也没有资源分类</b>：资源（本机文件、运行目录、数据库、对外动作）对主人与她本人完全可见、可改、可执行；对 <code>ALLUSER</code> 是黑盒 —— 想读、想写、想碰，唯一的路是技能（工具）这条手脚，再加上数据与路径两道独立闸门。</p>
+<p><b>没有位，也没有资源分类</b>：资源（本机文件、运行目录、数据库、对外动作）对主人与她本人完全可见、可改、可执行；对 <code>ALLUSER</code> 是黑盒 —— 想读、想写、想碰，主路是技能（工具）这条手脚，再加上数据与路径两道独立闸门。唯一的旁路是只读的一小片：好感度档位放权闸（<code>auth\FavorGate.java</code>，W7/批 13）能在管控表<b>没列到</b>时，给到档的 <code>ALLUSER</code> 放行 <code>file.read</code> / <code>file.list</code> / <code>send.file</code> / <code>send.record</code> 这四个 op 与允许根内的读路径；显式 <code>Ban</code>、主人与她本人都不受它影响。</p>
 <h3 class="sec">op 从哪来、身份怎么写</h3>
 <p>op 清单来自<b>声明</b>：技能在装载期用 <code>OpList.add(tool, action, note)</code> 把自己的动作列一遍，内置工具在注册时声明；<code>Ops.of(tool)</code> 对没声明过的老技能退化成工具名本身。写文件时的分组、释义与顺序由这份清单产出，<code>ai/perm gen</code> 只是在<b>已有的</b>权限文件里按它重排（不新建文件），没进表的 op 照样不授权（<code>auth\Ops.java</code>、<code>auth\OpList.java</code>）。</p>
 <div class="tw reveal"><table>
@@ -519,6 +533,7 @@ rowOwned(c, 行归属):    行归属主体等于调用者；无归属的行只�
 <tr><td><b>文件门</b></td><td>碰路径的写口：本地文件改写、外链地址产出、整库导出与导入</td><td>这个路径能不能碰（<code>Acl.fileDeny</code>，<code>write</code> 决定看哪一层）</td></tr>
 </tbody></table></div>
 <p>旧守卫不删：会话归属（<code>inScope</code> / <code>constrain</code> / <code>constrainRow</code>）、整库闸（<code>writeAdminDeny</code> / <code>writeMemoryDeny(row == null)</code>）与那几条不是归属的规则都原样保留，新的两道闸门是<b>加在它们前面</b>的一层，不是替代品 —— 老守卫答“这一行是不是你的会话 / 是不是整库动作”，新闸门答“这类数据 / 这个路径给不给你”。</p>
+<p><b>罢工闸（op 级，<code>Builtins.strikeDeny</code>）挂在这张表的后面，不是替代</b>：<code>needOpAs</code> 的顺序是「① <code>auth.allow</code> 先判 —— 拒文原样返回（权限阻断优先）；② 放行了才看情绪」。判据真源只有一处：<code>kv</code> 的 <code>mood:&lt;场合&gt;</code> 行的 <code>state</code> 字段（<code>group:&lt;群号&gt;</code> / <code>private:&lt;QQ&gt;</code>，与 <code>情绪\EmotionMood.scopeOf</code> 同一个表达式、注释里写明必须同源改），<code>strike</code> ⇒ 除 <code>perm</code> 一族外一律拒，回执 <code>Builtins.STRIKE_LINE</code> 一行，不调用任何下游。四个调用点是 <code>needOpAs</code>（内置 op）、<code>skill\Host#need</code>（技能 op）、<code>tool\Registry#mayEnterDeny</code>（工具入口）、<code>Boot</code> 的 <code>Api.Guard</code>（NapCat 动作出口 —— <code>h.napcat()</code> 直连原来整段绕过，这一路用 <code>strikeDenyScene</code> 从动作参数现算场合，并豁免 <code>STRIKE_SPEAK_ACTIONS</code> 那几个"把话送出去"的动作：罢工 = 不干活，但要继续骂人）。取不到场合 / 读库异常 ⇒ 不拦 + 一行 warn（fail-open，同场合同原因只记第一行）；<b>不豁免 SYSTEM</b>（<code>Builtins.java</code>、<code>Host.java</code>、<code>Registry.java</code>、<code>Boot.java</code>）。</p>
 <h3 class="sec">写文件：授权 / 封禁 / 数据 / 路径 / 撤回 / 重排</h3>
 <div class="tw reveal"><table>
 <thead><tr><th>操作</th><th>行为</th></tr></thead>
@@ -539,13 +554,13 @@ rowOwned(c, 行归属):    行归属主体等于调用者；无归属的行只�
 <h3 class="sec">接线：工具面与事实块</h3>
 <p><b>工具面两道门</b>：<code>Registry.visible(caller)</code> 决定“交不交到手”—— 整把工具放行、或它任一动作放行，这把工具才会出现在模型可见的工具面里；<code>Registry.call</code> 的入口闸门决定“点不点得动”，工具内部每个动作再判一次自己的 op。不筛的情况只有两个：<code>caller == null</code>（内部 / 诊断）与权限面未装配 —— 后者<b>不假装</b>自己有权限面（<code>tool\Registry.java</code>）。</p>
 <p><b>数据面与文件面的接线口</b>：工具面那几条都由 <code>Builtins</code> 里的薄壳调用（<code>dbDenyOf</code> / <code>dbReadDenyOf</code> / <code>fileDenyOf</code>，整库动作走 <code>dbWholeDeny</code> 把它覆盖到的每一类都过一遍）；行归属按类别各自映射成 <code>user:&lt;QQ&gt;</code> / <code>group:&lt;群号&gt;</code>，<b>不由字符串直接比</b> —— 会话键那种形态与规范身份不是一个写法（<code>Builtins.rowOwnerOf</code>）。</p>
-<p><b>事实块三个键</b>：<code>caller.kind</code>（<code>MASTER</code> / <code>SYSTEM</code> / <code>ALLUSER</code>）、<code>caller.ops</code>（<b>结论</b>：恒全权写字符串 <code>"ALL"</code>，其余写可用 op 数组，一个都没授权写 <code>[]</code>，绝不写 <code>null</code>）、<code>caller.rules</code>（<b>依据</b>：能命中他的条目原文，条数有上限、超出的末尾补一句“还有 N 条”；主人与她本人恒为空数组）。三个键都直接问权限面，基板不重算任何一次判定（<code>ctx\CtxBuild.java</code>）。</p>
+<p><b>事实块五个键</b>：<code>caller.favor</code>（关系数值，<b>跟身份无关地给</b> —— 主人也有一格）、<code>caller.favorGate</code>（<b>档位 + 档位表 + 这张放权清单表 + 这一档此刻真放行的 op</b>，唯一真源 <code>auth\FavorGate.facts</code>）、<code>caller.kind</code>（<code>MASTER</code> / <code>SYSTEM</code> / <code>ALLUSER</code>）、<code>caller.ops</code>（<b>结论</b>：恒全权写字符串 <code>"ALL"</code>，其余写可用 op 数组，一个都没授权写 <code>[]</code>，绝不写 <code>null</code>）、<code>caller.rules</code>（<b>依据</b>：能命中他的条目原文，条数有上限、超出的末尾补一句“还有 N 条”；主人与她本人恒为空数组）。五个键都直接问权限面，基板不重算任何一次判定（<code>ctx\CtxBuild.java</code>）。</p>
 <h3 class="sec">多源合并装载</h3>
 <p>装载走的是<b>多源合并</b>：<code>Acl.loadMerged(core, skillsDir, toolOwners, 已注册的 op 清单, out)</code> 把数据根下的 <code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code> 读成一个合并视图 —— core 在前、技能文件按目录名排序在后，来源与条数由 <code>sourceStat()</code> 汇总成人读的一行，装载汇总由 <code>summary()</code> 给（启动与 <code>ai/perm</code> 各打一次）。把“当前已注册的 op 清单”一并交下去是必须的一步：工具级的那条键只覆盖这把工具<b>已经注册的动作</b>，拿不到清单时退回“本表里被授予过的动作”这条更严的口径（只会更严，不会放宽）。<code>Auth</code> 侧是这条装载路径在本基板里的<b>唯一调用方</b>（<code>auth\Auth.java</code>、<code>Acl.loadMerged</code>）。</p>
 <p>旧格式照读：上一版的嵌套写法与旧的统一表都还能读进来（前者装载时提示建议 <code>ai/perm gen</code> 重排，后者 warn 一行建议分家、<b>不删不写</b>）；<code>version</code> 读到 5 按旧语义读并点名，读到比这一版新也点名“版本比基板新”；老文件缺数据或路径两域 ⇒ 按该域“没列到”的默认值走（<b>不会因为“没写”而放宽</b>）。更早那版按资源分类的权限账本（<code>Acl.LEGACY_FILE_NAME</code>）还会读一次做迁移：只有工具入口那几条能翻译成新口径 —— 条目里带 <code>X</code> 的转 <code>Run</code>，其余的转 <code>Ban</code>；按资源分类的那几行在新语义里没有意义，忽略并计数。迁移<b>只读不写</b>（<code>Acl.readLegacy</code>、<code>Acl.readLegacyBlocks</code>）。</p>
 <p><b>归属从哪来</b>：哪个 op 属于哪个技能由工具注册表回答（<code>Registry.toolOwners()</code>）。技能装载或卸载会改变归属，而归属正是“技能文件里哪些条目算越界”的判据，所以每次全量扫描收口都会重读一次权限文件（<code>Boot.reloadPerm</code>）；读不到就按空表处理，判定侧 fail-closed 不受影响。读盘只有一处（<code>Acl.readInto</code>）：<code>Acl.load</code> 与 <code>Acl.loadMerged</code> 都走它，换解析器不用改别处；一份文件读不出来时<b>按空处理 + 点名文件</b>——读不出等于“没有授权”，绝不等于“没有限制”。</p>
 <div class="note bad">
-<b>好感度不进判定链</b>：好感度表仍在（它是数据，也是事实块 <code>caller.favor</code> 的来源），但 <code>Auth</code> 的构造器不持有它 —— 一个工具能不能用只看技能管控表（<code>auth\Auth.java</code>、<code>auth\Favor.java</code>）。
+<b>好感度不再是"与判定无关的数"</b>（V4.3 改口，主人令 2026-09-26）：好感度表仍在（它是数据，也是事实块 <code>caller.favor</code> 的来源），判断也仍然<b>先看技能管控表</b> —— 但自 W7/批 13 起多了一道<b>并行的第二道闸</b> <code>auth\FavorGate.java</code>：<code>Acl</code> 按管控表给出"没列到 / 空表"这类<b>没有决定</b>的结论之后，会回头问它一次"这一档是不是本来就该让他做这件只读的事"。它只有一张<b>写死的窄表</b>（<code>file.read</code> / <code>file.list</code> / <code>send.file</code> / <code>send.record</code>，门槛 <code>favorFileMin</code> 出厂 500），没有通配、不给宽身份新增授权，<b>显式 <code>Ban</code> 永远压过它</b>，主人与她本人恒 <code>null</code>（逐字节不变）；读路径那一侧同理（<code>FavorGate.liftPath</code> + <code>HARD_BAN</code> / <code>HARD_BAN_REL</code> 硬名单）。所以"一个工具能不能用"现在是<b>两处</b>共同给答案：<code>Auth</code> / <code>Acl</code> 先判，<code>FavorGate</code> 只补它没决定的洞 —— 调用点就在 <code>auth\Acl.java</code> 的 <code>allow</code> 与 <code>fileDeny</code> 两处。
 </div>
 <p><b>权限面是一层薄门面</b>：<code>Auth</code> 的出口是 <code>allow(c, op)</code>、<code>allowed(c, op)</code>、<code>allowedOps(c)</code>，加上装载与重读那几支；它把“已注册的 op 清单”一并交给账本，自己不算判定。合并后的权限表懒装载、进程内缓存一份，<code>reloadAcl()</code> 重新合并重读。<code>init()</code> 的语义是“已经装过就重读一次，还没装过就什么都不做”，它<b>不写盘</b>。账本（<code>Acl</code>）自己也不主动往控制台刷：装载汇总由装配方与控制台各打一次，免得每次重读都刷屏（<code>auth\Auth.java</code>、<code>Boot.logPermDefault</code>）。</p>
 </section>
@@ -557,29 +572,45 @@ rowOwned(c, 行归属):    行归属主体等于调用者；无归属的行只�
 <pre><code>assemble(turn, userText):
   ① system(stable)      // 系统提示词 + 偏好块，同一条 system 消息
   ② 外挂「稳定段」块       // 每块一条 system
-  ③ system(facts)       // 基板内置事实块 —— 恒为第二条 system（不随插件数量变化）
+  ③ system(facts)       // 基板内置事实块，首行恒为 time:；本会话聊天窗口拼在这一条的末尾
   ④ 外挂「易变段」块       // 每块一条 system
   ⑤ 历史（dialog 最近 N 条）
-  ⑥ 本轮 user 消息
+  ⑥ 【本轮说话人】锚点    // system，一条；只在普通回合插
+  ⑦ 本轮 user 消息
 
-assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没有历史与本轮 user</code></pre></div>
-<p><b>稳定段紧贴系统提示词</b>：前缀缓存按 <code>messages</code> 前缀逐字命中，而事实块第一行就是 <code>time:</code>（每个回合都变），排在它后面的东西一律进不了那段前缀；偏好块因而放进第一条 system。<b>易变段排在事实块之后</b>：让「内置事实块恒为第二条 system」不受插件数量影响，序号稳定，看日志与日常观察都不会被「装了哪个插件」改变。<b>内置事实块刻意不走扩展点的超时与预算</b>：它是基板骨架，外挂再多也挤不掉它。</p>
+assembleSystem(turn):   // 收尾回合复用：①②③④ 段位完全一致，没有历史、锚点与本轮 user</code></pre></div>
+<p><b>稳定段紧贴系统提示词</b>：前缀缓存按 <code>messages</code> 前缀逐字命中，而事实块第一行就是 <code>time:</code>（每个回合都变），排在它后面的东西一律进不了那段前缀；偏好块因而放进第一条 system。<b>易变段排在事实块之后</b>：让事实块后面那一段不受「装了哪些插件」影响。注意<b>内置事实块并不恒为第二条 system</b>：「稳定段」provider（线上「用户画像」/「群成员映射」/「点名引用」都是 <code>stable()</code>）排在它之前，所以认它只能认首行 <code>time: </code>（<code>CtxBuild.assemble</code> 的注释，批 15 改正）。<b>内置事实块刻意不走扩展点的超时与预算</b>：它是基板骨架，外挂再多也挤不掉它。<b>锚点只在普通回合插</b>：它是一条独立 system，位置在历史之后、本轮 user 之前（离「本轮他说的话」最近处），不并进 user 正文 —— 改 user 正文会破「未过闸时 messages 与改之前逐字节相同」那条契约（<code>CtxBuild.assemble</code> / <code>CtxBuild.speakerAnchor</code>）。</p>
 <h3 class="sec">事实块：一行一条 JSON 事实</h3>
 <p><code>CtxBuild.facts(turn)</code> 按固定键序产出行：</p>
 <div class="tw reveal"><table>
 <thead><tr><th>行前缀</th><th>内容</th></tr></thead>
 <tbody>
 <tr><td><code>time:</code></td><td>当前时间</td></tr>
-<tr><td><code>caller:</code></td><td><code>entry</code>／<code>qq</code>／<code>name</code>／<code>master</code>／<code>session</code>／<code>group</code>／<code>role</code>／<code>favor</code>（非主人）／<code>kind</code>／<code>ops</code>／<code>rules</code></td></tr>
-<tr><td><code>person:</code></td><td>六库聚合出的「正在说话的这个人」是谁（跨群同一人）；构建失败这一行就不存在</td></tr>
+<tr><td><code>caller:</code></td><td><code>entry</code>／<code>qq</code>／<code>name</code>（有才写）／<code>master</code>／<code>session</code>／<code>group</code>（群里才有）／<code>role</code>（有才写）／<code>favor</code>（<b>跟身份无关地给</b>，主人也有一格）／<code>favorGate</code>（档位 + 档位表 + 这张放权清单表 + 这一档此刻真放行的 op）／<code>kind</code>／<code>ops</code>／<code>rules</code></td></tr>
+<tr><td><code>addressed:</code></td><td><b>这一轮是怎么被叫到的</b>（能力③的产出行，2026-10-01）。值只有<b>六个封闭枚举</b>：<code>trigger</code>（触发词／技能或插件投了"要回"那一票，最具体，压过地址规则）、<code>at</code>（群里被 @）、<code>private</code>（私聊）、<code>master</code>（主人那条没有 QQ 地址的本地控制台／面板入口）、<code>self</code>（她自己的自主／内部回合，<code>Agent.wake</code>）、<code>system</code>（基板定时／闹钟／任务投递，<code>Tick</code>）。<b>由起这一轮的那个产者在提交时塞进 <code>Turn</code>，<code>facts</code> 只渲染、一个字都不重推</b>；渲染前过一次白名单 <code>CtxBuild.isAddressed</code>，产者塞的别的东西一律不出现。没有产者塞过 ⇒ <b>这一行整个不出现</b>（不写空值）。开关 <code>addressedFacts</code>（默认 true，出厂不写盘）</td></tr>
+<tr><td><code>favorKinds:</code></td><td>好感度加减的「来往类别 → 区间」一行可机读文本（唯一真源 <code>Favor.kindTable()</code>）；配置键 <code>favorKindFacts=false</code> 关掉就少这一行，判定与夹取一个字不变</td></tr>
+<tr><td><code>person:</code></td><td>六库聚合出的「正在说话的这个人」是谁（跨群同一人）；同一人在<b>别的群</b>叫什么另写一格 <code>aka</code>（形如 <code>群888888:张三</code>，最多 3 条、每条 ≤24 字、顺序确定；数据只从「群成员映射」插件<b>已加载的内存快照</b>反射取，拿不到就一个字符都不加）；构建失败这一行就不存在</td></tr>
 <tr><td>（媒体行）</td><td>只有媒体段的消息才有</td></tr>
 <tr><td><code>napcat:</code></td><td><code>connected</code> / <code>disconnected</code></td></tr>
 <tr><td><code>models:</code></td><td>八字段模型事实（见下）</td></tr>
 <tr><td><code>tasks_running:</code></td><td>只有大于 0 才写</td></tr>
 <tr><td>（能力索引行）</td><td>「类别 → 工具[一句话]」；缺配置就没有这一行</td></tr>
 <tr><td><code>rounds:</code></td><td>第几轮 / 还剩几轮 / 上限是谁的；由 <code>Loop</code> 每回合<b>就地刷新</b>（<code>Loop.java</code>）</td></tr>
+<tr><td><code>clients:</code></td><td>本账号下<b>另有机器人服务在发言</b>（能力①，纯数据、不下结论）。出现时机是<b>这一轮的窗口里确实有外部来源行</b>（<code>ChatWindow.foreignRows</code> 的计数 &gt; 0）—— 没有外部行时一个字节都不出现，所以既有事实行逐字节不变。逐字文案冻结在 <code>CtxBuild.CLIENTS_LINE</code>，<b>不写"可能是谁"</b>（帧里没有识别来源客户端的字段）。开关 <code>clientsFacts</code>（默认 true，出厂不写盘）</td></tr>
+<tr><td><code>cmdish:</code></td><td>这一轮的正文<b>以 <code>#</code> 或 <code>/</code> 开头</b>（能力③的形状事实，如 <code>cmdish: '#'</code>）。<b>只给形状、不给归属</b>：判据只有"第一个字符是 # 或 /"这一条字符串形状（<code>CtxBuild.cmdishOf</code>），没有关键词表、也没有忽略名单；<b>它不影响这一轮要不要回、要不要问</b>。判据来源是 <code>assemble</code> 写进 <code>Turn</code> 的本轮输入，收尾回合／无正文 ⇒ 不出现。开关 <code>cmdishFacts</code>（默认 true，出厂不写盘）</td></tr>
 </tbody></table></div>
 <p><code>ops</code> 与 <code>rules</code> 都直接问权限面（<code>Acl.allow</code> 的结论与依据），基板不在这里重算一次判定；<code>rules</code> 给「此人能命中的条目原文」，省去每次翻纪律文本。同一行的 JSON 也落到 <code>Turn</code> 状态（键 <code>models</code>），插件用现成的只读口就能读到，不额外新增扩展点接口。</p>
+<h3 class="sec"><code>addressed:</code> 的产者接线（能力③）</h3>
+<p>取值<b>只有产者知道</b>，所以它由产者在提交那一刻贴到 <code>Turn</code> 状态上（键 <code>CtxBuild.ST_ADDRESSED</code>），<code>CtxBuild.facts</code> 只渲染、一个字都不重推 —— 重推就是第二个产法。唯一入口是 <code>Agent.ask(caller, sink, text, mediaFact, addressed)</code>：空串 = 没有产者表态 ⇒ <code>Turn</code> 上不写这个键 ⇒ 事实块里没有这一行（<code>agent\Agent.java</code>）。</p>
+<div class="tw reveal"><table>
+<thead><tr><th>产者</th><th>取值</th><th>判据／出处</th></tr></thead>
+<tbody>
+<tr><td><code>QqGateway.submitTurn</code>（QQ 入站）</td><td><code>trigger</code> / <code>at</code> / <code>private</code> / <code>master</code></td><td>纯函数 <code>QqGateway.addressedOf(ev, caller, byVote)</code>，按优先级从上到下第一个命中：投了"要回"那一票（<code>byVote</code>，技能把 <code>payload._reply</code> 置 true 或插件投 ANSWER）⇒ <code>trigger</code>；群里 <code>Ev.atSelf()</code> ⇒ <code>at</code>；<code>Ev.isPrivate()</code> ⇒ <code>private</code>；主人兜底 ⇒ <code>master</code>（<code>QqGateway.java</code>）</td></tr>
+<tr><td>本地控制台 <code>Boot.askConsole</code>、面板／命令 <code>Cmd</code>（<code>ai/chat</code>）</td><td><code>master</code></td><td>这一条入口没有 QQ 地址，直接塞 <code>AD_MASTER</code>（<code>Boot.java</code>、<code>term\Cmd.java</code>）</td></tr>
+<tr><td>基板定时／闹钟／任务投递 <code>Tick</code></td><td><code>system</code></td><td>到点了替某个人办那件事，不是"有人在会话里叫她"（<code>Tick.java</code>）</td></tr>
+<tr><td>她自己 <code>Agent.wake</code> 的自主／内部回合</td><td><code>self</code></td><td>没有人发消息，是她自己在时间里跑的那一轮（<code>agent\Agent.java</code>）</td></tr>
+</tbody></table></div>
+<p><b>渠道优先于身份</b>：主人的私聊读 <code>private</code>、主人在群里 @ 读 <code>at</code> —— "怎么被叫到的"问的是渠道，身份本来就在 <code>caller.master</code> 那一格里（<code>CtxBuild.ST_ADDRESSED</code> 的取值表）。</p>
 <h3 class="sec"><code>models:</code> 的八个字段</h3>
 <div class="code" data-lang="json"><div class="code-head"><span class="lang">json</span><span class="path">src\sair\v4\ctx\CtxBuild.java</span><button class="copy" type="button">复制</button></div>
 <pre><code>models: {"self":"…","self_has_vision":true,"main":"…","main_has_vision":true,
@@ -636,7 +667,7 @@ assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没�
 // 她就会凭空描述图里有什么（比「没有图」更糟）</code></pre></div>
 <p>挂上了的那一行由 <code>Loop</code> 追加且只做一次（<code>round == 0</code>）：<code>note</code> 是过去式（「图已在本回合第 1 次请求里看过」），第 1 次请求真的返回之后才成立；同一时刻还<b>把图从 messages 里剥掉</b> —— 主循环每个回合都重发整个 messages，不剥就是每个回合重发一遍图，成本随轮数倍增，而行为上完全看不出来（<code>Loop.java</code>）。</p>
 <h3 class="sec">相关小件</h3>
-<p>回合材料装在 <code>ctx\Turn.java</code> 里：<code>messages</code>、<code>facts</code>、工具结果、<code>lastText</code>、<code>stopped</code> 都挂在它上面；<code>Ctx.java</code> 负责线程内的调用者绑定，<code>ctx\ChatWindow.java</code> 存群窗口快照（取最近几条由 <code>chatWindowSize</code> 决定，默认 30）。拼装顺序由 <code>CtxBuild</code> 定，这几个载体只负责装材料，不参与顺序决策。</p>
+<p>回合材料装在 <code>ctx\Turn.java</code> 里：<code>messages</code>、<code>facts</code>、工具结果、<code>lastText</code>、<code>stopped</code> 都挂在它上面；<code>Ctx.java</code> 负责线程内的调用者绑定，<code>ctx\ChatWindow.java</code> 存群窗口快照（取最近几条由 <code>chatWindowSize</code> 决定，默认 30，硬上限 200）。<b>窗口里每一行的「谁」都带 QQ</b>（群行形如 <code>昵称(QQ 10001)</code>；昵称为空、或昵称与角色标注词 <code>我</code>／<code>对方</code> 撞车时退 <code>#QQ</code>，防的是把群名片改成「我」当成她自己）。<b>窗口与历史的去重是 best-effort</b>：只按「正文去头之后相同 + 时间相近（±60s）」丢掉窗口里那一条，正文被剥过头、或时间差超过容差就照留（<code>ChatWindow.dropAlreadyInHistory</code>）；私聊与控制台刻意不做这一层去重。拼装顺序由 <code>CtxBuild</code> 定，这几个载体只负责装材料，不参与顺序决策。</p>
 </section>
 <!-- ============================================================ -->
 <section class="chapter" id="agent-impl">
@@ -759,6 +790,7 @@ assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没�
 <p><b>捕获器的生命周期归壳</b>：<code>Th.shutdown()</code> 不碰它 —— 它是控制台的一部分，插件构造期就挂上；注销由壳负责：只有壳卸载（调试壳 <code>detach()</code> ← <code>V4Activity.exit()</code>）时才注销。</p>
 <h3 class="sec">输出去向：四种端点 + 一条出站阶段管线</h3>
 <p><code>term\Sinks.java</code> 收四个 <code>ctx\Sink</code> 实现：<code>ConsoleSink</code>、<code>QqSink</code>、<code>TaskSink</code>（后台任务与闹钟结果的落点）、<code>SilentSink</code>（只吞不出）。<b>出站阶段管线只接一处</b>：<code>Sinks.setExt(ext)</code>，发送前先过 <code>e.runStages(m, parts, sp).parts</code> —— 于是「分段 + 渲染 + 外挂改写」都在同一个位置发生，没有第二条出站路径。</p>
+<p><b>纪律与改写是两个不同层，顺序写死</b>：整条口（<code>wholeGate</code>）→ 分段 → 接缝暗号（<code>seamSilent</code>）→ 止语点跨段（<code>markStopTail</code>）→ 好感度标记 → <b>stage 管线</b> → 一轮条数上限（<code>capParts</code>，<code>replyMaxParts</code> 默认 9）→ 逐条闸（<code>gate</code>）→ 发送。所以外挂看到的是"已经裁过条数、但还没过出站闸"的那一批；<code>stage</code> 的注入口默认是 null（谁都没注入过 = 零 stage = 与加这一层之前逐字节一致），改写层自己炸了这一条按原样发。红线、标记族与协议暗号这三族<b>不在 stage 里</b>（在基板的 <code>gate</code> 与 <code>Api</code> 上），这一点见 <a href="#qq-impl">QQ 面实现 · 出站</a> 与 <a href="#auth-impl">权限面实现</a>（<code>Sinks.java</code>）。</p>
 <h3 class="sec">本地交流面板：窗口动作投到 EDT</h3>
 <div class="tw reveal"><table>
 <thead><tr><th>点</th><th>口径</th></tr></thead>
@@ -775,8 +807,8 @@ assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没�
 <ul>
 <li>纯 <code>ServerSocket</code> 行协议；连上后第一行是 <code>AUTH &lt;token&gt;</code>：成功回 <code>+OK &lt;name&gt;</code>，失败回 <code>-ERR bad token</code> 并断开，每次失败记一行 warn</li>
 <li><b>只绑 <code>127.0.0.1</code></b>，不监听 <code>0.0.0.0</code></li>
-<li>token 留空则拒绝启动并打一行 warn</li>
-<li><b>装配不会自动起它</b>：只由控制台命令起停，端口与 token 走命令参数、不进 <code>config.json</code></li>
+<li>token 留空则拒绝启动并打一行 warn（<code>ai/debug on</code> 不带 token 时现场生成一个）</li>
+<li><b>装配不会自动起它</b>：只由控制台 <code>ai/debug on|off|status</code> 起停，端口与 token 走命令参数、不进 <code>config.json</code>；起口时把运行现场凭据写进数据根下的 <code>debug-port.json</code>（<code>name</code> / <code>host</code> / <code>port</code> / <code>pid</code> / <code>token</code> / <code>token_fp</code> / <code>ts</code>，输入口另有 <code>sim*</code> 几格），口停了就删掉 —— 客户端拿这一份就够，不必去猜端口与 token（<code>dev\DebugPort.java</code>）</li>
 </ul></div>
 <div class="panel"><h4><code>dev\DebugSimPort.java</code></h4>
 <p>模拟口：把构造出来的事件喂进网关那条路，用来在没有真链接的情况下看路由行为；与调试口同一套「只回环 + 带 token」口径。另有 <code>dev\DebugShell.java</code>（调试壳，负责挂载与卸载捕获器）与 <code>dev\DebugLog.java</code>（调试日志）。</p></div>
@@ -793,7 +825,7 @@ assembleSystem(turn):   // 收尾回合复用，段位完全一致，只是没�
 <div class="tw reveal"><table>
 <thead><tr><th>扩展点</th><th>能做什么</th><th>不能做什么</th></tr></thead>
 <tbody>
-<tr><td><code>OutboundStage</code><br>出站改写</td><td>位置在<b>分段之后、发送之前</b>（<code>QqSink</code> / <code>TaskSink</code>）。逐条三个口：<code>veto</code> 一票否决（<code>true</code> = 这一条不发）、<code>transform</code> 改正文（返回 <code>null</code> = 不改，返回空串 = 基板丢弃这一条）、<code>extra</code> 追加独立消息；另有一个整批收尾口，拿得到最终整条消息列表，可以整表改写或原样不动（<code>ext\OutboundStage.java</code>）</td><td>改不动基板判定：op 判定、地址判定、闸门与台账都在这条管线之外。否决是<b>整条丢</b>，没有「改一点点再发」的中间态；<code>extra</code> 追加出来的消息不再回 stage，插件之间就不会互相追加成环</td></tr>
+<tr><td><code>OutboundStage</code><br>出站改写</td><td>位置在<b>分段之后、发送之前</b>（<code>QqSink</code> / <code>TaskSink</code>）。逐条三个口：<code>veto</code> 一票否决（<code>true</code> = 这一条不发）、<code>transform</code> 改正文（返回 <code>null</code> = 不改，返回空串 = 基板丢弃这一条）、<code>extra</code> 追加独立消息；另有一个整批收尾口，拿得到最终整条消息列表，可以整表改写或原样不动（<code>ext\OutboundStage.java</code>）</td><td>改不动基板判定：op 判定（含罢工闸）、地址判定、闸门与台账都在这条管线之外。否决是<b>整条丢</b>，没有「改一点点再发」的中间态；<code>extra</code> 追加出来的消息不再回 stage，插件之间就不会互相追加成环。看到的那一批条数已按一轮上限（<code>replyMaxParts</code>，默认 9）裁过；<b>协议级 / 安全级三族（<code>[[mood:…]]</code> 标记族、<code>&lt;silent&gt;</code> 协议暗号一族与出站红线）是基板的判据</b>，不要在 stage 里重写第二套</td></tr>
 <tr><td><code>ContextProvider</code><br>上下文提供者</td><td>每轮往 <code>messages</code> 里加一段，自己声明顺序（<code>order</code> + 插件名）、段位（<code>stable()</code>）与单段字符上限（<code>maxChars()</code>）：稳定段排在系统提示词之后、内置事实块之前，易变段排在内置事实块之后（<code>ext\ContextProvider.java</code>、<code>BuildContext.java</code>）</td><td>内置事实块的位置与内容、历史条数与字符预算、本轮 user 消息的位置，都由基板定，它碰不到。它拿到的是只读口 <code>BuildContext.host()</code>，要写就写自己的库或自己的 <code>kv</code></td></tr>
 <tr><td><code>LifecycleHook</code><br>生命周期钩子</td><td>主回合的三个时点：回合开始（装配完、还没跑）、真要对外说话时、回合结束（正文已发出或已失败）。用途是记账与清理：写对话历史、记调用量、清临时态、发「typing」这类副作用（<code>ext\LifecycleHook.java</code>）</td><td>不改消息内容 —— 那是 <code>OutboundStage</code> 的事，所以这里拿到的是只读 <code>BuildContext</code>，没有可改的正文。子 Agent 回合与后台收尾回合不触发，它们本来也不进对话历史</td></tr>
 <tr><td><code>TriggerVoter</code><br>触发投票</td><td>三态票：<code>ANSWER</code> 回、<code>DECLINE</code> 不回（省掉一整轮模型调用）、<code>ABSTAIN</code> 不管。按 <code>order, 插件名</code> 依次问，<b>第一个非弃权票生效</b>（不是多数决）（<code>ext\TriggerVoter.java</code>、<code>QqGateway.java</code>）</td><td>改不动地址判定本身：没人表态时网关仍走「私聊一律回、群里要求被 @」那条路。投票抛异常或超时都按 <code>ABSTAIN</code> 处理 —— 宁可不答，一条消息也不会因为投票而凭空消失</td></tr>

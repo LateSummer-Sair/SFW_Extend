@@ -125,7 +125,9 @@ public final class Builtins {
 
         // ---------------- ① 六库：读 ----------------
         reg.add(Tool.of("store")
-                .desc("读写基板六库：lib 取 memory 长期记忆/note 知识笔记/dialog 对话历史/grouplog 群聊历史/sticker 表情包/pref 偏好设定。")
+                .desc("读写基板库：**六库** = memory 长期记忆/note 知识笔记/dialog 对话历史/grouplog 群聊历史/"
+                        + "sticker 表情包/pref 偏好设定；**外加插件声明的业务库**（情绪状态表等就在里面）——"
+                        + "当前到底有哪些库，先 `store_admin op=stat` 看一遍，别猜（猜错的名字会被直接拒）。")
                 .returns("查询结果（JSON 文本）")
                 .params(schemaStoreRead(libs))
                 .handler(new Tool.Handler() {
@@ -194,7 +196,12 @@ public final class Builtins {
 
         // ---------------- ① 六库：写 ----------------
         reg.add(Tool.of("store_write")
-                .desc("写基板六库（put/update/delete）：字段名按库定义给，写错会被忽略。")
+                .desc("写基板库（六库 + 插件声明的库）：put 写一行 / update 改一行 / delete 删一行。"
+                        + "写之前先照抄一行，别凭印象编字段：① 先 store op=list lib=<库> limit=1 看一行现在长什么样，"
+                        + "字段名照抄；② 再按那个形状写 row（put）或 patch（update）；"
+                        + "③ 写完 store op=get lib=<库> id=<回执里的 id> 回读确认那一行 —— 回读拿到的才是真记住的。"
+                        + "★ 字段名写错**不会报错**：库里没这一列就被静默丢掉，回执照旧说「已写入，id=N」——"
+                        + "那只是「写了一行」，不表示你的字段进库了，所以第 ③ 步不能省。")
                 .returns("新 id / 影响行数")
                 .params(schemaStoreWrite())
                 .handler(new Tool.Handler() {
@@ -328,7 +335,19 @@ public final class Builtins {
                         }
                         String lib = J.s(args, "lib", "");
                         String path = J.s(args, "path", "");
-                        File f = Str.blank(path) ? new File(conf.filesDir(), lib + "-" + Str.stamp() + ".jsonl") : new File(path);
+                        // ★ 默认落点 files\ → tmp\（批 15，2026-09-26，GM 裁定）：不给 path 时这一格把
+                        //   <b>整库</b>写成一份 JSONL —— dialog 库里是全部私聊记录（真机证据：2026-09-26
+                        //   18:20:56 控制台那句 `ai/store export dialog` 写出的 files\dialog-20260926-182056.jsonl
+                        //   有 6406 行）。而批 13/14 已经把 `files\` 开成了"好感度 ≥ 500 的群友可读根"
+                        //   （FavorGate.DEF_FILE_ROOTS = "D:/share/;{root}/files/"）⇒ 导出件正好落在
+                        //   群友读得到的那一格 —— 等于把整库（含别人的私聊）摆到放权面上。
+                        //   两条理由选 tmp\：① 它<b>不在</b>放权允许根里（同一份 DEF_FILE_ROOTS 只列
+                        //   D:/share/ 与 {root}/files/）；② 它是 `_deploy.ps1` 认定的运行时数据格
+                        //   （第 98 行 $skip 里就有 tmp\），部署不会把导出件搬来搬去。
+                        //   文件名形状 <lib>-<stamp>.jsonl 一个字不改；<b>给了 path 时行为也一个字不改</b>
+                        //   （下面既有那三道判定照原样判它给的那个路径）。`ai/store export`（控制台那条）
+                        //   由 term\Cmd.java 那条车道按同一裁定改，不在这里代劳。
+                        File f = Str.blank(path) ? new File(conf.tmpDir(), lib + "-" + Str.stamp() + ".jsonl") : new File(path);
                         if ("optimize".equals(op)) {
                             // 动作级 op：合并全文索引段
                             String aclDeny = needOp(auth, conf, "store_admin.optimize");
@@ -395,7 +414,12 @@ public final class Builtins {
 
         // ---------------- ② 技能库：读 ----------------
         reg.add(Tool.of("skill")
-                .desc("技能库（外挂层）：list 清单/read 说明书/validate 体检/search 按名找。技能决定你有哪些额外工具与钩子。")
+                .desc("技能库（外挂层）：list 清单（给 name 就按名字包含过滤）/read 说明书/validate 体检。"
+                        + "技能决定你有哪些额外工具与钩子。"
+                        + "★ 工具的 desc 只有一句话，**细节全在技能说明书里**：要动多 op 的工具之前，先 "
+                        + "skill op=read name=<技能名> 读一遍（要动 group / send / sticker / friend / file 这类，这一步别省）。"
+                        + "说明书可能几千到几万字符，一次读不完会被截断 —— 返回末尾会告诉你本段范围、全文总长和下一个 "
+                        + "offset，照着用 skill op=read name=<技能名> offset=<n> [limit=<n>] 接着读。")
                 .returns("技能清单/说明书正文")
                 .params(schemaSkillRead())
                 .handler(new Tool.Handler() {
@@ -416,7 +440,13 @@ public final class Builtins {
                             Sk sk = skills.get(J.s(args, "name", ""));
                             if (sk == null) return "没有这个技能";
                             String body = sk.doc == null ? "" : sk.doc;
-                            return "技能 " + sk.name + "\n" + J.json(sk.toJson()) + "\n\n" + body;
+                            String all = "技能 " + sk.name + "\n" + J.json(sk.toJson()) + "\n\n" + body;
+                            // 批 17 L2：说明书正文 4~36 KB，而工具结果只在 Registry 里保头 toolResultMax 字
+                            // （默认 6000，超了就是"…（结果已截断，共 N 字符）"）—— 所以光有 read 不够，
+                            // 得给她"接着读"的办法。offset/limit 都是**字符**偏移，标尺 = 不传参数时返回的
+                            // 那一整串（`all`），这样她被截断后按尾注里的 offset 续读就对得上。
+                            // 不传 offset/limit 时**逐字节原样**返回 all（既有行为一字不变）。
+                            return skillReadWindow(all, args, conf == null ? 6000 : conf.toolResultMax(), sk.name);
                         }
                         // 默认分支（list，含认不出的 op）：动作级 op
                         String aclDeny = needOp(auth, conf, "skill.list");
@@ -946,15 +976,87 @@ public final class Builtins {
                                 if (out != null) out.err(why);
                                 return why;
                             }
+                            // ★ 事实说明（不是新动作）**必须最先放**：本地文件怎么交给 NapCat —— 由基板统一改写，
+                            //   调用方只管传绝对路径。为什么钉在第一位（2026-09-24 批 9 的真实回归，GM 修）：
+                            //   工具结果有上限（`Registry.run` 按 `toolResultMax`，出厂 6000 字符）**且从尾部截断**，
+                            //   而本目录随后会装进全部放行动作（批 9 catalog 48→63）⇒ 原来"最后加"的这条事实说明
+                            //   被整条截掉，`ProbeRelay` 两条断言因此在批 9 变红（批 8 门禁还是绿的，gate8-final-A/B.log）。
+                            //   把它放第一位 = 无论目录多长，这条**没有别的获取途径**的说明一定在她的结果里。
+                            //   （目录本身仍会被截断：模型会看到"结果已截断"那行 —— 收窄目录是批 10 的票，见看板。）
+                            //   （这条一字不改、连 "params":{} 一起照旧 —— 批 15 兑现了批 10 那张票：
+                            //    目录从此是分页的，见下；位置与正文都不许动，`probe\ProbeRelay.java:423`
+                            //    就钉着它，批 9 的真实回归正是它被从尾部截掉。）
+                            visible.add("_local_file", J.obj("desc", localFileFact(boot.relay()),
+                                    "params", new JsonObject()));
+                            // ★ 目录改成"可分页 + 每项精简"（批 15，2026-09-26，GM 裁定：只收窄不放大）。
+                            //   为什么必须分页：catalog 现在有 <b>63</b> 个动作（批 9 的 D6 把它从 48 涨到 63），
+                            //   而旧形状<b>每项都带一整个嵌套的 `params` 对象</b>（动作参数名 → 说明）⇒ 一份
+                            //   完整目录序列化后越过 `toolResultMax`（出厂 6000 字符），而 `Registry.run`
+                            //   是<b>从尾部</b>截断的 ⇒ 排在后面的动作她根本看不到，也看不出被截了什么
+                            //   （批 9 那条 `_local_file` 说明就是这么被整条吃掉的）。现在每项只留
+                            //   "动作名 → 一行描述"，并按 limit/offset 分页 ⇒ 默认页一定在上限之内，
+                            //   尾部动作也不再丢：翻页拿得到，元信息里连"下一页怎么写"都给了。
+                            //   <b>参数说明不在这里</b>：权威说明在 `tools op=show napcat` 与动作自己的拒文里，
+                            //   这里只给动作名与一句话（这也是"每项精简"能省下大半长度的原因）。
+                            //
+                            //   权限语义一个字不改：仍然逐个动作 needOpAs(auth, who, "napcat.<动作名>") 判一次，
+                            //   只让放行的进来；不放行的连名字都不进 total、不进任何一页（所以 total 是
+                            //   "这个调用者看得见的动作数"，不是 63 —— 不拿别人的能力面当计数）。
+                            List<String> allowed = new ArrayList<String>();
                             for (Map.Entry<String, com.google.gson.JsonElement> e : cat.entrySet()) {
                                 // 走同一口判定（needOpAs）：罢工态下目录里一个动作都不放行（SPEC §4）。
                                 if (needOpAs(auth, who, "napcat." + e.getKey()) == null) {
-                                    visible.add(e.getKey(), e.getValue());
+                                    allowed.add(e.getKey());
                                 }
                             }
-                            // 事实说明（不是新动作）：本地文件怎么交给 NapCat —— 由基板统一改写，调用方只管传绝对路径
-                            visible.add("_local_file", J.obj("desc", localFileFact(boot.relay()),
-                                    "params", new JsonObject()));
+                            int total = allowed.size();
+                            // limit/offset 一律<b>夹取</b>（不抛、不拒）：负数当默认，超上限夹到上限，
+                            // offset 超过总条数就停在末尾、给一句可读的话（见下面的 `_page`）。
+                            int off = J.i(args, "offset", 0);
+                            if (off < 0) off = 0;
+                            if (off > total) off = total;
+                            int lim = J.i(args, "limit", NAPCAT_LIST_DEFAULT);
+                            if (lim <= 0) lim = NAPCAT_LIST_DEFAULT;
+                            if (lim > NAPCAT_LIST_MAX) lim = NAPCAT_LIST_MAX;
+                            int end = Math.min(total, off + lim);
+                            boolean beyond = total > 0 && off >= total;
+                            String next = end < total ? ("action=list offset=" + end)
+                                    : (beyond ? "action=list offset=0" : "");
+                            // 可读元信息（`_` 前缀，沿用 `_local_file` 那套约定）。与动作名不冲突：
+                            // 目录里确实有以 `_` 打头的动作（`_get_group_notice` / `_send_group_notice`，
+                            // NapCat 扩展），但它们第二个字符起是字母，与 `_local_file` / `_page` 不同名。
+                            JsonObject page = new JsonObject();
+                            page.addProperty("total", total);
+                            page.addProperty("offset", off);
+                            page.addProperty("limit", lim);
+                            // 空页（offset 越界 / 一个动作都没放行）时区间一律报 0：不许出现 "from":0,"to":63
+                            // 这种"看着像有 63 条"的读法 —— 元信息是给她看的，不是给机器猜的。
+                            page.addProperty("from", end > off ? (off + 1) : 0);
+                            page.addProperty("to", end > off ? end : 0);
+                            page.addProperty("next", next);
+                            String hint;
+                            if (total <= 0) {
+                                hint = "这个调用者当前一个 NapCat 动作都没有放行（共 0 个）；要授权看 perm 工具。";
+                            } else if (beyond) {
+                                hint = "offset=" + off + " 超出总条数（共 " + total + " 个动作）—— 这一页没有动作；"
+                                        + "从头看：action=list offset=0";
+                            } else {
+                                hint = "本页 " + (off + 1) + "-" + end + "／共 " + total + " 个动作"
+                                        + "（limit 默认 " + NAPCAT_LIST_DEFAULT + "、上限 " + NAPCAT_LIST_MAX + "）。 "
+                                        + (next.isEmpty() ? "已经是最后一页。 " : ("看下一页：action=list offset=" + end + "。 "))
+                                        + "每项只是「动作名 → 一行描述」；参数说明看 tools op=show napcat。";
+                            }
+                            page.addProperty("hint", hint);
+                            // 元信息紧跟 `_local_file`（第二位）：万一日后目录再涨、这份结果又被截，
+                            // "被截了什么 / 怎么看下一页"也一定还在她手里。动作名排在元信息之后。
+                            visible.add("_page", page);
+                            for (int i = off; i < end; i++) {
+                                String name = allowed.get(i);
+                                com.google.gson.JsonElement ce = cat.get(name);
+                                String desc = (ce != null && ce.isJsonObject())
+                                        ? J.s(ce.getAsJsonObject(), "desc", "") : "";
+                                visible.addProperty(name, desc);
+                            }
                             return J.json(visible);
                         }
                         // 先判权限再看连接状态：越权者不该从"未连接"里读到自己有没有这个动作
@@ -1272,7 +1374,7 @@ public final class Builtins {
         ops.add("store_admin", "import", "导入覆盖");
         // ② 技能库 / 动态执行
         ops.add("skill", "list", "技能清单");
-        ops.add("skill", "read", "读技能说明书");
+        ops.add("skill", "read", "读技能说明书（正文可能几万字符，超长会被截断；用 offset/limit 分段接着读）");
         ops.add("skill", "validate", "技能库体检");
         ops.add("skill_write", "add", "新增技能");
         ops.add("skill_write", "update", "覆盖技能内容");
@@ -1907,6 +2009,10 @@ public final class Builtins {
             + "search 按**意图**找（「改设置」「发图」「查余额」）；show <工具名> 读完整说明书："
             + "描述、返回、**参数表**（类型/必填/默认/示例）、归属、**★以你现在的身份能不能用（哪个 op 能用也说清）**、"
             + "只读还是有副作用。\n"
+            + "★ 这里（包括 show）给的**只有一句话摘要** —— 真正的细节在技能说明书里："
+            + "`skill` op=read name=<技能名> 读全文（正文几千到几万字符），太长会被截断，"
+            + "**用 offset/limit 接着读** —— 返回末尾会告诉你本段范围、全文总长与下一个 offset，照着给就行。"
+            + "要动多 op 的工具（group / send / sticker / friend / file）之前，先读一遍它那一份说明书。\n"
             + "想不起工具名、不确定 op 怎么填、想确认「我这身份调不调得动」—— 先问我，别硬试"
             + "（撞权限墙会被连续失败闸门掐停整轮）。\n"
             + "边界：只列你**现在看得见**的工具（工具面按技能管控表里的 op 筛）；看不见的我不替你描述。";
@@ -3494,6 +3600,115 @@ public final class Builtins {
         return out;
     }
 
+    // ==================== 批 17 L2：skill op=read 的分段读（说明书 4~36 KB，结果只保头 6000 字） ====================
+
+    /**
+     * {@code skill op=read} 的**分段读窗口**：把"整份 read 结果"切成她点得动的一段。
+     *
+     * <p><b>标尺只有一个</b>：不传 {@code offset}/{@code limit} 时返回的那一整串（= {@code full}）。
+     * Registry 截断保头 N 字，她看到的就是 {@code full[0..N)}；所以"接着读"的 offset 必须是
+     * <b>同一个字符串</b>里的字符下标 —— 两边同一把尺子，她照尾注给的 offset 读就不会错位。</p>
+     *
+     * <p><b>不传参数 = 逐字节原样返回</b>（老行为一字不变）。传了就只切一段，并在末尾补一行尾注：
+     * 本段范围 + 全文总长 + 下一个 offset（可照抄的完整调用）。</p>
+     *
+     * <p><b>永不抛</b>：越界 / 负数 / 非数字一律收敛成一行可读拒绝（"永不失联"口径），
+     * 切片的上下界都先夹紧再 {@code substring}。纯函数：不碰盘、不碰 state。</p>
+     *
+     * @param full      不传参数时会返回的那一整串（{@code null} 视同空串）
+     * @param args      工具入参（{@code offset}/{@code limit} 可选）
+     * @param maxChars  工具结果的单次上限（{@code Registry.call} 的 {@code conf.toolResultMax()}，默认 6000）；
+     *                  {@code <=0} = 不限，这时不预留尾注位
+     * @param skillName 尾注里"续读"指令要用的技能名（可为空 = 用占位符）
+     */
+    public static String skillReadWindow(String full, JsonObject args, int maxChars, String skillName) {
+        String all = full == null ? "" : full;
+        String offRaw = readCountArg(args, "offset");
+        String limRaw = readCountArg(args, "limit");
+        // 一个都没传 = 与老行为逐字节相同（这一句是"默认行为不变"的唯一保证）
+        if (offRaw == null && limRaw == null) return all;
+        long total = all.length();
+        String who = Str.has(skillName) ? skillName : "<技能名>";
+        long off = 0L;
+        if (offRaw != null) {
+            Long v = readCountOf(offRaw);
+            if (v == null || v < 0L) {
+                return "offset 只认 0 或正整数（从第几个字符开始读）：收到「" + offRaw
+                        + "」。不传 offset 就是从第 0 个字符读起。";
+            }
+            if (v > total) {
+                return "offset 越界：这份说明书一共 " + total + " 字符，offset 最远只能到 " + total
+                        + "（要从头读就别传 offset）。";
+            }
+            off = v;
+        }
+        long len = -1L;                       // -1 = 读到结尾
+        boolean explicit = limRaw != null;    // 显式 limit = 她要多少给多少（只在"单次上限"面前收口）
+        if (explicit) {
+            Long v = readCountOf(limRaw);
+            if (v == null || v <= 0L) {
+                return "limit 只认正整数（这一段读几个字符）：收到「" + limRaw
+                        + "」。不传 limit 就是读到结尾。";
+            }
+            len = v;
+        } else if (maxChars > 0) {
+            len = maxChars - SKILL_READ_TRAILER_ROOM;      // 给尾注留位：尾注自己被截掉就等于没有
+            if (len < SKILL_READ_MIN_SEGMENT) len = SKILL_READ_MIN_SEGMENT;
+        }
+        long end = (len < 0L || len >= total - off) ? total : off + len;
+        boolean capped = maxChars > 0 && len > maxChars && end < total;   // 只有"真被切短了"才叫收口
+        String tail = "";
+        // 硬保证：切片 + 尾注 <= 单次上限。否则尾注（含"下一步 offset"）会被 Registry 再截一次，
+        // 她就又断了线索 —— 宁可这段少给一点，也要把"下一步"留在眼前。
+        // 尾注长度随 end 的位数变化，所以按"超出多少就收缩多少"迭代到收敛（最多 5 轮，实测 2 轮）。
+        for (int i = 0; i < 5; i++) {
+            tail = skillReadTrailer(off, end, total, who, capped);
+            if (maxChars <= 0) break;
+            long over = (end - off) + tail.length() - maxChars;
+            if (over <= 0L) break;
+            capped = true;
+            end = Math.max(off, end - over);
+        }
+        return all.substring((int) off, (int) end) + tail;
+    }
+
+    /** 分段读的尾注：本段范围 + 全文总长 + 下一步（续读指令 / 已到结尾）。 */
+    private static String skillReadTrailer(long off, long end, long total, String who, boolean capped) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n—— 本段 ").append(off).append('~').append(end)
+          .append(" 字符（全文共 ").append(total).append(" 字符）");
+        if (capped) sb.append("；已按单次上限收口");
+        if (end < total) sb.append("；续读：skill op=read name=").append(who).append(" offset=").append(end);
+        else sb.append("；已到结尾");
+        return sb.toString();
+    }
+
+    /** 尾注预留：本段范围 + 总长 + 续读指令（含工具名与技能名）实测 40~110 字符，这里留 400。 */
+    private static final int SKILL_READ_TRAILER_ROOM = 400;
+
+    /** 不传 limit 时的单段默认量下限（上限很小的时候不至于只剩一行尾注）。 */
+    private static final long SKILL_READ_MIN_SEGMENT = 200L;
+
+    /** 取一个分段参数的字面：没给 = {@code null}；给了非标量（对象/数组）也当"给了"，好出一句人话拒绝。 */
+    private static String readCountArg(JsonObject args, String key) {
+        com.google.gson.JsonElement e = J.get(args, key);
+        if (e == null) return null;
+        String s = e.isJsonPrimitive() ? e.getAsString() : e.toString();
+        return s == null ? "" : s;
+    }
+
+    /** 严格整数：{@code null}（没给）→ {@code null}；空串 / 非数字 / 小数一律 {@code null}（由调用处拒绝）。 */
+    private static Long readCountOf(String raw) {
+        if (raw == null) return null;
+        String v = raw.trim();
+        if (v.isEmpty()) return null;
+        try {
+            return Long.valueOf(Long.parseLong(v));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     // ==================== JSON Schema（给模型看的参数说明） ====================
 
     /**
@@ -3560,7 +3775,9 @@ public final class Builtins {
                 "type", "object",
                 "properties", J.obj(
                         "op", oneOf("list/read/validate", "list", "list", "read", "validate"),
-                        "name", obj("string", "技能名（read；list 时做包含过滤）")));
+                        "name", obj("string", "技能名（read；list 时做包含过滤）"),
+                        "offset", obj("integer", "read 分段读：从第几个**字符**开始（0 起；不传 = 从 0 读全文）"),
+                        "limit", obj("integer", "read 分段读：本段读几个**字符**（不传 = 读到结尾）")));
     }
 
     private static JsonObject schemaSkillWrite() {
@@ -3695,12 +3912,29 @@ public final class Builtins {
                         "model", obj("string", "临时换模型（省略=配置模型）")));
     }
 
+    // ==================== ⑧ NapCat 动作目录：分页参数（批 15，2026-09-26） ====================
+    //
+    // 两个数只有这一处真源：schemaNapcat() 的说明文案与 action=list 的夹取都用它们，改一个两处一起走。
+    // 为什么是这两个数：目录有 63 个动作，默认 40 ⇒ 一页装得下且"下一页"真的存在（第 63 条必须翻页才看得到，
+    // 这正是批 15 的验收点）；上限 60 ⇒ 就算有人硬要最大页，序列化长度也还在 toolResultMax（出厂 6000）之内
+    // （实测数字见 tmp\v6-real\batch6\W15f\run.txt，不"看着差不多"）。
+
+    /** {@code napcat action=list} 默认每页条数（不给 limit 时）。 */
+    private static final int NAPCAT_LIST_DEFAULT = 40;
+
+    /** {@code napcat action=list} 每页上限（limit 给多大都夹到这里）。 */
+    private static final int NAPCAT_LIST_MAX = 60;
+
     private static JsonObject schemaNapcat() {
         return J.obj(
                 "type", "object",
                 "properties", J.obj(
                         "action", J.obj("type", "string", "description", "动作名；list=列目录", "default", "list"),
-                        "params", obj("object", "动作参数对象（按目录里的参数名给）")));
+                        "params", obj("object", "动作参数对象（按目录里的参数名给）"),
+                        "limit", obj("integer", "action=list：一页多少个动作（默认 " + NAPCAT_LIST_DEFAULT
+                                + "，上限 " + NAPCAT_LIST_MAX + "，越界自动夹取；参数说明看 tools op=show napcat）"),
+                        "offset", obj("integer", "action=list：从第几个动作开始（从 0 数，默认 0）——"
+                                + "看下一页就填上一页元信息 _page.next 里那句，形如 action=list offset=40")));
     }
 
     private static JsonObject schemaConsole() {

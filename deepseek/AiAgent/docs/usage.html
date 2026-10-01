@@ -82,8 +82,8 @@
               </tr>
               <tr>
                 <td>QQ 群聊</td>
-                <td><b>@ 她一下</b>才会进入处理</td>
-                <td>被 @ 的那条消息会得到回复；没 @ 的消息她<b>不进入处理</b>（连模型都不调）</td>
+                <td><b>@ 她一下</b>才会自动回复</td>
+                <td>被 @ 的那条消息会得到回复；没 @ 的消息基板<b>不自动回</b>（不建上下文、不调模型）—— 触发词命中时由那个技能接管，见下</td>
                 
               </tr>
               <tr>
@@ -97,7 +97,11 @@
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">"引用了她的消息但没 @" 不会触发 —— 这是设计，不是故障</span>：群聊的触发判据是"这条消息是否 @ 到了她自己"（<code>QqGateway.java</code>）；技能触发词命中时由技能投票另起一轮，不走这一条。所以<b>只引用、不 @</b> 时判定为否，不产生回合、不会回复。要想让她接话，@ 一下即可。</p>
+          <p><span class="n-title">"引用了她的消息但没 @" 不会触发 —— 这是设计，不是故障</span>：群聊的触发判据是"这条消息是否 @ 到了她自己"（<code>QqGateway.java</code>）；技能触发词命中时由那个技能自己接管（它派一个子 Agent 把话发出去），不走这一条。所以<b>只引用、不 @</b> 时判定为否，不产生回合、不会回复。要想让她接话，@ 一下即可。</p>
+        </div>
+
+        <div class="note reveal">
+          <p><span class="n-title">只 @ 一下、没带话；戳一戳她 —— 两种都算数</span>：<b>空@</b>（群里只 @ 她、既没文字也没有图片/语音）照样起一轮，这一轮的全部输入是上下文快照，让模型自己读一遍再接；回什么由 <code>prompts\tools-index.md</code> 的 <code>被单@时的输入</code> 那一行定（现在教她"看不出就只发一个「？」"）。<b>戳一戳</b>（戳的是她本人）直接回一个「？」，不走模型；<b>同一会话、同一个人 60 秒只回一次</b>，连戳剩下的几次不会刷屏。两个回执都<b>不新增配置键</b>（<code>QqGateway.java</code>）。</p>
         </div>
 
         <h3 class="sec">三个容易被当成故障的正常行为</h3>
@@ -110,12 +114,12 @@
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">② 一次回复可能被拆成几条</h4>
             <p>长回复按分段规则拆开发送（分段开关、长度与延迟都是配置键）。</p>
-            <p class="t-cap">出处：<code>term\Segmenter.java</code>（<code>replySplit</code> / <code>replyMaxChars</code> / <code>replyGroupMaxChars</code> / <code>replySplitDelayMs</code> / <code>replySplitJitterMs</code>），键登记在 <code>Conf.java</code>。</p>
+            <p class="t-cap">出处：<code>term\Segmenter.java</code>（<code>replySplit</code> / <code>replyMaxChars</code> / <code>replyGroupMaxChars</code> / <code>replySplitDelayMs</code> / <code>replySplitJitterMs</code> / <code>replyMaxParts</code>），键登记在 <code>Conf.java</code>。最后那一个是<b>一轮最多发几条</b>（默认 9），超出的尾巴直接丢弃 —— 它是爆炸半径的硬上限，不参与分段。</p>
           </div>
           <div class="panel reveal d2">
             <h4 class="sub" style="margin-top:0">③ 发图她能看图</h4>
-            <p>消息里带图时，图可以被直接挂进这一轮请求做理解（走 <code>native</code> 档）；这是<b>图片专有</b>能力：语音 / 视频 / 文件段只出标签、不做识别。</p>
-            <p class="t-cap">出处：<code>qq\MediaAttach.java</code>、<code>ctx\CtxBuild.java</code>、<code>qq\MediaRender.java</code>（图）对比 （语音/视频只有标签）。</p>
+            <p>消息里带图时，图可以被直接挂进这一轮请求做理解（走 <code>native</code> 档）；这是<b>图片专有</b>能力：语音 / 视频 / 文件段只出标签、不做识别。让看图手（技能 <code>辅助识图</code>）出描述时，描述先过<b>图片内容审查</b>（涉政 / 黄赌毒两张表）：命中就<b>不转述</b>，只回一句固定的「[识图·已拦截] 这张图的内容按红线不转述。」；词表读不到时按<b>放行</b>处理并记一行 warn。</p>
+            <p class="t-cap">出处：<code>qq\MediaAttach.java</code>、<code>ctx\CtxBuild.java</code>、<code>qq\MediaRender.java</code>（图）对比 （语音/视频只有标签）；审查在 <code>辅助识图\VisionAgent.java</code>、词表在 <code>辅助识图\prompt.md</code>。</p>
           </div>
         </div>
       </section>
@@ -136,8 +140,8 @@
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">重启基板：<code>ai/restart</code></h4>
-            <p>先停旧基板 → 重读 <code>config.json</code> → 重新装配 19 步；<b>不并发</b>：已经在装配/重启时会被明确拒绝（回 <code>BUSY</code> 一句）。</p>
-            <p class="t-cap"><b>做完会看到</b>：一行"重启已受理"，随后又是一轮装配进度行，最后 <code>ai/status</code> 的「待生效」清单<b>变空</b>。出处：<code>Cmd.java</code>、<code>V4Activity.java</code>。</p>
+            <p>先停旧基板 → 重读 <code>config.json</code> → 重新装配 19 步；<b>不并发</b>：已经在装配/重启时会被明确拒绝，回一句"已经有一次装配/重启在跑（…），本次 … 已忽略 —— 重复 start/restart 不并发"（<code>BUSY</code> 是内部状态名，控制台上看不到这个字面）。</p>
+            <p class="t-cap"><b>做完会看到</b>：一行"已受理重启：…"，随后又是一轮装配进度行，最后 <code>ai/status</code> 的「待生效」清单<b>变空</b>。出处：<code>Cmd.java</code>、<code>V4Activity.java</code>。</p>
           </div>
         </div>
 
@@ -176,7 +180,7 @@
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">谁会被加密</h4>
-            <p>三个敏感键（<code>apiKey</code> / <code>napcatToken</code> / <code>relayToken</code>）<b>密文落盘</b>，回执只回"已设置 / 长度"，绝不回值。</p>
+            <p>三个敏感键（<code>apiKey</code> / <code>napcatToken</code> / <code>relayToken</code>）<b>密文落盘</b>，回执一律打码：长度 <code>&lt;=8</code> 只回 <code>****</code>，否则只留前 4 个字符加总长度（<code>abcd…（已打码，共 N 字符）</code>）；模型侧的工具回执只回"已设置 / 长度"。</p>
             <p class="t-cap">密文与<b>启动目录</b>绑死：密钥派生包含 <code>user.dir</code>。换机器 / 用户名 / 工作目录会解不开 —— 这时把该键改成明文让它重新加密。出处：<code>Conf.java</code>、<code>kit\Crypto.java</code>。</p>
           </div>
         </div>
@@ -233,7 +237,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">权限</span>
           <h2>权限与好感：两个不同的东西</h2>
-          <p class="chapter-desc">一句话分工：<b><code>ai/perm</code> 管"能不能做"（技能管控表），<code>ai/favor</code> 管好感度</b>；改判据是改技能管控表，不是改好感度。</p>
+          <p class="chapter-desc">一句话分工：<b><code>ai/perm</code> 管"能不能做"（技能管控表），<code>ai/favor</code> 管好感度</b>；改判据以技能管控表为准 —— 好感度那一档只多放行几个只读动作（见下）。</p>
         </header>
 
         <div class="grid-2">
@@ -244,13 +248,13 @@
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0"><code>ai/favor</code>：好感度</h4>
-            <p><code>ai/favor</code> 看榜单、<code>get</code> 看一个人的数值与档位、<code>set</code> 直改、<code>reset</code> 清成初值。<b>好感度不是权限，也不参与任何判定</b>——它只影响回话热络。</p>
-            <p class="t-cap">出处：<code>Cmd.java</code>，<code>auth\Favor.java</code>。想给别人放开某项能力：在那个键归属的那份权限文件的对应层里补一个身份（技能自己的工具与它的数据在该技能目录的 <code>perms.jsonc</code>；基板内置工具、其余数据键与全部路径在数据根的 <code>perms-core.jsonc</code>），或在控制台敲 <code>ai/perm run &lt;op&gt; &lt;身份&gt;</code>、<code>ai/perm db|file … &lt;身份&gt;</code>。</p>
+            <p><code>ai/favor</code> 看榜单、<code>get</code> 看一个人的数值与档位、<code>set</code> 直改、<code>reset</code> 清成初值。<b>好感度不写进权限表，但它自己是一道与权限表平行的第二道闸</b>：档位到 <code>favorFileMin</code>（出厂 500）时，权限表<b>没给决定</b>的那几个只读动作会被这一档放行 —— <code>file.read</code> / <code>file.list</code> / <code>send.file</code> / <code>send.record</code>（窄表写死、没有通配，放行会打一行 <code>[favor] lift …</code>）；档位到 <code>favorNoAngerMin</code>（出厂 700）则进「敬重档」——对这个人不发火、语气放敬。<b>主人与她本人不受这一档影响</b>；其余仍只是回话热络。</p>
+            <p class="t-cap">出处：<code>Cmd.java</code>，<code>auth\Favor.java</code>、<code>auth\FavorGate.java</code>。想给别人放开某项能力：在那个键归属的那份权限文件的对应层里补一个身份（技能自己的工具与它的数据在该技能目录的 <code>perms.jsonc</code>；基板内置工具、其余数据键与全部路径在数据根的 <code>perms-core.jsonc</code>），或在控制台敲 <code>ai/perm run &lt;op&gt; &lt;身份&gt;</code>、<code>ai/perm db|file … &lt;身份&gt;</code>。</p>
           </div>
         </div>
 
         <div class="note warn reveal">
-          <p><span class="n-title">默认对非主人是全关的</span>：表里没列到他，就是<b>一个 op 都没有</b>，数据不能改、路径不能碰；三个域里只有<b>数据那一域的"读"</b>是例外 —— 没列到时默认可读（装载时会点名列出来）。同一把键上 <code>Ban</code> 压过允许，更具体的键优先。主人（<code>MASTER</code>）与她本人（<code>SYSTEM</code>）恒全权、任何条目都影响不到他们。出处：<code>auth\Acl.java</code>。</p>
+          <p><span class="n-title">默认对非主人是全关的</span>：表里没列到他，就是<b>一个 op 都没有</b>，数据不能改、路径不能碰；三个域里只有<b>数据那一域的"读"</b>是例外 —— 没列到时默认可读（装载时会点名列出来）。同一把键上 <code>Ban</code> 压过允许，更具体的键优先。主人（<code>MASTER</code>）与她本人（<code>SYSTEM</code>）恒全权、任何条目都影响不到他们。另有两件与这张表平行的事：好感度档位那道闸按档位放行几个只读动作（上一格）；<b>路径那一域还有一张写死在代码里的硬禁名单</b>（<code>config.json</code> / <code>debug-port.json</code> / <code>v4.db</code> / <code>logs\</code> / <code>SFW-BOT.ir</code> 那几条），<b>任何放行之后都要再过它一遍</b>。出处：<code>auth\Acl.java</code>、<code>auth\FavorGate.java</code>。</p>
         </div>
       </section>
 
@@ -271,7 +275,7 @@
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">怎么开、怎么关</h4>
             <p><code>ai/debug on [token]</code> 开（token 不给就现生成一个，只落进数据根的 <code>debug-port.json</code>，不进 <code>config.json</code>）、<code>ai/debug status</code> 看状态、<code>ai/debug off</code> 关、<code>ai/debug simulate on|off</code> 切输入口的仿真。</p>
-            <p class="t-cap"><b>做完会看到</b>：<code>on</code> 之后回一行"调试面已开"加端口与 token 指纹；<code>status</code> 打印两个口的监听状态。<b>只有这条命令能起停这两个口</b>；<code>ai/restart</code> 不会把它关掉。出处：<code>Cmd.java</code>。</p>
+            <p class="t-cap"><b>做完会看到</b>：<code>on</code> 之后回一行"调试面已开"加端口与 token 指纹；<code>status</code> 打印两个口的监听状态。<b>只有这条命令能起这两个口</b>；关它们的是 <code>ai/debug off</code> 或壳卸载（<code>ai/exit</code> / 插件卸载那一类）；<code>ai/restart</code> 不会把它关掉。出处：<code>Cmd.java</code>。</p>
           </div>
         </div>
 
@@ -295,11 +299,11 @@
             </thead>
             <tbody>
               <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>（业务库 + 运行表 + 全文索引都在里面）</td><td>备份就是复制它；它的表结构交给基板自己维护就好</td></tr>
-              <tr><td><code>config.json</code></td><td>配置文件（已知键 94 个）</td><td>含密文；换启动目录会解不开</td></tr>
+              <tr><td><code>config.json</code></td><td>配置文件（已知键 114 个）</td><td>含密文；换启动目录会解不开</td></tr>
               <tr><td><code>perms-core.jsonc</code></td><td>基板侧的权限文件（主人写的，三个域各自分层，路径也写在这一份里）</td><td>写坏了只能靠备份回滚</td></tr>
               <tr><td><code>skills\&lt;技能名&gt;\perms.jsonc</code></td><td>技能自己的权限文件（只写这个技能提供的工具与属于它的数据键；目录里没有它 = 它的 op 都不授权）</td><td>跟着技能目录走：删掉目录，它的授权也一起消失</td></tr>
               <tr><td><code>prompts\</code></td><td>提示词文件</td><td><code>ai/prompt reload</code> 即可重载，不必重启</td></tr>
-              <tr><td><code>files\</code></td><td>下载 / 图片落点，库导出也落这里</td><td>体积会随使用增长</td></tr>
+              <tr><td><code>files\</code></td><td>下载 / 图片落点</td><td>体积会随使用增长；<b>库导出不落这里</b>，落数据根的 <code>tmp\</code></td></tr>
               <tr><td>日志目录</td><td>运行期日志，按大小滚动、只增不删</td><td>排障先看这里；不会自动清理</td></tr>
             </tbody>
           </table>
@@ -315,12 +319,13 @@
             <tbody>
               <tr><td><code>ai/store stat</code></td><td>看每个库的条数与占用</td><td>一份库清单 + 总条数 + 文件大小（含 WAL 占用）</td></tr>
               <tr><td><code>ai/store maintain</code></td><td>按保留期清理过期流水</td><td>清理结果回执；<b>清理不会自动缩小文件</b></td></tr>
-              <tr><td><code>ai/store export &lt;库&gt;</code></td><td>把某个库导出成文件</td><td>一行"已导出 &lt;绝对路径&gt;"，落点在 <code>files\</code>（<code>Cmd.java</code>）</td></tr>
+              <tr><td><code>ai/store export &lt;库&gt;</code></td><td>把某个库导出成文件</td><td>一行"已导出 &lt;绝对路径&gt;"，落点在数据根的 <code>tmp\</code>（<code>Cmd.java</code>）</td></tr>
               <tr><td><code>ai/store import &lt;库&gt; &lt;路径&gt;</code></td><td>从文件导回某个库</td><td>一行"已导入 N 条"</td></tr>
             </tbody>
           </table>
         </div>
-        <p class="t-cap">出处：<code>Cmd.java</code>。保留期三把尺子（记忆 / 对话 / 群聊）默认 30 / 180 / 30 天，<code>&lt;=0</code> = 不过期（<code>Conf.java</code>）。</p>
+        <p class="t-cap">出处：<code>Cmd.java</code>。保留期三把尺子（记忆 / 对话 / 群聊）默认 30 / 180 / 30 天：聊天记录那两把 <code>&lt;=0</code> = 不过期，记忆那把 <code>&lt;=0</code> 退回默认 30 天（<code>Conf.java</code>、<code>Store.java</code>）。清理只删行、不缩文件；要把空间真正还盘，先 <code>ai/store optimize &lt;库&gt;</code>（合并全文索引段，删掉的标记才真丢）再 <code>ai/store vacuum</code>（回收空闲页，期间独占数据库）。</p>
+        <p class="t-cap">只读的观察口还有一个 <code>ai/facts</code>：把这一轮的事实块（首行是 <code>time: </code> 的那段 system）逐字打出来 —— 不落库、不调模型、不调工具；基板没就绪就只回一句原因（<code>Cmd.java</code>）。</p>
       </section>
 
       <!-- ============ 8 ============ -->
@@ -348,9 +353,9 @@
                 <td><code>ai/config</code> 只写文件；用 <code>ai/restart</code> 让它生效</td>
               </tr>
               <tr>
-                <td><code>ai/restart</code> 回 <code>BUSY</code></td>
+                <td>重复敲 <code>ai/start</code> / <code>ai/restart</code></td>
                 <td>它自己的回话</td>
-                <td>已经有一条装配/重启在跑 —— <b>等它结束再试</b>，不用连着敲</td>
+                <td>已经有一条装配/重启在跑 —— 回一句"本次 … 已忽略"（内部状态名是 <code>BUSY</code>）；<b>等它结束再试</b>，不用连着敲</td>
               </tr>
               <tr>
                 <td>QQ 侧没反应</td>
@@ -364,13 +369,13 @@
               </tr>
               <tr>
                 <td>密钥解不开</td>
-                <td>解不开时的提示行（只含因子描述、不含密钥）</td>
+                <td>解不开时的提示行（点名是哪个键 + 因子描述：机器 / JVM / 用户名 / 启动目录；不含密文与派生密钥）</td>
                 <td>换了机器 / 用户名 / 工作目录 —— 把该键改成明文让它重新加密</td>
               </tr>
               <tr>
                 <td>外挂层某个单元没起来</td>
-                <td><code>ai/status</code> 的步骤台账</td>
-                <td>装载失败<b>只让那一项能力缺位，装配继续往下走</b>；<code>ai/status</code> 能看出缺了哪一项（技能怎么写见 <a href="skills.html">11 · 技能开发</a>）</td>
+                <td><code>ai/skill validate</code> 与 <code>[skills]</code> 日志行</td>
+                <td>装载失败<b>只让那一项能力缺位，装配继续往下走</b>；点名缺了哪一项也要靠这两处 —— <code>ai/status</code> 只给技能计数与编译错误数（技能怎么写见 <a href="skills.html">11 · 技能开发</a>）</td>
               </tr>
               <tr>
                 <td>程序还在、基板没了</td>
@@ -402,7 +407,7 @@
             </thead>
             <tbody>
               <tr><td><code>ai/start</code></td><td>装配进度打完 + <code>ai/status</code> 里 <code>ready=1</code></td></tr>
-              <tr><td><code>ai/restart</code></td><td>一行"重启已受理" + 新一轮装配进度 + 「待生效」清单为空</td></tr>
+              <tr><td><code>ai/restart</code></td><td>一行"已受理重启：…" + 新一轮装配进度 + 「待生效」清单为空</td></tr>
               <tr><td><code>ai/config set …</code></td><td>回执提示"未生效"，并且 <code>ai/status</code> 的「待生效」段出现该键</td></tr>
               <tr><td><code>ai/prompt reload</code></td><td>一行重载回执，<b>不需要重启</b></td></tr>
               <tr><td><code>ai/debug on</code></td><td>一行"调试面已开"+ 端口信息；<code>ai/debug status</code> 显示两个口的状态</td></tr>

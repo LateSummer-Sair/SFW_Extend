@@ -31,7 +31,9 @@ import sair.v4.kit.Str;
  *   <li><b>N 个工作线程</b>（{@code turnWorkers}，默认 2，保守）：道是逻辑上的，真正并行的是它们。</li>
  *   <li><b>溢出策略</b>（{@code turnOverflow}）：{@code coalesce}（默认）把后到的<b>并进该会话还在排队的那一条</b>
  *       —— 合并不新增待办，因此洪泛下不丢内容；合并装不下或选了 {@code drop} 时，
- *       按 {@code turnDropNotice} 回一句外挂文案（{@code 队列溢出文案}），绝不静默消失。</li>
+ *       按 {@code turnDropNotice} 回一句外挂文案（{@code 队列溢出文案}），绝不静默消失。
+ *       <b>★ 2026-09-22 G7：合并只发生在"同一个人"之间</b> —— {@link ChatJob#merge} 在说话人不同时
+ *       返回 {@code -1}，这里于是排成新的一条、各自按自己的 {@code caller} 跑（不同人各一条不合并）。</li>
  *   <li><b>优先级</b>（{@code turnPriority=master_first}，默认）：主人 / 私聊的道优先于群道；
  *       设成 {@code fifo} 就是纯先到先得。</li>
  *   <li><b>两道硬上限</b>：单会话待办 {@code turnLaneMax}、全体待办 {@code turnQueueMax}，
@@ -169,6 +171,10 @@ public final class Lanes implements Dispatcher {
                 lanesCreated.incrementAndGet();
             }
             // ① 先试着并进"该会话还在排队的那一条"：合并不占新的名额，所以优先于一切上限判断
+            //    ★ 2026-09-22「内部文字外泄防线批」G7：**能不能合由 job 自己说了算** ——
+            //      schedule.ChatJob.merge 在"说话人不同"时返回 -1（那一轮是两条不同的人的消息），
+            //      这里于是走 ② 排成新的一条、各自按自己的 caller 跑。判据只有 ChatJob 一处，
+            //      本类不写第二套（也不在这里比较 caller：merge 的 -1 已经覆盖引文/装不下/不同人三种）。
             boolean merged = false;
             if (!"drop".equals(overflow)) {
                 Job tail = lane.q.peekLast();

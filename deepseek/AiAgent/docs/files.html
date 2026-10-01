@@ -56,7 +56,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">01 / PACKAGES</span>
           <h2>源码包结构</h2>
-          <p class="chapter-desc">全部实现都在 <code>src\sair\v4\</code> 下：114 个 <code>.java</code>，分 17 个包（1 个根包 + 16 个子包）。这张表就是“哪段逻辑在哪个包”的入口。</p>
+          <p class="chapter-desc">全部实现都在 <code>src\sair\v4\</code> 下：119 个 <code>.java</code>，分 17 个包（1 个根包 + 16 个子包）。这张表就是“哪段逻辑在哪个包”的入口。</p>
         </header>
 
         <h3 class="sec">这些包分别管什么</h3>
@@ -69,17 +69,17 @@
               <tr><td><code>sair.v4</code>（根包）</td><td class="num">7</td><td>装配、内建工具面、配置、QQ 网关入口、心跳、组件入口</td><td><code>Boot</code> <code>Builtins</code> <code>Conf</code> <code>Cron</code> <code>QqGateway</code> <code>Tick</code> <code>V4Activity</code></td></tr>
               <tr><td><code>agent</code></td><td class="num">2</td><td>Agent 执行循环与子 Agent 并发控制</td><td><code>Agent</code> <code>Loop</code></td></tr>
               <tr><td><code>ai</code></td><td class="num">5</td><td>模型接口客户端、SSE 流式解析、消息与工具规格、返回封装</td><td><code>DeepSeek</code> <code>Sse</code> <code>Msg</code> <code>Res</code> <code>ToolSpec</code></td></tr>
-              <tr><td><code>auth</code></td><td class="num">7</td><td>权限判定：权限文件的合并装载与判定、op 清单、调用者、好感度分级</td><td><code>Acl</code> <code>Auth</code> <code>Caller</code> <code>Ops</code> <code>OpList</code> <code>Favor</code></td></tr>
+              <tr><td><code>auth</code></td><td class="num">8</td><td>权限判定：权限文件的合并装载与判定、op 清单、调用者、好感度存储，以及好感度档位那道只读放权闸</td><td><code>Acl</code> <code>Auth</code> <code>Caller</code> <code>Ops</code> <code>OpList</code> <code>Favor</code> <code>FavorGate</code></td></tr>
               <tr><td><code>ctx</code></td><td class="num">6</td><td>回合上下文装配：事实块、聊天窗口、调用者作用域</td><td><code>CtxBuild</code> <code>ChatWindow</code> <code>Turn</code> <code>RecognizerState</code></td></tr>
               <tr><td><code>dev</code></td><td class="num">4</td><td>本机调试口与调试日志：只绑回环的输出口、输入口、命令外壳、日志</td><td>类名不列出（只绑 <code>127.0.0.1</code>，起停见 <a href="commands.html#table">控制台命令</a>）</td></tr>
               <tr><td><code>ext</code></td><td class="num">7</td><td>扩展点：注册表、上下文提供者、出站改写、投票、生命周期钩子</td><td><code>ExtRegistry</code> <code>ContextProvider</code> <code>OutboundStage</code> <code>TriggerVoter</code></td></tr>
               <tr><td><code>hot</code></td><td class="num">7</td><td>动态编译与类加载：内存编译、源码状态、工具名、说明书解析</td><td><code>DynCode</code> <code>Sk</code> <code>SkClassLoader</code> <code>SkCompile</code> <code>SkMd</code></td></tr>
-              <tr><td><code>kit</code></td><td class="num">12</td><td>基础件：JSON、文件、字符串、线程、HTTP、文本解码、输出、加密、指纹、网络护栏</td><td><code>J</code> <code>Fs</code> <code>Str</code> <code>Th</code> <code>Http</code> <code>Crypto</code> <code>NetGuard</code></td></tr>
+              <tr><td><code>kit</code></td><td class="num">13</td><td>基础件：JSON、文件、字符串、线程、HTTP、文本解码、输出、加密、指纹、网络护栏</td><td><code>J</code> <code>Fs</code> <code>Str</code> <code>Th</code> <code>Http</code> <code>Crypto</code> <code>NetGuard</code></td></tr>
               <tr><td><code>prompt</code></td><td class="num">3</td><td>提示词文件加载与注入位（身份、子 Agent 公共部分、按位注入）</td><td><code>Prompts</code> <code>PromptFile</code> <code>Inject</code></td></tr>
-              <tr><td><code>qq</code></td><td class="num">18</td><td>NapCat 接入：反向 WS、事件与入站、API 调用、分段与渲染、引用缓存、文件外链中转、去重</td><td><code>Link</code> <code>Api</code> <code>Ev</code> <code>Inbound</code> <code>QuoteCache</code> <code>Relay</code> <code>Seen</code></td></tr>
+              <tr><td><code>qq</code></td><td class="num">20</td><td>NapCat 接入：反向 WS、事件与入站、API 调用、分段与渲染、引用缓存、文件外链中转、去重、自报标记与内部事实行判据</td><td><code>Link</code> <code>Api</code> <code>Ev</code> <code>Inbound</code> <code>QuoteCache</code> <code>Relay</code> <code>Seen</code> <code>MoodMarks</code> <code>InternalFacts</code></td></tr>
               <tr><td><code>schedule</code></td><td class="num">7</td><td>回合调度：按会话分道、优先级、有界池、任务抽象</td><td><code>Lanes</code> <code>Pool</code> <code>Job</code> <code>ChatJob</code> <code>Dispatcher</code></td></tr>
               <tr><td><code>store</code></td><td class="num">9</td><td>存储：连接与建表、表声明、库注册表、检索、行维护、人物聚合</td><td><code>Db</code> <code>Store</code> <code>LibSpec</code> <code>Lib</code> <code>Libs</code> <code>FtsQuery</code> <code>Person</code></td></tr>
-              <tr><td><code>term</code></td><td class="num">6</td><td>控制台：命令面、捕获器、回复分段、输出与投递、装配进度</td><td><code>Cmd</code> <code>ConsoleTap</code> <code>Segmenter</code> <code>Sinks</code> <code>SfwOut</code></td></tr>
+              <tr><td><code>term</code></td><td class="num">7</td><td>控制台：命令面、捕获器、回复分段、输出与投递、装配进度、出站红线词表</td><td><code>Cmd</code> <code>ConsoleTap</code> <code>Segmenter</code> <code>Sinks</code> <code>SfwOut</code> <code>Redline</code></td></tr>
               <tr><td><code>tool</code></td><td class="num">3</td><td>工具注册表、工具声明与构建、能力索引</td><td><code>Registry</code> <code>Tool</code> <code>ToolIndex</code></td></tr>
               <tr><td><code>ui</code></td><td class="num">4</td><td>本地界面：交流面板、面板挂载、输出桥、样式工具</td><td><code>TalkPanel</code> <code>TalkMount</code> <code>PanelSink</code> <code>SfwStyle</code></td></tr>
             </tbody>
@@ -105,13 +105,13 @@
           <div class="code-head"><span class="lang">text</span><span class="path">&lt;项目目录&gt;（本仓根）\src</span><button class="copy" type="button">复制</button></div>
           <pre><code>src\
 └─ sair\
-   └─ v4\                       114 个 .java
+   └─ v4\                       119 个 .java
       ├─ Boot.java  Builtins.java  Conf.java              (根包 7 个)
       ├─ Cron.java  QqGateway.java  Tick.java  V4Activity.java
-      ├─ agent\      2   ai\       5   auth\     7   ctx\      6
-      ├─ dev\        4   ext\      7   hot\      7   kit\     12
-      ├─ prompt\     3   qq\      18   schedule\ 7   store\    9
-      ├─ term\       6   tool\     3   ui\       4
+      ├─ agent\      2   ai\       5   auth\     8   ctx\      6
+      ├─ dev\        4   ext\      7   hot\      7   kit\     13
+      ├─ prompt\     3   qq\      20   schedule\ 7   store\    9
+      ├─ term\       7   tool\     3   ui\       4
       └─ （另有 1 个契约包 7 个文件，见上一节；数据根下另有 1 个外挂单元目录）</code></pre>
         </div>
 
@@ -159,7 +159,7 @@
         </header>
 
         <div class="note reveal">
-          <p><span class="n-title">两个位置的关系</span>：插件落位后，数据根是 <code>&lt;框架目录&gt;\data\AiAgent-V4\</code>（<code>&lt;框架目录&gt;</code> 指 SFW 的安装目录）；本仓的 <code>data\</code> 是同一个结构的本地对照副本（文件名与子目录名一致），两边可以互相对照着看。</p>
+          <p><span class="n-title">两个位置的关系</span>：插件落位后，数据根是 <code>&lt;框架目录&gt;\data\AiAgent-V4\</code>（<code>&lt;框架目录&gt;</code> 指 SFW 的安装目录）；本仓的 <code>data\</code> 是本地对照副本，<b>结构一致、内容不必一致</b>：它只放 <code>prompts\</code> / <code>skills\</code> / <code>files\</code> / <code>tmp\</code> 与 <code>config.json</code> / <code>v4.db</code>；运行期才长出来的项（<code>logs\</code>、<code>debug-port.json</code>、真机那份 <code>SFW-BOT.ir</code>、<code>skills-off\</code>）以及<b>主人在真机上授权出来的权限文件</b>（<code>perms-core.jsonc</code> 与各技能的 <code>perms.jsonc</code>）都以真机那一侧为准 —— 部署脚本一律跳过它们（<code>_deploy.ps1</code> 的跳过清单）。</p>
         </div>
 
         <h3 class="sec">先分清：数据、配置、权限文件、提示词</h3>
@@ -199,6 +199,12 @@
                 <td>外挂单元目录：一个目录就是一项能力</td>
                 <td>删掉那一项能力就消失，基板照常运转</td>
               </tr>
+              <tr>
+                <td><b>日志与运行现场</b></td>
+                <td><code>logs\</code>、<code>debug-port.json</code>、<code>SFW-BOT.ir</code></td>
+                <td>不是数据也不是配置：落盘日志（控制台 / 对话面各一份）、调试口的运行现场凭据、启动脚本；都由运行期或主人自己写</td>
+                <td>删了不影响运行（日志与凭据会重新长出来，启动脚本要主人自己补）；想腾空间删 <code>logs\</code> 是安全的</td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -207,15 +213,19 @@
         <div class="code reveal" data-lang="text">
           <div class="code-head"><span class="lang">text</span><span class="path">SairFrameWork\data\AiAgent-V4\</span><button class="copy" type="button">复制</button></div>
           <pre><code>data\AiAgent-V4\
-├─ v4.db              SQLite 单文件库：六库 + 运行表 + 全文索引（见下一节）
-├─ v4.db-wal          预写日志：WAL 模式下还没合并的改动
-├─ v4.db-shm          WAL 的共享内存索引
-├─ config.json        全部配置键（逐键说明见 config.html）
-├─ perms-core.jsonc   基板内置工具与全部路径的权限文件（权限模型见 perms.html）
-├─ prompts\           提示词正文：identity.md / subagent.md / tools-index.md
-├─ files\             收到的文件与导出的落点（下载、导出、表情包图片）
-├─ （另有 1 个外挂单元目录 data\skills\，一个子目录一项能力；技能自己那份 perms.jsonc 就放在它的目录里）
-└─ tmp\               临时文件目录</code></pre>
+├─ v4.db               SQLite 单文件库：六库 + 运行表 + 全文索引（见下一节）
+├─ v4.db-wal           预写日志：WAL 模式下还没合并的改动
+├─ v4.db-shm           WAL 的共享内存索引
+├─ config.json         全部配置键（逐键说明见 config.html）
+├─ perms-core.jsonc    基板内置工具与全部路径的权限文件（权限模型见 perms.html）
+├─ debug-port.json     本机调试口的运行现场凭据：起口时写、停口时删（不进 config.json）
+├─ SFW-BOT.ir          线上的启动脚本：框架按 /ir "&lt;路径&gt;" 跑它（只在真机这一侧；仓根那一份是验收夹具）
+├─ prompts\            提示词与判据文本：identity.md / subagent.md / tools-index.md / redline.md
+├─ skills\             外挂单元目录：一个子目录一项能力（技能自己那份 perms.jsonc 就放在它的目录里）
+├─ skills-off\         停用的外挂单元目录（真机上用来安置暂时不启用的单元；基板源码不引用这个名字）
+├─ files\              收到的文件与导出的落点（下载、导出、表情包图片）
+├─ logs\               落盘日志：console-&lt;日期&gt;.log（控制台捕获的每一行）与 talk-&lt;日期&gt;.log（对话面每一条）
+└─ tmp\                临时文件目录</code></pre>
         </div>
 
         <h3 class="sec">逐个文件</h3>
@@ -228,17 +238,21 @@
               <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>：全部业务数据与运行台账都在它里面（表清单见 <a href="#db">数据表落在哪</a>）</td><td>存储层 <code>store.Db</code> / <code>store.Store</code></td></tr>
               <tr><td><code>v4.db-wal</code></td><td>预写日志，WAL 模式的正常伴生文件；连接建立时就设上</td><td>SQLite 自己</td></tr>
               <tr><td><code>v4.db-shm</code></td><td>WAL 的共享内存索引文件，同样由 SQLite 自己维护</td><td>SQLite 自己</td></tr>
-              <tr><td><code>config.json</code></td><td>扁平 JSON，94 个已知键集中在这里；敏感键是密文</td><td><code>Conf</code>（<code>Conf.java</code> 拼出这个路径）</td></tr>
+              <tr><td><code>config.json</code></td><td>扁平 JSON，114 个已知键集中在这里（<code>Conf.knownKeys()</code>）；敏感键是密文</td><td><code>Conf</code>（<code>Conf.java</code> 拼出这个路径）</td></tr>
               <tr><td><code>perms-core.jsonc</code></td><td>基板侧的权限文件：三个域（<code>Skill</code> / <code>DB</code> / <code>File</code>），域里是它自己那几层（<code>Skill</code> 只有 <code>Run</code> / <code>Ban</code>；<code>Read</code> 只存在于 <code>DB</code> 与 <code>File</code>），规则键写成中括号数组；<b>路径只写在这一份里</b>（权限模型见 <a href="perms.html">权限管理</a>）</td><td><code>auth</code> 侧；装配期与技能目录里的 <code>perms.jsonc</code> 合并读入</td></tr>
               <tr><td><code>skills\&lt;技能名&gt;\perms.jsonc</code></td><td>技能自己的权限文件：只写这个技能提供的工具与<b>属于它的数据键</b>（写了别人的会被忽略，路径块整块不生效）；技能目录里没有它 = 它的全部 op 不授权</td><td>技能自己带；<code>auth</code> 侧合并读入</td></tr>
-              <tr><td><code>prompts\</code></td><td>提示词正文目录，见 <a href="#prompts">提示词文件</a></td><td><code>prompt.Prompts</code></td></tr>
+              <tr><td><code>prompts\</code></td><td>提示词正文与出站红线词表目录，见 <a href="#prompts">提示词文件</a></td><td><code>prompt.Prompts</code>、<code>term.Redline</code></td></tr>
               <tr><td><code>files\</code></td><td>文件落点：下载、导出、表情包图片（控制台的导出会写到 <code>files\&lt;库名&gt;-&lt;时间戳&gt;.jsonl</code>；图片另有一个 <code>stickers\</code> 子目录）</td><td>工具面与控制台命令</td></tr>
-              <tr><td><code>data\skills\</code></td><td>外挂单元目录：本页只交代数据根下有这么一个目录，装进来的单元一目录一项能力</td><td>装配期扫描</td></tr>
+              <tr><td><code>debug-port.json</code></td><td>本机调试口的<b>运行现场凭据</b>：<code>name</code> / <code>host</code> / <code>port</code> / <code>pid</code> / <code>token</code> / <code>token_fp</code> / <code>ts</code>（输入口另有 <code>sim*</code> 几格，两个口共用同一个 token）；<code>ai/debug on</code> 没带 token 时现场生成一个写进这里，<code>ai/debug off</code> 时删掉 —— <b>不是配置</b>，也不进 <code>config.json</code></td><td><code>dev.DebugPort</code>（<code>DebugPort.java</code> 写/删它）</td></tr>
+              <tr><td><code>SFW-BOT.ir</code></td><td>启动脚本：框架按 <code>/ir "&lt;路径&gt;"</code> 跑它，里面是 <code>web/start</code>、<code>ai/config set …</code>、<code>ai/start</code> 这类命令行；真机那一份是唯一可移植的明文密钥来源（<code>config.json</code> 里的密文与运行目录绑定）；本仓仓根那一份只是验收夹具</td><td>主人自己维护；框架启动时读</td></tr>
+              <tr><td><code>data\skills\</code></td><td>外挂单元目录：一个子目录一项能力（本仓 33 个）；本页只交代有这么一个目录</td><td>装配期扫描</td></tr>
+              <tr><td><code>skills-off\</code></td><td>停用的外挂单元目录（真机上用来安置暂时不启用的单元）；<b>基板源码里不引用这个名字</b> —— 扫描只认配置键 <code>skillsDir</code> 指的那个目录，所以它不是基板建的，删了也不影响运行</td><td>主人自己挪</td></tr>
+              <tr><td><code>logs\</code></td><td>落盘日志：<code>console-&lt;日期&gt;.log</code>（控制台捕获的每一行）与 <code>talk-&lt;日期&gt;.log</code>（对话面每一条）；<b>随壳存在</b>，第一条命令进来时才建目录并接上</td><td><code>dev.DebugLog</code>（<code>DebugLog.java</code>，目录常量 <code>logs</code>）</td></tr>
               <tr><td><code>tmp\</code></td><td>临时文件目录，装配期就会建出来</td><td>基板与工具面</td></tr>
             </tbody>
           </table>
         </div>
-        <p class="dim">数据根里的这些名字，都可以在仓库的 <code>data\</code> 下直接看到；线上对应的是 <code>SairFrameWork\data\AiAgent-V4\</code>。</p>
+        <p class="dim">这份布局以真机 <code>SairFrameWork\data\AiAgent-V4\</code> 为准；本仓 <code>data\</code> 里能直接看到的是可随包分发的那一部分（<code>prompts\</code> / <code>skills\</code> / <code>files\</code> / <code>tmp\</code> 与 <code>config.json</code> / <code>v4.db</code>），<code>logs\</code>、<code>debug-port.json</code>、真机那份 <code>SFW-BOT.ir</code>、<code>skills-off\</code> 与主人的权限文件只在真机那一侧。</p>
 
         <h3 class="sec">空数据首次启动会生成什么</h3>
         <p>整个数据根不存在（或者为空）时，<b>第一次启动就会把骨架全部落盘</b>，不需要手动建任何文件：只创建、不覆盖、不写正文。</p>
@@ -249,7 +263,7 @@
           </div>
           <div class="panel reveal d1">
             <h3>两个提示词空壳</h3>
-            <p><code>prompts\identity.md</code> 与 <code>prompts\subagent.md</code> 建成<b>空文件</b>：在提示词层，“空文件”与“文件不存在”的语义完全一致，所以空壳就够，基板不塞任何默认文案。</p>
+            <p><code>prompts\identity.md</code> 与 <code>prompts\subagent.md</code> 建成<b>空文件</b>：在提示词层，“空文件”与“文件不存在”的语义完全一致，所以空壳就够，基板不塞任何默认文案。<code>prompts\tools-index.md</code> 与 <code>prompts\redline.md</code> 由你自己放 —— 骨架不建它们；后者缺文件时出站红线这条闸一个词都不判，并打一行 err（<code>Boot.java</code>、<code>term\Redline.java</code>）。</p>
           </div>
           <div class="panel reveal d2">
             <h3>库文件与配置</h3>
@@ -409,7 +423,7 @@ public File dbFile()     { return path("v4.db");   }</code></pre>
         <header class="chapter-head reveal">
           <span class="chapter-tag">05 / PROMPTS</span>
           <h2>提示词文件</h2>
-          <p class="chapter-desc">数据根下的 <code>prompts\</code> 存三类外挂文本：身份、子 Agent 公共部分，以及“文案与能力索引”。它们都是纯文本，改完按修改时间自动重读。</p>
+          <p class="chapter-desc">数据根下的 <code>prompts\</code> 存四类外挂文本：身份、子 Agent 公共部分、“文案与能力索引”，以及出站红线的词表。它们都是纯文本，改完按修改时间自动重读。</p>
         </header>
 
         <div class="tw scroll reveal">
@@ -421,12 +435,13 @@ public File dbFile()     { return path("v4.db");   }</code></pre>
               <tr><td><code>prompts\identity.md</code></td><td>身份提示词。基板只带这一份初始提示词</td></tr>
               <tr><td><code>prompts\subagent.md</code></td><td>子 Agent 的<b>公共部分</b>提示词；缺文件就等于空，基板不兜底</td></tr>
               <tr><td><code>prompts\tools-index.md</code></td><td>文案与能力索引：索引行的预算、工具的一句话示例、队列溢出 / 排队 / 初始化中等提示语、面板标题、偏好块三行文案</td></tr>
+              <tr><td><code>prompts\redline.md</code></td><td>出站红线的<b>唯一词表</b>（<code>term\Redline.java</code> 是唯一判据）：<code>禁词常开</code> / <code>禁词不替换</code> / <code>禁词-&lt;类目&gt;</code> / <code>禁词替换-&lt;类目&gt;</code> 四组键，逗号分隔；<b>热读</b>（mtime + 字节数），改完保存下一条消息就生效。骨架<b>不</b>创建它 —— 文件不在时这条闸一个词都不判并打一行 err</td></tr>
             </tbody>
           </table>
         </div>
 
-        <h3 class="sec">三份文件各自的角色</h3>
-        <div class="grid-3">
+        <h3 class="sec">四份文件各自的角色</h3>
+        <div class="grid-2">
           <div class="panel reveal">
             <h3>identity.md：她的根</h3>
             <p>路径由配置键决定（默认 <code>prompts/identity.md</code>）。字符预算只是<b>报警线，不是闸门</b>：超预算只 warn 一行，正文一个字都不截、一个字都不丢。</p>
@@ -435,9 +450,13 @@ public File dbFile()     { return path("v4.db");   }</code></pre>
             <h3>subagent.md：公共层</h3>
             <p>写的是“所有子 Agent 共同的那一层”，<b>不是</b>某个子任务的说明书。渲染时按作用域走同一套注入位。</p>
           </div>
-          <div class="panel reveal d2">
+          <div class="panel reveal">
             <h3>tools-index.md：文案外挂</h3>
             <p>它的内容会被好几处读走：工具索引行（<code>tool\ToolIndex.java</code>）、能力索引（<code>tool\Registry.java</code>）、生命周期回话（<code>term\Cmd.java</code>）、入站那几路提示（<code>QqGateway.java</code>）、执行循环的终止文案（<code>agent\Loop.java</code>）、装配校验（<code>Boot.java</code>）。</p>
+          </div>
+          <div class="panel reveal d1">
+            <h3>redline.md：出站红线词表</h3>
+            <p>它不是提示词，是<b>基板的判据数据</b>：<code>term\Redline.java</code> 读它，命中<b>不可替换</b>类目（威胁 / 自伤）就整条不发、命中<b>可替换</b>类目（隐私 / 机密键）就就地换词。词表是子串匹配，所以不许往里放能在正常句里当子串出现的短词（<code>Redline.java</code> 的类注释把这条写在最前面）。</p>
           </div>
         </div>
 
@@ -505,12 +524,17 @@ public File dbFile()     { return path("v4.db");   }</code></pre>
             </thead>
             <tbody>
               <tr><td><code>AiAgentV4.jar</code></td><td><span class="badge ok">产物</span></td><td>插件本体，落位后按文件名决定控制台前缀（改名为 <code>ai.jar</code> 就是 <code>ai/</code>）</td></tr>
-              <tr><td><code>src\</code></td><td><span class="badge info">源码</span></td><td>全部 114 个 <code>.java</code>，见 <a href="#src-tree">源码树</a></td></tr>
+              <tr><td><code>src\</code></td><td><span class="badge info">源码</span></td><td>全部 119 个 <code>.java</code>，见 <a href="#src-tree">源码树</a></td></tr>
               <tr><td><code>data\</code></td><td><span class="badge mute">数据</span></td><td>数据根的本地对照副本，见 <a href="#datadir">数据根布局</a></td></tr>
-              <tr><td><code>docs\</code></td><td><span class="badge info">源码</span></td><td>本静态站：导航上的若干 <code>.html</code> 页面 + <code>css\site.css</code> + <code>js\site.js</code>；无外链、无第三方库、无网络请求</td></tr>
+              <tr><td><code>probe\</code></td><td><span class="badge info">源码</span></td><td>探针（门禁用例）：顶层 67 个 <code>.java</code>（<code>Probe*.java</code> 与几个 <code>Dump*.java</code>，如 <code>ProbeIdCross.java</code> / <code>ProbeAgentBoundary.java</code>），另有 <code>fixtures\</code> 下 2 个夹具类；<b>不属于运行时</b>，也不进插件打包</td></tr>
+              <tr><td><code>notes\</code></td><td><span class="badge mute">记录</span></td><td>工程记录：<code>team-board.md</code>（车道看板，最长的一份）、各类设计与验收记录，以及 <code>archive\</code> / <code>workorders\</code> 两个子目录；不进产物</td></tr>
+              <tr><td><code>tmp\</code></td><td><span class="badge mute">暂存</span></td><td>临时目录：构建 / 探针 / 取证的中间件，随便清；回滚件留在 <code>tmp\v6-real\gm-witness\</code>（例如 <code>ai.jar.live-before-batch19*</code>），要留就别整目录删</td></tr>
+              <tr><td><code>docs\</code></td><td><span class="badge info">源码</span></td><td>本静态站：12 个 <code>.html</code> 页面 + <code>css\site.css</code> + <code>js\site.js</code>；无外链、无第三方库、无网络请求</td></tr>
               <tr><td><code>build\</code></td><td><span class="badge mute">暂存</span></td><td>构建暂存区：外挂层源码与文案的中间副本，不参与插件打包，删掉也能重新生成</td></tr>
-              <tr><td><code>out\</code></td><td><span class="badge ok">产物</span></td><td>编译输出目录：<code>sair\v4\</code> 下 16 个子包目录 + 根包类 —— 与 jar 内条目同构</td></tr>
+              <tr><td><code>out\</code></td><td><span class="badge ok">产物</span></td><td>编译输出目录：344 个 <code>.class</code>，<code>sair\v4\</code> 下 16 个子包目录 + 根包类 —— 与 jar 内条目同构</td></tr>
               <tr><td><code>META-INF\</code></td><td><span class="badge info">源码</span></td><td>只有 <code>MANIFEST.MF</code>，打包时进 jar 根</td></tr>
+              <tr><td><code>SFW-BOT.ir</code></td><td><span class="badge info">脚本</span></td><td>项目侧的启动脚本（框架按 <code>/ir "&lt;路径&gt;"</code> 跑它）；<b>仓根这一份是验收夹具</b>，真机那份在数据根下，部署脚本从不覆盖它（<code>_deploy.ps1</code> 的跳过清单）</td></tr>
+              <tr><td><code>_*.ps1</code></td><td><span class="badge mute">脚本</span></td><td>运维脚本：<code>_build.ps1</code> 编译、<code>_jar.ps1</code> 打包、<code>_deploy.ps1</code> 部署、<code>_probe.ps1</code> 门禁、<code>_dbg.ps1</code> / <code>_sim.ps1</code> 调试与模拟；都不进产物</td></tr>
               <tr><td><code>README.md</code></td><td><span class="badge info">文档</span></td><td>仓库说明书：九项能力、权限模型、工具面、命令面、部署要点</td></tr>
             </tbody>
           </table>
@@ -520,11 +544,11 @@ public File dbFile()     { return path("v4.db");   }</code></pre>
         <div class="grid-2">
           <div class="panel reveal">
             <h3>可丢弃的</h3>
-            <p><code>out\</code> 与 <code>build\</code> 都是中间态：删掉不影响运行，重新编译 / 重新打包就能再生。产物本体只有一个 <code>AiAgentV4.jar</code>。</p>
+            <p><code>out\</code>、<code>build\</code> 与 <code>tmp\</code> 都是中间态：删掉不影响运行，重新编译 / 重新打包就能再生（<code>tmp\v6-real\gm-witness\</code> 里放着上一版 jar 的回滚件，要留就别整目录删）。产物本体只有一个 <code>AiAgentV4.jar</code>。</p>
           </div>
           <div class="panel reveal d1">
             <h3>不可再生的</h3>
-            <p>数据根下的 <code>v4.db</code>、<code>config.json</code>、<code>perms-core.jsonc</code>（以及各技能目录里的 <code>perms.jsonc</code>）、<code>prompts\</code> 是运行资产：删了就没了。尤其是 <code>v4.db</code> —— 保留期那组键是唯一会删数据的旋钮（见 <a href="config.html#retention">配置 · 保留期</a>）。</p>
+            <p>数据根下的 <code>v4.db</code>、<code>config.json</code>、<code>perms-core.jsonc</code>（以及各技能目录里的 <code>perms.jsonc</code>）、<code>prompts\</code> 是运行资产：删了就没了。尤其是 <code>v4.db</code> —— 保留期那组键是唯一会删数据的旋钮（见 <a href="config.html#retention">配置 · 保留期</a>）。真机那份 <code>SFW-BOT.ir</code> 也算：<code>config.json</code> 里的密文与运行目录绑定，明文密钥只有它还留着（部署脚本刻意不覆盖它）。</p>
           </div>
         </div>
         <div class="note bad reveal">

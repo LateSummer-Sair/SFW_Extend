@@ -199,7 +199,9 @@ public final class Conf implements sair.v4.skill.ConfView {
      * <p>关掉它 = 基板回到"零外挂"行为：所有 {@code ext} 扩展点一概不调用，
      * 装配、出站、投票、生命周期四处与"一个插件都没挂"逐字节一致。
      * 这是给主人留的<b>救火开关</b>：某个插件把回合拖慢/把上下文撑爆时，
-     * 不必去删插件目录、也不必重启，改这一个键就回到干净状态。</p>
+     * 不必去删插件目录，改这一个键就能回到"一个插件都没挂"的状态。
+     * <b>但"改配置文件"与"生效"是两件事</b>：它读的是内存里那份配置，
+     * 改完 config.json 仍要 {@code ai/start}（没在跑）或 {@code ai/restart}（已在跑）才生效。</p>
      */
     public static final boolean DEF_EXT_ENABLED = true;
 
@@ -275,8 +277,9 @@ public final class Conf implements sair.v4.skill.ConfView {
      * 调试口监听端口（出厂 {@value #DEF_DEBUG_PORT}；{@code <=0} = 关）。
      * <p>只绑 {@code 127.0.0.1}，不对外。{@code 2660} 是本机实测没人用的冷门口，并且刻意避开
      * 框架/插件的势力范围（{@code 2671} 中转 / {@code 8082} NapCat 反向口 / {@code 8083}）。</p>
-     * <p><b>不在 config.json 里</b>（见上面的口径变更）；测试/共存时可用系统属性
-     * {@code -Dv4.debug.port} 覆盖（见 {@link sair.v4.dev.DebugPort#port()}）。</p>
+     * <p><b>不在 config.json 里</b>（见上面的口径变更）。端口<b>没有</b>系统属性/环境变量口子：
+     * {@link sair.v4.dev.DebugPort#port()} 直接返回这个常量（那边注释写着"没有任何环境变量/系统属性口子"），
+     * 要换口只能改这里并重新构建。</p>
      */
     public static final int DEF_DEBUG_PORT = 2660;
 
@@ -615,6 +618,173 @@ public final class Conf implements sair.v4.skill.ConfView {
 
     /** 链接有效期（分钟）；0 = 不过期。到点中转自己停。 */
     public int relayTtlMinutes() { return getInt("relayTtlMinutes", 0); }
+
+    // ---- 语音转写（N2/D2：键 qqPttText；唯一的消费者是 qq.Api.pttEnrich） ----
+
+    /**
+     * <b>入站语音段要不要转文字</b>（键 {@code qqPttText}，默认 <b>true</b>）。
+     *
+     * <p>键名与 {@code qq.Api.CFG_PTT_TEXT} <b>是同一串</b>（那边是常量，这里是读它的那一处；
+     * 与 {@code msgDedupWindowSec} 读 {@code qq.Seen.DEF_WINDOW_SEC} 同一种写法：单一来源）。</p>
+     *
+     * <p>口径（与 {@code Api.pttEnrich} 的 javadoc 同一份，改一处必须改两处）：开 = 一条有语音段
+     * 的入站消息多发<b>一次只读动作</b> {@code fetch_ptt_text}（NapCat 4.18.2+），拿到什么就补进
+     * 那条语音段的事实里 ⇒ 标签变 {@code [语音 12秒：转写文本]}；<b>任何失败（未连接 / 版本旧 /
+     * retcode≠0 / 响应畸形）都吞成"没有转写"，标签逐字节退回旧形状 {@code [语音 12秒]}</b>，
+     * 绝不因为开关开着而丢消息、改正文或报错。关 = 一个动作都不发（事实行里 {@code enabled:false}）。</p>
+     */
+    public boolean qqPttText() { return getBool(sair.v4.qq.Api.CFG_PTT_TEXT, true); }
+
+    /**
+     * <b>语音转写首取失败后额外重试几次</b>（键 {@code qqPttRetry}，出厂默认 {@code 3}，夹 {@code [0,5]} ——
+     * 于是动作最多 4 次；<b>判据与真机证据的唯一真源</b>是 {@code Api.CFG_PTT_RETRY} 的 javadoc，别在这儿重复）。</p>
+     *
+     * <p>为什么需要它（2026-09-25 真机取证）：NapCat 侧对<b>刚收到</b>的语音，第一次
+     * {@code fetch_ptt_text} 会直接返失败（媒体还没备好），而**同一个 message_id 隔一会儿再取就成功**。
+     * 旧口径是"一次不成就退回旧标签"，于是她永远看不到文本。重试口径与三道硬顶写在
+     * {@code qq.Api.pttTextQuiet} 的 javadoc（单次等待、累计预算、次数上限）；重试期间
+     * <b>绝不改判据</b>：失败照旧吞成空串、不抛、不阻断渲染。</p>
+     */
+    public int qqPttRetry() { return getInt(sair.v4.qq.Api.CFG_PTT_RETRY, sair.v4.qq.Api.PTT_RETRY_DEFAULT); }
+
+    /**
+     * <b>每次重试前的等待毫秒表</b>（键 {@code qqPttRetryMs}，出厂默认 {@code "1000,2000,3000"}）。
+     *
+     * <p>逗号分隔；值不够时复用最后一个；单次与累计都由消费者夹取（见 {@code Api.pttTextQuiet}）。
+     * 默认三档的依据、两条真机样本与"为什么不是 1200,2000"都写在 {@code Api.CFG_PTT_RETRY_MS}
+     * 的 javadoc（**唯一真源**）：首取之后的第 2/3/4 次动作 ≈1.0s / 3.0s / 6.0s。</p>
+     */
+    public String qqPttRetryMs() { return get(sair.v4.qq.Api.CFG_PTT_RETRY_MS, sair.v4.qq.Api.PTT_RETRY_MS_DEFAULT); }
+
+    // ---- 好感度档位放权闸（W7/批 13：4 个键；消费者 = sair.v4.auth.FavorGate）----
+    // 登记口径与 mediaRender / qqPttText / qqPttRetry 那一族完全一致：**进 knownKeys()（`ai/config`
+    // 看得见、能 get/set），不进 ensureDefaults()** —— 出厂不写盘，缺省值只有 FavorGate 那一处
+    // （键名常量就是唯一真源，这里的 getter 读它，键名不再抄第二遍）。
+
+    /**
+     * <b>好感度档位放权闸的总开关</b>（键 {@code favorGateEnabled}，出厂 <b>true</b>）。
+     *
+     * <p>它就是"与 ACL 平行的第二道闸"（主人令 2026-09-26）。判据、放行清单（写死的窄表）、
+     * 只读允许根与硬 Ban 全在 {@code sair.v4.auth.FavorGate} 的类注释里（唯一真源，别在这儿重复）。
+     * 关掉它 = 这一层完全不存在：档位再高也一个 op 都不放宽，行为逐字节退回加它之前。</p>
+     */
+    public boolean favorGateEnabled() {
+        return getBool(sair.v4.auth.FavorGate.CFG_ENABLED, sair.v4.auth.FavorGate.DEF_ENABLED);
+    }
+
+    /**
+     * <b>文件那一档的门槛</b>（键 {@code favorFileMin}，出厂 {@code 500}）。
+     * <p>到这一档才放行那 4 个只读 op（清单在 {@code FavorGate}；批 15 改正这里的"5"——清单一直是 4 条）。改大 = 更严，改小 = 更松；
+     * 事实块里的 {@code favorGate.tiers.files} 跟着这个值走。</p>
+     */
+    public int favorFileMin() {
+        return getInt(sair.v4.auth.FavorGate.CFG_FILE_MIN, sair.v4.auth.FavorGate.DEF_FILE_MIN);
+    }
+
+    /**
+     * <b>"尊重"那一档的门槛</b>（键 {@code favorNoAngerMin}，出厂 {@code 700}）。
+     *
+     * <p>本基板只把<b>档位这个事实</b>给出去（事实块 {@code favorGate.tier}）——
+     * "不会再对此人发怒 + 尊重的口气说话"那半是情绪侧（data 侧 K7）的事，不在这里实现。</p>
+     */
+    public int favorNoAngerMin() {
+        return getInt(sair.v4.auth.FavorGate.CFG_NO_ANGER_MIN, sair.v4.auth.FavorGate.DEF_NO_ANGER_MIN);
+    }
+
+    /**
+     * <b>读放行的允许根</b>（键 {@code favorFileRoots}，出厂
+     * {@code "D:/share/;{root}"}，分号或逗号分隔）。
+     *
+     * <p>{@code {root}} 是数据根占位符（= 她的库 / 收藏 / 文件那一棵）。目录写成末尾带斜杠 =
+     * 整棵子树。<b>硬 Ban 压过一切</b>（{@code FavorGate.HARD_BAN}，写死在代码里），
+     * 所以这个键再怎么写都读不到那几条。</p>
+     */
+    public String favorFileRoots() {
+        return get(sair.v4.auth.FavorGate.CFG_FILE_ROOTS, sair.v4.auth.FavorGate.DEF_FILE_ROOTS);
+    }
+
+    // ---- 好感度加减规则（W7/批 13 追加；消费者 = sair.v4.auth.Favor）----
+    // 同一登记口径：**进 knownKeys()（`ai/config` 看得见、能 get/set），不进 ensureDefaults()** ——
+    // 出厂不写盘，缺省值只有 sair.v4.auth.Favor 那一处（键名常量与区间表原文都在它那里，唯一真源）。
+    // 甲方/GM 2026-09-26 重定：总界 加 [1,7] / 减 [1,12]，再按"来往类别"（kind）分 13 档夹取。
+
+    /** 她单次<b>加</b>的下界（总区间；不写 kind 时用）。 */
+    public double favorAddMin() {
+        return getDouble(sair.v4.auth.Favor.CFG_ADD_MIN, sair.v4.auth.Favor.ADD_MIN);
+    }
+
+    /** 她单次<b>加</b>的上界（总区间；不写 kind 时用）。出厂 {@code 7}。 */
+    public double favorAddMax() {
+        return getDouble(sair.v4.auth.Favor.CFG_ADD_MAX, sair.v4.auth.Favor.ADD_MAX);
+    }
+
+    /** 她单次<b>减</b>的下界（总区间；不写 kind 时用）。出厂 {@code 1}（"无厘头 −1"要用）。 */
+    public double favorSubMin() {
+        return getDouble(sair.v4.auth.Favor.CFG_SUB_MIN, sair.v4.auth.Favor.SUB_MIN);
+    }
+
+    /** 她单次<b>减</b>的上界（总区间；不写 kind 时用）。出厂 {@code 12}。 */
+    public double favorSubMax() {
+        return getDouble(sair.v4.auth.Favor.CFG_SUB_MAX, sair.v4.auth.Favor.SUB_MAX);
+    }
+
+    /**
+     * <b>按"来往类别"分档的区间表</b>（一条字符串，出厂 {@link sair.v4.auth.Favor#DEF_KIND_RANGES}）。
+     * <p>写法 {@code 名称=方向:下界-上界}，条目用 {@code ;} 或 {@code ,} 分隔，数值写正数。
+     * 改这张表 = 改一个键，不用碰代码；她看到的可读清单由
+     * {@link sair.v4.auth.Favor#kindTable()} 从这同一份原文算出来。</p>
+     */
+    public String favorKindRanges() {
+        return get(sair.v4.auth.Favor.CFG_KIND_RANGES, sair.v4.auth.Favor.DEF_KIND_RANGES);
+    }
+
+    /**
+     * 事实块里要不要给一行可机读的 kind 表（{@code favorKinds}，出厂 {@code true}）。
+     * <p>她要靠它学会"这一笔该记哪一类"；预算顶不住时把它关掉即可（关掉只少一行事实，
+     * 判定与夹取一个字都不变）。</p>
+     */
+    public boolean favorKindFacts() {
+        return getBool(sair.v4.auth.Favor.CFG_KIND_FACTS, sair.v4.auth.Favor.DEF_KIND_FACTS);
+    }
+
+    /**
+     * <b>入站图片直链要不要在"怀疑过期"时刷一次</b>（键 {@code qqMediaUrlRefresh}，默认 <b>true</b>）。
+     *
+     * <p>键名与 {@code qq.Api.CFG_MEDIA_URL_REFRESH} <b>是同一串</b>。判据、限流、缓存与降级
+     * 口径全在消费者那一处（{@code Api.refreshFactsUrlsQuiet} 的 javadoc，逐条可核）：
+     * 只在"有 rkey 的图 + 有理由怀疑它旧"时才发动作；60 秒最多 6 次、一条消息最多 1 张；
+     * 刷不出来就保留原地址。关掉它 = 一个刷新动作都不发（事实行 {@code enabled:false,"why":"off"}），
+     * 其余行为一个字节不变。</p>
+     */
+    public boolean qqMediaUrlRefresh() { return getBool(sair.v4.qq.Api.CFG_MEDIA_URL_REFRESH, true); }
+
+    // ---- Stream API（N2/D5：键 streamChunkBytes / streamTimeoutMs；消费者 qq.Api 的流式上传下载） ----
+
+    /**
+     * <b>流式传输的分块大小</b>（字节；键 {@code streamChunkBytes}，默认
+     * {@code Api.STREAM_CHUNK_DEFAULT} = 64 KiB = NapCat 自己的默认）。
+     *
+     * <p>键名与 {@code qq.Api.CFG_STREAM_CHUNK} 是同一串。口径（消费者
+     * {@code Api.streamUploadQuiet} / {@code streamDownloadQuiet}）：上传按这个大小逐块读文件
+     * （<b>不把整个文件读进内存</b>），下载把同一个值作为 {@code chunk_size} 告诉 NapCat；
+     * 出厂默认与 NapCat 的默认一致，改大省往返、改小省内存。有效值被夹到 1 KiB..4 MiB
+     * （{@code <=0} 回落默认）。</p>
+     */
+    public int streamChunkBytes() {
+        return getInt(sair.v4.qq.Api.CFG_STREAM_CHUNK, sair.v4.qq.Api.STREAM_CHUNK_DEFAULT);
+    }
+
+    /**
+     * <b>一次流式传输的总时限</b>（毫秒；键 {@code streamTimeoutMs}，默认
+     * {@code Api.STREAM_TIMEOUT_DEFAULT} = 10 分钟 = NapCat 自己的 stream 超时）。
+     *
+     * <p>键名与 {@code qq.Api.CFG_STREAM_TIMEOUT} 是同一串。它是<b>整条流</b>的墙钟上限
+     * （超了就放弃并回退到既有 relay/upload_group_file 路），不是单帧超时 ——
+     * 单次往返仍由 {@code napcatTimeoutMs} 管（见 {@code Link}）。</p>
+     */
+    public int streamTimeoutMs() {
+        return getInt(sair.v4.qq.Api.CFG_STREAM_TIMEOUT, (int) sair.v4.qq.Api.STREAM_TIMEOUT_DEFAULT);
+    }
 
     // ---- 主人 ----
     public long masterQQ() { return getLong("masterQQ", 0L); }
@@ -1124,6 +1294,9 @@ public final class Conf implements sair.v4.skill.ConfView {
         add(out, "replySplitDelayMs", String.valueOf(getInt("replySplitDelayMs", sair.v4.term.Segmenter.DEF_DELAY_MS)));
         add(out, "replySplitJitterMs",
                 String.valueOf(getInt("replySplitJitterMs", sair.v4.term.Segmenter.DEF_JITTER_MS)));
+        // 一轮最多发几条（爆炸半径的硬上限；<=0 = 不限制）—— 2026-09-22 内部文字外泄防线批 G3
+        add(out, "replyMaxParts",
+                String.valueOf(getInt("replyMaxParts", sair.v4.term.Segmenter.DEF_MAX_PARTS)));
         add(out, "msgDedupWindowSec", String.valueOf(getInt("msgDedupWindowSec", sair.v4.qq.Seen.DEF_WINDOW_SEC)));
         // ---- Agent 与技能 ----
         add(out, "agentMaxRounds", String.valueOf(agentMaxRounds()));
@@ -1163,6 +1336,20 @@ public final class Conf implements sair.v4.skill.ConfView {
         add(out, "ctxBudgetChars", String.valueOf(ctxBudgetChars()));
         // 本会话最近 N 条聊天记录（动态窗口）：与偏好/扩展点同属"往上下文里塞什么"这一类
         add(out, "chatWindowSize", String.valueOf(chatWindowSize()));
+        // ---- 能力①②③ 的事实行开关（D1 2026-09-28；消费者 = sair.v4.ctx.CtxBuild.facts）----
+        // 登记口径与 mediaRender 那一族完全一致：进 knownKeys()（`ai/config` 看得见、能 get/set），
+        // **不进 ensureDefaults()** —— 出厂不写盘，缺省值与消费口都只有 CtxBuild 那几处
+        // （键名与出厂值都取自 CtxBuild 的常量，唯一真源，不可能与读口漂开）。
+        //   clientsFacts  ：事实块里的 `clients:`（本账号另有机器人服务在发言）开关；
+        //   cmdishFacts   ：事实块里的 `cmdish:`（这一轮正文以 # 或 / 开头）开关；
+        //   addressedFacts：事实块里的 `addressed:`（这一轮**怎么被叫到的**：at/private/trigger/
+        //                   master/self/system 封闭枚举；产者塞进 Turn、CtxBuild 只渲染）开关。
+        add(out, sair.v4.ctx.CtxBuild.CFG_CLIENTS_FACTS,
+                String.valueOf(sair.v4.ctx.CtxBuild.DEF_CLIENTS_FACTS));
+        add(out, sair.v4.ctx.CtxBuild.CFG_CMDISH_FACTS,
+                String.valueOf(sair.v4.ctx.CtxBuild.DEF_CMDISH_FACTS));
+        add(out, sair.v4.ctx.CtxBuild.CFG_ADDRESSED_FACTS,
+                String.valueOf(sair.v4.ctx.CtxBuild.DEF_ADDRESSED_FACTS));
         // M4：引用解析与媒体面（12 个键；**不进 ensureDefaults()**，与 chatWindowSize 同一类）
         add(out, "mediaRender", String.valueOf(mediaRender()));
         add(out, "mediaRenderMaxChars", String.valueOf(mediaRenderMaxChars()));
@@ -1208,6 +1395,32 @@ public final class Conf implements sair.v4.skill.ConfView {
         add(out, "relayPublicHost", relayPublicHost());
         add(out, "relayToken", relayToken());
         add(out, "relayTtlMinutes", String.valueOf(relayTtlMinutes()));
+        // ---- 语音转写（N2/D2：键 qqPttText，默认开；消费者 = Api.pttEnrich）----
+        // 登记口径与 mediaRender 那一族一致：进 knownKeys()（`ai/config` 看得见、能 get/set），
+        // **不进 ensureDefaults()** —— 出厂不写盘，缺省值只有 Conf.qqPttText() 那一处。
+        add(out, "qqPttText", String.valueOf(qqPttText()));
+        // ---- 语音转写重试（W6/批 11：键 qqPttRetry / qqPttRetryMs；消费者 = Api.pttTextQuiet）----
+        // 同一登记口径：进 knownKeys()（`ai/config` 看得见、能 get/set），**不进 ensureDefaults()**。
+        // 键名取自 Api 的常量（唯一真源），与消费者读的那两串逐字相同。
+        add(out, sair.v4.qq.Api.CFG_PTT_RETRY, String.valueOf(qqPttRetry()));
+        add(out, sair.v4.qq.Api.CFG_PTT_RETRY_MS, qqPttRetryMs());
+        // ---- 好感度档位放权闸（W7/批 13：4 个键；消费者 = sair.v4.auth.FavorGate）----
+        // 同一登记口径：进 knownKeys()（`ai/config` 看得见、能 get/set），**不进 ensureDefaults()**。
+        add(out, sair.v4.auth.FavorGate.CFG_ENABLED, String.valueOf(favorGateEnabled()));
+        add(out, sair.v4.auth.FavorGate.CFG_FILE_MIN, String.valueOf(favorFileMin()));
+        add(out, sair.v4.auth.FavorGate.CFG_NO_ANGER_MIN, String.valueOf(favorNoAngerMin()));
+        add(out, sair.v4.auth.FavorGate.CFG_FILE_ROOTS, favorFileRoots());
+        // ---- 好感度加减规则（W7/批 13 追加；消费者 = sair.v4.auth.Favor）----
+        add(out, sair.v4.auth.Favor.CFG_ADD_MIN, String.valueOf(favorAddMin()));
+        add(out, sair.v4.auth.Favor.CFG_ADD_MAX, String.valueOf(favorAddMax()));
+        add(out, sair.v4.auth.Favor.CFG_SUB_MIN, String.valueOf(favorSubMin()));
+        add(out, sair.v4.auth.Favor.CFG_SUB_MAX, String.valueOf(favorSubMax()));
+        add(out, sair.v4.auth.Favor.CFG_KIND_RANGES, favorKindRanges());
+        add(out, sair.v4.auth.Favor.CFG_KIND_FACTS, String.valueOf(favorKindFacts()));
+        add(out, "qqMediaUrlRefresh", String.valueOf(qqMediaUrlRefresh()));
+        // D5 的流式传输两把尺子（分块大小 / 整条流的总时限）：同一登记口径
+        add(out, "streamChunkBytes", String.valueOf(streamChunkBytes()));
+        add(out, "streamTimeoutMs", String.valueOf(streamTimeoutMs()));
         // ---- 本机调试口：**已整条撤出**（不再是配置键）----
         // debugPort / debugToken / debugSimPort / debugSimulate 四个键从本表、从 ensureDefaults()、
         // 从 config.json 里全部拿掉：两个口的起停只由 `ai/debug on|off|status` 说了算。
@@ -1285,6 +1498,8 @@ public final class Conf implements sair.v4.skill.ConfView {
             set("replyGroupMaxChars", sair.v4.term.Segmenter.DEF_GROUP_MAX_CHARS);
             set("replySplitDelayMs", sair.v4.term.Segmenter.DEF_DELAY_MS);
             set("replySplitJitterMs", sair.v4.term.Segmenter.DEF_JITTER_MS);
+            // 一轮最多发几条（<=0 = 不限制）：与上面四个键同一族，写到 config.json 里看得见
+            set("replyMaxParts", sair.v4.term.Segmenter.DEF_MAX_PARTS);
             set("keepDays", DEF_KEEP_DAYS);
             set("grouplogKeepDays", DEF_GROUPLOG_KEEP_DAYS);
             set("dialogKeepDays", DEF_DIALOG_KEEP_DAYS);

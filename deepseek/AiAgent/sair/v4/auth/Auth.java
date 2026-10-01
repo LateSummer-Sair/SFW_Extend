@@ -65,6 +65,13 @@ public final class Auth {
     public Auth(Conf conf, Favor favor, Out out) {
         this.conf = conf;
         this.out = out;
+        // 好感度档位放权闸（W7/批 13）的配置面：它是 Acl 之外的第二道闸，判定口是静态的
+        // （签名冻结：FavorGate.lift(op, caller)），所以配置也从这里注一次 —— **一个进程一份 Conf**，
+        // 与 Auth 同源。没注（直接 new Acl / 独立用例）时 FavorGate 按出厂默认跑（闸默认是开的）。
+        FavorGate.install(conf);
+        // 好感度加减规则（W7/批 13 追加）的配置面：区间/kind 表也从同一个装配点注入
+        // （同上，一个进程一份 Conf）。
+        Favor.install(conf);
     }
 
     /**

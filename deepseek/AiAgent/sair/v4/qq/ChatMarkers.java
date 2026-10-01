@@ -26,21 +26,41 @@ public final class ChatMarkers {
     private ChatMarkers() {
     }
 
+    /*
+     * 取值口径（四条正则共用同一段：("[^"]*"|'[^']*'|[^\s>"'/]*)，标签体一律「引号感知」，
+     * 改一处必须四处同改 —— 管线路的 skill「点名引用\AtPickStage」里是同一份拷贝）。
+     *
+     * 标签体 = (?:[^>"']|"[^"]*"|'[^']*')*：属性值里带 > 不会把标签截半
+     * （<quote id="5" title="a > b"/> 是**一个**完整标签，不是到第一个 > 就收口，
+     * 所以不会剩下 "/> 之类当正文漏出去）；引号必须成对。
+     * 取值段 = "[^"]*"（整段双引号）/ '[^']*'（整段单引号）/ 裸词（不含空白、引号、>、/）；
+     * 值后面若还跟着 /，只有当它是自闭合的那一个（/ 紧跟 >）才作数。
+     *
+     * 认：id="5" / id='5' / id=5 / id=5/（自闭合不带空格）/ id=" 5 " / id=" 5" / id="5 "
+     *     （引号内两侧空白）/ id = "5" / 成对 <quote id="5">原文</quote> /
+     *     带其它属性 <quote id="5" foo="bar"/> / 大小写混写。
+     * 不认（整段 fail-closed：标记跟它自己的字节一起删掉 —— 既不产码，也不把残片当正文漏出去）：
+     *     <quotation id="5"/>（标签名要精确）、<quote idx="5"/>（不是 id 这个词）、
+     *     正文里孤立的 id=5（没有标记就没有这一步）；号码不合法（空 / 0 / 非十进制 / 超长 /
+     *     全角数字）；取值里有垃圾 —— id="5/"、id="5 /"、id="5/6"、id="5 6"、id="5/ >"、id="5>"
+     *     都丢掉：宁可没有引用，也不把 "5 /" 截断成 5 那种「看起来对、其实是猜的」号码。
+     * <at> 的两条同形，键是 qq。
+     */
     /** {@code <at qq="1">名字</at>}（成对，整段吃掉）。 */
     private static final Pattern AT_PAIR = Pattern.compile(
-            "<at\\b[^>]*\\bqq\\s*=\\s*[\"']?([^\"'\\s>]*)[\"']?[^>]*>[\\s\\S]*?</at\\s*>",
+            "<at\\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*\\bqq\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>\"'/]*)\\s*(?!/(?!>))(?:[^>\"']|\"[^\"]*\"|'[^']*')*>[\\s\\S]*?</at\\s*>",
             Pattern.CASE_INSENSITIVE);
     /** {@code <at qq="1"/>}。 */
     private static final Pattern AT_ONE = Pattern.compile(
-            "<at\\b[^>]*\\bqq\\s*=\\s*[\"']?([^\"'\\s>]*)[\"']?[^>]*/?>",
+            "<at\\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*\\bqq\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>\"'/]*)\\s*(?!/(?!>))(?:[^>\"']|\"[^\"]*\"|'[^']*')*/>",
             Pattern.CASE_INSENSITIVE);
     /** {@code <quote id="1">原文</quote>}（{@code reply} 同义）。 */
     private static final Pattern QT_PAIR = Pattern.compile(
-            "<(?:quote|reply)\\b[^>]*\\bid\\s*=\\s*[\"']?([^\"'\\s>]*)[\"']?[^>]*>[\\s\\S]*?</(?:quote|reply)\\s*>",
+            "<(?:quote|reply)\\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*\\bid\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>\"'/]*)\\s*(?!/(?!>))(?:[^>\"']|\"[^\"]*\"|'[^']*')*>[\\s\\S]*?</(?:quote|reply)\\s*>",
             Pattern.CASE_INSENSITIVE);
     /** {@code <quote id="1"/>}。 */
     private static final Pattern QT_ONE = Pattern.compile(
-            "<(?:quote|reply)\\b[^>]*\\bid\\s*=\\s*[\"']?([^\"'\\s>]*)[\"']?[^>]*/?>",
+            "<(?:quote|reply)\\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*\\bid\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>\"'/]*)\\s*(?!/(?!>))(?:[^>\"']|\"[^\"]*\"|'[^']*')*/>",
             Pattern.CASE_INSENSITIVE);
 
     /**
@@ -78,12 +98,24 @@ public final class ChatMarkers {
     }
 
     private static String digits(String raw) {
-        String s = raw == null ? "" : raw.trim();
+        String s = unquote(raw);
         if (s.isEmpty() || s.length() > 20) return null;
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
             if (c < '0' || c > '9') return null;
         }
         return s.charAt(0) == '0' ? null : s;
+    }
+
+    /** 取值段是「整段取值」（可能带成对引号）：剥掉外面那一对引号与两侧空白，再判号码。 */
+    private static String unquote(String raw) {
+        String s = raw == null ? "" : raw.trim();
+        if (s.length() >= 2) {
+            char q = s.charAt(0);
+            if ((q == '"' || q == '\'') && s.charAt(s.length() - 1) == q) {
+                s = s.substring(1, s.length() - 1).trim();
+            }
+        }
+        return s;
     }
 }

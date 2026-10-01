@@ -118,6 +118,18 @@ public final class Registry implements sair.v4.skill.ToolView {
             return;
         }
         tools.put(t.name(), t);
+        // ★ 2026-09-28「协议标记漏出」批：**出站标记名单的动态真源**。
+        //   她学会了"把工具名当标签写"（真机 sent id=3413 的 <sticker op="send"/>、id=2361 的
+        //   <memory op="remember" …/> —— 两个都是 V4 的工具名，没有任何技能教过、也没有任何技能
+        //   实现过那种形状），而 qq\MarkerTags 那张唯一的白名单从 V3 起只有 30 个动作标签。
+        //   唯一漏斗在这里（内置工具由 Builtins 走 add(Tool)，技能工具由 hot\Skills 走同一个 add），
+        //   所以把名字喂给 MarkerTags 就等于"新加一个工具，它的标签名自动进入剥离集合"。
+        //   名字<b>只进不出</b>（技能卸下之后那个名字仍会被剥）：方向是安全的超集 ——
+        //   多剥一个已经不存在的工具名，比漏剥一个存在的便宜得多；剔除的三类见 MarkerTags.addName。
+        try {
+            sair.v4.qq.MarkerTags.addName(t.name());
+        } catch (Throwable ignored) {
+        }
         // 顺手把"这把工具是干什么的"登记进 op 清单：写技能管控表时，每个工具分组头就用它 —— 表是给人看的
         try {
             if (auth != null && auth.ops() != null) auth.ops().tool(t.name(), Str.oneLine(t.desc()));

@@ -56,7 +56,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">01 / KEYS</span>
           <h2>键面总览</h2>
-          <p class="chapter-desc">基板只认一份扁平 JSON（数据根下的 <code>config.json</code>）。已知键共 94 个，分 11 个面；想改哪儿、去哪儿查，看这一张就够。</p>
+          <p class="chapter-desc">基板只认一份扁平 JSON（数据根下的 <code>config.json</code>）。已知键共 114 个，分 15 个面；想改哪儿、去哪儿查，看这一张就够。</p>
         </header>
 
 
@@ -69,19 +69,19 @@
         <p><code>knownKeys()</code> 给的是<b>已生效</b>的值；<code>fileKeys()</code>（<code>Conf.java</code>）给的是<b>文件</b>里的值，多一位 <code>pending()</code> 标记。控制台 <code>config</code> 与模型侧 <code>config</code> 工具读的都是文件面。</p>
 
         <div class="note reveal">
-          <p><span class="n-title">键从哪来</span>：文件里登记的与出厂默认的一共 94 个；差出来的那一批，是"出厂不写盘、靠默认值生效"的。</p>
+          <p><span class="n-title">键从哪来</span>：文件里登记的与出厂默认的一共 114 个；差出来的那一批，是"出厂不写盘、靠默认值生效"的。</p>
         </div>
 
         <div class="code reveal" data-lang="powershell">
           <div class="code-head"><span class="lang">powershell</span><span class="path">&lt;项目目录&gt;（本仓根）</span><button class="copy" type="button">复制</button></div>
-          <pre><code>(Select-String -Path src\sair\v4\Conf.java -Pattern 'add\(out,\s*"').Count
-# 结果：94
+          <pre><code>(Select-String -Path src\sair\v4\Conf.java -Pattern 'add\(out,\s*').Count
+# 结果：114（Conf.knownKeys() 的全部登记；其中 15 行的键名取自各自模块的常量，不是字面量）
 
 (Select-String -Path src\sair\v4\Conf.java -Pattern 'set\("').Count
-# 结果：61（Conf.ensureDefaults() 首次运行落盘的那批）</code></pre>
+# 结果：62（Conf.ensureDefaults() 首次运行落盘的那批）</code></pre>
         </div>
 
-        <h3 class="sec">11 个面与本页小节</h3>
+        <h3 class="sec">15 个面与本页小节</h3>
         <div class="tw scroll reveal">
           <table>
             <thead>
@@ -89,9 +89,10 @@
             </thead>
             <tbody>
               <tr><td>模型与对话</td><td class="num">13</td><td><a href="#model-cfg">模型与对话</a></td></tr>
-              <tr><td>回复与回合</td><td class="num">8</td><td><a href="#model-cfg">模型与对话</a></td></tr>
+              <tr><td>回复与回合</td><td class="num">9</td><td><a href="#model-cfg">模型与对话</a></td></tr>
               <tr><td>调度（池 / 闸门 / 优先级）</td><td class="num">17</td><td><a href="#sched">调度与并发</a></td></tr>
               <tr><td>上下文注入</td><td class="num">7</td><td><a href="#other">其余键</a></td></tr>
+              <tr><td>能力①②③ 的事实行开关</td><td class="num">3</td><td><a href="#other">其余键</a></td></tr>
               <tr><td>媒体面（M4 键表）</td><td class="num">12</td><td><a href="#other">其余键</a></td></tr>
               <tr><td>维护与保留期</td><td class="num">6</td><td><a href="#retention">保留期与自维护</a></td></tr>
               <tr><td>控制台捕获器</td><td class="num">5</td><td><a href="#console-ui">控制台 / 面板 / 日志</a></td></tr>
@@ -99,15 +100,18 @@
               <tr><td>日志</td><td class="num">4</td><td><a href="#console-ui">控制台 / 面板 / 日志</a></td></tr>
               <tr><td>NapCat 与文件外链</td><td class="num">10</td><td><a href="#qq-cfg">NapCat 与文件外链</a></td></tr>
               <tr><td>Agent 与提示词</td><td class="num">10</td><td><a href="#other">其余键</a>（其中 2 个键不逐字展开，见该节末尾）</td></tr>
+              <tr><td>语音转写与重试</td><td class="num">3</td><td><a href="#other">其余键</a></td></tr>
+              <tr><td>媒体直链刷新与流式传输</td><td class="num">3</td><td><a href="#other">其余键</a></td></tr>
+              <tr><td>好感度（档位放权闸 + 加减规则）</td><td class="num">10</td><td><a href="#other">其余键</a></td></tr>
             </tbody>
           </table>
         </div>
 
         <h3 class="sec">一个键的值可能从哪来</h3>
-        <p>三种来源：<b>文件里写了</b>（首次启动由 <code>ensureDefaults()</code> 写下一份带默认值的 <code>config.json</code>，<code>Conf.java</code>）；<b>文件里没写</b>（回落到 getter 默认值 —— 33 个键属于这一类，<code>config</code> 清单照样列出并显示生效值）；<b>运行期内部写入</b>（<code>Conf.set(String,Object)</code>，<code>Conf.java</code>，例如文件外链 token 留空时自动生成并写回，<code>Conf.java</code>）。</p>
+        <p>三种来源：<b>文件里写了</b>（首次启动由 <code>ensureDefaults()</code> 写下一份带默认值的 <code>config.json</code>，<code>Conf.java</code>）；<b>文件里没写</b>（回落到 getter 默认值 —— 52 个键属于这一类，<code>config</code> 清单照样列出并显示生效值）；<b>运行期内部写入</b>（<code>Conf.set(String,Object)</code>，<code>Conf.java</code>，例如文件外链 token 留空时自动生成并写回，<code>Conf.java</code>）。</p>
 
         <div class="note warn reveal">
-          <p><span class="n-title">不在这 94 个里的名字</span>：写进去没人读。控制台 <code>config set</code> 会明确回一句"不在已知键表里（没有消费者读它）"（<code>src\sair\v4\term\Cmd.java</code>），模型侧 <code>config op=get</code> 同口径（<code>src\sair\v4\Builtins.java</code>）。相关的命令与参数见 <a href="commands.html#config-cmds">控制台命令 · 配置</a>。</p>
+          <p><span class="n-title">不在这 114 个里的名字</span>：写进去没人读。控制台 <code>config set</code> 会明确回一句"不在已知键表里（没有消费者读它）"（<code>src\sair\v4\term\Cmd.java</code>），模型侧 <code>config op=get</code> 同口径（<code>src\sair\v4\Builtins.java</code>）。相关的命令与参数见 <a href="commands.html#config-cmds">控制台命令 · 配置</a>。</p>
         </div>
       </section>
 
@@ -115,7 +119,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">02 / MODEL</span>
           <h2>模型与对话</h2>
-          <p class="chapter-desc">接口凭据、模型名、采样参数、历史注入预算，以及回复怎么拆成几条发出去。21 个键。</p>
+          <p class="chapter-desc">接口凭据、模型名、采样参数、历史注入预算，以及回复怎么拆成几条发出去。22 个键。</p>
         </header>
 
         <h3 class="sec">接口与模型</h3>
@@ -294,6 +298,14 @@
               <dt>含义</dt><dd>在基础停顿上再加的随机抖动上限（毫秒），<code>Segmenter.java</code>、<code>Segmenter.java</code>。</dd>
               <dt>怎么调</dt><dd><code>config set replySplitJitterMs 2000</code>。</dd>
               <dt>调错的后果</dt><dd class="risk">写 0 = 间隔完全固定，节奏变得可预测；调很大 = 相邻两条之间可能出现明显空档。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">replyMaxParts</span><span class="k-def">默认 9</span><span class="badge mute">出厂写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd><b>一轮最多发几条</b> —— 爆炸半径的硬上限，分完段、跑完出站改写之后，<code>parts.size() &gt; cap</code> 就只发前 <code>cap</code> 条，其余丢弃并留一行 warn（<code>rule=parts_cap</code>）。它<b>不参与分段</b>：分段结果一个字不变，也不改落库 —— 只影响投递（<code>term\Sinks.java</code> 的 <code>capParts</code>、<code>term\Segmenter.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set replyMaxParts 6</code>。相关键的机制都在 <code>term.Segmenter</code>（<code>Segmenter.java</code>）。</dd>
+              <dt>调错的后果</dt><dd class="risk"><code>&le;0</code> = 不限制（一轮能发多少就发多少）；调小 = 长回复会被截掉尾巴（丢掉的那几条不再发，也不补发）。出厂 9 是实测选的：全库 2151 条回复的条数分布里 <code>&gt;9</code> 只有事故那 1 条（历史误伤 0），而照人设写的 3 会误伤 62 条；QQ"每群每分钟 10 条"的限流也正好在这个上限以内（<code>Segmenter.java</code>）。</dd>
             </dl>
           </div>
           <div class="keyrow reveal">
@@ -749,7 +761,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">07 / OTHER</span>
           <h2>其余键</h2>
-          <p class="chapter-desc">回合执行上限、提示词文件与预算、上下文注入、扩展点护栏，以及媒体面的 12 个键。</p>
+          <p class="chapter-desc">回合执行上限、提示词文件与预算、上下文注入、能力①②③ 的事实行开关的 3 个键、扩展点护栏、媒体面的 12 个键、语音转写与流式传输的 6 个键，以及好感度的 10 个键。</p>
         </header>
 
         <h3 class="sec">Agent 执行上限</h3>
@@ -825,7 +837,7 @@
         </div>
         <p class="t-cap">技能这一层可以自己长：怎么写、怎么装见 <a href="skills.html">11 · 技能开发</a>。</p>
         <div class="note reveal">
-          <p><span class="n-title">本页少列 2 个已知键</span>：键面里还有 2 个键管的是外挂层的目录与编译时机，键名本身含外挂层字样，按本文档口径不逐字列出 —— 出厂默认与读口分别在 <code>Conf.java</code>、<code>Conf.java</code> 与 <code>Conf.java</code>。所以这一章的逐键块覆盖 27 个键，键面总数仍是 94。</p>
+          <p><span class="n-title">本页少列 2 个已知键</span>：键面里还有 2 个键管的是外挂层的目录与编译时机，键名本身含外挂层字样，按本文档口径不逐字列出 —— 出厂默认与读口分别在 <code>Conf.java</code>、<code>Conf.java</code> 与 <code>Conf.java</code>。所以这一章的逐键块覆盖 46 个键，键面总数是 114。</p>
         </div>
 
         <h3 class="sec">上下文注入</h3>
@@ -859,7 +871,7 @@
             <dl>
               <dt>含义</dt><dd>扩展点总开关。关掉 = 基板回到"零外挂"行为：所有扩展点一概不调用，与"一个都没挂"逐字节一致（<code>Conf.java</code>、<code>src\sair\v4\ext\ExtRegistry.java</code>）。</dd>
               <dt>怎么调</dt><dd><code>config set extEnabled false</code>。每次用到时读。</dd>
-              <dt>调错的后果</dt><dd class="risk">这是留的救火开关：某个扩展把回合拖慢或把上下文撑爆时，改这一个键就回到干净状态（不必去删目录、也不必重启）。关着的时候，依赖它的上下文块与出站改写都不生效。</dd>
+              <dt>调错的后果</dt><dd class="risk">这是留的救火开关：某个扩展把回合拖慢或把上下文撑爆时，改这一个键就回到干净状态（不必去删插件目录；改完仍要 <code>ai/start</code>／<code>ai/restart</code> 才生效 —— 生效口径对所有键只有这一条）。关着的时候，依赖它的上下文块与出站改写都不生效。</dd>
             </dl>
           </div>
           <div class="keyrow reveal">
@@ -886,6 +898,41 @@
               <dt>调错的后果</dt><dd class="risk"><code>&lt;=0</code> = 不带这一段事实；上下界由消费者自己夹（下界 1，上界见 <code>ChatWindow.MAX_ROWS</code>）。它与 <code>historyLimit</code> 是两件事：一个进事实块，一个进对话历史。</dd>
             </dl>
           </div>
+        </div>
+
+        <h3 class="sec">能力①②③ 的事实行开关</h3>
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">clientsFacts</span><span class="k-def">默认 true</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>事实块里那行 <code>clients:</code>（本账号另有机器人服务在发言）的开关。开着<b>且这一轮的窗口里确实有外部来源行</b>时才出现（<code>src\sair\v4\ctx\CtxBuild.java</code> 的 <code>clientsFacts()</code>，外部行的计数问 <code>ctx\ChatWindow.java</code> 的 <code>foreignRows</code>）。键名与出厂值都取自 <code>CtxBuild.CFG_CLIENTS_FACTS</code> / <code>DEF_CLIENTS_FACTS</code>，<code>Conf.knownKeys()</code> 只引用常量、不重抄一份（<code>Conf.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set clientsFacts false</code>。想看那一行到底长什么样，用只读观察口 <code>ai/facts</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">关掉 = 事实块里少这一行，<b>判定一个字都不变</b>（它只是给她看的一句纯数据）。代价是她不再被明确告知"窗口里标「其他」的行不是人、也不是你说的"。它<b>不在 <code>ensureDefaults()</code> 里</b>：出厂不写盘，靠默认值生效。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">cmdishFacts</span><span class="k-def">默认 true</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>事实块里那行 <code>cmdish: '#'</code>（或 <code>cmdish: '/'</code>）的开关 —— 只报"这一轮的正文以 <code>#</code> 或 <code>/</code> 开头"这一个<b>形状</b>，不给任何归属结论（<code>src\sair\v4\ctx\CtxBuild.java</code> 的 <code>cmdishFacts()</code> / <code>cmdishOf</code>）。判据来源是这一轮的输入本身，由 <code>CtxBuild.assemble</code> 写进 <code>Turn</code>；收尾回合与没有正文的回合没有这一行。</dd>
+              <dt>怎么调</dt><dd><code>config set cmdishFacts false</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">关掉 = 少这一行。<b>它不影响这一轮要不要回、要不要问</b>（那是提示词层的判断）；基板侧只有"第一个字符是 <code>#</code> 或 <code>/</code>"这一条字符串形状，<b>没有关键词表、也没有"忽略名单"</b>。同样<b>不在 <code>ensureDefaults()</code> 里</b>。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">addressedFacts</span><span class="k-def">默认 true</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>事实块里那行 <code>addressed: &lt;值&gt;</code>（这一轮<b>怎么被叫到的</b>）的开关。值只有<b>六个封闭枚举</b>：<code>at</code>（群里被 @）、<code>private</code>（私聊）、<code>master</code>（主人那条没有 QQ 地址的本地控制台／面板入口）、<code>trigger</code>（触发词或插件投票起的那一轮）、<code>self</code>（她自己的自主／内部回合）、<code>system</code>（定时／闹钟／任务投递）。由<b>起这一轮的那个产者</b>在提交时塞进 <code>Turn</code>，<code>CtxBuild.facts</code> 只渲染、一个字都不重推，渲染前还过一次白名单 <code>CtxBuild.isAddressed</code>（<code>src\sair\v4\ctx\CtxBuild.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set addressedFacts false</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">关掉 = 少这一行；产者与地址判定都不受影响。另外<b>取不到就不写这一行</b> —— 没有产者塞过（探针裸建的回合、子 Agent 的回合）时事实块里根本没有 <code>addressed:</code>，<b>绝不写成空值</b>，也绝不出现自由文本（白名单之外的值一律不渲染）。同样<b>不在 <code>ensureDefaults()</code> 里</b>。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <div class="note reveal">
+          <p><span class="n-title">这三行长什么样</span>：<code>clients: 本账号另有机器人服务在发言；窗口里标「其他」的行不是人，也不是你说的</code>、<code>cmdish: '#'</code>、<code>addressed: at</code>。三个键的出厂值都是 <b>true</b>，三行都由 <code>src\sair\v4\ctx\CtxBuild.java</code> 的 <code>facts(turn)</code> 产出。共同纪律是<b>纯数据、不下结论</b>：基板只说事实，要不要起疑、要不要问一句归提示词层；每一行各有自己的出现条件，条件不成立就<b>整行不出现</b>（绝不写空值）；关掉对应开关只少一行，判定一个字都不变。</p>
+        </div>
+        <div class="note warn reveal">
+          <p><span class="n-title">一条已知边界（照实记）</span>：群里一条<b>没有 @ 她</b>的普通消息不起回合（地址判定只认被 @，私聊一律算），所以群友用<b>引用她的话</b>来接她的问、却没有 @ 她时，这条<b>到不了她那里</b>；私聊不受影响。判据在 <code>src\sair\v4\QqGateway.java</code> 的 <code>shouldAnswer</code>（群里 <code>return ev.atSelf()</code>），跳过时控制台留一行 <code>skip reason=not_addressed</code>。</p>
         </div>
 
         <h3 class="sec">媒体面（12 个键）</h3>
@@ -987,6 +1034,144 @@
               <dt>含义</dt><dd>展开出来的字符上限（<code>Conf.java</code>、<code>Conf.java</code>），<b>当前无读口</b>。</dd>
               <dt>怎么调</dt><dd>写了不生效。属<b>计划中／未实现</b>。</dd>
               <dt>调错的后果</dt><dd class="risk">无。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <h3 class="sec">语音转写与流式传输（6 个键）</h3>
+        <p>这一组管两件事：入站语音怎么变成文字、大文件怎么进出 NapCat。消费者在用到时读它们（<code>qq\Api.java</code>），读到的是装配时加载的那份生效值 —— 按本页唯一那条生效口径，改完仍要 <code>ai/start</code>／<code>ai/restart</code>。</p>
+        <div class="keylist">
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">qqPttText</span><span class="k-def">默认 true</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>入站语音段要不要转文字。开 = 一条带语音的入站消息多发<b>一次只读动作</b> <code>fetch_ptt_text</code>，拿到什么就补进那条语音段的事实里（标签变 <code>[语音 12秒：转写文本]</code>）；<b>任何失败</b>（没连上 / 版本旧 / 返回码非 0 / 响应畸形）都吞成"没有转写"，标签逐字节退回旧形状 <code>[语音 12秒]</code>（<code>Conf.java</code>、<code>src\sair\v4\qq\Api.java</code> 的 <code>pttEnrich</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set qqPttText false</code>。消费者 <code>qq\Api.java</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">关掉 = 一个动作都不发（事实行里 <code>enabled:false</code>），她只看得见语音的时长；开着不会因为失败丢消息、改正文或报错 —— 最差就是退回旧标签。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">qqPttRetry</span><span class="k-def">默认 3（夹 [0,5]，于是动作最多 4 次）</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>首取转写失败后<b>额外再取几次</b>。真机上 NapCat 对<b>刚收到</b>的语音第一次取会直接失败、同一条隔一会儿再取就成功（转写窗口实测约 3 秒），所以这一版把出厂默认从 2 上调到 3；缺省值的唯一真源是 <code>qq\Api.java</code> 里那两处常量，<code>Conf.java</code> 只读它。</dd>
+              <dt>怎么调</dt><dd><code>config set qqPttRetry 2</code>。消费者 <code>qq\Api.java</code> 的 <code>pttTextQuiet</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">写超过 5 会被夹住（配置写多大都不会把入站路堵住）；写 0 = 只取一次，刚收到的语音多半取不到文本。重试期间不改任何判据：失败照旧吞成空串，不抛、不阻断渲染。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">qqPttRetryMs</span><span class="k-def">默认 "1000,2000,3000"</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>每次重试<b>之前等多少毫秒</b>的序列（逗号分隔）。序列比次数上限短就复用最后一个值；单次等待被夹到不超过 8000 ms，全部等待合计还有一道累计预算，预算睡满之后剩下的项自动变 0 = 不再等（<code>Conf.java</code>、<code>qq\Api.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set qqPttRetryMs "1000,2000,3000"</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">默认三档对应首取之后的第 2 / 3 / 4 次动作，约 1.0s / 3.0s / 6.0s；空串回落默认序列，某一段不是数字就按 0 处理（那一次等于立刻重试）。调大到被夹住为止都只是"等久一点"，不会变成无界阻塞。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">qqMediaUrlRefresh</span><span class="k-def">默认 true</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>入站图片直链在"<b>有理由怀疑它过期</b>"时刷一次：只在"带 rkey 的图 + 怀疑它旧"时才发动作，且 60 秒最多 6 次、一条消息最多 1 张；刷不出来就保留原地址（<code>Conf.java</code>、<code>qq\Api.java</code> 的 <code>refreshFactsUrlsQuiet</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set qqMediaUrlRefresh false</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">关掉 = 一个刷新动作都不发（事实行 <code>enabled:false,"why":"off"</code>），其余行为一个字节不变；开着只是多几次只读动作，不改正文、不阻断渲染。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">streamChunkBytes</span><span class="k-def">默认 65536（64 KiB）</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>流式传输的分块大小（字节）：上传按这个大小逐块读文件（<b>不把整个文件读进内存</b>），下载把同一个值作为 <code>chunk_size</code> 告诉 NapCat。出厂默认与 NapCat 自己的默认一致（<code>Conf.java</code>、<code>qq\Api.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set streamChunkBytes 131072</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">有效值被夹到 1 KiB..4 MiB（<code>&le;0</code> 回落默认）；改大省往返、改小省内存，没有"调到不生效"的取值。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">streamTimeoutMs</span><span class="k-def">默认 600000（10 分钟）</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd><b>整条流</b>的墙钟上限（毫秒）：超了就放弃本次流式传输并回退到既有的文件发送路。出厂默认与 NapCat 自己的 stream 超时一致（<code>Conf.java</code>、<code>qq\Api.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set streamTimeoutMs 300000</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">它不是单帧超时 —— 单次往返仍由 <code>napcatTimeoutMs</code> 管；<code>&le;0</code> 回落默认。调太小 = 大文件传到一半被放弃（回退到普通发送路，不是丢文件）。</dd>
+            </dl>
+          </div>
+        </div>
+
+        <h3 class="sec">好感度（10 个键）</h3>
+        <p>好感度本身不判权限，但它有两处会反过来影响判定：<b>档位放权闸</b>（够到门槛的人多拿几个只读 op）与<b>加减规则</b>（她自己单次能动多少）。四个放权闸键、六个加减规则键；十个键出厂都不写盘，缺省值只在各自模块的常量里，<code>Conf.java</code> 只做登记与读取。</p>
+        <div class="keylist">
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">favorGateEnabled</span><span class="k-def">默认 true</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>好感度档位放权闸的总开关 —— 与权限平行的<b>第二道闸</b>。关掉 = 这一层完全不存在：档位再高也一个 op 都不放宽，行为逐字节退回加它之前（<code>Conf.java</code>、<code>src\sair\v4\auth\FavorGate.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set favorGateEnabled false</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">关掉只会更严（下面三个门槛键整组失效），不会更松；它放宽的那一面是<b>写死的窄表</b>（恰好 4 个只读 op），加不进新 op。</dd>
+            </dl>
+          </div>
+          <div class="keyrow amber reveal">
+            <div class="k-head"><span class="k-name">favorFileMin</span><span class="k-def">默认 500</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>文件那一档的门槛：好感度到这一档才放行那 4 个只读 op（<code>file.read</code> / <code>file.list</code> / <code>send.file</code> / <code>send.record</code>），且只在 <code>favorFileRoots</code> 列的允许根里；事实块里的 <code>favorGate.tiers.files</code> 跟着这个值走（<code>Conf.java</code>、<code>FavorGate.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set favorFileMin 600</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">改大 = 更严、改小 = 更松；它只管"够不够门槛"，不改变 op 清单本身。与它配套的 <code>favorFileRoots</code> 决定"放行到哪棵树"，两个键要一起看。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">favorNoAngerMin</span><span class="k-def">默认 700</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>"尊重"那一档的门槛。基板只把<b>档位这个事实</b>给出去（事实块 <code>favorGate.tier</code>）；"不会再对此人发怒 + 用尊重的口气说话"那半是情绪侧的事，不在这里实现（<code>Conf.java</code>、<code>FavorGate.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set favorNoAngerMin 700</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">它只影响给出去的那个档位事实；改成比 <code>favorFileMin</code> 还小并不会因此多放行 op —— 两个档管的是两件事。</dd>
+            </dl>
+          </div>
+          <div class="keyrow rose reveal">
+            <div class="k-head"><span class="k-name">favorFileRoots</span><span class="k-def">默认 "D:/share/;{root}/files/"</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>读放行的<b>允许根</b>（分号或逗号分隔；<code>{root}</code> 是数据根占位符）。目录写成末尾带斜杠 = 整棵子树。<b>硬 Ban 写死在代码里、压过一切</b>，所以这个键再怎么写都读不到那几条（<code>Conf.java</code>、<code>FavorGate.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set favorFileRoots "D:/share/;{root}/files/"</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">往这里<b>加</b>路径 = 给够到门槛的人多开一条只读通道；这正是 <a href="commands.html#store-cmds">ai/store export</a> 的落点从 <code>files\</code> 挪到 <code>tmp\</code> 的原因 —— 整库导出件不该躺进放行根里。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">favorAddMin</span><span class="k-def">默认 1</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>她单次<b>加</b>好感度的下界（总区间；某一笔没写来往类别时用这一对）。<b>它不约束主人</b>：控制台 <code>favor set</code> 是直改，不受这一对区间限制（<code>Conf.java</code>、<code>src\sair\v4\auth\Favor.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set favorAddMin 1</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">这一对是"总界"，写反了只会让夹取结果变得别扭；真实每一笔还按类别分档再夹一道（见下面的 <code>favorKindRanges</code>），更小的那一档压得住这里的值。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">favorAddMax</span><span class="k-def">默认 7</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>她单次<b>加</b>好感度的上界（总区间）。出厂 7，与最重的那一档"夸赞"对齐（<code>Conf.java</code>、<code>Favor.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set favorAddMax 7</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">调大 = 一次夸赞能涨得更多（关系涨得快，也更容易冲上放权门槛）。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">favorSubMin</span><span class="k-def">默认 1</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>她单次<b>减</b>好感度的下界（总区间）。出厂 1 —— 留着它就是为了"无厘头 −1"这类小罚（<code>Conf.java</code>、<code>Favor.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set favorSubMin 1</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">写 0 会让"该扣一点"的类别扣不动（夹取结果恒为 0）。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">favorSubMax</span><span class="k-def">默认 12</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>她单次<b>减</b>好感度的上界（总区间）。出厂 12，与最重的那一档"背叛"对齐（<code>Conf.java</code>、<code>Favor.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set favorSubMax 12</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">调大 = 一次冲突能扣得更狠。落库值另有两条硬界：下界 0（负值不收）、上限 1000（写超了按上限收），主人直改也照样夹在那里（<code>Favor.java</code>）。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">favorKindRanges</span><span class="k-def">默认 13 档区间表（见下）</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>按"来往类别"分档的区间表，一条字符串：写法 <code>名称=方向:下界-上界</code>，条目用 <code>;</code> 或 <code>,</code> 分隔，数值写正数。事实块里那行 <code>favorKinds:</code> 与她看到的可读清单都从这同一份原文算出来（<code>Conf.java</code>、<code>Favor.java</code>）。出厂 13 档：<code>夸赞=add:5-7;帮忙=add:3-5;怜悯=add:2-3;投喂=add:2-4;陪伴=add:1-2;普通=add:1-1;无厘头=sub:1-1;羞辱=sub:2-3;撒谎=sub:3-4;吵架=sub:3-5;越界=sub:4-6;发怒=sub:5-12;背叛=sub:8-12</code>。</dd>
+              <dt>怎么调</dt><dd><code>config set favorKindRanges "夸赞=add:5-7;…"</code>（整串换掉，不逐条改）。类别名认中文口语与英文别名，<b>认不出的整条不执行</b>（fail-closed，不猜、不凑合）。</dd>
+              <dt>调错的后果</dt><dd class="risk">改这张表 = 改一个键、不用碰代码；但写错一个类别名等于那一类记不进账，写宽一档就等于放宽判定 —— 后者正是要防的方向。</dd>
+            </dl>
+          </div>
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">favorKindFacts</span><span class="k-def">默认 true</span><span class="badge info">出厂不写盘</span></div>
+            <dl>
+              <dt>含义</dt><dd>事实块里要不要给一行可机读的类别表（<code>favorKinds</code>）。她要靠它学会"这一笔该记哪一类"；预算顶不住时关掉即可（<code>Conf.java</code>、<code>Favor.java</code>）。</dd>
+              <dt>怎么调</dt><dd><code>config set favorKindFacts false</code>。想看那一行到底长什么样，用只读观察口 <code>ai/facts</code>。</dd>
+              <dt>调错的后果</dt><dd class="risk">关掉只少一行事实：判定与夹取一个字都不变，但她更容易写错类别名（写错 = 那一笔整条不执行，不是按某一档凑合）。</dd>
             </dl>
           </div>
         </div>

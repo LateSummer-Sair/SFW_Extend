@@ -77,6 +77,34 @@ public final class Turn {
 
     public void addMessage(JsonObject raw) { if (raw != null) messages.add(raw); }
 
+    /**
+     * 第 {@code i} 段 {@code system} 消息的正文（{@code i} 从 <b>0</b> 起数；越界 ⇒ 空串）。
+     *
+     * <p><b>只读</b>：不改消息、不加消息、不碰 {@link #state()} —— 这是给"外部观察口"用的
+     * 读口，不是写口（{@link #addSystem(String)} 那一家仍然只由基板自己调）。</p>
+     *
+     * <p><b>为什么要开这个口</b>（批 15 / 2026-09-26，缺陷 C1）：基板每轮产出的<b>事实块</b>
+     * （时间 / 调用者 / 好感档位与 {@code favorKinds} / 权限事实 …）是第二条 {@code system}，
+     * 契约写在 {@code data\prompts\identity.md}「每轮第二段 system 是基板产出的键值事实」
+     * 与 {@link sair.v4.ctx.CtxBuild#assemble} 的段位口径里。但在加这个口之前，外面
+     * <b>没有任何办法</b>把它逐字打出来 —— 于是「{@code favorKinds:} 真的在事实块里」
+     * 这句话<b>从来没有被外部观测证实过</b>（只有"读代码看得出来"）。这个口就是那个观测点，
+     * 唯一消费者是控制台 {@code ai/facts}。</p>
+     */
+    public String systemAt(int i) {
+        if (i < 0) return "";
+        int k = 0;
+        for (int n = 0; n < messages.size(); n++) {
+            com.google.gson.JsonElement e = messages.get(n);
+            if (e == null || !e.isJsonObject()) continue;
+            JsonObject m = e.getAsJsonObject();
+            if (!"system".equals(J.s(m, "role", ""))) continue;
+            if (k == i) return J.s(m, "content", "");
+            k++;
+        }
+        return "";
+    }
+
     public void addTool(String toolCallId, String content) {
         JsonObject m = new JsonObject();
         m.addProperty("role", "tool");

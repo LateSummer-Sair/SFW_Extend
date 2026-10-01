@@ -1,6 +1,7 @@
 package sair.v4;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.io.File;
@@ -293,6 +294,189 @@ public final class Boot {
         return "";
     }
 
+    // ==================== 落点规则（批 15 / 2026-09-26 甲方 CEO 令）：只许发在当前会话 ====================
+
+    /**
+     * <b>落点规则</b>：一份<b>文件 / 语音 / 图片 / 视频</b>只许发在<b>当前会话</b>里
+     * （★ 图片与视频是<b>批 16 / 2026-09-27 甲方令</b>③ 才纳进来的，见下文口径 ①）。
+     *
+     * <p>原话（甲方 CEO 令，2026-09-26，逐字）：<i>「东西仅允许发在群文件与私聊中，
+     * <b>不得从一个私聊发到另一个私聊</b>，这不是出于隐私考虑，而是<b>避免让其他人造成困扰</b>。」</i>
+     * 所以这是<b>落点</b>规则，<b>不是</b>权限（ACL）规则 —— 主人与她本人的 ACL 恒全权<b>一个字都不动</b>，
+     * 这一道排在 ACL 与罢工闸<b>之后</b>，管的是"这一次要发出去的东西交给谁"。</p>
+     *
+     * <h3>为什么收口在 NapCat 闸门这一处（唯一一处实现）</h3>
+     * <p>{@code Api.call} 与 {@code Api.callQuiet} 是所有平台动作的<b>唯一出口</b>：模型工具、技能、
+     * 钩子/扩展点、闹钟、她自己的自主行为全都从那里走；而技能与模型唯一拿得到的出口是<b>带闸门</b>
+     * 那个实例（{@link #guardedNapcat()}）。所以这条判据只写在闸门体里一次 ——
+     * {@link sair.v4.skill.Host#sayFile} / {@link sair.v4.skill.Host#sayMedia} 这两条"以她自己身份发出去"
+     * 的出口<b>不另写判据</b>：它们只把"当前会话"如实带进那一跳（见 Host 里那句 {@code me.withSystem(true)}），
+     * 于是同一个出口既保持"只发当前会话"的既有语义，又必然过这里这一道。</p>
+     *
+     * <h3>口径（逐条）</h3>
+     * <ol>
+     *   <li><b>只判带"东西"载荷的动作</b>：上传类 {@code upload_group_file} /
+     *       {@code upload_private_file}，以及 {@code send_group_msg} / {@code send_private_msg} /
+     *       {@code send_msg} 里<b>带 {@code record}（语音）/ {@code file}（文件）/ {@code image}（图片）/
+     *       {@code video}（视频）段</b>的；段数组与 CQ 串两种形态都认。<b>纯文字不判</b>
+     *       （CEO 令管的是"东西"；纯文字是"话"，且它今天正是回复与定时投递的常规通路，
+     *       {@code Sinks.TaskSink} 的到点提醒就是纯文字）。
+     *       ★ 批 16 ③（2026-09-27 甲方令）：{@code image} / {@code video} 是本批新纳进来的两段 ——
+     *       甲方原话：<i>「"东西"含图片/视频/音频；纯文字是"话"不是"东西"，仍不判。」</i>
+     *       （音频 {@code record} 批 15 就已经在内。）</li>
+     *   <li><b>私聊落点必须就是当前私聊对手方</b>（{@code user_id} == 当前会话的 QQ）。
+     *       对不上 ⇒ <b>拒</b>，一个字节都不发。</li>
+     *   <li><b>没有当前会话 / 没有对手方时，私聊落点一律拒（fail-closed）</b>：
+     *       她自己的 SYSTEM 自主主体、扩展点/钩子、控制台，都没有 QQ 对手方 ⇒ 只允许发给
+     *       <b>主人本人</b>（那一支的 qq 就是主人号 —— 她向主人回报不算"打扰第三方"），其余一律拒。
+     *       闸门那句"没有主体就折成 SYSTEM 主体"给的正是这个语义，所以落点规则直接看折完之后的
+     *       {@code c}，不再另取一个主体（既有探针 {@code ProbeRelay} 就是拿裸线程直接调带闸门实例，
+     *       它的私聊用例发给的正是主人 —— 这一格必须不破）。</li>
+     *   <li><b>群落点：{@code group_id} 必须是"当前会话所在的那一个群"</b>。
+     *       <b>群 A 的回合把文件放进群 B 就是这条要拦的</b>（批 15 修这条之前那条路是通的）。
+     *       ★ 批 16 ④（2026-09-27 甲方令 · GM 追加单，收口批 15 登记在册的残余）：
+     *       当前会话<b>不是群</b>时，批 15 那一版是"没有当前群可核对 ⇒ 这一支不判"，
+     *       于是"<b>在私聊 / 控制台里让她把东西发进任意一个群</b>"是通的（V15 独立复核实测
+     *       {@code console → group} 与 {@code 主人私聊 → group} 都是 ALLOW），与"东西只许发在<b>当前会话</b>"
+     *       直接冲突。本批收口成：<b>有具体主体、且他此刻不在群里</b>（{@code c != null && !isGroup(c)}）
+     *       ⇒ 群落点<b>一律拒</b>（与"群 A 发进群 B"同一句拒文形状，前缀 {@link Acl#DENY_PREFIX}）；
+     *       <b>没有主体</b>（{@code c == null}：基板自身 / 诊断 / 无主体直调带闸门实例那一支，
+     *       即既有探针 {@code ProbeRelay} 的形状）⇒ <b>保持不判</b>（{@code return null}），
+     *       那一格必须不破。覆盖表里这一格的状态由"未覆盖"改为
+     *       <b>"有主体 ⇒ 拒（已覆盖）+ 无主体 ⇒ 不判"</b>两行。</li>
+     *   <li><b>主人例外</b>（GM 裁定 + 批 16 ② 甲方令扩边）：当轮调用者是主人<b>且</b>这一轮就在
+     *       主人自己的私聊里时，私聊发给第三方<b>放行</b>。CEO 的原话是绝对的，这一条是 GM 给的例外 ——
+     *       要收紧成"谁都不行"只需删掉下面那一行 {@code MASTER} 判断（报告里已点名请甲方确认）。
+     *       ★ 批 16 ②（2026-09-27 甲方令，逐字）：<b>控制台面板里的主人算"他的私聊"</b> ——
+     *       主人从本地控制台面板把东西发给第三方私聊同样放行。判据<b>只放宽到</b>
+     *       {@code c.master() && c.isConsole()} 这一种形状，<b>不是</b>"任何控制台调用者"：
+     *       非主人的控制台主体（今天库里唯一存在的形状是 {@code Caller.systemActor(...)}：
+     *       entry=CONSOLE 且 master=false）一个字都不放宽，今后真出现别的非主人控制台主体也一样。</li>
+     * </ol>
+     *
+     * <p>拒绝原文用既有的 {@link Acl#DENY_PREFIX} 前缀（与全库的拒绝面同一套机器认得出），
+     * 一句中文说清原因：群落点叫「落点不是当前会话」，私聊落点叫
+     * 「不许把东西从一个人的私聊转到另一个人的私聊」。</p>
+     *
+     * @param action 动作名（{@code Api.call} 收到的那一个；大小写不敏感）
+     * @param params 动作参数（改写层之后的副本；可为 {@code null}）
+     * @param c      当轮主体（{@code Ctx.caller()}；闸门已经把那句"没有主体就折成 SYSTEM 主体"做完了，
+     *               所以闸门那一跳里它恒非 {@code null}）。"当前私聊对手方 / 当前群"就取自它的
+     *               {@code qq()} / {@code groupId()}；{@code null}（诊断直接调本方法）时按"没有当前会话"判，
+     *               不放过任何私聊落点（fail-closed）。
+     * @return {@code null} = 放行；否则是拒绝原文（含 {@link Acl#DENY_PREFIX}）
+     */
+    public static String destDeny(String action, JsonObject params, Caller c) {
+        return destDeny(action, params, c, false);
+    }
+
+    // ★ 批 16 ④（2026-09-27 甲方令 · GM 追加单）：带"无主体"标记的内部重载。
+    //   守卫那一跳在折主体**之前**若没有 Ctx.caller()，就把 noSubject=true 带进来 ——
+    //   只有那一跳知道"折没折过"：折出来的 Caller.systemActor(masterQQ) 与"她自己的自主主体"
+    //   （钩子/扩展点/网关自己绑的那个）在 destDeny 眼里**逐字同形**（同一个工厂、同一组参数），
+    //   判据内部区分不了。所以这个事实由守卫带进来，而不是在这里猜。
+    //   它只影响**群落点**那一支（无主体 ⇒ 照旧不判）；私聊落点那一支一个字都不看它。
+    static String destDeny(String action, JsonObject params, Caller c, boolean noSubject) {
+        String a = Str.lower(Str.trim(action));
+        JsonObject p = params == null ? new JsonObject() : params;
+        if (!carriesThing(a, p)) return null;                      // ① 只管带"东西"载荷的动作（批 16 ③：含图片/视频）
+        long gid = J.l(p, "group_id", 0L);
+        long uid = J.l(p, "user_id", 0L);
+        if (gid <= 0L && uid <= 0L) return null;                   // 没写落点：交给平台自己拒（这里不猜）
+
+        long curG = c == null ? 0L : c.groupId();
+        long curQ = c == null ? 0L : c.qq();
+        boolean inGroup = isGroup(c);
+        boolean inPrivate = c != null && !c.isConsole() && curG <= 0L && curQ > 0L;
+        // ★ 批 16 ②（2026-09-27 甲方令，逐字）：控制台面板里的主人算"他的私聊"。
+        //   这一行只认 "MASTER && 在控制台上" 这一种主体形状 —— 不是"任何控制台调用者"：
+        //   非主人的控制台主体（今天库里唯一存在的形状是 Caller.systemActor(..)：entry=CONSOLE
+        //   且 master=false，例子就是她自己的 SYSTEM 自主行为）拿不到这一支。
+        //   控制台 + **群**落点本来也不进这一支（② 只管私聊落点）—— 但那一格已经被批 16 ④
+        //   单独收口了：有主体且不在群里 ⇒ 群落点一律拒，见下面 gid 那一支。
+        boolean consoleMaster = c != null && c.master() && c.isConsole();
+
+        if (gid > 0L) {
+            // ★ 批 16 ④（2026-09-27 甲方令 · GM 追加单）：收口批 15 登记在册的那条残余 ——
+            //   "当前会话不是群 ⇒ 群落点不判"让"在私聊 / 控制台里把东西发进任意一个群"变成通的。
+            //   新口径只加一刀**最小**的：**有具体主体且他此刻不在群里** ⇒ 一律拒；
+            //   **没有主体**（c == null）⇒ 照旧不判（下面第一行就是给它留的，ProbeRelay 那一格必须不破）。
+            //   留票（甲方令允许"不确定就按最小机制做"）：更通用的"任务自己的落点"这一层没做 ——
+            //   即没有把"某个定时任务当初指定的群"当成主体的一部分带进来。
+            //   已核过的那条路不受影响：到点提醒在 Tick 那一跳自己就把群带在主体的 groupId 上
+            //   （Tick.java 里 ownerMaster ? new Caller(QQ, 0, group) : new Caller(QQ, ownerQq, ownerGroup)），
+            //   所以"定时投递回它自己那个群"仍然判的是"就是当前群"⇒ 放行；且到点提醒本身是纯文字，压根不走这一支。
+            if (c == null || noSubject) return null;               // 无主体直调（含守卫折过的那一支）：照旧不判
+            if (!inGroup) {
+                return Acl.DENY_PREFIX + "落点不是当前会话：「" + a + "」要发的 group_id=" + gid
+                        + " 不在当前会话里（当前会话不是群，没有当前群可比） —— 东西只许发在当前会话里";
+            }
+            if (curG == gid) return null;                          // 就是当前群：群文件正是允许的落点
+            return Acl.DENY_PREFIX + "落点不是当前会话：「" + a + "」要发的 group_id=" + gid
+                    + " 不是当前群 " + curG + " —— 东西只许发在当前会话里";
+        }
+
+        if (!inGroup && curQ > 0L && curQ == uid) return null;      // 就是当前私聊对手方
+        if (c != null && c.kind() == Caller.Kind.MASTER && (inPrivate || consoleMaster)) return null;   // ★ 主人例外（批 16 ②：控制台面板里的主人也算"他的私聊"）
+        return Acl.DENY_PREFIX + "不许把东西从一个人的私聊转到另一个人的私聊：「" + a
+                + "」要发的 user_id=" + uid + " 不是当前会话"
+                + (inPrivate ? "（当前私聊 " + curQ + "）" : "（当前没有私聊对手方）")
+                + " —— 东西只许发在当前会话里";
+    }
+
+    /**
+     * 这个动作带不带<b>"东西"载荷</b>（{@link #destDeny} 的适用范围，判据只有这一处）。
+     *
+     * <ul>
+     *   <li><b>上传类</b>：{@code upload_group_file} / {@code upload_private_file} —— 动作本身就是"发一份文件"；</li>
+     *   <li><b>消息类</b>：{@code send_group_msg} / {@code send_private_msg} / {@code send_msg} 的
+     *       {@code message} 里出现 {@code record}（语音）/ {@code file}（文件）/ {@code image}（图片）/
+     *       {@code video}（视频）段；段数组与 CQ 串两种形态都认。
+     *       ★ 批 16 ③（2026-09-27 甲方令）：{@code image} / {@code video} 是本批新纳入的两段 ——
+     *       甲方原话：<i>「"东西"含图片/视频/音频；纯文字是"话"不是"东西"，仍不判。」</i></li>
+     * </ul>
+     *
+     * <p><b>刻意不覆盖</b>（报告覆盖表里逐条点名）：纯文字（回复 / 定时投递 / 自我记账都靠它 ——
+     * 甲方批 16 原话：<i>「"东西"含图片/视频/音频；纯文字是"话"不是"东西"，仍不判。」</i>）、
+     * {@code upload_file_stream}（它只是把字节搬到 NapCat 那台机器，
+     * 落点在后面的 {@code upload_*_file} 上，那一步已经被本判据管住）、
+     * {@code send_*_forward_msg}（转发节点）与 {@code _send_group_notice} 的 {@code image}。
+     * ★ 批 16 ③ 之前 {@code image} / {@code video} 也在这张单子上，本批已把它们<b>移出</b>不覆盖清单。</p>
+     */
+    private static boolean carriesThing(String action, JsonObject params) {
+        if ("upload_group_file".equals(action) || "upload_private_file".equals(action)) return true;
+        if (!"send_group_msg".equals(action) && !"send_private_msg".equals(action)
+                && !"send_msg".equals(action)) return false;
+        JsonElement m = J.get(params, "message");
+        if (m == null) return false;
+        if (m.isJsonArray()) {
+            JsonArray arr = m.getAsJsonArray();
+            for (int i = 0; i < arr.size(); i++) {
+                JsonElement e = arr.get(i);
+                if (e == null || !e.isJsonObject()) continue;
+                String t = Str.lower(Str.trim(J.s(e.getAsJsonObject(), "type", "")));
+                // ★ 批 16 ③（2026-09-27 甲方令）：「东西」含图片/视频/音频 —— image / video 是本批
+                //   新纳入的两段（音频 record 批 15 就在内）。纯文字仍不在此列（那是"话"不是"东西"）。
+                if ("record".equals(t) || "file".equals(t)
+                        || "image".equals(t) || "video".equals(t)) return true;
+            }
+            return false;
+        }
+        if (m.isJsonPrimitive() && m.getAsJsonPrimitive().isString()) {
+            String low = Str.lower(m.getAsString());               // CQ 串：块类型大小写不敏感
+            // ★ 批 16 ③（2026-09-27 甲方令）：CQ 串形态同样认 image / video ——
+            //   段数组与 CQ 串两条路必须同口径，否则"换个写法就绕过去了"。
+            return low.indexOf("[cq:record") >= 0 || low.indexOf("[cq:file") >= 0
+                    || low.indexOf("[cq:image") >= 0 || low.indexOf("[cq:video") >= 0;
+        }
+        return false;
+    }
+
+    /** {@code c} 是不是"当前会话在某个群"（{@code null} / 控制台 / 私聊都为 false）。 */
+    private static boolean isGroup(Caller c) {
+        return c != null && !c.isConsole() && c.groupId() > 0L;
+    }
+
     public Boot(File root, Out out) {
         this.root = root;
         this.out = out;
@@ -568,9 +752,16 @@ public final class Boot {
                         // 主人与她本人恒全权（Acl.allow 内部短路），ALLUSER 按技能管控表 —— 没写 = 未授权。
                         String op = "napcat." + action;
                         Caller c = sair.v4.ctx.Ctx.caller();
+                        // ★ 批 16 ④（2026-09-27 甲方令 · GM 追加单）：**折之前**先记下"这一轮到底有没有主体"，
+                        //   原样带给 destDeny 的群落点那一支 —— 折出来的 systemActor 与"她自己的自主主体"
+                        //   在 destDeny 眼里逐字同形，只有这一跳知道折没折过。私聊落点那一支不看这个标记。
+                        boolean noSubject = c == null;
                         // 没有绑定主体 = 她自己的自主行为（基板回复、定时推送、钩子/扩展点回调）→ SYSTEM。
                         // 旧口径是"没有绑定调用者 = 基板内部动作 → 放行"，那是钩子绕闸门的那条洞
                         // （notes/acl-impl-plan.md §2.1(a)）：新模型里一律先有主体，再按主体判。
+                        // ★ 批 15（2026-09-26 甲方 CEO 令 · 落点规则）：这一折**正是落点规则要的"当前对手方"** ——
+                        //   SYSTEM 主体的 qq 就是主人号 ⇒ "她没有会话"时唯一允许的私聊落点是主人本人
+                        //   （她向主人回报不算打扰第三方）。落点规则看的就是这个 c，不再另取一个主体。
                         if (c == null) c = Caller.systemActor(conf == null ? 0L : conf.masterQQ());
                         // ★ 罢工硬干活闸（情绪 v2 §4，第三轮）：动作出口也要判 —— h.napcat() 是**直连**
                         //   （群审核 / 申请审批的钩子就在这儿发禁言、警告、审批），只判 ACL 会整段绕过罢工。
@@ -580,7 +771,11 @@ public final class Boot {
                         //   回复都发不出去（真机：整群静默）。清单与判据只有 Builtins.strikeDenyAction 一处。
                         if (c.master()) {
                             // 主人 = MASTER：ACL 不判（恒全权）⇒ 但罢工照判（与 op 闸的矩阵一致）。
-                            return sair.v4.Builtins.strikeDenyAction(action, napcatScene(params), op);
+                            String sd = sair.v4.Builtins.strikeDenyAction(action, napcatScene(params), op);
+                            if (sd != null) return sd;
+                            // ★ 批 15：主人免的是 ACL，**不是落点** —— 落点规则对所有人生效
+                            //   （唯一例外是 destDeny 里那条 GM 裁定的"主人自己的私聊里发给第三方"）。
+                            return destDeny(action, params, c, noSubject);
                         }
                         if (auth == null) {
                             // 装配失败：不许静默放权（旧行为是 return null = 闸门不存在）
@@ -591,7 +786,13 @@ public final class Boot {
                         }
                         String acl = auth.allow(c, op);
                         if (acl != null) return acl;   // ACL 拒文优先（逐字不变）
-                        return sair.v4.Builtins.strikeDenyAction(action, napcatScene(params), op);
+                        String strike = sair.v4.Builtins.strikeDenyAction(action, napcatScene(params), op);
+                        if (strike != null) return strike;
+                        // ★ 批 15（2026-09-26 甲方 CEO 令）：ACL 与罢工都放行之后，才轮到这一道 ——
+                        //   "这一次要发出去的东西只能落在当前会话"。排在这两关**之后**是刻意的：
+                        //   既有 ACL 拒文逐字不变（ALLUSER 的黑名单那几句照旧先出），
+                        //   而这一道管的正是"ACL 够不着"的那一面（她自己的 SYSTEM 自主行为 / 被授权的一轮）。
+                        return destDeny(action, params, c, noSubject);
                     }
                 });
                 guardedApi = g;                              // ← 不可分割：装好了才交出去
@@ -652,6 +853,16 @@ public final class Boot {
                     }
                 });
                 sair.v4.term.Sinks.setExt(ext);          // 出站 stage 管线（④ 的"发送"半边）
+                // 基板级出站红线（2026-09-22 基板提炼批）：词表在 prompts\redline.md，热读。
+                // 与上面那一行同一个套路（静态注入口，默认 null = 一个词都不判 = 与加这一层之前逐字节一致）；
+                // 但它**不是**扩展点、不受 extEnabled 影响 —— 安全级规则不许随可选技能/总开关生死。
+                // install 里读一次表：读到打一行事实（类目/词数/mtime），读不到打一行 err（静默失败比失败更贵）。
+                sair.v4.term.Redline.install(conf, out);
+                // 出站纪律的另三条（2026-09-22「内部文字外泄防线批」）**刻意不打启动事实行**：
+                // 那行会进 ConsoleTap 的**捕获窗口**，把既有探针 ProbeLogQuiet ⑤a 的余量挤掉
+                // （独立复核实测：临时路径再长 25 字符就多出一条红）⇒ 返工第 1 条把它收回。
+                // 判据的可见性改由配置面提供：replyMaxParts 在 Conf.knownKeys() 里（config op=get 可见）；
+                // G1 的键表与阈值在 qq.InternalFacts 的常量/类注释里，G2 在 qq.MoodMarks 里。
                 ctx = new CtxBuild(conf, prompts, store, env, out);
                 ctx.setExt(ext);                         // 上下文 provider 块（⑤ 的"装配"半边）
                 // 识图组件（约定名 look）的在面状态（T12-R3）：装配期注入**同一份**状态载体 ——
@@ -1257,6 +1468,8 @@ public final class Boot {
             try { if (eventPool != null) eventPool.shutdownNow(); } catch (Exception ignored) {}
             // 扩展点：先把出站管线摘掉（停完还在改正文是没意义的），再关掉它自己的工作线程池
             try { sair.v4.term.Sinks.setExt(null); } catch (Exception ignored) {}
+            // 基板红线同一条纪律：停完还在判"这条能不能发"是没意义的（它有自己的热读缓存）
+            try { sair.v4.term.Redline.uninstall(); } catch (Exception ignored) {}
             try { if (ext != null) ext.close(); } catch (Exception ignored) {}
             sair.v4.kit.Th.shutdown();
         }
@@ -1338,7 +1551,9 @@ public final class Boot {
         // 先取落点（它会在面板被关掉时把面板挂回来），再写主人这句话 —— 顺序反了主人那句会落空
         sair.v4.ctx.Sink sink = localSink();
         echoConsoleUser(text);
-        agent.ask(c, sink, text);
+        // ★ 能力③（2026-10-01）：本地控制台/面板 = 主人那条**没有 QQ 地址**的入口 ⇒ addressed: master
+        //   （取值表见 CtxBuild.ST_ADDRESSED；只多一个事实，行为一个字没改）
+        agent.ask(c, sink, text, null, sair.v4.ctx.CtxBuild.AD_MASTER);
         return agent;
     }
 
@@ -1578,8 +1793,11 @@ public final class Boot {
      * 这里与它们同源（不另开一条"绕过闸门"的口）。</p>
      *
      * <p><b>为什么不建 {@code QqSink}</b>：那条路要一个 {@link Caller} 当落点载体，
-     * 而这里的落点是任务行里<b>记下来的会话</b>（创建者此刻不一定在场，主体另有其人 ——
-     * 见 {@code CronSkill.on} 的 {@code ownerActor}）。{@code TaskSink} 要的正是"群/私聊 + 号"，
+     * 而这里的落点是任务行里<b>记下来的会话</b>（创建者此刻不一定在场，主体另有其人）。
+     * 定时任务这一条的归属记在基板 {@code Tick} 的<b>闹钟账本</b>里（{@code alarm} 表的
+     * {@code owner} 列）：{@link sair.v4.Tick#ownerJson} / {@link sair.v4.Tick#ownerOf} /
+     * {@link sair.v4.Tick#ownedBy} / {@link sair.v4.Tick#isMine} 一族读写它，到点<b>以发起者的身份</b>
+     * 跑（非主人建的闹钟绝不以主人身份执行）。{@code TaskSink} 要的正是"群/私聊 + 号"，
      * 而且它的结构事实行（{@code [task→] sent scope=… target=…}）把这件事故意打在明面上。</p>
      *
      * @param session  任务行里记的目标会话键；{@code null}/空 = 没有目标
@@ -1701,8 +1919,15 @@ public final class Boot {
                     sair.v4.ctx.Ctx.Scope sc = sair.v4.ctx.Ctx.of(
                             Caller.systemActor(conf == null ? 0L : conf.masterQQ()));
                     try {
+                        // NapCat 的 set_input_status 负载 schema 是 { user_id: String(QQ号), event_type: Number }
+                        // 两个都必填（来源：NapCatQQ SetInputStatus.ts 的 payloadSchema 与官方 OpenAPI 文档
+                        // /set_input_status 的 required:[user_id,event_type]）。旧写法发的是
+                        // { user_id: <数字>, status: <0|1> } —— 缺必填的 event_type，且 user_id 类型不对，
+                        // 服务端 schema 编译失败 ⇒ 真机恒定 retcode 1400「Schema compilation error:
+                        // Expected required property」，私聊"正在输入"从来没生效过。详见
+                        // tmp\v6-real\batch6\W2-typing\REPORT.md。
                         g.call("set_input_status",
-                                sair.v4.kit.J.obj("user_id", qq, "status", on ? 1 : 0));
+                                sair.v4.kit.J.obj("user_id", String.valueOf(qq), "event_type", on ? 1 : 2));
                     } finally {
                         sc.close();
                     }
@@ -1775,9 +2000,14 @@ public final class Boot {
 
             /**
              * 显式指定主体的派发入口（{@link Host#spawnAs}）：主体字段换成调用方给的那一个。
-             * 定时任务到点派子 Agent 走的正是这里 —— 它把主体从"钩子主体（SYSTEM）"换成
-             * <b>任务创建者</b>（能力继承，见 {@code CronSkill.on}）。
-             * {@code who == null} 时与上面那一族逐字一致（= 当轮调用者）。
+             * 这条口是给<b>技能面</b>用的：技能派子 Agent 时可选择不让它继承钩子主体。
+             * <p><b>勘误（2026-09-23）：基板定时任务到点不走这里。</b>原注释引用的
+             * {@code CronSkill.on} 是已退休的外置「定时任务」技能（2026-09-19 退休，全库已无此类）。
+             * 现状：定时/闹钟由基板 {@link sair.v4.Tick} 的<b>闹钟账本</b>负责 —— 到点从
+             * {@code alarm.owner} 重建 {@link Caller}（主人走 {@link Caller#console}、
+             * 其他人就是他自己），再直接 {@code agent.ask(c, sink, text)}（{@code Tick.java:461-483}），
+             * 全程不经 {@code spawnAs}。
+             * {@code who == null} 时与上面那一族逐字一致（= 当轮调用者）。</p>
              */
             @Override
             public JsonObject spawnAs(Caller who, String task, List<String> tools, boolean async,

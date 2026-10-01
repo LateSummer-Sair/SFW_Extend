@@ -46,6 +46,31 @@ import sair.v4.kit.Str;
  * 用什么记号表示"这里要放一张图"），本类是<b>入站记录</b>（把收到的段翻成人话）。两者用途不同、
  * 消费者不同，<b>不许互相抄</b>：改出站占位符等于改主人能看见的文案（那套文案外挂在 {@code prompt.md}）。</p>
  *
+ * <h3>段型覆盖（N1：把上游 15 种里剩下的 4 种补齐）</h3>
+ * <p>上游 {@code /onebot/segment} 列<b>15</b> 种段（{@code tmp/v6-real/upstream/D3.md} 消息段 6/7/8/14、
+ * 结论第 11 条）：{@code text/at/reply/face/mface/dice/rps/poke/image/record/video/file/json/music/forward}。
+ * 本次补齐的四种与判据（逐条对 D3 的字段表，<b>只打真有的字段</b>）：</p>
+ * <ul>
+ *   <li>{@code dice}：接收字段 {@code result}（骰子点数 1-6）⇒ {@code [骰子 点数=5]}；缺 ⇒ {@code [骰子]}；</li>
+ *   <li>{@code rps}：接收字段 {@code result}（1=石头 2=剪刀 3=布）⇒ {@code [猜拳 结果=石头]}；
+ *       表外的值原样打（{@code 结果=7}）—— 不猜、不映射；缺 ⇒ {@code [猜拳]}；</li>
+ *   <li>{@code poke}：接收字段 {@code type}/{@code id} ⇒ {@code [戳一戳 type=… id=…]}；缺 ⇒ {@code [戳一戳]}；
+ *       <b>与通知那一路（{@link NoticeRender} 的 {@code [戳一戳]}）是两件事</b>：那是"谁戳了谁"的事件，
+ *       这里是消息里的一段；</li>
+ *   <li>{@code music}：上游写明"<b>仅支持发送，接收时会转换为 json 类型</b>"⇒ 这一段是<b>防御性渲染</b>
+ *       （真收到时应当已经是 json 卡片）：{@code [音乐 平台=… 标题=… 歌手=… 曲目=… 链接=…]}，
+ *       一个字段都没有 ⇒ {@code [音乐]}。封面 {@code image} 只是一张封面图的地址，不当作内容打出来。</li>
+ * </ul>
+ *
+ * <h3>语音转写（N1：让她"听得懂"语音）</h3>
+ * <p>语音段（{@code record}）在事实里可以带一个 {@code ptt_text} 键 —— 那是入站渲染链在<b>渲染之前</b>
+ * 用 {@code Api.pttEnrich} 调 NapCat 的 {@code fetch_ptt_text}（4.18.2+）补上的转写文本
+ * （见 {@link #PTT_KEY}）。有它就渲染成 {@code [语音 12秒：转写文本]}，<b>没有就逐字节退回原来的
+ * {@code [语音 12秒]}</b> —— 取不到转写不是一种"降级形态"，而是"没发生这件事"。
+ * 转写文本是<b>入站内容</b>（对方说的话，跟文件名同类），<b>不是</b>我们模型写的描述 ⇒
+ * <b>不</b>加 {@code [来源·模型]} 前缀；它进标签时照样过 {@link #san}（方括号换圆括号、{@code ·} 换 {@code -}），
+ * 所以"标签里有 {@code ·} ⇒ 那是机器写的"这条判据不被它破坏。</p>
+ *
  * <h3>机器产出的文本怎么包（只提供形状，本步不写任何机器文本）</h3>
  * <p><b>硬规定：基板自己的标签里永远不出现 {@code ·}。</b>机器写的东西一律走 {@link #machine}，
  * 形如 {@code [识图·deepseek-flash] 一只橘猫}。于是两种形状不可能混：基板标签 = {@code [} + 中文段型词 + 空格；
@@ -61,6 +86,14 @@ public final class MediaRender {
     public static final int MAX_CHARS = 1000;
     /** 单个值的上限（{@code file}/{@code name}/{@code nickname} 等都按它截断）。 */
     public static final int MAX_FIELD_CHARS = 80;
+    /**
+     * 语音转写文本在事实里的键名（<b>只由</b> {@code Api.pttEnrich} 写入，见类注释"语音转写"）。
+     * <p>刻意 <b>不</b>从段自己的 {@code data} 里读这个键：转写只有一个来源（我们那一次
+     * {@code fetch_ptt_text} 调用），否则第三方就能用 {@code data.ptt_text} 伪造一句"她说过的话"。</p>
+     */
+    public static final String PTT_KEY = "ptt_text";
+    /** 转写文本的长度上界（比普通字段宽：转写是一句话；但仍不许把一格撑爆）。 */
+    public static final int PTT_TEXT_CHARS = 200;
     /** 机器产出文本的包装形状：{@code [来源·模型] }。 */
     public static final String MACHINE_FMT = "[%s·%s] ";
     /** 机器文本正文的上限。 */
@@ -160,6 +193,21 @@ public final class MediaRender {
             return "[表情" + kv("id", val(d, f, "id")) + kv("emoji_id", val(d, f, "emoji_id"))
                     + kv("summary", val(d, f, "summary")) + "]";
         }
+        // N1：上游 15 种里剩下的 4 种（判据与降级逐条见类注释"段型覆盖"）
+        if ("dice".equals(type)) {
+            return "[骰子" + kv("点数", val(d, f, "result")) + "]";
+        }
+        if ("rps".equals(type)) {
+            return "[猜拳" + kv("结果", rpsWord(val(d, f, "result"))) + "]";
+        }
+        if ("poke".equals(type)) {
+            // type/id 只从**段自己的 data** 读：fact 里的 "type" 是段型词（mediaFacts 会带上），
+            // 从 fact 兜底会把 `[戳一戳 type=poke]` 这种段型词当成戳一戳类型打出来（实测踩过）。
+            return "[戳一戳" + kv("type", segData(d, "type")) + kv("id", segData(d, "id")) + "]";
+        }
+        if ("music".equals(type)) {
+            return musicLabel(d, f);
+        }
         if ("reply".equals(type)) {
             return "[引用" + kv("msg_id", val(d, f, "id")) + "]";
         }
@@ -181,7 +229,9 @@ public final class MediaRender {
         String len = val(d, f, "data_len");
         if ("record".equals(type) && Str.has(len)) {
             // 内联音频（NapCat 给不出文件时把 base64 塞在 record.data 里）：只打长度，正文绝不进标签
-            return "[内联音频" + kv("", base(val(d, f, "file"))) + kv("data_len", len) + "]";
+            String txt = pttOf(f);
+            return "[内联音频" + kv("", base(val(d, f, "file"))) + kv("data_len", len)
+                    + (Str.has(txt) ? "：" + txt : "") + "]";
         }
         String name = "file".equals(type) ? val(d, f, "name") : "";
         if (Str.blank(name)) name = base(val(d, f, "file"));
@@ -191,7 +241,50 @@ public final class MediaRender {
             sb.append(kv("", durField(d, f, "duration")));
         }
         sb.append(kv("", sizeField(d, f, "file_size")));
+        if ("record".equals(type)) {
+            // 转写文本（只有这次入站调用补上的那一份；段里自带的 data.ptt_text 不算，见 PTT_KEY）
+            String txt = pttOf(f);
+            if (Str.has(txt)) sb.append('：').append(txt);
+        }
         return sb.append(']').toString();
+    }
+
+    /**
+     * 音乐分享段：{@code [音乐 平台=qq 标题=… 歌手=… 曲目=… 链接=…]}（字段缺就整段不出现）。
+     * <p>上游 D3 §消息段 14 的接收侧字段是 {@code type/id/url/image/singer/title/content}；
+     * 这里只打"人话里认得出这首歌"的那几个，封面 {@code image} 与描述 {@code content} 不打
+     * （前者只是一张封面图地址，后者常与标题重复）。</p>
+     */
+    private static String musicLabel(JsonObject d, JsonObject f) {
+        StringBuilder sb = new StringBuilder("[音乐");
+        // 平台同理只从段自己的 data 读（fact 的 "type" 是段型词 "music"，不是平台）
+        sb.append(kv("平台", segData(d, "type")));
+        sb.append(kv("标题", val(d, f, "title")));
+        sb.append(kv("歌手", val(d, f, "singer")));
+        sb.append(kv("曲目", val(d, f, "id")));
+        sb.append(kv("链接", val(d, f, "url")));
+        return sb.append(']').toString();
+    }
+
+    /**
+     * 猜拳结果的词：上游 D3 §消息段 7 写明 {@code 1/2/3} 分别代表石头、剪刀、布。
+     * <p>只映射这三个值；别的值（含缺字段）<b>原样</b>返回 —— 不猜、不编。</p>
+     */
+    private static String rpsWord(String result) {
+        String r = Str.trim(result);
+        if ("1".equals(r)) return "石头";
+        if ("2".equals(r)) return "剪刀";
+        if ("3".equals(r)) return "布";
+        return r;
+    }
+
+    /**
+     * 事实里那一份转写文本（{@link #PTT_KEY}），过 {@link #san} 卫生 + {@link #PTT_TEXT_CHARS} 截断。
+     * <p>{@code f=null}（facts 缺失）⇒ 空串 ⇒ 标签逐字节退回 {@code [语音 12秒]}。</p>
+     */
+    private static String pttOf(JsonObject f) {
+        if (f == null) return "";
+        return san(J.s(f, PTT_KEY, ""), PTT_TEXT_CHARS);
     }
 
     /** 嵌套转发节点：{@code [转发节点 张三(10001): 内容]}（内容是段数组时递归渲染再去方括号）。 */
@@ -334,6 +427,16 @@ public final class MediaRender {
         String v = d == null ? "" : J.s(d, key, "");
         if (Str.has(v)) return v;
         return f == null ? "" : J.s(f, key, "");
+    }
+
+    /**
+     * <b>只从段自己的 data</b> 取值（不从 fact 兜底）。
+     * <p>给 {@code poke.type} / {@code music.type} 这类<b>键名与段型字段同名</b>的场合用：
+     * {@code mediaFacts} 造的 fact 里有一个 {@code "type"} 键，值是<b>段型词</b>
+     * （{@code "poke"} / {@code "music"}），拿它兜底就会把段型词当成真值打出来。</p>
+     */
+    private static String segData(JsonObject d, String key) {
+        return d == null ? "" : J.s(d, key, "");
     }
 
     private static String sizeField(JsonObject d, JsonObject f, String key) {

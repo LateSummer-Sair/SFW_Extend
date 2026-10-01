@@ -13,6 +13,7 @@ import sair.v4.Tick;
 import sair.v4.auth.Acl;
 import sair.v4.auth.Caller;
 import sair.v4.auth.Favor;
+import sair.v4.auth.FavorGate;
 import sair.v4.hot.Sk;
 import sair.v4.kit.J;
 import sair.v4.kit.Out;
@@ -199,6 +200,10 @@ public final class Cmd {
             }
             if ("store".equals(f)) {
                 storeCmd(a);
+                return null;
+            }
+            if ("facts".equals(f)) {
+                factsCmd();
                 return null;
             }
             if ("tick".equals(f)) {
@@ -554,6 +559,9 @@ public final class Cmd {
         // 没挂面板时它什么都不做 —— 主人的话本来就在控制台自己的输入回显里。
         boot.echoConsoleUser(text);
         final sair.v4.ctx.Turn t = new sair.v4.ctx.Turn(c, sink);
+        // ★ 能力③（2026-10-01）：控制台这一条 = 主人那条没有 QQ 地址的入口 ⇒ addressed: master
+        //   （取值表见 CtxBuild.ST_ADDRESSED；事实块里多一行，这一轮的行为一个字没改）
+        t.put(sair.v4.ctx.CtxBuild.ST_ADDRESSED, sair.v4.ctx.CtxBuild.AD_MASTER);
         try {
             boot.ctx().assemble(t, text);
             if (boot.store() != null) boot.store().appendDialog(t.session(), "user", text, 0);
@@ -651,7 +659,8 @@ public final class Cmd {
     }
 
     // 旧面已清：`perm set/reset|list|<QQ>`（好感度控制台口）与更早的 `perm levels/setlevel`（旧档位注册表）
-    // 都随这一轮权限整改下线 —— 好感度不是权限、也不参与任何判定（notes\perm-rework-spec.md）。
+    // 都随这一轮权限整改下线 —— 好感度**数值**不是权限、不参与判定（"档位 → 只读放权"那一层是另一件事，
+    // 在 auth\FavorGate；见那里与 notes\perm-rework-spec.md）。
     // 新的 `perm` 只管一件事：身份 × op → Ban / Run / 空，权限文件按归属分散
     // （data\perms-core.jsonc + 每个技能的 data\skills\<技能名>\perms.jsonc）。
 
@@ -1565,14 +1574,23 @@ public final class Cmd {
         if (want.doubleValue() < 0.0D) {
             out.warn("数值越界：" + favorNum(want.doubleValue())
                     + " —— 好感度的下界是 0（负值不收；要降就设一个更小的非负数）。");
-            out.dim("  上不封顶：≥900 就是最高档「" + boot.favor().levelName(900) + "」；下界 0 = 「"
-                    + boot.favor().levelName(0) + "」。");
+            out.dim("  上限 " + favorNum(Favor.CAP) + "（主人令 2026-09-26：上限 1000、下限 0）——"
+                    + "写超了按上限收（夹取，不报错）；最高档「" + boot.favor().levelName(Favor.CAP) + "」；"
+                    + "下界 0 = 「" + boot.favor().levelName(0) + "」。");
             return;
         }
         Favor.Change c = boot.favor().setValue(qq, want.doubleValue(), "控制台直改", "console");
         out.ok("已直改：" + qq + " 好感度 " + favorNum(c.before) + " → " + favorNum(c.after)
                 + "（" + boot.favor().levelName(c.after) + "）");
-        out.dim("  主人定值不受她自己单次加减区间（加 [1,3] / 减 [5,10]）限制；她自己的加减照旧由基板夹死。");
+        out.dim("  主人定值不受她自己单次加减区间限制；她自己的加减照旧由基板夹死 ——"
+                + "总界 加 " + Favor.rangeText(Favor.addMin(), Favor.addMax())
+                + " / 减 " + Favor.rangeText(Favor.subMin(), Favor.subMax())
+                + "，再按 <favor kind=\"…\"/> 的来往类别分 " + Favor.kinds().size() + " 档夹取"
+                + "（" + Favor.kindTable() + "）。");
+        out.dim("  但上界对所有人一视同仁：" + favorNum(Favor.CAP) + "（" + boot.favor().levelName(Favor.CAP)
+                + "）—— 写超了按上限收；好感度档位放权闸（" + FavorGate.CFG_FILE_MIN + "="
+                + boot.conf().favorFileMin() + " / " + FavorGate.CFG_NO_ANGER_MIN + "="
+                + boot.conf().favorNoAngerMin() + "）读的就是落库后的这个数值。");
     }
 
     /**
@@ -2213,7 +2231,20 @@ public final class Cmd {
             return;
         }
         if ("export".equals(op)) {
-            File f = new File(boot.conf().filesDir(), v[1] + "-" + Str.stamp() + ".jsonl");
+            // ★ 批 15 / 2026-09-26（缺陷 A3，GM 裁决）：导出落点从数据根下的 files\ 挪到 tmp\。
+            // 为什么必须挪（两条都写在这里，免得以后有人"顺手挪回去"）：
+            //   (a) files\ 是 FavorGate 的允许根之一 —— FavorGate.DEF_FILE_ROOTS =
+            //       "D:/share/;{root}/files/"，只要某人 favor >= favorFileMin（出厂 500），
+            //       Acl 就会回头问这道闸、并对 {root}/files/ 整棵子树放行只读
+            //       （file.read / file.list / send.file / send.record）。整库导出落在那儿
+            //       = 把全量私聊 dump 放进"成员读得到的那一格"（线上 2026-09-26 18:20:56
+            //       那次 dialog 导出就是这么躺进 files\ 的）。
+            //   (b) tmp\ 既不在那个允许根清单里（FavorGate.fileRoots() 只列 D:/share/ 与 {root}/files/），
+            //       又被 _deploy.ps1 的跳过表排除（第 16/98 行：files\ tmp\ cache\ 属 runtime data，
+            //       不随部署搬走）—— 没有任何一条 QQ 侧的读路能指到这里。
+            // 文件名形状（<表>-<时间戳>.jsonl）与成功行形状（已导出 <绝对路径>）一字不动；
+            // 导出面不再增加任何东西。Store.exportJson 会自己建父目录（那里有 Fs.mkdirs）。
+            File f = new File(boot.conf().tmpDir(), v[1] + "-" + Str.stamp() + ".jsonl");
             out.ok(boot.store().exportJson(v[1], f) ? ("已导出 " + f.getAbsolutePath()) : "导出失败");
             return;
         }
@@ -2250,6 +2281,75 @@ public final class Cmd {
         out.print(boot.storeStat() + "\n", Out.Tone.NORMAL);
     }
 
+    // ==================== 事实块观察口（批 15 / 2026-09-26，缺陷 C1） ====================
+
+    /**
+     * {@code facts} 的探针正文（<b>固定</b>）。它只为把装配跑完整（装出 user 那一段），
+     * 不进事实块、不外发、不发给任何模型 —— 事实块的内容与这行字无关。
+     */
+    private static final String FACTS_PROBE_TEXT = "ai/facts 探针：只装配、不发送（这一行只为把上下文装配完整）";
+
+    /** 事实块的<b>首行口径</b>：{@code CtxBuild.facts} 第一句永远是 {@code time: }（见那里的代码）。 */
+    private static final String FACTS_FIRST_LINE = "time: ";
+
+    /**
+     * {@code facts}：<b>把每轮第二段 system（基板产出的键值事实块）逐字打给控制台</b>。
+     *
+     * <p><b>为什么要有这个口</b>（批 15 / 2026-09-26，缺陷 C1）：{@code data\prompts\identity.md}
+     * 写着「每轮第二段 system 是基板产出的键值事实」，{@code favorKinds:} 那一行也在里面 ——
+     * 但在这个命令之前，控制台<b>没有任何办法</b>把它打出来，所以「事实块里真有 {@code favorKinds:}」
+     * 这句话<b>从来没有被外部观测证实过</b>（只能读代码"看得出来"）。这个命令补的就是那一段：
+     * 按真回合的同一段装配路（{@link sair.v4.ctx.CtxBuild#assemble}）装一遍 → 取那段 system → 原样打印，
+     * 谁都能在外面逐字对上。</p>
+     *
+     * <p><b>只读、失败关闭</b>：不写 dialog / 不写任何库、不调模型、不调工具，也不往任何会话说话
+     * （{@code Turn} 连 sink 都不接）。基板没就绪 ⇒ 只回一句 {@link #why()} 就返回，别的什么都不做。</p>
+     */
+    private void factsCmd() {
+        if (boot == null || boot.ctx() == null) {
+            out.warn("facts 不可用：基板未就绪（" + why() + "）");
+            return;
+        }
+        Caller c = caller();                              // 控制台 = 主人（与 chat 同一条取法）
+        sair.v4.ctx.Turn t = new sair.v4.ctx.Turn(c, null);   // 不接 sink：观察口不对任何会话说话
+        try {
+            boot.ctx().assemble(t, FACTS_PROBE_TEXT);
+        } catch (Throwable e) {
+            out.err("facts 装配失败：" + e + "（控制台未受影响）");
+            return;
+        }
+        String block = factsBlock(t);
+        if (!Str.has(block)) {
+            out.warn("facts：这一轮装配里没有事实块（第二条 system 是空的）");
+            return;
+        }
+        out.print(block + "\n", Out.Tone.NORMAL);          // 逐字、不截断
+    }
+
+    /**
+     * 取事实块。<b>先按契约取第二条 system</b>；它不是事实块时，顺着 system 序号往后找第一个
+     * 以 {@code time: } 打头的段 —— 这一步不是"猜"，是因为今天装配里<b>可能先插稳定段</b>
+     * （{@code extEnabled} 出厂为开，{@code 点名引用} 的 {@code AtPickTeach} 等 provider 的
+     * {@code stable()=true}，见 {@code CtxBuild.assemble} 的段位顺序）：
+     * 那种情况下第二条 system 是插件的稳定段，事实块被顶到后面。观察口要打的是<b>事实块本身</b>，
+     * 所以这里如实往下找；一个都找不到就按契约原样给第二条（不编、不猜内容）。
+     */
+    private static String factsBlock(sair.v4.ctx.Turn t) {
+        String second = t.systemAt(1);
+        if (isFacts(second)) return second;
+        for (int i = 2; i < 64; i++) {
+            String s = t.systemAt(i);
+            if (!Str.has(s)) break;                        // system 段取完了
+            if (isFacts(s)) return s;
+        }
+        return second;
+    }
+
+    /** 这一段是不是事实块（首行口径 {@link #FACTS_FIRST_LINE}）。 */
+    private static boolean isFacts(String s) {
+        return Str.nz(s).startsWith(FACTS_FIRST_LINE);
+    }
+
     // ==================== 帮助 ====================
 
     public String name() { return name; }
@@ -2262,7 +2362,7 @@ public final class Cmd {
         try {
             String n = name();
             return new String[] {
-                    "AiAgent V4.2 —— 基板只做九件事：存储 / 热插拔 / 提示词 / Agent / 上下文 / 权限 / 模型 / NapCat / 控制台",
+                    "AiAgent " + sair.v4.V4Activity.VERSION + " —— 基板只做九件事：存储 / 热插拔 / 提示词 / Agent / 上下文 / 权限 / 模型 / NapCat / 控制台",
                     "本地控制台交互 ≡ QQ 中的主人交互；主人（MASTER）与她本人（SYSTEM）恒全权，工具一律放行。",
                     "对话：",
                     "\t" + n + "/chat <内容>      和 AI 说话（与 QQ 主人消息同一条链路）",
@@ -2301,7 +2401,8 @@ public final class Cmd {
                     "\t" + n + "/favor reset <QQ>                   清成初值（0 = 初识）；不给 QQ 就清空全部记录 —— 只有主人能跑",
                     "\t" + n + "/napcat [status|on|off|list|send group 群号 内容]",
                     "\t" + n + "/napcat relay [status|on|off]       文件外链中转（本地文件怎么交给 NapCat）",
-                    "\t" + n + "/store [stat|maintain|export 库|import 库 路径]",
+                    "\t" + n + "/store [stat|maintain|optimize 库|vacuum|export 库|import 库 路径]",
+                    "\t" + n + "/facts            逐字打印基板产出的键值事实块（认首行 time: 的那条 system，不是第几条；只读：不落库、不调模型、不调工具）",
                     "\t" + n + "/debug [on [token]|off|status|simulate on|off]   本机调试面的开关（只有它能起停）",
                     "永不失联：装配部分失败时 help/status/tools/config 仍然可用，",
                     "\t" + n + "/status 的 boot.failed_step 会指出是哪一步失败、因为什么。",
@@ -2315,7 +2416,9 @@ public final class Cmd {
                     "\t技能目录里没有 " + Acl.SKILL_FILE_NAME + " = 该技能全部 op 不授权；"
                             + "技能文件里写了不属于它的 op 会被忽略（启动日志里有一行告警）。",
                     "\t看表与改表都在控制台 " + n + "/perm；授权/撤销/查询也可以让她用 perm 工具。",
-                    "说明：好感度不是权限，也不参与任何判定 —— 只影响回话热络；主人可直改"
+                    "说明：好感度数值本身不是权限，但档位另有一道与权限表平行的只读放权闸"
+                            + "（见 auth\\FavorGate：档位够了只多放 file.read / file.list / send.file / send.record 这四个只读 op，"
+                            + "没有通配、翻不过显式 Ban 与硬禁名单）；其余只影响回话热络。主人可直改"
                             + "（" + n + "/favor set <QQ> <数值>）。",
             };
         } catch (Throwable t) {
@@ -2326,7 +2429,7 @@ public final class Cmd {
     /** 最底线的命令表（构造/装配都不可用时的兜底；静态常量，不可能失败）。 */
     public static String[] fallbackHelp() {
         return new String[] {
-                "AiAgent V4.2（降级命令表）",
+                "AiAgent " + sair.v4.V4Activity.VERSION + "（降级命令表）",
                 "控制台可用：help / status / tools / config；其余命令需要基板装配成功。",
                 "如果 status 也不可用，请查看组件日志里 [v4] 开头的错误行。",
         };

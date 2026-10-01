@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>总览 · AiAgent V4 文档</title>
-<meta name="description" content="AiAgent V4.2 文档总览：基板九项能力、12 个页面入口与上手前要留意的约定，每条说明都能对应到实现。">
+<meta name="description" content="AiAgent V4.3 文档总览：基板九项能力、12 个页面入口与上手前要留意的约定，每条说明都能对应到实现。">
 <link rel="stylesheet" href="css/site.css">
 <noscript><style>.reveal{opacity:1 !important;transform:none !important}#bg-canvas,.scanline{display:none !important}</style></noscript>
 </head>
@@ -46,7 +46,7 @@
 
     <section class="hero">
       <span class="eyebrow">总览 · 命令使用 / 基板能力 / 技术实现</span>
-      <h1>AiAgent <span class="grad">V4.2</span><br>基板只做九件事</h1>
+      <h1>AiAgent <span class="grad">V4.3</span><br>基板只做九件事</h1>
       <p class="lede">
         本套文档只写三件事：<b>命令怎么用</b>、<b>基板能做什么</b>、<b>它是怎么实现的</b>。
         关于实现的每条说明都能在仓库里找到对应的地方；
@@ -142,11 +142,11 @@
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">源码</h4>
-            <p><b>114 个 <code>.java</code></b>，分布在 <b>17 个包</b>（根包 <code>sair.v4</code> + 16 个子包）。</p>
+            <p><b>119 个 <code>.java</code></b>，分布在 <b>17 个包</b>（根包 <code>sair.v4</code> + 16 个子包）；随包技能 <b>33</b> 个（<code>data\skills\</code>），工具面 <b>39</b> 个。</p>
             <div class="code" data-lang="powershell">
               <div class="code-head"><span class="lang">powershell</span><span class="path">计数口径</span><button class="copy" type="button">复制</button></div>
               <pre><code>Get-ChildItem &lt;项目目录&gt;\src -Recurse -Filter *.java | Measure-Object
-# =&gt; Count : 114
+# =&gt; Count : 119
 Get-ChildItem &lt;项目目录&gt;\src -Recurse -Filter *.java |
   ForEach-Object { $_.DirectoryName } | Sort-Object -Unique | Measure-Object
 # =&gt; Count : 17</code></pre>
@@ -157,12 +157,12 @@ Get-ChildItem &lt;项目目录&gt;\src -Recurse -Filter *.java |
         <div class="grid-2">
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">配置键面</h4>
-            <p><b>94 个已知键</b>：<code>Conf.knownKeys()</code>（<code>Conf.java</code>）里逐条登记，共 94 次 <code>add(out, …)</code>。</p>
+            <p><b>114 个已知键</b>：<code>Conf.knownKeys()</code>（<code>Conf.java</code>）里逐条登记，共 114 次 <code>add(out, …)</code>（其中 15 次用常量名登记，如 <code>FavorGate.CFG_*</code>）。</p>
             <p class="t-cap"><code>ai/status</code> 会把「文件里是新值、跑着的基板还是旧值」的键点名列成<b>待生效</b>（<code>Conf.java</code>）。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">提示词实物</h4>
-            <p><code>data\prompts\identity.md</code> ；<code>subagent.md</code> ；<code>tools-index.md</code> 。</p>
+            <p><code>data\prompts\identity.md</code> ；<code>subagent.md</code> ；<code>tools-index.md</code> ；<code>redline.md</code>（出站红线词表，四组键）。</p>
             <p class="t-cap">冷启动时基板只建 <b>0 字节空壳</b>，不带任何提示词文案（<code>Boot.java</code>）。</p>
           </div>
         </div>
@@ -195,7 +195,7 @@ Get-ChildItem &lt;项目目录&gt;\src -Recurse -Filter *.java |
         <div class="grid-3">
           <a class="tile reveal" href="usage.html"><span class="t-num">02 / USAGE</span><h3><span class="dot"></span>使用说明</h3><p>任务导向：跟她说话、起停、改配置、提示词、权限与好感、调试面、数据与备份、常见故障 —— 每条都写清"做完会看到什么"。</p><span class="t-meta"><span>怎么做</span><span>怎么确认成功</span></span></a>
           <a class="tile reveal d1" href="deploy.html"><span class="t-num">03 / DEPLOY</span><h3><span class="dot"></span>部署</h3><p>文件落位、启动目录的硬约束、NapCat 反向 WS 与 token、跨机中转、冷启动会生成什么、启动与关停的正确做法。</p><span class="t-meta"><span>落位</span><span>启动 / 关停</span></span></a>
-          <a class="tile reveal d2" href="config.html"><span class="t-num">04 / CONFIG</span><h3><span class="dot"></span>配置键面</h3><p>逐键说明：含义、默认值、怎么调、调错的后果；以及何时生效（<code>ai/config</code> 只写文件）。</p><span class="t-meta"><span>94 键</span><span>生效时机</span></span></a>
+          <a class="tile reveal d2" href="config.html"><span class="t-num">04 / CONFIG</span><h3><span class="dot"></span>配置键面</h3><p>逐键说明：含义、默认值、怎么调、调错的后果；以及何时生效（<code>ai/config</code> 只写文件）。</p><span class="t-meta"><span>114 键</span><span>生效时机</span></span></a>
           <a class="tile reveal" href="commands.html"><span class="t-num">05 / COMMANDS</span><h3><span class="dot"></span>控制台命令</h3><p>每条命令的用法、参数、效果、依赖与注意事项，含"群里只 @ 才触发"和正确关停口径。</p><span class="t-meta"><span>命令表</span><span>注意事项</span></span></a>
           <a class="tile reveal d1" href="capabilities.html"><span class="t-num">06 / CAPABILITIES</span><h3><span class="dot"></span>基板能力</h3><p>九件事、生命周期、失败降级、模型面、QQ 面、权限面、存储面、调试面、边界。</p><span class="t-meta"><span>能力面</span><span>边界</span></span></a>
           <a class="tile reveal d2" href="perms.html"><span class="t-num">07 / PERMS</span><h3><span class="dot"></span>权限管理</h3><p>权限文件怎么按归属分散、<code>perms-core.jsonc</code> 与各技能 <code>perms.jsonc</code> 的写法、三个域各自的默认值、<code>ai/perm</code> 的看表与改表（含数据与路径两种写命令）、越界与未授权长什么样。</p><span class="t-meta"><span>权限文件</span><span>授权 / 撤销</span></span></a>
@@ -256,8 +256,10 @@ Get-ChildItem &lt;项目目录&gt;\src -Recurse -Filter *.java |
         <h3 class="sec">两条最容易踩的坑</h3>
         <div class="grid-2">
           <div class="panel reveal">
-            <h4 class="sub" style="margin-top:0">群里只 @ 才触发</h4>
-            <p>群消息的触发判定只认"被 @ 到自己"：判定点在 <code>QqGateway.java</code> 的 <code>return ev.atSelf();</code>（同一文件  是同一判定的使用处 决定是否剥掉开头的 @）。<code>atSelf()</code> 的判定本体在 <code>qq\Ev.java</code>。</p>
+            <h4 class="sub" style="margin-top:0">群里的地址门：@ 或触发词</h4>
+            <p>基板最小判定只有一句：<b>私聊一律回；群里要求被 @ 到自己</b>（<code>QqGateway.java</code> 的 <code>shouldAnswer(Ev, Caller)</code> → <code>ev.atSelf()</code>；判定本体在 <code>qq\Ev.java</code>）。<b>主人在这道门上也没有豁免</b> —— 群里要么 @ 它、要么用触发词。</p>
+            <p>另有两条路<b>不走</b>这道地址门：① 外挂 voter 投"回"（<code>pluginVote</code>）；② 技能 <code>触发词</code> 命中后自己派活（<code>on_message</code> 里 <code>spawn(…, speak=true)</code>，由此产生的接话由技能那条路负责）。所以"群里没 @ 就一定不说话"是错的，准确说法是"<b>主回合的地址门只认 @</b>"。</p>
+            <p>只 @ 一下、没带任何正文也算数：照样起一轮，把上下文快照交给模型自己接（外挂键 <code>被单@时的输入</code>，回什么由提示词定）。</p>
           </div>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">jar 放到对的目录</h4>

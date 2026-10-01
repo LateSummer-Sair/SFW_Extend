@@ -161,6 +161,7 @@
               <tr><td><code>ai/prompt [show|list|sections|read 名|stat|reload|inject|clear]</code></td><td>提示词</td><td>提示词面；不带子命令 = <code>show</code><br><code>Cmd.java</code></td></tr>
               <tr><td><code>ai/napcat [status|on|off|list|send …|relay …]</code></td><td>NapCat 连接与动作</td><td>连接面 + 配置；<code>on|off</code> 只改文件<br><code>Cmd.java</code></td></tr>
               <tr><td><code>ai/store [stat|maintain|optimize|vacuum|export|import]</code></td><td>六库管理</td><td>六库；不带子命令 = <code>stat</code><br><code>Cmd.java</code></td></tr>
+              <tr><td><code>ai/facts</code></td><td>逐字打印每轮的事实块（基板产出的键值事实）</td><td>上下文装配面；<b>只读</b>：不截断、不落库、不调模型 / 工具、不对任何会话说话<br><code>Cmd.java</code></td></tr>
               <tr><td><code>ai/tick</code></td><td>手动跑一次心跳</td><td>心跳；回"手动心跳完成（第 N 次）"<br><code>Cmd.java</code></td></tr>
               <tr><td><code>ai/alarm</code></td><td>定时唤醒清单</td><td>心跳；打印清单 JSON<br><code>Cmd.java</code></td></tr>
               <tr><td><code>ai/exit</code></td><td>停基板（框架转发到组件 <code>exit()</code>）</td><td>框架；<b>不结束进程</b>，见<a href="#cautions">第十三节</a><br><code>Cmd.java</code></td></tr>
@@ -427,8 +428,8 @@
       <section class="chapter" id="model-cmds">
         <header class="chapter-head reveal">
           <span class="chapter-tag">状态与工具面</span>
-          <h2>六、模型与状态命令：<code>status</code> / <code>tools</code></h2>
-          <p class="chapter-desc">模型这一面没有专属命令 —— 它由 <code>status</code> 报出来、由 <code>config</code> 改、由 <code>chat</code> 用。</p>
+          <h2>六、模型与状态命令：<code>status</code> / <code>tools</code> / <code>facts</code></h2>
+          <p class="chapter-desc">模型这一面没有专属命令 —— 它由 <code>status</code> 报出来、由 <code>config</code> 改、由 <code>chat</code> 用。另有一个只读观察口 <code>facts</code>，把每轮的事实块逐字打给控制台。</p>
         </header>
 
         <div class="keylist">
@@ -461,6 +462,22 @@
               <dd>装配的「基板工具面」那一步注册 <b>17 个</b>（<code>src\sair\v4\term\Cmd.java</code>）；注册动作 <code>src\sair\v4\Boot.java</code>，实现里 17 处 <code>reg.add(Tool.of("…"))</code>（<code>src\sair\v4\Builtins.java</code> 起）。其余工具在外挂扫描之后陆续出现。</dd>
               <dt>依赖</dt>
               <dd>工具注册表。没装配就报"工具面还没装配：&lt;原因&gt;"并提示 <code>ai/start</code>（<code>src\sair\v4\term\Cmd.java</code>）；<code>boot</code> 都没有时回"工具面不可用：注册表未装配"并指向 <code>ai/status</code>。装配还在跑时也能用，结尾补一行说明其余工具会陆续注册。</dd>
+            </dl>
+          </div>
+
+          <div class="keyrow reveal">
+            <div class="k-head"><span class="k-name">ai/facts</span><span class="k-def">用法：<code>ai/facts</code>，不接受参数</span><span class="badge ok">只读观察口</span></div>
+            <dl>
+              <dt>效果</dt>
+              <dd>把<b>每轮第二段 system</b>（基板产出的键值事实块）逐字打给控制台：<code>time: …</code> / <code>caller: …</code> / <code>favorKinds: …</code> / <code>napcat: …</code> / <code>models: …</code> 那些行原样输出，<b>不截断</b>（<code>src\sair\v4\term\Cmd.java</code>；事实块本体在 <code>src\sair\v4\ctx\CtxBuild.java</code>）。</dd>
+              <dt>那一段怎么取的</dt>
+              <dd>按真回合的同一条装配路（<code>CtxBuild.assemble</code>）空装一遍再取 system 段：<b>先按契约取第二条</b>；它不以 <code>time: </code> 打头（前面插进了别的稳定段）就顺着 system 序号往后找第一个事实块；一个都找不到就把第二条原样给出来，<b>不编也不猜内容</b>（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+              <dt>只读：什么都不写</dt>
+              <dd><b>不写对话、不写任何库、不调模型、不调工具、不对任何会话说话</b>（那一轮连对话落点都不接）；装配用的探针正文只是一行固定字符串，只为把上下文装完整，不进事实块、不外发、不发给任何模型（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+              <dt>依赖</dt>
+              <dd>上下文装配面。基板没就绪时只回一句 <code>facts 不可用：基板未就绪（&lt;缺什么&gt;）</code> 就返回，别的什么都不做（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+              <dt>谁来敲</dt>
+              <dd>控制台命令，<b>不在工具面里</b>：ALLUSER 够不着它（模型侧唯一通路是既有的 <code>console</code> 工具 <code>run</code>，而那条 op 默认对 ALLUSER 是 Ban）（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
             </dl>
           </div>
         </div>
@@ -785,9 +802,11 @@
             <div class="k-head"><span class="k-name">ai/store export &lt;库&gt;</span><span class="k-def">导出成 jsonl</span><span class="badge ok">写文件</span></div>
             <dl>
               <dt>参数</dt>
-              <dd>一个库名。导出文件写在配置里的 files 目录下，名字是 <code>&lt;库&gt;-&lt;时间戳&gt;.jsonl</code>；成功回 <code>已导出 &lt;绝对路径&gt;</code>，失败回 <code>导出失败</code>（<code>src\sair\v4\term\Cmd.java</code>；实现 <code>src\sair\v4\store\Store.java</code>）。</dd>
+              <dd>一个库名。导出文件写在<b>数据根下的 <code>tmp\</code> 目录</b>里（<code>Conf.tmpDir()</code>），名字是 <code>&lt;库&gt;-&lt;时间戳&gt;.jsonl</code>；成功回 <code>已导出 &lt;绝对路径&gt;</code>，失败回 <code>导出失败</code>（<code>src\sair\v4\term\Cmd.java</code>；实现 <code>src\sair\v4\store\Store.java</code>）。</dd>
               <dt>注意</dt>
-              <dd>导出的是一个库的全部行，不是某个会话；文件名带时间戳，<b>多次导出不会互相覆盖</b>。落点固定是配置里的 files 目录 —— <b>这条不从参数取路径</b>，所以导出这一跳没有路径那一层的判定；取路径的是下面的 <code>import</code>（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+              <dd>导出的是一个库的全部行，不是某个会话；文件名带时间戳，<b>多次导出不会互相覆盖</b>。落点固定是数据根下的 <code>tmp\</code> —— <b>这条不从参数取路径</b>，所以导出这一跳没有路径那一层的判定；取路径的是下面的 <code>import</code>（<code>src\sair\v4\term\Cmd.java</code>）。</dd>
+              <dt>为什么落 <code>tmp\</code> 而不是 <code>files\</code></dt>
+              <dd class="risk">批 15（2026-09-26）改的：<code>files\</code> 是好感度档位放权闸的允许根之一（键 <code>favorFileRoots</code> 的出厂值里就有 <code>{root}/files/</code>），够到门槛的人对它是只读放行的 —— 整库导出落在那里，等于把全量私聊摆到放人读的那一格（真机上出过一次：一份 6406 行的 <code>dialog</code> 导出就躺在 <code>files\</code> 里）。<code>tmp\</code> 既不在那个允许根清单里，又是部署时按运行时数据跳过的目录，没有任何一条 QQ 侧的读路指得到它。文件名形状与成功行的形状一个字都没改（<code>src\sair\v4\term\Cmd.java</code>、<code>src\sair\v4\Builtins.java</code>）。</dd>
             </dl>
           </div>
 

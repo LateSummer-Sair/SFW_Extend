@@ -475,7 +475,9 @@ public final class Tick {
                             c = new Caller(Caller.Entry.QQ, ownerQq, group ? (ownerGroup > 0 ? ownerGroup : t) : 0,
                                     "", false, store == null ? 0 : store.favor(ownerQq), Str.nz(ownerSession));
                         }
-                        agent.ask(c, sink, text);
+                        // ★ 能力③（2026-10-01）：到点投递不是"有人在会话里叫她" ⇒ addressed: system
+                        //   （取值表见 CtxBuild.ST_ADDRESSED；这一行是纯事实，不影响这一轮的行为）
+                        agent.ask(c, sink, text, null, sair.v4.ctx.CtxBuild.AD_SYSTEM);
                     } catch (Throwable e) {
                         if (out != null) out.err("[tick] 定时任务 #" + id + " 执行失败: " + e);
                     }

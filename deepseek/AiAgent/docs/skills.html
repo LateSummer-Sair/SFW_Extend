@@ -107,7 +107,7 @@
               <tr>
                 <td><code>prompt.md</code></td>
                 <td>可选</td>
-                <td>两件事：① 技能运行时用 <code>Host.skillDir()</code> 读它，把文案、阈值、词表放在里面（改完即时生效，不用重编译）；② md 里写了 <code>inject:</code> 时，装载期把整篇注入到那个槽位。</td>
+                <td>两件事：① 技能运行时用 <code>Host.skillDir()</code> 读它，把文案、阈值、词表放在里面（改完即时生效，不用重编译）；② md 里写了 <code>inject:</code> 时，装载期把整篇注入到那个槽位。<b>格式与同名 md 不同</b>：它是纯 <code>键: 值</code> 一行一条，<b>没有</b> <code>---</code> front matter，<code>#</code> 开头的行是注释；怎么读由技能自己定（真技能一般按文件 mtime 惰性缓存，改完保存下一轮生效）。</td>
                 <td>不写也能跑，但技能里就得把文案硬写在 java 里；声明了 <code>inject:</code> 却没有这份文件 → 什么也不注入（不会报错）。</td>
               </tr>
               <tr>
@@ -186,10 +186,10 @@
           </div>
         </div>
         <div class="note warn reveal">
-          <p><span class="n-title">注册名才是能用在各处的那个名字</span>：权限表里的 op、<code>ai/perm run</code> 敲的参数、代码里 <code>h.need("…")</code> 传的名字，用的都是<b>注册名</b>。声明名与注册名的对照，启动时打一行 <code>[skills]</code> 日志，技能列表里也带 <code>tool_declared</code> 与 <code>tool_note</code> 两句说明。所以新技能最省事的写法就是一开始就把 <code>tool:</code> 写成 ASCII 名字，别让基板替你改名。</p>
+          <p><span class="n-title">注册名才是能用在各处的那个名字</span>：权限表里的 op、<code>ai/perm run</code> 敲的参数、代码里 <code>h.need("…")</code> 传的名字，用的都是<b>注册名</b>。声明名与注册名的对照，启动时打一行 <code>[skills]</code> 日志；被自动改名时，技能列表里还会多出 <code>tool_declared</code> 与 <code>tool_note</code> 两句说明（名字本来就合规范时这两个键不出现）。所以新技能最省事的写法就是一开始就把 <code>tool:</code> 写成 ASCII 名字，别让基板替你改名。</p>
         </div>
         <div class="note bad reveal">
-          <p><span class="n-title">工具名与基板内置工具重名 = 直接失败</span>：基板自己那批工具名是保留名（<code>napcat</code>、<code>console</code>、<code>exec</code>、<code>prompt</code>、<code>model</code>、<code>perm</code>、<code>store</code>、<code>tools</code>、<code>skill</code>、<code>ctx</code>、<code>config</code>、<code>agent</code>、<code>alarm</code>、<code>sendimage</code> 这一类）。技能声明的工具名撞上它们 → 状态 <code>ERROR</code>，错误是「与基板工具重名（基板工具名是保留名，请改名）」，这个技能整条不装。</p>
+          <p><span class="n-title">工具名与基板内置工具重名 = 直接失败</span>：基板自己那 17 个工具名是保留名（<code>store</code>、<code>store_write</code>、<code>store_admin</code>、<code>skill</code>、<code>skill_write</code>、<code>prompt</code>、<code>prompt_write</code>、<code>exec</code>、<code>agent</code>、<code>ctx</code>、<code>perm</code>、<code>tools</code>、<code>config</code>、<code>model</code>、<code>napcat</code>、<code>console</code>、<code>alarm</code>）。技能声明的工具名撞上它们 → 状态 <code>ERROR</code>，错误是「与基板工具重名（基板工具名是保留名，请改名）」，这个技能整条不装。<b>别的技能提供的工具名不算保留名</b>（<code>send</code>、<code>sendimage</code>、<code>sticker</code> 这些是随包技能的工具）—— 撞上它们只会按撞车规则被改成 <code>-2</code> 后缀，技能照常装。</p>
         </div>
 
         <h3 class="sec">一个技能提供几把工具</h3>
@@ -230,7 +230,7 @@
 
         <h3 class="sec">改完什么时候生效</h3>
         <div class="note reveal">
-          <p><span class="n-title">基板不监听目录</span>：加载时机只有两个 —— <b>启动时扫一次</b>，以及<b>显式重载</b>（控制台 <code>ai/skill reload</code>，或模型侧 <code>skill</code> 工具的 <code>op=reload</code>）。改了 md、java、prompt.md 之后不重载，就看不出任何变化。</p>
+          <p><span class="n-title">基板不监听目录</span>：加载时机只有两个 —— <b>启动时扫一次</b>，以及<b>显式重载</b>（控制台 <code>ai/skill reload</code>，或模型侧 <code>skill_write</code> 工具的 <code>op=reload</code>）。改了 md、java、prompt.md 之后不重载，就看不出任何变化。</p>
           <p>重载会不会重编，看这个技能目录的内容有没有变（md 的修改时间与大小、每个 <code>.java</code> 的修改时间与大小、<code>prompt.md</code> 的修改时间与大小）。只改了技能自己读的素材文件（比如 <code>assets</code> 里的图片）不在这个判断里，但那种文件本来就是运行时现读的，不影响。</p>
         </div>
       </section>
@@ -240,7 +240,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">02 / 文档</span>
           <h2>同名 md 怎么写：front matter 逐键讲解</h2>
-          <p class="chapter-desc">md 分两半。<b>上半</b>是夹在两行 <code>---</code> 之间的 front matter，机器只读这一半：工具叫什么、给模型看什么话、参数表长什么样、挂哪些钩子。<b>下半</b>是正文说明书，给人看的，基板一个字都不喂给模型。这一节把上半能认的每个键都列出来，并给一份能直接抄的模板。</p>
+          <p class="chapter-desc">md 分两半。<b>上半</b>是夹在两行 <code>---</code> 之间的 front matter，机器只读这一半：工具叫什么、给模型看什么话、参数表长什么样、挂哪些钩子。<b>下半</b>是正文说明书，给人看的；基板不会自动把它喂给模型，但模型可以按需把它读进来（见下面「说话的那几个键」末尾）。这一节把上半能认的每个键都列出来，并给一份能直接抄的模板。</p>
         </header>
 
         <h3 class="sec">先认边界：front matter 从哪开始、到哪结束</h3>
@@ -398,7 +398,7 @@ list:
             </tbody>
           </table>
         </div>
-        <p class="t-cap">正文那半是给人看的：讲清楚动作、返回、失败形态、边界。它不会进模型上下文 —— 想让模型每轮都看到一段固定的话，用 <code>inject:</code> 加 <code>prompt.md</code>，或者在扩展点里每轮产一段（见<a href="#ext">第 05 节</a>）。</p>
+        <p class="t-cap">正文那半是给人看的：讲清楚动作、返回、失败形态、边界。它不会<b>自动</b>进模型上下文 —— 想让模型每轮都看到一段固定的话，用 <code>inject:</code> 加 <code>prompt.md</code>，或者在扩展点里每轮产一段（见<a href="#ext">第 05 节</a>）。但模型<b>读得到</b>它：基板那把 <code>skill</code> 工具的说明里写着「细节全在技能说明书里」，所以模型要在多动作工具上动手之前，会先 <code>skill op=read name=&lt;技能名&gt;</code> 把正文取走。读法是一条命令一个窗口：<code>offset</code> 是起始字符下标、<code>limit</code> 是本段字符数，标尺就是不传参数时返回的那一整串（正文 == <code>整串[offset, offset+limit)</code>），不传参数时<b>逐字节原样</b>返回。正文可能几万字符，一次读不完会被单次上限（<code>toolResultMax</code>，出厂 6000）收口 —— 切片加上尾注一起不超过这个上限，所以每段末尾都有一行尾注写明本段范围、全文总长与<b>下一个 offset</b>，照着它的 offset 一段段续读，各段正文拼回来就是整份正文。坏参数（负数 / 越界 / 非数字）只回一句可读拒绝，<b>绝不抛异常</b>。所以正文里那些「边界与别拿它干什么」照写，别只塞进 <code>airun.description</code>。</p>
 
         <h3 class="sec">分类与顺序：没有这种键</h3>
         <div class="note reveal">
@@ -484,7 +484,7 @@ airun:
               <tr><td>注释</td><td>声明区里整行以 <code>#</code> 开头的行是注释；行尾注释没有（行尾的 <code>#</code> 会被当成值的一部分）</td><td>只跳过整行注释</td></tr>
               <tr><td>一个 md 声明几个工具</td><td><b>只能一个</b>。要提供两把工具就建两个技能目录</td><td><code>tool:</code> 是单个字符串，一个技能只注册一把工具</td></tr>
               <tr><td>多动作怎么写</td><td>一把工具 + 一个选择子参数 + <code>declareOps</code> 里一个动作一条</td><td>权限、清单、<code>ai/perm</code> 的分组都按这些 op 名走</td></tr>
-              <tr><td>正文</td><td>用 Markdown 写，怎么排版都行</td><td>正文不参与解析，只被原样打印给人看</td></tr>
+              <tr><td>正文</td><td>用 Markdown 写，怎么排版都行</td><td>正文不参与解析、不进 front matter；它是给人读的，也是模型 <code>skill op=read</code> 按需读的那一份</td></tr>
             </tbody>
           </table>
         </div>
@@ -625,7 +625,7 @@ public void declareOps(sair.v4.auth.OpList ops) {
           <table>
             <thead><tr><th>库与数据</th><th>给你什么</th><th>什么时候用它</th></tr></thead>
             <tbody>
-              <tr><td><code>store()</code></td><td>六库的通用读写口</td><td>存自己的数据：<code>put</code> / <code>get</code> / <code>list</code> / <code>search</code> / <code>update</code> / <code>delete</code> / <code>count</code>，以及 <code>kv</code> / <code>kvSet</code> 这种小键值。跨调用要记的东西都放这里（<b>不要放 static</b>）。</td></tr>
+              <tr><td><code>store()</code></td><td>六库 + 插件声明的业务库的通用读写口</td><td>存自己的数据：<code>put</code> / <code>get</code> / <code>list</code> / <code>search</code> / <code>update</code> / <code>delete</code> / <code>count</code>，以及 <code>kv</code> / <code>kvSet</code> 这种小键值。跨调用要记的东西都放这里（<b>不要放 static</b>）。</td></tr>
               <tr><td><code>libs()</code></td><td>库注册表：「世界上有哪些表」的唯一答案</td><td>要确认某张表在不在、有哪些列（比如目标库得有 <code>scope</code> 与 <code>scope_id</code> 才可用）。查不到返回 <code>null</code>，不是异常。</td></tr>
             </tbody>
           </table>
@@ -664,7 +664,7 @@ public void declareOps(sair.v4.auth.OpList ops) {
               <tr><td><code>sfwCursor()</code></td><td>当前控制台输出游标</td><td>配合下面的 <code>sfwRead</code>：下次把它传回去，只拿新增输出。</td></tr>
               <tr><td><code>sfwRead(sinceSeq, maxChars)</code></td><td>控制台最近输出的正文 + 一行事实行</td><td>技能想知道「我刚跑的东西在控制台上打出了什么」时。读不到也给一行说明，不抛异常。</td></tr>
               <tr><td><code>sfwRun(cmd)</code></td><td>跑一条 SFW 框架命令，回它新打出来的输出</td><td>技能要代替人敲一条控制台命令时。判定与 <code>console</code> 工具的 <code>run</code> 是同一个 op（<code>console.run</code>），主人短路在判定之前。</td></tr>
-              <tr><td><code>typing(on)</code></td><td>私聊「正在输入」开关</td><td>私聊里要让对方看到机器人在打字时。这是机器人自己的状态，<b>不按调用者权限裁决</b>；群里是 no-op，NapCat 没连上也是 no-op，不抛异常。</td></tr>
+              <tr><td><code>typing(on)</code></td><td>私聊「正在输入」开关</td><td>私聊里要让对方看到机器人在打字时。它是<b>她自己的状态动作</b>：走带闸门的 NapCat 出口，但主体<b>显式绑 <code>SYSTEM</code></b>（她本人恒全权，所以不会被当轮触发者的位误拦）；群里是 no-op，NapCat 没连上也是 no-op，不抛异常。</td></tr>
             </tbody>
           </table>
         </div>
@@ -691,6 +691,9 @@ public void declareOps(sair.v4.auth.OpList ops) {
 }</code></pre>
         </div>
         <p class="t-cap">判定用的主体是 <code>h.subject()</code>：工具调用时是触发者（「她能替这个人碰什么」看这个人），钩子与扩展点调用时是她自己（自动禁言、自动审批这类是她的自动策略，按触发者判会被陌生人的默认状态当场拒掉）。主人与她本人恒全权，不受表影响。所以判权限不要拿 <code>h.caller()</code> 去问别的地方，统一走 <code>need</code>。</p>
+        <div class="note warn reveal">
+          <p><span class="n-title"><code>h.need</code> 之后还有第二道闸：罢工</span>：情绪到 <code>strike</code>（罢工）档时，<code>need</code> 在<b>权限放行之后</b>再看一眼本场合的情绪，<code>strike</code> 态下除 <code>perm</code> 一族外一律拒，回执只有一行 <code>[罢工中] 我正忙着，这事等会儿再说。</code>，<b>不调用任何下游</b>。所以技能要做的就是"把 <code>need</code> 的返回值原样回给模型"——判据、措辞与场合键都只有基板那一处（<code>Builtins.strikeDeny</code>），<b>别在技能里再写一套停工判断</b>。它取不到场合 / 读库异常时按不拦处理（fail-open，只记一行 warn），也<b>不豁免 SYSTEM</b> —— 你自己钩子里发的 op 在罢工态下同样会被拒 <code>skill\Host.java</code>、<code>Builtins.java</code>。</p>
+        </div>
 
         <h3 class="sec">异常、超时、返回值：把话说清楚</h3>
         <div class="keylist">
@@ -719,7 +722,7 @@ public void declareOps(sair.v4.auth.OpList ops) {
             <div class="k-head"><span class="k-name">static 状态</span><span class="k-def">重载后一定丢</span><span class="badge bad">别用它记状态</span></div>
             <dl>
               <dt>为什么</dt><dd>热重载会把技能重新编译一遍，并换上一个<b>新的类加载器</b>：旧类连同它的 static 字段一起作废，新实例看到的是全新的初值。所以「把计数、缓存、锁表放在 static 里」在重载之后就是空的 —— 计数归零、缓存没了、锁也换了一把。</dd>
-              <dt>那放哪</dt><dd>跨调用要记住的东西放 <code>h.store()</code>（六库或 kv）里；只在一次调用内部用的临时量放局部变量。同一次装载里 static 是共享的，多条会话会同时读写它，要用就得自己加锁 —— 这一条也是「能不用就不用」的理由。</dd>
+              <dt>那放哪</dt><dd>跨调用要记住的东西放 <code>h.store()</code>（六库 + 插件声明的业务库，或者 <code>kv</code> 小键值）里；只在一次调用内部用的临时量放局部变量。同一次装载里 static 是共享的，多条会话会同时读写它，要用就得自己加锁 —— 这一条也是「能不用就不用」的理由。</dd>
               <dt>跟实例的关系</dt><dd>默认每次都新建实例（<code>airun.state: per_call</code>），实例字段活不过一次调用；写成 <code>shared</code> 时整个进程复用一个实例，同一个技能同一时刻只跑一个调用，但实例字段在重载后同样是新的。</dd>
             </dl>
           </div>
@@ -1182,7 +1185,7 @@ public class Example implements Skill, Hooked {
           <table>
             <thead><tr><th>问题</th><th>答案</th></tr></thead>
             <tbody>
-              <tr><td>它是干什么的</td><td>管「发出去的东西」：洗 AI 味、给提问者加 @、追加一张表情包、剥离不该外泄的标记。位置在<b>分段之后、发送之前</b>，所以看到的是已经分好的一条条消息。</td></tr>
+              <tr><td>它是干什么的</td><td>管「发出去的东西」：洗 AI 味、给提问者加 @、追加一张表情包这类<b>业务改写</b>。位置在<b>分段之后、发送之前</b>，所以看到的是已经分好的一条条消息。</td></tr>
               <tr><td>要写哪几个方法</td><td><code>int order()</code>（抽象方法，要写）；<code>String transform(Outbound m)</code>、<code>List&lt;String&gt; extra(Outbound m)</code>、<code>boolean veto(Outbound m)</code>、<code>List&lt;String&gt; finish(List&lt;String&gt; parts, Outbound m)</code> 四个都有默认实现，按需要覆盖。</td></tr>
               <tr><td>什么时候轮到你</td><td>每一次要往外发话（群、私聊、定时任务的落点）都会走一遍。逐条口会对<b>每一条</b>各调用一次。</td></tr>
               <tr><td>每个口的分工</td><td><b><code>veto</code></b>：一票否决，<code>true</code> = 这一条不发（整条丢，不做「改一点点再发」）。<b><code>transform</code></b>：改正文，返回 <code>null</code> = 不改（这是「没意见」的默认），返回空串或全空白 = 这一条会被丢掉。<b><code>extra</code></b>：追加独立消息（再追一张表情包这种），只在还有话要发的时候收一次，追加的消息<b>不再过 stage</b>（否则插件之间会互相追加、无限繁殖）。<b><code>finish</code></b>：整批收尾，拿到最终的整条消息表（已含追加的消息），返回新表就整表替换，返回 <code>null</code> = 不改；返回空表 = 这一批一条都不发。</td></tr>
@@ -1203,6 +1206,9 @@ public class Example implements Skill, Hooked {
             <p>有些事天然是「整条回复」级别的，逐条口做不对。典型是<b>把 @ 提问者加在首条</b>：首条要是<b>真正会发出去</b>的那一条，而在逐条口里看不到后面哪条会被别的 stage 丢掉或者洗空 —— 结果 @ 挂到了一条根本没发的消息上。「末条补个标点」「整批去重」也只有在这里才准。</p>
             <p>注意：<code>finish</code> 返回空表就是这个能力（等于整批不发），用的时候心里有数；表里的元素按原样发，不再过 stage。</p>
           </div>
+        </div>
+        <div class="note warn reveal">
+          <p><span class="n-title">协议级与安全级的那几族<b>不归 stage 管</b>，别重写</span>：<code>[[mood:…]]</code> 标记族（唯一实现 <code>qq\MoodMarks.java</code>）与出站红线（唯一实现 <code>term\Redline.java</code>，词表 <code>prompts\redline.md</code> 热读）已经下沉到基板，落在<b>逐条那一道闸</b>（<code>term\Sinks.gate</code>）与<b>工具发送路</b>（<code>qq\Api</code> 的内容级闸）上。理由是这两族原先只有一个实现、住在可选技能里 ⇒ 技能被移走 / 编译失败 / <code>extEnabled=false</code>（整条 stage 管线不跑）/ 工具发送路（完全不过 stage）任一形态都会让整族失效。所以：<b>不要在你的 stage 里再写一套标记剥离或红线词表</b>（只会多出第二套判据）；<code>[[mood:转述]]</code> 这类"标记的含义"仍归技能，基板只负责"这一行不许成为正文"。另外 <code>finish</code> 拿到的是最终条数已按一轮条数上限（<code>replyMaxParts</code>，默认 9）裁过的那一批 <code>Sinks.java</code>、<code>MoodMarks.java</code>、<code>Redline.java</code>。</p>
         </div>
 
         <h3 class="sec">ContextProvider：每轮往上下文里加一段</h3>
@@ -1408,8 +1414,14 @@ public class Example implements Skill, Hooked, ContextProvider {
               <tr>
                 <td><code>data\skills\情绪\</code></td>
                 <td><code>EmotionSkill.java</code>（<code>implements Skill, Hooked</code>）、<code>EmotionProvider.java</code>（<code>implements ContextProvider</code>）、<code>MoodStage.java</code>（<code>implements OutboundStage</code>，<code>order()</code> 给 90）、<code>MoodLifecycle.java</code>（<code>implements LifecycleHook</code>）</td>
-                <td>一个技能同时挂了钩子与三个扩展点，全都不给工具</td>
-                <td>同一件事的四种时机拆成四个类，各自只管一段；provider 是<b>只读</b>的（不写库、不取时间戳、不用随机数），所以「同一状态同一轮两次产出一字不差」永远成立 —— 前缀缓存与排错都靠这一条。</td>
+                <td>一个技能同时挂了钩子与三个扩展点，全都不给工具；<b>14 个状态</b>（<code>calm</code> / <code>angry</code> / <code>happy</code> / <code>sad</code> / <code>letdown</code> / <code>strike</code> / <code>careful</code>（戒备）/ <code>wronged</code>（委屈）/ <code>guilty</code>（心虚）/ <code>jealous</code>（吃醋）/ <code>proud</code>（得意）/ <code>shy</code>（害羞）/ <code>expect</code>（期待）/ <code>tired</code>（疲惫））</td>
+                <td>同一件事的四种时机拆成四个类，各自只管一段；provider 是<b>只读</b>的（不写库、不取时间戳、不用随机数），所以「同一状态同一轮两次产出一字不差」永远成立 —— 前缀缓存与排错都靠这一条。<br>它注入的那一段情绪态是一个<b>最多六行</b>的块：第 1 行事实 + 第 2 行语气 + 第 3 行<b>范例</b> + 第 4 行边界 + 第 5 行自报要求 + 末行覆盖句；语气 / 范例 / 边界 / 自报要求四行都是"取到内容才加"，所以行数在 3~6 之间浮动（<code>EmotionMood.block()</code>）。<b>标记的识别与剥离不在这里</b> —— <code>[[mood:…]]</code> 的唯一实现在基板 <code>qq\MoodMarks.java</code>，这个技能只读"标记的含义"（记分与语义）；阈值一类旋钮都在同目录的 <code>prompt.md</code>（例如 <code>触发阈-poke: 3</code> = 被反复戳三次才升级）。</td>
+              </tr>
+              <tr>
+                <td><code>data\skills\辅助识图\</code></td>
+                <td><code>VisionAgent.java</code>（看图手 + 图片内容审查 + 候选行产出）、<code>LookTool.java</code>（给模型的那把工具）</td>
+                <td><code>tool: look</code> + 入站钩子（只登记身份，不判、不写候选）</td>
+                <td>跨技能接口只用一行 <code>kv</code> 表达：看图成功且 trailer 三项都读得到时写 <code>sticker:cand/&lt;md5&gt;</code>（<code>md5 = md5(url 非空 ? url : file)</code>），消费方 <code>表情包\StickerCollect.java</code> <b>读到即删</b> —— 谁写谁清、键本身就是去重键，两边不用共享任何类。审查（禁图词表）也在这里：<code>imgGate</code> 只有两个调用点（新回执、账本命中），命中就只回一句固定话、描述一个字都不出去。</td>
               </tr>
               <tr>
                 <td><code>data\skills\表情包\</code></td>
@@ -1622,7 +1634,7 @@ ai/perm list example.add
               <tr>
                 <td>昨天还好好的，重载之后计数器 / 缓存清零了</td>
                 <td>代码里有没有 static 字段存状态</td>
-                <td><b>热重载会换一个新的类加载器</b>，旧类连同它的 static 字段一起作废，新实例看到的是全新的初值 —— 计数归零、缓存没了、锁也换了一把。跨调用要记住的东西放 <code>store</code>（六库或 kv）里。</td>
+                <td><b>热重载会换一个新的类加载器</b>，旧类连同它的 static 字段一起作废，新实例看到的是全新的初值 —— 计数归零、缓存没了、锁也换了一把。跨调用要记住的东西放 <code>store</code>（六库 + 插件声明的业务库，或者 <code>kv</code>）里。</td>
               </tr>
               <tr>
                 <td>md 里写了 <code>tool:</code>，但工具面里没有这把工具</td>

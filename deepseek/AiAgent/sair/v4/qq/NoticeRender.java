@@ -55,6 +55,34 @@ import sair.v4.store.Store;
  * {@code notice_type}、19 组 {@code type/sub_type}、1,827 条。本类用到的那几个字段全在原始帧里
  * <b>亲眼见过</b>；表里标了但实测不存在的字段（如 {@code notify/profile_like} 的 {@code user_id}）
  * <b>没有</b>被写成代码，见 REPORT「未核实/与工单不符」一节。</p>
+ *
+ * <h3>N1：两种写法都要认（同形断言）</h3>
+ * <p>上游两页给出的 {@code notice_type} 取值写法<b>不同</b>（{@code tmp/v6-real/upstream/D3.md}
+ * 「notice_type 两页写法不同」第 9 条、两页各自的表）：</p>
+ * <ol>
+ *   <li>{@code /onebot/event}：{@code notice_type=notify} + {@code sub_type=<kind>}
+ *       （poke / group_name / title / gray_tip / profile_like / input_status 共 <b>6</b> 个）；</li>
+ *   <li>{@code /onebot/basic_event}：{@code notice_type=<kind>} <b>直接给</b>取值
+ *       （{@code poke} / {@code lucky_king} / {@code honor} 等，共 <b>14</b> 个；
+ *       {@code lucky_king} 与 {@code honor} <b>只</b>在这一页出现）。</li>
+ * </ol>
+ * <p>归一在 {@link #notifyKind(String, String)} <b>一处</b>完成：写法①取 {@code sub_type}、
+ * 写法②取 {@code notice_type}，得到同一个 {@code kind} 后走同一条渲染分支 ⇒
+ * <b>同一件事的两种写法给出逐字节相同的标签</b>。写法②只在 {@code sub_type} 为空<b>或与自己同名</b>时才算数
+ * （上游 basic_event 表里这三个取值的补充说明逐字写着 {@code sub_type: 'poke'} / {@code 'lucky_king'} /
+ * {@code 'honor'}）；{@code sub_type} 是别的值 ⇒ <b>不认</b>，落回"未知通知"那一路（宁可少渲染，不编）。</p>
+ *
+ * <h3>N1：本轮补齐的分支</h3>
+ * <ul>
+ *   <li>{@code lucky_king}（运气王；上游只列字段 {@code group_id/user_id/target_id}，
+ *       <b>没写</b>哪个是运气王 ⇒ 打原键名 {@code target_id=…}，不猜它是消息 id）；</li>
+ *   <li>{@code honor}（荣誉变更；{@code honor_type} 的取值表上游<b>没有</b>给 ⇒ 原样打值，不翻译）；</li>
+ *   <li>{@code gray_tip}（灰条；{@code content} 是<b>JSON 字符串</b>，上游没给内部形状 ⇒
+ *       只从里面抽第一个 {@code txt}/{@code text} 字符串，抽不到就只打结构键）；</li>
+ *   <li>{@code group_name}（群名变更；上游给了 {@code name_new}，顺手补上，6 个 notify 子类型就齐了）。</li>
+ * </ul>
+ * <p>原有的 {@code poke/input_status/profile_like/title} 与新增分支的标签<b>逐字未动</b>：
+ * 本次只"多认几种写法 + 多几个分支"，既有夹具（{@code probe\ProbeNotices}）期望的每一串都还在。</p>
  */
 public final class NoticeRender {
 
@@ -104,6 +132,19 @@ public final class NoticeRender {
     public static final String ESSENCE = "[精华] ";
     public static final String ESSENCE_MID = " 把消息 ";
     public static final String ESSENCE_TAIL = " 设为精华";
+    /** N1 新增：运气王（只有 {@code /onebot/basic_event} 给这个取值）。 */
+    public static final String LUCKY_KING = "[运气王] ";
+    public static final String LUCKY_KING_TAIL = " 是运气王 (target_id=";
+    /** N1 新增：荣誉变更。 */
+    public static final String HONOR = "[荣誉] ";
+    public static final String HONOR_MID = " 的荣誉变更";
+    /** N1 新增：灰条。 */
+    public static final String GRAY_TIP = "[灰条] ";
+    /** N1 新增：群名变更（notify 的 6 个子类型之一，顺手补上）。 */
+    public static final String GROUP_NAME = "[群名] ";
+    public static final String GROUP_NAME_MID = " 把群名改成 ";
+    /** 抽不出任何文字时的显式降级（灰条 content 内部形状上游没给）。 */
+    public static final String NO_TEXT = "(没有可读文本)";
     public static final String UNKNOWN = "[未知通知 type=";
     public static final String UNKNOWN_MID = " sub=";
     public static final String UNKNOWN_TAIL = "]";
@@ -137,6 +178,48 @@ public final class NoticeRender {
         return "group_msg_emoji_like".equals(t) || "essence".equals(t);
     }
 
+    /**
+     * <b>「这条 poke 通知戳的是本机本人吗」—— 唯一一处结构判据</b>（标签与"戳回复"共用一处，
+     * 不写第二套）。判据只用<b>原始帧的结构字段</b>，刻意<b>不</b>看任何文案/标签 ——
+     * 标签恰恰是本类产出的，拿它当判据就是自证。
+     *
+     * <p>判据：{@code notice_type=notify} + {@code sub_type=poke} + {@code target_id}。</p>
+     *
+     * <p><b>{@code target_id<=0} 视为"戳的是本机"</b>：与 {@link #labelNotify} 的旧写法逐字同一条
+     * 读法（私聊戳理论上可以没有这个字段）。线上实测（{@code tmp\v6-real\emptyat-poke\REPORT.md}：
+     * 2026-09-22 当天 111 帧 poke，<b>0 帧缺 {@code target_id}</b>；其中 7 帧
+     * {@code target_id == self_id}）—— 也就是说这条兜底今天不会被真实帧用到，留着只为与标签同口径。</p>
+     *
+     * @param self 本机 QQ（{@code self_id}）；{@code <=0} = 不认本机（那时只有 {@code target_id}
+     *             缺失才算"是她"）
+     */
+    public static boolean pokeAtSelf(Ev ev, long self) {
+        if (ev == null) return false;
+        // N1：两种写法都认（notify+poke / 直接 poke）—— 判据与标签共用 notifyKind，不写第二套。
+        if (!"poke".equals(notifyKind(low(ev.noticeType()), low(ev.subType())))) return false;
+        long target = longOf(ev, "target_id", 0L);
+        return target <= 0L || (self > 0L && target == self);
+    }
+
+    /** notify 家族的全部 {@code kind}（上游 {@code /onebot/event} 的 6 个 sub_type + 只在该页直接给的两个）。 */
+    private static final java.util.Set<String> NOTIFY_KINDS = new java.util.HashSet<String>(
+            java.util.Arrays.asList("poke", "group_name", "title", "gray_tip", "profile_like", "input_status",
+                    "lucky_king", "honor"));
+
+    /**
+     * <b>两种写法的唯一归一入口</b>（{@code /onebot/event} 的 {@code notify+sub_type} 与
+     * {@code /onebot/basic_event} 的直接取值）。返回空串 = "不是 notify 家族"（未知子类型也返回空串，
+     * 于是调用方照旧走"未知通知"那一路，既有输出逐字不变）。
+     *
+     * @param t   {@code notice_type}（已 lower+trim）
+     * @param sub {@code sub_type}（已 lower+trim）
+     */
+    private static String notifyKind(String t, String sub) {
+        if ("notify".equals(t)) return NOTIFY_KINDS.contains(sub) ? sub : "";
+        if (NOTIFY_KINDS.contains(t) && (sub.isEmpty() || sub.equals(t))) return t;
+        return "";
+    }
+
     /** 未知通知最多带几个标量字段。 */
     private static final int UNKNOWN_FIELDS_MAX = 6;
     /** 未知通知单个值的上限（字符）。 */
@@ -147,6 +230,12 @@ public final class NoticeRender {
     private static final int NESTED_VALUE_CHARS = 200;
     /** {@code extra} 里 {@code sub_type} 的最大长度。 */
     private static final int SUB_TYPE_CHARS = 40;
+    /** 灰条文本（{@code content} 里抽出来的那一句）的上限。 */
+    private static final int GRAY_TEXT_CHARS = 120;
+    /** 灰条 {@code content} 的 JSON 遍历深度上限。 */
+    private static final int GRAY_DEPTH_MAX = 6;
+    /** 灰条 {@code content} 的 JSON 遍历节点数上限（防"巨大载荷把抽取变成遍历炸弹"）。 */
+    private static final int GRAY_NODES_MAX = 128;
 
     /**
      * 未知通知不带进标签的结构性键（它们不是"这条通知说了什么"，事件分类已经在别处）。
@@ -174,7 +263,10 @@ public final class NoticeRender {
         String t = low(ev.noticeType());
         if (t.isEmpty()) return "";
         String sub = low(ev.subType());
-        if ("notify".equals(t)) return labelNotify(ev, sub, self, st, c);
+        // N1：两种写法归一到同一个 kind（判据见类注释"N1：两种写法都要认"）。
+        // kind 为空 ⇒ 不是 notify 家族（含 unknown 的 notify 子类型）⇒ 继续走下面各条分支。
+        String kind = notifyKind(t, sub);
+        if (!kind.isEmpty()) return labelNotify(ev, kind, self, st, c);
         if ("group_msg_emoji_like".equals(t)) return labelEmojiLike(ev, st, c);
         if ("group_recall".equals(t)) return RECALL + nick(ev.operatorId(), st, c) + RECALL_TAIL + ev.messageId() + ")";
         if ("friend_recall".equals(t)) return RECALL + nick(ev.userId(), st, c) + RECALL_TAIL + ev.messageId() + ")";
@@ -212,23 +304,123 @@ public final class NoticeRender {
 
     // ---------------------------------------------------------------- 逐类标签
 
-    /** {@code notify/*}：poke / input_status / profile_like / title（其余子类型 ⇒ 未知那一路）。 */
-    private static String labelNotify(Ev ev, String sub, long self, Store st, Caller c) {
-        if ("poke".equals(sub)) {
+    /**
+     * notify 家族（{@code kind} 由 {@link #notifyKind} 归一而来，8 个分支全覆盖）：
+     * {@code poke / input_status / profile_like / title / lucky_king / honor / gray_tip / group_name}。
+     */
+    private static String labelNotify(Ev ev, String kind, long self, Store st, Caller c) {
+        if ("poke".equals(kind)) {
             String who = nick(ev.userId(), st, c);
-            long target = longOf(ev, "target_id", 0L);
-            if (target <= 0L || (self > 0L && target == self)) return POKE + who + POKE_YOU;
-            return POKE + who + POKE_OTHER + nick(target, st, c);
+            if (pokeAtSelf(ev, self)) return POKE + who + POKE_YOU;
+            return POKE + who + POKE_OTHER + nick(longOf(ev, "target_id", 0L), st, c);
         }
-        if ("input_status".equals(sub)) return INPUT_STATUS + nick(ev.userId(), st, c) + INPUT_SUFFIX;
-        if ("profile_like".equals(sub)) {
+        if ("input_status".equals(kind)) return INPUT_STATUS + nick(ev.userId(), st, c) + INPUT_SUFFIX;
+        if ("profile_like".equals(kind)) {
             // 注意：这一类的 actor 是 operator_id（普查 2/2 都只有 operator_id，**没有** user_id）
             long op = longOf(ev, "operator_id", 0L);
             return PROFILE_LIKE + nick(op > 0L ? op : ev.userId(), st, c)
                     + PROFILE_LIKE_MID + nick(ev.userId(), st, c) + PROFILE_LIKE_TAIL;
         }
-        if ("title".equals(sub)) return TITLE + nick(ev.userId(), st, c) + TITLE_TAIL;
-        return unknown(ev, "notify", sub);
+        if ("title".equals(kind)) return TITLE + nick(ev.userId(), st, c) + TITLE_TAIL;
+        if ("lucky_king".equals(kind)) {
+            // 上游只列 group_id/user_id/target_id，**没说** target_id 是什么 ⇒ 打原键名，不猜
+            return LUCKY_KING + nick(ev.userId(), st, c) + LUCKY_KING_TAIL
+                    + longOf(ev, "target_id", 0L) + ")";
+        }
+        if ("honor".equals(kind)) {
+            // honor_type 的取值表上游没给 ⇒ 原样打值（不翻译成"龙王/群聊之火"那种我们查不到对照表的话）
+            String ht = cut(val(ev, "honor_type"));
+            return HONOR + nick(ev.userId(), st, c) + HONOR_MID
+                    + (ht.isEmpty() ? " " + NO_TEXT : " honor_type=" + ht);
+        }
+        if ("gray_tip".equals(kind)) return labelGrayTip(ev, st, c);
+        if ("group_name".equals(kind)) {
+            String n = cut(val(ev, "name_new"));
+            return GROUP_NAME + nick(ev.userId(), st, c) + GROUP_NAME_MID
+                    + (n.isEmpty() ? NO_TEXT : n);
+        }
+        // 8 个 kind 全在上面 ⇒ 兜底只为"将来往 NOTIFY_KINDS 加了一个却没写分支"时不静默丢：
+        return unknown(ev, low(ev.noticeType()), low(ev.subType()));
+    }
+
+    /**
+     * {@code notify/gray_tip}（灰条）：{@code content} 是<b>JSON 字符串</b>（上游 D3 该行原文
+     * "灰条内容（JSON字符串）"），但<b>没有</b>给内部形状 ⇒ 这里只做两件事：
+     * ① 从里面抽第一个 {@code txt}/{@code text} 字符串（深度/节点数都有界）；
+     * ② 抽不出就打结构键 {@code busi_id}/{@code message_id}；再没有就 {@link #NO_TEXT}。
+     *
+     * <p>{@code user_id} 按上游是"真实发送者 QQ（如果是伪造的灰条，这就是攻击者）"⇒ 照它念名字。</p>
+     */
+    private static String labelGrayTip(Ev ev, Store st, Caller c) {
+        StringBuilder sb = new StringBuilder(GRAY_TIP).append(nick(ev.userId(), st, c));
+        boolean any = false;
+        String txt = cut(grayText(val(ev, "content")), GRAY_TEXT_CHARS);
+        if (!txt.isEmpty()) { sb.append(' ').append(txt); any = true; }
+        String busi = cut(val(ev, "busi_id"), UNKNOWN_VALUE_CHARS);
+        if (!busi.isEmpty()) { sb.append(" busi_id=").append(busi); any = true; }
+        long mid = ev.messageId();
+        if (mid > 0L) { sb.append(" msg_id=").append(mid); }
+        if (!any) sb.append(' ').append(NO_TEXT);
+        return sb.toString();
+    }
+
+    /**
+     * 灰条 {@code content} 里的可读文本：是 JSON 就从里面找第一个 {@code txt}/{@code text} 字符串；
+     * 不是 JSON（或解析不出来）就<b>原样</b>当作文本（它同样会被 {@code cut} 卫生 + 截断）。
+     */
+    private static String grayText(String content) {
+        String s = Str.trim(content);
+        if (s.isEmpty()) return "";
+        JsonElement e = J.el(s);
+        if (e == null) return s;
+        // 裸串（"接龙开始啦"）在宽松解析下就是一个 JsonPrimitive —— 那它就是文本本身。
+        // （实测踩过：不认这一支，纯文本灰条会只剩结构键。）
+        if (e.isJsonPrimitive()) {
+            try {
+                String t = Str.trim(e.getAsString());
+                return Str.has(t) ? t : s;
+            } catch (Throwable ignored) {
+                return s;
+            }
+        }
+        String found = firstTextLeaf(e, 0, new int[] {GRAY_NODES_MAX});
+        return found == null ? "" : found;
+    }
+
+    /**
+     * 深度优先找第一个 {@code txt}/{@code text} 字符串值（键名逐字来自上游对灰条以外文本段的命名习惯，
+     * 也是 NapCat 灰条载荷里实际用的键）；节点预算见 {@link #GRAY_NODES_MAX}，超了就不再往下找。
+     */
+    private static String firstTextLeaf(JsonElement e, int depth, int[] budget) {
+        if (e == null || e.isJsonNull() || depth > GRAY_DEPTH_MAX || budget[0] <= 0) return null;
+        if (e.isJsonPrimitive()) return null;
+        budget[0]--;
+        if (e.isJsonObject()) {
+            JsonObject o = e.getAsJsonObject();
+            for (Map.Entry<String, JsonElement> en : o.entrySet()) {
+                String k = Str.lower(Str.trim(en.getKey()));
+                JsonElement v = en.getValue();
+                if (("txt".equals(k) || "text".equals(k)) && v != null && v.isJsonPrimitive()) {
+                    try {
+                        String t = Str.trim(v.getAsString());
+                        if (Str.has(t)) return t;
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+            for (Map.Entry<String, JsonElement> en : o.entrySet()) {
+                String r = firstTextLeaf(en.getValue(), depth + 1, budget);
+                if (r != null && Str.has(r)) return r;
+            }
+            return null;
+        }
+        if (e.isJsonArray()) {
+            for (JsonElement x : e.getAsJsonArray()) {
+                String r = firstTextLeaf(x, depth + 1, budget);
+                if (r != null && Str.has(r)) return r;
+            }
+        }
+        return null;
     }
 
     /**

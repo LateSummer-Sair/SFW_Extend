@@ -75,6 +75,70 @@ public final class QqGateway {
      */
     private final sair.v4.qq.Seen seen = new sair.v4.qq.Seen();
 
+    /**
+     * <b>戳一戳回复</b>（本批 2026-09-22「空@兜底 + 戳一戳应答」）：就是<b>这一个字符</b>。
+     *
+     * <p><b>为什么写死在 Java 里、不走 {@code prompts/tools-index.md} 外挂 —— 这是 GM 裁定，不是随手决定</b>：
+     * 它<b>不是"她对用户说的话"，而是系统级固定回执</b>，与仓库既有的"冻结措辞"同类
+     * （{@code [权限阻断] } 那一类就是写死的）。外挂一个键会新增"缺键 ⇒ 她连问号都不回"的失败面，
+     * 而这条路的全部价值恰恰是"<b>永远有一个最小回应</b>"。⇒ 裁定：<b>作为冻结回执写死在 Java 里，
+     * 不新增配置键</b>。若甲方以后要改这个字，改动面 = <b>本处 1 行 + 部署一次</b>，代价可接受。</p>
+     */
+    private static final String POKE_REPLY = "？";
+
+    /**
+     * 戳回复的<b>内存</b>窗口：{@code session#user_id → [窗口起点 ms, 本窗口内被压掉的次数]}。
+     *
+     * <p>口径（<b>GM 裁定二</b>）：<b>同一会话、同一个人 60 秒内连戳只回一次</b>。
+     * 键刻意用既有会话键 + 人（{@code group:<群号>#<qq>} / {@code qq:<qq>#<qq>}，会话键由
+     * {@link Caller#session()} 现码，本处<b>不</b>自己拼会话字符串）—— <b>不同会话互不影响</b>。</p>
+     *
+     * <p><b>为什么不是"只按人"</b>（最初的写法）：同一个人在 A 群戳完、30 秒内在 B 群再戳就会被一起压掉，
+     * 在 B 群表现得像"她不理人"。GM 明确不要这个副作用，故收窄成"人 + 会话"。</p>
+     *
+     * <p>窗口是<b>纯内存态</b>：进程重启即清空（如实记在报告里；不落库是有意的 —— 这是一条
+     * 反刷屏的礼貌闸，不是业务账本）。</p>
+     */
+    private final Map<String, long[]> pokeWin = new java.util.concurrent.ConcurrentHashMap<String, long[]>();
+    private static final long POKE_WINDOW_MS = 60000L;
+    /** 窗口表的回收水位：超过它就顺手清掉已过期的条目（防止长期运行只增不减）。 */
+    private static final int POKE_WIN_SWEEP = 512;
+
+    /**
+     * <b>外部来源行</b>（D1）在 {@code dialog.role} 上的取值：本账号<b>另一个机器人服务</b>发出来的私聊消息。
+     *
+     * <p>为什么不是 {@code "user"}：{@code dialog.role} 只有 {@code user}/{@code assistant} 两个"人"的位置，
+     * 而 {@code CtxBuild.appendHistory} 把 {@code user} 行<b>逐字</b>注入这一轮的对话历史 —— 写 {@code user}
+     * 会让模型把它读成"<b>对方说的</b>"（这正是 D1 要治的"错归属"，只是换了个人）。写一个第三种角色值
+     * 之后：窗口（{@code ChatWindow}）照旧列它并标「其他」（见 {@code ChatWindow.FOREIGN}），
+     * 而 role 历史那条路（只认 user/assistant）自然不收它 —— 它在模型眼里<b>永远不会</b>变成某个人说的话。
+     * 代价如实记在报告里：私聊的外部行只经"窗口"可见，不重复进 role 历史。</p>
+     */
+    public static final String DIALOG_ROLE_FOREIGN = "foreign";
+
+    /**
+     * 本进程内"<b>我们自己真的发出去过</b>"的 {@code msg_id} 环的容量（D1 的正向证据第 ① 层）。
+     *
+     * <p>它比 {@code sent} 台账的保留量（{@link sair.v4.store.Store#DEF_SENT_KEEP} = 2000 行，
+     * 按行数裁）大 ⇒ <b>进程还活着的时候</b>，"台账被裁掉的老消息"仍然认得出是我们发的
+     * （见 {@link #ownKind}）。纯内存、有界（超出淘汰最旧的），重启即空 —— 那一段由台账与
+     * {@link #recentMidKind} 兜。</p>
+     */
+    private static final int RECENT_SENT_MAX = 4096;
+    /** {@link #recentMidKind} 只看目标会话<b>最近</b>多少行（有界、走会话索引的点查）。 */
+    private static final int ECHO_SCAN_ROWS = 200;
+    /** {@link #ownKind} 的三档结论：确定是外部来源 / 已经有她自己的行 / 确实是这次我们发的。 */
+    private static final int OWN_FOREIGN = 0;
+    private static final int OWN_ROW_SELF = 1;
+    private static final int OWN_MINE = 2;
+    /** 本进程内我们发过的 {@code msg_id}（LRU 有界环；读写都加锁，A 路来自任意线程）。 */
+    private final Map<Long, Boolean> sentRing = new java.util.LinkedHashMap<Long, Boolean>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, Boolean> eldest) {
+            return size() > RECENT_SENT_MAX;
+        }
+    };
+
     public QqGateway(Boot boot) {
         this.boot = boot;
         this.conf = boot.conf();
@@ -116,6 +180,53 @@ public final class QqGateway {
     /** 一行结构事实（dim 色，前缀 [qq]）。 */
     private void facts(String line) {
         if (out != null && logQq()) out.dim("[qq] " + line);
+    }
+
+    /**
+     * <b>与 {@code [qq→] sent …} 同级的可见出口</b>：一行结构事实（dim 色，前缀 {@code [qq] }），
+     * <b>只受"有没有 out"约束，不受 {@code logConsole} 的 {@code msg} 类别开关影响</b>。
+     *
+     * <p><b>为什么需要第二个出口</b>（2026-09-22 真机实测 + 本批根因定位，原文见
+     * {@link #pokeFact(String)}）：{@link #facts(String)} 的口子是 {@code logQq()} =
+     * {@code conf.getBool("logQq", true)} <b>且</b> {@code conf.logOn("msg")}；而 {@code logConsole}
+     * 的出厂值是 {@code "tool,model"}（{@code Conf.DEF_LOG_CONSOLE}）⇒ <b>默认
+     * {@code logOn("msg") == false}</b>。于是"已经发生、但用户看不见"的既成事实
+     * （戳回复、语音转写）会整行被那两道类别开关挡掉 —— 现象看起来像"功能没做"。</p>
+     *
+     * <p>判据：<b>这件事是否已经发生且不可从别处看见</b>。是 ⇒ 走这个出口（一行、只有结构量、
+     * 一个正文字符都不打）；不是（普通路由/跳过说明）⇒ 照旧走 {@link #facts(String)} 受类别管。
+     * 这个出口<b>不改</b>任何全局日志配置：{@code logConsole} / {@code logQq} 的语义与出厂值
+     * 一个字节没动。</p>
+     */
+    private void visibleFact(String line) {
+        if (out != null) out.dim("[qq] " + line);
+    }
+
+    /**
+     * 一行<b>戳回复</b>结构事实（{@code [qq] poke reply=…}）—— 与 {@code [qq→] sent …}
+     * （{@code term.Sinks}）同级：<b>只受"有没有 out"约束，不受 {@code logConsole} 的
+     * {@code msg} 类别开关影响</b>。
+     *
+     * <h3>为什么不走 {@link #facts(String)}（2026-09-22 真机实测 + 本批根因定位）</h3>
+     * <p>{@code facts()} 的口子是 {@code logQq()} = {@code conf.getBool("logQq", true)}
+     * <b>且</b> {@code conf.logOn("msg")}；而 {@code logConsole} 的出厂值是 {@code "tool,model"}
+     * （{@code Conf.DEF_LOG_CONSOLE}）⇒ <b>默认 {@code logOn("msg") == false}</b>
+     * ⇒ 戳回复那条事实行<b>一行都没进控制台</b>（真机 grep {@code poke reply} = 0 命中，
+     * 只剩 {@code Link.call} 那条不受开关约束的 {@code [NapCat] 动作 …} 行）。</p>
+     *
+     * <p><b>根因不是级别</b>：{@code QqGateway.out} 就是 {@code boot.out()} 原对象
+     * （{@code Boot.out()}），{@code SfwOut.print} 对任何 tone 都照印，dim 直达控制台 ——
+     * 整行是在<b>调用之前</b>被上面那两道类别开关挡掉的（"供应商没错，闸口认错了类别"）。
+     * 所以修法是给这条结构性事实换一个<b>与 {@code [qq→] sent} 同级</b>的出口，
+     * <b>不动日志全局配置</b>：{@code logConsole} / {@code logQq} 的语义与出厂值一个字节没改，
+     * {@code notice …} 那条既有事实行照旧受 {@code msg} 类别管。</p>
+     *
+     * <p><b>不带正文/昵称</b>：只有 {@code reply} / {@code user} / {@code gid} /
+     * {@code suppressed} 四个结构量；每次戳<b>至多一行</b>（{@code reply=1} 与
+     * {@code reply=0} 二选一，不叠加）。</p>
+     */
+    private void pokeFact(String line) {
+        visibleFact(line);
     }
 
     /** 一行回合摘要（前缀 [turn]：这轮跑了多久/几轮/几次工具/成没成）；默认不打。 */
@@ -227,6 +338,87 @@ public final class QqGateway {
                 + (Str.blank(Str.trim(ev.subType())) ? "" : "/" + Str.lower(Str.trim(ev.subType())))
                 + " table=" + table + " chars=" + Str.nz(nr.label).length());
         dispatchNotice(ev, type, nr.row);
+        // ★ 本批 2026-09-22「戳一戳应答」：通知分支里**唯一**一条会往外说话的路。
+        //   刻意排在 dispatchNotice **之后**：既有那条"落库 → 结构事实 → 派记账钩子"的顺序
+        //   一个字节都不动（情绪技能的戳计数靠的就是那条钩子，本批不碰情绪记账）。
+        pokeReply(ev);
+    }
+
+    /**
+     * 有人<b>戳的是她本人</b> ⇒ 直接回一个「？」（<b>不走模型</b>）。
+     *
+     * <h3>这条路的纪律（与消息路彻底分开，工单 P2 第 1/2 条）</h3>
+     * <ul>
+     *   <li><b>判据是结构字段</b>：{@link sair.v4.qq.NoticeRender#pokeAtSelf(Ev, long)}
+     *       （{@code notice_type=notify} + {@code sub_type=poke} + {@code target_id == self_id}）——
+     *       与标签产法<b>共用同一处</b>判据，<b>不</b>拿 {@code content} 里的
+     *       {@code [戳一戳]} 文案当判据（标签是别处产出的，用它就是自证）；</li>
+     *   <li><b>零回合</b>：不进 {@code shouldAnswer}（地址门）、不进 {@code pluginVote}（触发投票）、
+     *       不派 {@code Skills.ON_MESSAGE}、<b>不调模型</b>、不提交任何回合 —— 本方法在 notice 分支里，
+     *       那几处在 {@code handleMessage} 里，构造上够不着；</li>
+     *   <li><b>走同一道出站闸</b>：与消息回复同一个 {@link Sinks.QqSink} + {@code boot.guardedApi()}
+     *       ⇒ 整条事实块闸（G1 {@code qq.InternalFacts}）、自我记账头、工具调用标记、出站红线、
+     *       一轮条数上限、内部字面量闸全部照旧生效（<b>不</b>自己拼 NapCat 调用）；</li>
+     *   <li><b>同一会话、同一人 60 秒只回一次</b>（{@link #pokeWin}；键 = {@code session#qq}，
+     *       内存态、重启即清。GM 裁定二：不同会话互不影响）。</li>
+     * </ul>
+     *
+     * <p><b>一条结构事实行</b>（<b>不含正文/昵称</b>，只有号码与计数）：
+     * {@code [qq] poke reply=1|0 user=<qq> gid=<群号或 0> suppressed=<本窗口内被压掉的次数>}。
+     * {@code reply=0} = 这次被窗口压掉；{@code suppressed} 在 {@code reply=1} 那一行上带的是
+     * <b>上一个窗口</b>压掉的次数（窗口刚重置，本窗口此刻必然是 0）—— 这样一行就能看出
+     * "刚才被连着戳了几下才让我回这一声"。{@code gid} 就是窗口键里那个会话的群号（私聊为 0），
+     * 所以"是哪个会话被压掉的"这一行自己说得清。</p>
+     *
+     * <p>不喂情绪状态机：本方法<b>不</b>碰任何情绪库/账本；戳的记账照旧只由 {@code dispatchNotice}
+     * 那条记账钩子（{@code Skills.ON_NOTICE}）负责，本批一个字都没动它。</p>
+     */
+    private void pokeReply(Ev ev) {
+        try {
+            if (ev == null || boot == null) return;
+            if (!sair.v4.qq.NoticeRender.pokeAtSelf(ev, ev.selfId())) return;
+            long qq = ev.userId();
+            if (qq <= 0L || qq == ev.selfId()) return;     // 自己戳自己：不回
+            Caller c = callerOf(ev);
+            if (c == null) return;
+            // 本地黑名单是"我们这边不处理"的权威（与消息路同一条纪律，见类注释）：
+            // 被本地拉黑的人戳她，同样一个字都不回。工单没写这一条，这里按既有纪律办，报告里登记。
+            if (blocked(qq)) {
+                facts("poke skip reason=blocked user=" + qq
+                        + "（本地黑名单；戳已记入 " + (ev.isGroup() ? "grouplog" : "dialog") + "）");
+                return;
+            }
+            long gid = ev.isGroup() ? ev.groupId() : 0L;
+            long now = System.currentTimeMillis();
+            if (pokeWin.size() > POKE_WIN_SWEEP) sweepPokeWin(now);
+            // ★ GM 裁定二：窗口键 = **会话 + 人**（不是只按人）—— 同一会话同一个人 60 秒只回一次，
+            //   不同会话互不影响。会话键取既有 Caller.session()（本处不自己拼会话字符串）。
+            String key = c.session() + "#" + qq;
+            long[] w = pokeWin.get(key);
+            if (w != null && now - w[0] < POKE_WINDOW_MS) {
+                w[1] = w[1] + 1L;
+                pokeFact("poke reply=0 user=" + qq + " gid=" + gid + " suppressed=" + w[1]
+                        + "（同一会话同一人 " + (POKE_WINDOW_MS / 1000L) + " 秒内只回一次）");
+                return;
+            }
+            long suppressed = w == null ? 0L : w[1];       // 上一个窗口压掉的次数（窗口已过期）
+            pokeWin.put(key, new long[] { now, 0L });
+            pokeFact("poke reply=1 user=" + qq + " gid=" + gid + " suppressed=" + suppressed);
+            Sink sink = new Sinks.QqSink(boot.guardedApi(), c, out, false, seg, boot.favor());
+            sink.say(POKE_REPLY);
+        } catch (Throwable t) {
+            if (out != null) out.warn("[qq] 戳回复失败（不影响这条通知的留痕）：" + t);
+        }
+    }
+
+    /** 清掉过期的窗口条目（只在表变大时顺手做一次；口径与 {@link #pokeReply} 同一个窗口长度）。 */
+    private void sweepPokeWin(long now) {
+        java.util.Iterator<Map.Entry<String, long[]>> it = pokeWin.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, long[]> e = it.next();
+            long[] v = e.getValue();
+            if (v == null || now - v[0] >= POKE_WINDOW_MS) it.remove();
+        }
     }
 
     /** 一条通知落在哪个会话键上（群 → {@code group:<群号>}，私聊 → {@code Caller.session()}）。 */
@@ -347,6 +539,48 @@ public final class QqGateway {
     //   * 去重三层：内存 `Seen`（键 `s:`，挡同进程重复投递）→ 持久 `Store.sentKnown`
     //     （走 `idx_sent_msgid`，挡跨重启重放）→ 落行带 `extra.self=true`（读侧可辨）。
     //
+    // ★ D1（2026-09-28，本批修的缺陷）：**同一个 selfId 下有三个机器人服务共用一个 QQ 账号**
+    //   （我们 / 云崽 / 舞立方，NapCat 向三家各发一条反向 WS，并且把 `message_sent` **广播**给所有连接）。
+    //   于是"另一个机器人服务"发出去的消息，会以**和我们自己发的完全同形**的 `message_sent` 帧
+    //   （`user_id == selfId`）送到这里。改之前 `handleMessageSent` 只挡 `uid != selfId` ⇒ 挡不住它们；
+    //   接下去的 `selfEcho` 判据是"台账里有没有这条" ⇒ 查不到就当**她说的**写一行
+    //   （`grouplog` 里 `user_id=selfId` + `[我发的 msg_id=…]` 头；私聊那侧 `dialog.role=assistant`）
+    //   ⇒ **别家机器人的话被记成她说的**，窗口显示「我」，还进她的记忆/印象素材。
+    //   现在的口径（判据都写死在这里，**没有任何"关键词→归属"的规则**）：
+    //     * **只有正向证据**才走"她的行"（{@link #ownKind}）：① 这次发送自带台账行（A 路）；
+    //       ② 本进程内我们发过的 id（内存环，台账被裁也在）；③ 台账点查命中；
+    //       ④ 台账已经裁过时，目标会话最近若干行里已经有这个 id 的**自我行**；
+    //     * 拿不到正向证据 ⇒ **不写她的行**，改写**外部来源行**（{@link #foreignEcho}：
+    //       无自我记账头、`extra.self` 不为 true、`extra.foreign=true`、窗口标「其他」）；
+    //     * 台账"从没裁过"时（`count(sent) < DEF_SENT_KEEP`）不在台账里 = **确定不是我们发的**
+    //       （不做任何猜测）：这是把"我们自己的老消息被误判成外部"这个方向堵死的那一步。
+    //   A 路（`sentId > 0`）一字未改：它仍旧是"这条是我们发的"的铁证。
+    //
+
+    /** 记一笔"这个 id 是我们发的"（正向证据的内存层；A 路与已确认的 B 路都写它）。 */
+    private void rememberSent(long msgId) {
+        if (msgId <= 0L) return;
+        try {
+            Long k = Long.valueOf(msgId);
+            synchronized (sentRing) {
+                sentRing.remove(k);              // 重插 ⇒ 它挪到最年轻的一端（LRU）
+                sentRing.put(k, Boolean.TRUE);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 这个 id 是不是本进程内我们发过的（纯内存，无 IO）。 */
+    private boolean recentSent(long msgId) {
+        if (msgId <= 0L) return false;
+        try {
+            synchronized (sentRing) {
+                return sentRing.containsKey(Long.valueOf(msgId));
+            }
+        } catch (Throwable t) {
+            return false;
+        }
+    }
     // ★ 自我识别（A 路与 B 路怎么认出"这一条我已经记过了"）—— 这一段的结论是被实测逼出来的，
     //   写清楚免得后人再踩一次：
     //   朴素做法是"落行前先查 `sent` 台账里有没有这个 msg_id"。**它会让 A 路永远不落行**：
@@ -400,6 +634,9 @@ public final class QqGateway {
     public void selfEcho(String action, long msgId, JsonObject params, long sentId, String preview) {
         if (boot == null || boot.store() == null) return;      // 六库没装配：不记（与 N1 同）
         if (msgId <= 0L) return;                               // 没有真 id 就没有"③ 对应哪条消息"
+        // ★ D1：A 路的 `sentId > 0` 是"这条是我们发的"的**铁证** ⇒ 立刻进内存环
+        //   （于是台账以后被裁掉、同一个 id 再以 message_sent 回来时，第 ② 层还认得出）。
+        if (sentId > 0L) rememberSent(msgId);
         String sess = echoSession(params);                     // 落点会话键（归一成 Caller.session() 形状）
         boolean group = sess.startsWith("group:");
         if (!group && !sess.startsWith("qq:")) {
@@ -421,6 +658,7 @@ public final class QqGateway {
         if (sentId <= 0L) {
             try {
                 if (boot.store().sentKnown(msgId)) {
+                    rememberSent(msgId);                       // ★ D1：台账点查命中 = 正向证据 ⇒ 进内存环
                     facts("self_echo skip reason=sent_known msg_id=" + msgId + "（台账已记过这条）");
                     return;
                 }
@@ -452,6 +690,7 @@ public final class QqGateway {
         row.addProperty("content", content);
         row.add("extra", echoExtra(action, sentId));
         boot.store().put(table, row);
+        rememberSent(msgId);            // ★ D1：这一行落库 = 这条确实是我们发的 ⇒ 进内存环（B 路补记的那一支）
         // 结构事实一行（只有"哪个会话、哪个动作、多少字"，**没有正文**）：
         // 与 N1 的 facts 行同一形状 —— 控制台不当聊天记录的回声墙。
         facts("self_echo session=" + sess + " action=" + action + " table=" + table
@@ -543,6 +782,13 @@ public final class QqGateway {
      * <p><b>fail-closed 的自我核对</b>：帧里若给了 {@code user_id}/{@code sender.user_id}
      * 且都对不上 {@code self_id}，这条<b>不是</b>她发的 ⇒ 丢弃。
      * 两个来源都为 0（对端没填）时不拦（不能因为对方少填一个字段就丢掉记账）。</p>
+     *
+     * <p><b>★ D1 归属（本批新增，判据就一句：<u>只有正向证据才算她的</u>）</b>：
+     * 上面那条 {@code uid != selfId} 的核对对"共用同一个 QQ 账号的另一个机器人服务"<b>不设防</b>
+     * （三家的 {@code user_id} 都是 selfId）。所以这一步之后先问 {@link #ownKind}：
+     * 拿得到正向证据 ⇒ 照旧走 {@link #selfEcho}（她的行，字节与改之前一致）；
+     * 拿不到 ⇒ 走 {@link #foreignEcho}（<b>外部来源行</b>：不是她的行，但仍留痕、仍进窗口、标「其他」）。
+     * 两条路<b>共用同一把内存去重键</b> {@code s:<msg_id>} ⇒ 同一条重放不会写两行（不论归属）。</p>
      */
     private void handleMessageSent(Ev ev) {
         if (ev == null || boot == null || boot.store() == null) return;
@@ -580,7 +826,181 @@ public final class QqGateway {
         // sentId 给 0：这条路**没有**台账行（台账是 Api.call 那一步写的），于是：
         //   ① A 路已经记过 ⇒ 台账里有那一行 ⇒ selfEcho 的 ② 层挡下（跨重启也成立）；
         //   ② A 路没记过（比如这次发送走了不走 Api.call 的通路）⇒ 台账里没有 ⇒ 这一路补记一行。
-        selfEcho("message_sent", mid, params, 0L, "");
+        //
+        // ★ D1：这两条**只对"确实是我们发的"成立**。共用同一个 QQ 账号的其它机器人服务发出来的
+        //   消息，在帧上与她的东西逐字同形 ⇒ 归属必须先问 ownKind（正向证据），
+        //   拿不到证据的一律走 external 那一支（绝不写成她的行）。
+        int own = ownKind(mid, echoSession(params), ev.isGroup() && ev.groupId() > 0L);
+        if (own == OWN_ROW_SELF) {
+            rememberSent(mid);
+            facts("self_echo skip reason=already_self msg_id=" + mid + "（这个 id 已经有她自己的行）");
+            return;
+        }
+        if (own == OWN_MINE) {
+            selfEcho("message_sent", mid, params, 0L, "");
+            return;
+        }
+        foreignEcho("message_sent", mid, params);
+    }
+
+    // ==================== 归属（D1：正向证据） ====================
+
+    /**
+     * <b>这条 {@code message_sent} 是不是"我们自己发出去的"</b>（{@link #OWN_MINE} /
+     * {@link #OWN_ROW_SELF} / {@link #OWN_FOREIGN}）。
+     *
+     * <p>判据按"从便宜到贵"排，且<b>每一条都是正向证据</b>（没有任何关键词表、没有任何猜测）：</p>
+     * <ol>
+     *   <li><b>内存环</b>（{@link #recentSent}）：本进程内我们发过的 id —— 台账后来被裁掉也还认得出。
+     *       它是"台账超窗 ⇒ 我们自己的老消息被误判成外部"这个方向的第 ① 道堵塞；</li>
+     *   <li><b>台账点查</b>（{@code Store.sentKnown}，走 {@code idx_sent_msgid}）：跨重启也成立；</li>
+     *   <li><b>台账完整性</b>：{@code sent} 表<b>从没裁过</b>（行数 &lt; {@link sair.v4.store.Store#DEF_SENT_KEEP}）
+     *       ⇒ "不在台账里"就是<b>确定不是我们发的</b>（{@code Api.call} 的每一次发送都在台账里插一行）
+     *       —— 这一档让新装/低频期的判定是**结论**而不是猜测；</li>
+     *   <li><b>会话近期行</b>（{@link #recentMidKind}，有界、走会话索引）：台账已经裁过时，
+     *       目标会话最近 {@link #ECHO_SCAN_ROWS} 行里已经有这个 id 的<b>自我行</b> ⇒ 是她发的
+     *       （B 路跨重启重放那一支）。<b>成本与盲区</b>：一次会话内有界查询（不是全表扫 ——
+     *       {@code grouplog.msg_id} 没有索引，全表扫实测 61.8 ms，这里刻意不那样查）；
+     *       盲区 = 那一行已经滑出"最近 {@link #ECHO_SCAN_ROWS} 行"时看不出来，如实记在报告里。</li>
+     * </ol>
+     *
+     * <p><b>读不出来时的方向</b>：一律按"没有正向证据"处理（{@link #OWN_FOREIGN}）——
+     * 这正是本批的口径"<b>只有正向证据才算她的</b>"：宁可把一条她自己的老消息标成外部来源，
+     * 也不许把别家机器人的话记成她说的（两边的代价不对称，见报告）。</p>
+     */
+    private int ownKind(long mid, String sess, boolean group) {
+        if (recentSent(mid)) return OWN_MINE;                  // ①
+        try {
+            if (boot.store().sentKnown(mid)) return OWN_MINE;   // ②
+            boolean pruned = boot.store().db() != null
+                    && boot.store().db().count("sent", null) >= sair.v4.store.Store.DEF_SENT_KEEP;
+            if (!pruned) return OWN_FOREIGN;                    // ③ 台账完整 ⇒ 不在台账里 = 确定不是我们发的
+        } catch (Throwable t) {
+            if (out != null) out.warn("[qq] 归属判据读库失败（按外部来源处理）: " + t);
+            return OWN_FOREIGN;
+        }
+        return recentMidKind(sess, group, mid) == OWN_ROW_SELF ? OWN_ROW_SELF : OWN_FOREIGN;   // ④
+    }
+
+    /**
+     * 目标会话<b>最近</b> {@link #ECHO_SCAN_ROWS} 行里这条 {@code msg_id} 的状态（B 路第 ③ 层有界点查）。
+     *
+     * <p>返回 {@link #OWN_ROW_SELF}（已有<b>她自己的行</b>：{@code content} 带这个 id 的自我记账头，
+     * 两种头形态都认）/ 2（已有行但不是她的：外部来源行、或入站的别人发言）/ {@link #OWN_FOREIGN}（没有）。</p>
+     *
+     * <p><b>为什么是"会话最近 N 行"而不是 {@code WHERE msg_id = ?}</b>：{@code grouplog.msg_id}
+     * 没有索引（四个索引都在 {@code group_id}/{@code user_id}/{@code ts} 上），全表存在性检查实测
+     * 61.8 ms（{@code Store.sentKnown} 的注释里有实测数）。这里有界查询走
+     * {@code idx_grouplog_group(group_id, ts)} / {@code idx_dialog_session(session, ts)}，
+     * 读到 N 行就停，代价与表大小无关。换来的盲区就是"更老的行看不见"，如实写在报告里。</p>
+     */
+    private int recentMidKind(String sess, boolean group, long mid) {
+        if (mid <= 0L || Str.blank(sess)) return OWN_FOREIGN;
+        List<JsonObject> rows;
+        try {
+            rows = group
+                    ? boot.store().list("grouplog", J.obj("group_id", groupIdOf(sess)), ECHO_SCAN_ROWS, "ts DESC")
+                    : boot.store().list("dialog", J.obj("session", sess), ECHO_SCAN_ROWS, "ts DESC");
+        } catch (Throwable t) {
+            if (out != null) out.warn("[qq] 归属判据：会话近期行点查失败（按无正向证据处理）: " + t);
+            return OWN_FOREIGN;
+        }
+        if (rows == null || rows.isEmpty()) return OWN_FOREIGN;
+        String want = String.valueOf(mid);
+        String head = sair.v4.qq.SelfEcho.head(mid);                       // [我发的 msg_id=N]
+        String headP = sair.v4.qq.SelfEcho.HEAD_LEAD_PAREN + mid           // (我发的 msg_id=N)（san 中和出来的形态）
+                + sair.v4.qq.SelfEcho.HEAD_TAIL_PAREN;
+        for (JsonObject r : rows) {
+            String c = Str.nz(J.s(r, "content", ""));
+            if (c.startsWith(head) || c.startsWith(headP)) return OWN_ROW_SELF;      // 她自己的行（唯一产法）
+            if (group && want.equals(Str.trim(Str.nz(J.s(r, "msg_id", ""))))) return 2;   // 群行按 msg_id 列认
+            JsonObject ex = J.sub(r, "extra");
+            if (ex != null && J.b(ex, "foreign", false) && J.l(ex, "msg_id", 0L) == mid) return 2;
+        }
+        return OWN_FOREIGN;
+    }
+
+    /**
+     * <b>外部来源行</b>（D1）：本账号<b>另一个机器人服务</b>发出来的消息 —— 不是她的行，但照旧留痕。
+     *
+     * <p>与 {@link #selfEcho} 的关系（逐条对齐，差别只有归属）：</p>
+     * <ul>
+     *   <li><b>同表同会话</b>：群 → {@code grouplog}、私聊 → {@code dialog}，会话键由**同一处归一**
+     *       （{@link #echoSession}）算出来；</li>
+     *   <li><b>内容一样干净</b>：走 {@link sair.v4.qq.SelfEcho#content}（唯一产法）+ {@code withoutHead}
+     *       ⇒ 就是"她的行去掉自我记账头"的那一串（正文 + 段标签，段标签仍只由 {@code MediaRender} 产出），
+     *       <b>不写</b> {@code [我发的 msg_id=…]}、<b>不写</b> {@code dialog.role=assistant}；</li>
+     *   <li><b>{@code extra.foreign=true}</b>（键名冻结）：读侧的唯一身份判据（窗口标「其他」、
+     *       技能线不当素材、{@code Person} 不计入）；另带 {@code action} 与 {@code msg_id}（都是事实）；</li>
+     *   <li><b>同一把内存去重键</b> {@code s:<msg_id>}（与她的行共用）⇒ 同一条重放不会写两行；
+     *       跨重启重放由 {@link #recentMidKind} 在会话近期行里挡住（群行额外有 {@code msg_id} 列可比）；</li>
+     *   <li><b>零触发</b>：与 {@code selfEcho} 逐字同一份纪律 —— 只落一行、然后 return。不进地址门、
+     *       不进触发投票、不派 {@code ON_MESSAGE}、<b>不调模型、不发消息</b>（能力③要的"仍然唤起思考"
+     *       不是在这里做的，这里一个字都不做）。</li>
+     * </ul>
+     *
+     * <p><b>{@code user_id} 写什么（本处唯一的"取舍"）</b>：写 {@code conf.selfId()} —— 帧里给的发送者
+     * 就是本账号（不编）。代价：这一列与她的自我行同形 ⇒ "按 {@code user_id == selfId} 就当成她说的"
+     * 这种读法会再次踩坑，所以读侧的身份判据<b>必须</b>看 {@code extra}（窗口 / 技能线都已经这样判）。</p>
+     */
+    private void foreignEcho(String action, long msgId, JsonObject params) {
+        if (boot == null || boot.store() == null) return;
+        if (msgId <= 0L) return;
+        String sess = echoSession(params);
+        boolean group = sess.startsWith("group:");
+        if (!group && !sess.startsWith("qq:")) {
+            facts("foreign_echo skip reason=no_session action=" + action + " msg_id=" + msgId);
+            return;
+        }
+        // ① 内存层：与她的行共用同一把键（`s:`）⇒ 同一条重放不写第二行
+        if (seen.dup("s:" + msgId, System.currentTimeMillis(), dedupWindowMs())) {
+            facts("foreign_echo skip reason=dup msg_id=" + msgId + "（窗口内已经记过这条）");
+            return;
+        }
+        // ② 持久层：目标会话近期行里已经有这个 id ⇒ 不重复写（跨重启重放）
+        if (recentMidKind(sess, group, msgId) != OWN_FOREIGN) {
+            facts("foreign_echo skip reason=known msg_id=" + msgId + "（会话近期行里已经有这个 id）");
+            return;
+        }
+        // ③ 渲染：正文 + 段标签（唯一产法；合成失败绝不抛，降级成"只有正文/空"）
+        sair.v4.qq.Ev sev = sair.v4.qq.SelfEcho.evOf(params);
+        String content = sair.v4.qq.SelfEcho.withoutHead(sair.v4.qq.SelfEcho.content(msgId,
+                sair.v4.qq.SelfEcho.textOf(sev),
+                sair.v4.qq.SelfEcho.labels(sev, mediaFacts(sev))));
+        String table = group ? "grouplog" : "dialog";
+        JsonObject row = new JsonObject();
+        row.addProperty("ts", System.currentTimeMillis());
+        if (group) {
+            row.addProperty("group_id", groupIdOf(sess));
+            row.addProperty("user_id", conf.selfId());     // 帧里给的发送者（见方法注释的取舍）
+            row.addProperty("nickname", "");               // 不编名字：它不是这个群里的任何一个人
+            row.addProperty("msg_id", String.valueOf(msgId));   // 与自我行同一口径（TEXT 列写十进制串）
+        } else {
+            row.addProperty("session", sess);
+            row.addProperty("role", DIALOG_ROLE_FOREIGN);  // ★ 不是 assistant、也不是 user（见常量注释）
+            row.addProperty("tokens", 0);
+        }
+        row.addProperty("content", content);
+        row.add("extra", foreignExtra(action, msgId));
+        boot.store().put(table, row);
+        facts("foreign_echo session=" + sess + " action=" + action + " table=" + table
+                + " msg_id=" + msgId + " chars=" + content.length());
+        // ★ 到此为止：不派钩子、不投票、不调模型、不发消息（零触发，与 selfEcho 同一份）。
+    }
+
+    /**
+     * 外部来源行的 {@code extra}：{@code {"foreign":true,"action":…,"msg_id":…}}。
+     *
+     * <p>{@code foreign} 是<b>冻结键名</b>（读侧唯一身份判据，见 {@code ChatWindow.markedForeign}）；
+     * {@code action} 与 {@code msg_id} 都是帧里的事实，只用于诊断与跨重启重放的比对。
+     * <b>绝不写 {@code self}</b> ⇒ 任何"看 {@code extra.self} 判她自己"的读点天然拿不到它。</p>
+     */
+    private static JsonObject foreignExtra(String action, long msgId) {
+        JsonObject extra = new JsonObject();
+        extra.addProperty("foreign", true);
+        extra.addProperty("action", Str.lower(Str.trim(action)));
+        if (msgId > 0L) extra.addProperty("msg_id", msgId);
+        return extra;
     }
 
     // ==================== 消息 ====================
@@ -606,6 +1026,34 @@ public final class QqGateway {
         // 而图片段的 URL 兜底读的就是这本登记簿。
         sair.v4.qq.Inbound.remember(ev);
         final JsonArray mediaArr = mediaFacts(ev);
+        // ★ D2（N2）：语音转写（`fetch_ptt_text`）—— 入站渲染链上的**唯一**调用点。
+        //   为什么必须接在这里：`Api.pttEnrich` 只是"前置一步"（就地给 record 段补 `ptt_text`），
+        //   不接 = 能力备好了却永不发生（静默失效，不报错 —— N1 报告⑥-1 的那个卡点）。
+        //   ① 用**不带闸门**的 `boot.api()`：这是基板自主行为（与落库/自我记账同一档），
+        //      不是技能发起的动作；带闸门那条路要 `napcat.fetch_ptt_text` 有授权才动得了；
+        //   ② 放在 `mediaFacts` 之后、`media:` 事实串与 `MediaRender.render` **之前**：
+        //      转写进 fact ⇒ 标签形状 `[语音 12秒：…]` 与事实行 `media: […]` 是同一串（同一次渲染）；
+        //   ③ 走 `visibleFact`（与 `pokeFact` **同一个可见出口**）：出厂 `logConsole="tool,model"`
+        //      ⇒ `facts()` 那条口子里 `msg` 类别默认关，"转写发生了"会被整行挡掉（看不见 = 以为没做）；
+        //      这一行只有规模（records/text/none/enabled/[why]），**一个转写正文字符都没有**。
+        String pttLine = "";
+        String urlLine = "";
+        try {
+            sair.v4.qq.Api bootApi = boot.api();
+            if (bootApi != null) {
+                pttLine = bootApi.pttEnrich(ev, mediaArr);
+                // ★ D3（N2）：图片直链刷新（`nc_get_rkey` → `get_image` → `get_file` → `get_msg`）
+                //   的**唯一**调用点。为什么是这里、为什么不是 QuoteCache / MediaAttach.scan，
+                //   逐条写在 `Api.refreshFactsUrlsQuiet` 的 javadoc 里（那边是判据本体）。
+                //   要点：只在"有 rkey 的图 + 有理由怀疑它旧"时才发动作；刷不出来就**保留原地址**；
+                //   rkey 是令牌 ⇒ 刷出来的地址只留在本轮内存的 fact 里，不落库、不落日志。
+                urlLine = bootApi.refreshFactsUrlsQuiet(ev, mediaArr);
+            }
+        } catch (Throwable ignored) {
+            // 纯附属步骤：转写/刷新失败绝不改这条消息的任何既有行为（两个方法自己也不抛）
+        }
+        if (Str.has(pttLine)) visibleFact(pttLine);
+        if (Str.has(urlLine)) visibleFact(urlLine);
         final String media = mediaArr.size() == 0 ? "" : "media: " + J.json(mediaArr);
         // ★ M3：入站一次性确定性渲染。全树的调用点只有两处 —— 这一处（M3：入站那一次）
         // 与 qq\QuoteCache 里那一处（M4：取回被引消息）；两处都走 MediaRender 的唯一入口，
@@ -692,6 +1140,8 @@ public final class QqGateway {
                     + "（插件投票 " + pv.by + "：不自动回 —— 不产生模型调用）");
             return;
         }
+        // ★ 能力③（2026-10-01）：这一轮是不是**被投票要回来的**（插件那一票）—— 见下面 vote 那一支。
+        boolean byVote = pv != null && pv.vote == sair.v4.ext.TriggerVoter.Vote.ANSWER;
         if (pv == null || pv.vote != sair.v4.ext.TriggerVoter.Vote.ANSWER) {
             Boolean vote = null;
             try {
@@ -709,6 +1159,9 @@ public final class QqGateway {
                 facts("skip reason=not_addressed session=" + session + "（非主人/非私聊/未@）");
                 return;
             }
+            // ★ 能力③（2026-10-01）：这一轮是**被投票要回来的**（触发词那一票 / 插件那一票）——
+            //   它压过地址规则，是"为什么起这一轮"最具体的那一条（事实行 addressed: trigger 的判据）。
+            if (vote != null && vote.booleanValue()) byVote = true;
         }
         final String text = Str.nz(ev.plainText());
         // 只有 at 段（单 @ 一下、没有文字也没有媒体）不跳过：主人/群友"点个名"就是要它说话，
@@ -758,8 +1211,37 @@ public final class QqGateway {
                 : (Str.blank(media) ? quoteFact : media + "\n" + quoteFact);
         facts("→ lane=" + session + " high=" + ((c.master() || !c.isGroup()) ? 1 : 0)
                 + " chars=" + prompt.length() + (media.isEmpty() ? "" : " media=1")
-                + (Str.blank(quoteFact) ? "" : " quote=1"));
-        submitTurn(caller, sink, prompt, mediaFact);
+                + (Str.blank(quoteFact) ? "" : " quote=1")
+                + " addressed=" + Str.nz(addressedOf(ev, c, byVote)));
+        submitTurn(caller, sink, prompt, mediaFact, addressedOf(ev, c, byVote));
+    }
+
+    /**
+     * <b>这一轮是怎么被叫到的</b>（能力③的事实来源，{@code CtxBuild.ST_ADDRESSED} 的取值）。
+     *
+     * <p>判据表（优先级从上到下，第一个命中即取值；取值域见 {@code CtxBuild.AD_*}）：</p>
+     * <ol>
+     *   <li>{@code trigger} —— {@code byVote}：技能把 {@code payload._reply} 置 true 或插件投了 ANSWER。
+     *       <b>最具体的"为什么起这一轮"</b>，压过下面的地址规则；</li>
+     *   <li>{@code at} —— 群里 @ 到了自己（{@code Ev.atSelf()}）；</li>
+     *   <li>{@code private} —— 私聊（{@code Ev.isPrivate()}）；</li>
+     *   <li>{@code master} —— 主人（兜底：网关这一侧正常轮不到它，主人的私聊读 {@code private}、
+     *       主人在群里 @ 读 {@code at}；它的正主是本地控制台/面板那两条没有 QQ 地址的入口，
+     *       由 {@code Boot.askConsole} 与 {@code Cmd} 直接塞）。</li>
+     * </ol>
+     *
+     * <p><b>认不出就返回空串</b> ⇒ 产者不塞、事实块里没有 {@code addressed:} 这一行（取不到就不写，
+     * 不是写个空值）。纯函数：只看入参，不读配置、不读库、不抛。</p>
+     */
+    static String addressedOf(Ev ev, Caller c, boolean byVote) {
+        try {
+            if (byVote) return sair.v4.ctx.CtxBuild.AD_TRIGGER;
+            if (ev != null && ev.isGroup() && ev.atSelf()) return sair.v4.ctx.CtxBuild.AD_AT;
+            if (ev != null && ev.isPrivate()) return sair.v4.ctx.CtxBuild.AD_PRIVATE;
+            if (c != null && c.master()) return sair.v4.ctx.CtxBuild.AD_MASTER;
+        } catch (Throwable ignored) {
+        }
+        return "";
     }
 
     /** 外挂文案（{@code prompts/tools-index.md}）；加载不上时返回一个"什么都缺"的实例，绝不抛异常。 */
@@ -784,14 +1266,19 @@ public final class QqGateway {
      * <b>回合真正开跑的那一刻现查</b>（见 {@code agent.Agent.ask} → {@code ctx.ChatWindow}）——
      * 排队期间新到的消息因此也能进窗口，而"这一轮看见的到底是哪一段"只有一个地方说了算。</p>
      */
-    private void submitTurn(final Caller caller, final Sink sink, String prompt, String media) {
+    private void submitTurn(final Caller caller, final Sink sink, String prompt, String media,
+                            final String addressed) {
         final boolean high = caller.master() || !caller.isGroup();
         final String session = caller.session();
+        // ★ 2026-09-22「内部文字外泄防线批」G7：给 job 带上**说话人标识** ⇒ 同会话道里
+        //   不同人后到的消息**不再并进**这一条（合了就按第一个人的 caller 办事，见 schedule.ChatJob）。
+        //   同一人连发仍照旧合并（省一次模型调用）。行为影响：极少数轮会多跑一轮（可接受）。
+        final String owner = session + "#" + caller.qq();
         sair.v4.schedule.ChatJob job = new sair.v4.schedule.ChatJob(session, high,
                 new sair.v4.schedule.ChatJob.Body() {
                     @Override
                     public void run(String text, String mediaFact) {
-                        sair.v4.agent.Loop.Outcome oc = boot.agent().ask(caller, sink, text, mediaFact);
+                        sair.v4.agent.Loop.Outcome oc = boot.agent().ask(caller, sink, text, mediaFact, addressed);
                         // 回合摘要：这轮跑了多久、几轮、几次工具、成没成 —— 结构事实，无正文
                         if (oc != null) {
                             turn("session=" + session + " rounds=" + oc.rounds + " tools=" + oc.toolCalls
@@ -807,7 +1294,7 @@ public final class QqGateway {
                         if (sink != null) sink.say(text);
                     }
                 },
-                prompt, media, boot.conf() == null ? 4000 : boot.conf().turnMergeMaxChars());
+                prompt, media, boot.conf() == null ? 4000 : boot.conf().turnMergeMaxChars(), owner);
         sair.v4.schedule.Lanes lanes = boot.turnsQq();
         if (lanes != null) lanes.submit(session, high, job);
         else boot.submit(job);          // 调度器没装配起来时的降级路径（仍然不在这里直接跑回合）

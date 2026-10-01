@@ -74,6 +74,12 @@ import sair.v4.kit.Out;
  * <p><b>权限表只约束 {@code ALLUSER}</b>：把 {@code MASTER} / {@code SYSTEM} 写进表里一律
  * <b>忽略</b>（不报错、不生效）。</p>
  *
+ * <p><b>File 域的判定口只有 {@link #fileDeny} 一个</b>（{@code Builtins.fileDenyOf} /
+ * {@code Host.localFileDeny} / {@code Api.pathDeny} / {@code Relay.pathDeny} / {@code Cmd} 的
+ * import 全都汇到它），而它<b>放行的权威那一判是硬禁名单</b>（批 16 / 2026-09-27）：账本或好感度档位
+ * 无论哪一级想放行，都要先过一次 {@link FavorGate#banned(String, File)} —— 那几张名字
+ * <b>与权限表无关</b>，压过一切；主人与她本人照旧不受影响（见 {@link #fileDeny} 的 javadoc）。</p>
+ *
  * <p><b>绝不自己写盘</b>：只有主人敲授权命令（{@code ai/perm run|ban|db|file|revoke|gen}）才会落盘；
  * 装载、判定、控制台查看都不写。</p>
  */
@@ -1235,7 +1241,33 @@ public final class Acl {
     // ==================== 判定 ====================
 
     /**
+     * <b>好感度档位放权闸的审计出口</b>（W7/批 13）：这道闸<b>替 ALLUSER 顶掉过一次拒绝</b>时
+     * 打一行结构事实。形状与 {@code Host.sayMedia} 的 {@code [say] …} 同族、同一目的：<b>可审计</b>。
+     * <p>走 {@link Out#dim}（不是 warn/err）—— 它是一条"允许了"的事实，不是异常；
+     * 落点仍是既有的 {@code out}，出厂 {@code logConsole="tool,model"} 下默认不打（要看就加 {@code skill}
+     * 或 {@code logVerbose=true}）。这一行<b>只观测、绝不影响判定</b>（连它抛异常也吞掉）。</p>
+     */
+    private void favorNote(String why, Caller c, String subject) {
+        try {
+            if (out == null) return;
+            String who = c == null ? "?" : (c.kind() + ":" + c.qq());
+            out.dim("[favor] lift " + why + " by=" + who
+                    + " session=" + (c == null ? "?" : c.session()) + " on=" + subject);
+        } catch (Throwable ignored) {
+            // 事实行只是可观测：它自己绝不改变这次判定的结果
+        }
+    }
+
+    /**
      * <b>Skill 域</b>：这个身份能不能用这个 op（签名不变）。
+     *
+     * <p><b>判定顺序（两道闸，ACL 在前）</b>：① 主人 / 她本人恒全权；② ACL 账本判 —— 它给出的
+     * {@code Ban} / 未列到 / 空表结论<b>先摆在那儿</b>；③ <b>只有被判拒之后</b>才问一次
+     * {@link FavorGate#lift(String, Caller)} —— 好感度档位够（且这个 op 在它那张<b>写死的窄表</b>里）
+     * 就按放行处理，并打一行 {@code [favor] lift …} 结构事实；否则 ACL 的拒绝原文原样返回。
+     * 窄表之外的 op 一律拿不到放行（{@link FavorGate#lift} 直接返回 {@code null}）—— 这就是
+     * "那些越权钉子"（{@code exec.cmd} / {@code perm.set} / {@code console.run} / {@code send.group} …）
+     * 照旧被拒的全部原因。</p>
      *
      * @return {@code null} = 放行；否则是可直接回给模型的拒绝原文（含 {@link #DENY_PREFIX}）
      */
@@ -1246,8 +1278,14 @@ public final class Acl {
         if (isFree(c)) return null;                       // 主人与她本人：全权
         if (o.indexOf('.') < 0) return allowTool(c, o);   // 问"整把工具"：另有一套口径
         Decision d = decide(skillPool(), "Skill", o, c, "Run", OP_COVER);
-        if (d.kind == Decision.BAN) return DENY_PREFIX + "「" + o + "」在技能管控表的黑名单里";
         if (d.kind == Decision.RUN) return null;
+        // ② 第二道闸（与 ACL 平行，不往账本里加规则）：只有"档位够 + 在这个 op 的窄表里"才放行。
+        String lift = FavorGate.lift(o, c);
+        if (lift != null) {
+            favorNote(lift, c, "skill");
+            return null;
+        }
+        if (d.kind == Decision.BAN) return DENY_PREFIX + "「" + o + "」在技能管控表的黑名单里";
         if (d.kind == Decision.EMPTY) return DENY_PREFIX + "「" + o + "」没有授权给你（列出来了，但谁都没给）";
         return DENY_PREFIX + "「" + o + "」没有授权给你（未列到 = 未授权）";
     }
@@ -1261,6 +1299,39 @@ public final class Acl {
      *       {@code Registry.visible} 的口径一致（只放开某个动作时，模型仍然看得见这把工具去调它）；</li>
      *   <li>一个都没有 ⇒ 未授权。</li>
      * </ol>
+     *
+     * <h3>★ 这一问<b>不</b>查好感度闸 —— 这是定案，不是遗漏（批 15 / 2026-09-26）</h3>
+     * <p>曾经有一张票说"过档（{@code favor >= 500}）的人问这把工具答「未列到 = 未授权」，
+     * 与真实能力路径相反"。GM 复核 {@code tool\Registry.java} 之后<b>判该票不成立</b>，本方法
+     * <b>一个字节都没改</b>（理由与证据都留在下面，删掉这段就是删掉判据）。</p>
+     *
+     * <p><b>为什么不是缺陷</b>：裸工具这一问<b>从来不是唯一判据</b> —— 它的每一个消费者都是
+     * "<b>裸工具 ∨ 任一 op 允许</b>"的组合，而 op 那一支要过 {@link #allow(Caller, String)} ⇒
+     * <b>会</b>问好感度闸（{@link FavorGate#lift}）。逐个消费者（file:line）：</p>
+     * <ul>
+     *   <li>{@code Registry.mayEnter(Caller, Tool)}（{@code Registry.java:216-228}）：
+     *       :220 先问裸工具（{@code auth.allowed(c, t.name())}），不为真再 :221-223 逐个动作级 op 问
+     *       （{@code auth.allowed(c, op)}）⇒ <b>任意一支为真即放行</b>；{@code visible(Caller)}
+     *       （{@code Registry.java:201-208}）就是拿它逐个工具筛的；</li>
+     *   <li>{@code Registry.mayEnterDeny(Caller, String)}（{@code Registry.java:241-252}）：
+     *       同样两支（:244 裸工具、:245-247 逐 op），<b>两支都不放行时</b>才走到 :248
+     *       {@code return auth.allow(c, tool)} 取那句拒文 —— 到这一步已经说明"<b>一个 op 都没放行</b>"，
+     *       所以它只决定"回哪句话"，<b>不</b>决定"放不放"；{@code call(...)}（:296）用的就是它；</li>
+     *   <li>别的调用点（{@code Boot} / {@code Builtins} / {@code Host} / {@code Api} / {@code DynCode}）
+     *       传进来的都是 {@code 工具.动作} 这种带点的 op，根本走不到本方法。</li>
+     * </ul>
+     * <p>于是"裸工具答「未列到」而她其实能读"不是判断错误：能力由 op 那一支给，那一支一路过闸。
+     * 夹具实测（{@code tmp\v6-real\batch6\W15a}，真 {@code Boot} + 真「文件」技能 + 线上形状的权限表）：
+     * {@code favor=750} 的 ALLUSER 调 {@code Registry.call("file", {op:read})} 在<b>改前改后都能进、
+     * 都能读到</b>，而裸工具那一问在<b>改前改后同为「未列到」</b>（{@code allow(c,"file")} 的答复逐字相同）。</p>
+     *
+     * <p><b>★ 下一批的警报（要留着的判据）</b>：上面那张消费者表是"这一问不单独定生死"的<b>全部依据</b>。
+     * 将来若有人新增一个消费者，<b>只</b>根据这一问（或 {@code auth.allowed(c, 裸工具名)}）去授权／拒绝
+     * 一次真实调用，这张票立刻变成<b>真缺陷</b>。真到那一天，两条路选一条：① 给那个消费者补上
+     * "∨ 任一 op 放行"那一支（与 {@code Registry} 同形状）；② 让本方法也逐 op 问一次
+     * {@link FavorGate#lift}（与 {@link #allow(Caller, String)} 同形状，并打同一行
+     * {@code [favor] lift …} 审计事实）。<b>现在什么都不做</b> —— 改了只会在她那条路上多打一行
+     * 审计事实，并给"答问"与"授权"制造第二套口径。</p>
      */
     private String allowTool(Caller c, String tool) {
         List<Rule> pool = skillPool();
@@ -1353,6 +1424,37 @@ public final class Acl {
     /**
      * <b>File 域的判定</b>：{@code null} = 可碰。
      *
+     * <p><b>第二道闸（好感度档位，W7/批 13）</b>：ACL 拒了之后，<b>只在这一种情形</b>上再问一次
+     * {@link FavorGate#liftPath} —— 判定结果是 {@link Decision#NONE}（<b>这张表里一把覆盖键都没列到</b>
+     * 这个路径）。也就是说：</p>
+     * <ul>
+     *   <li>表里<b>显式</b>的 {@code Ban}（例 {@code D:/share/SairFrameWork/}）⇒ {@link Decision#BAN}，
+     *       <b>不</b>问第二道闸，谁都被拒；{@code FavorGate.HARD_BAN} 里那几条还额外写死在代码里；</li>
+     *   <li>表里<b>显式</b>写了的 {@code Read} 侧（含空身份表 = {@link Decision#EMPTY}）⇒ 按表收尾，
+     *       {@code FavorGate} <b>不</b>改口 —— 第二道闸只填"没列到"的洞，绝不给主人写下的明文决定翻案
+     *       （★ 硬禁名单是唯一的例外：它照样压过这条明文放行，见下一节）；</li>
+     *   <li>{@code Decision.NONE}（没列到）⇒ 问一次：档位够 + 路径在允许根内 + 只读 ⇒ 放行，
+     *       并打一行 {@code [favor] lift …} 结构事实。</li>
+     * </ul>
+     *
+     * <h3>★ 硬禁名单：这一判的<b>最后一道</b>，不是"表没列到时才问"的兜底（批 16 / 2026-09-27）</h3>
+     * <p>放行侧<b>两个来源</b>（表里显式的 {@code Run}/{@code Read}、{@code NONE} + 档位放行）在返回
+     * {@code null} 之前<b>都要</b>过一次 {@link FavorGate#banned(String, File)}：
+     * {@code true} ⇒ 一律拒（{@link #DENY_PREFIX} + 硬禁名单理由 + 路径），<b>与权限表、与档位、
+     * 与允许根全都无关</b>。</p>
+     * <p><b>为什么必须在这儿再问一次</b>（批 15 的残余）：批 15 把 {@code HARD_BAN_REL} 扩成
+     * "数据根之内任意深度"是对的，但它<b>只在 {@link FavorGate#liftPath} 里被问</b>，而
+     * {@code liftPath} 只在 ACL 答 {@link Decision#NONE}（表里一把覆盖键都没列到这个路径）时才被调用
+     * ⇒ 于是"权限表<b>显式</b>把 {@code File.Read} / {@code File.Run} 授给某个目录"这条路上，
+     * 硬禁名单<b>一次都没被问过</b>：{@code {root}/files/v4.db}（同名敏感件住在被授权的
+     * {@code files/} 里）对非主人就是可读的、可写的。主人令（批 13 原文，也抄在 {@code FavorGate} 里）：
+     * 「既有的敏感 Ban 一律仍然 Ban（<b>压过一切</b>）」—— 只有"最后一个说了算"才配得上"压过一切"。</p>
+     * <p><b>方向：只许更禁</b>。这一段只可能把"要放行"改成拒绝，<b>绝不会</b>让任何既有拒绝变成放行；
+     * 既有允许里也只有命中硬禁名单的那些会变拒。<b>主人（{@code MASTER}）与她本人（{@code SYSTEM}）
+     * 在 {@link #isFree} 那一行就返回了，{@code c == null}（内部 / 诊断）更早</b> —— 三者一位不受影响
+     * （主人照样读得到 {@code config.json} / {@code v4.db}）。
+     * 名单只有一份真源（{@link FavorGate#banned(String, File)}）：本类<b>绝不</b>重列那些名字。</p>
+     *
      * @param path  要碰的路径（绝对路径最准；装载时与判定时用<b>同一套</b>归一化）
      * @param write {@code true} 看 {@code Run}（改/写/删/建），{@code false} 看 {@code Read}（读/找/下）
      */
@@ -1364,7 +1466,27 @@ public final class Acl {
         String nk = why == null ? normPath(raw) : "";
         if (why != null || nk.isEmpty()) return DENY_PREFIX + "这个路径不在允许范围（" + raw + "）";
         Decision d = decide(rules, "File", nk, c, write ? "Run" : "Read", COVER_PATH);
-        if (d.kind == Decision.RUN) return null;
+        boolean pass = d.kind == Decision.RUN;            // 来源 ①：表里显式给了决定（Run / Read 命中）
+        if (d.kind == Decision.NONE) {
+            String lift = FavorGate.liftPath(c, nk, write, dataRoot);
+            if (lift != null) {
+                favorNote(lift, c, "file");
+                pass = true;                              // 来源 ②：表没列到 + 档位够（只读）
+            }
+        }
+        if (pass) {
+            // ★ P1（批 16 / 2026-09-27）：硬禁名单 = 这一判的最后一道，两个放行来源都从它下面过。
+            //   WHY：批 15 只在 FavorGate.liftPath（= 只有 ACL 答 NONE 时才走的那条路）里问过它，
+            //   于是"权限表**显式**授权某个目录"这条路上它一次都没被问 —— {root}/files/v4.db 这种
+            //   同名敏感件住在被授权的目录里就可读（Host.java:516 读侧）可写（Builtins:380 写侧）。
+            //   主人令（批 13 原文）：「既有的敏感 Ban 一律仍然 Ban（压过一切）」。
+            //   只许更禁：只可能把 pass 改成拒；主人 / 她本人 / c==null 都在这行之前返回，不受影响。
+            //   名单不在这里重列（单一真源 = FavorGate.banned(String, File)）。
+            if (FavorGate.banned(nk, dataRoot)) {
+                return DENY_PREFIX + "这个路径在硬禁名单里（与权限表无关）：" + nk;
+            }
+            return null;
+        }
         return DENY_PREFIX + "这个路径不在允许范围（" + nk + "）";
     }
 
@@ -1479,8 +1601,12 @@ public final class Acl {
     /**
      * 路径归一化（规格 §3）：反斜杠统一成正斜杠、去重复斜杠、解析 {@code .} 与 {@code ..}；
      * 末尾斜杠<b>保留</b>（= 目录，管整棵子树）。
+     *
+     * <p><b>包内可见</b>（W7/批 13）：好感度档位放权闸（{@link FavorGate}）判"这个路径在不在允许根内"
+     * 用的是<b>同一套</b>归一化 —— 收敛在一处，绝不允许出现第二套认法（两套认法之间的缝就是绕过）。
+     * 语义与可见性之前逐字节相同，只是 {@code private} 放宽到包内。</p>
      */
-    private static String normPath(String raw) {
+    static String normPath(String raw) {
         if (raw == null) return "";
         String s = raw.trim().replace('\\', '/');
         if (s.isEmpty()) return "";
@@ -1517,8 +1643,11 @@ public final class Acl {
         return null;
     }
 
-    /** 比对用的路径：Windows 下路径大小写不敏感，Linux 下敏感（规格 §3）。 */
-    private static String cmpPath(String s) { return WIN ? s.toLowerCase(Locale.ROOT) : s; }
+    /**
+     * 比对用的路径：Windows 下路径大小写不敏感，Linux 下敏感（规格 §3）。
+     * <p><b>包内可见</b>（W7/批 13）：同 {@link #normPath}，好感度档位放权闸共用这一套比对口径。</p>
+     */
+    static String cmpPath(String s) { return WIN ? s.toLowerCase(Locale.ROOT) : s; }
 
     // ==================== 查看 ====================
 

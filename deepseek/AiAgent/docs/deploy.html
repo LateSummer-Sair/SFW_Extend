@@ -87,7 +87,7 @@ start 8x64\bin\javaw -jar SFW.jar %*</code></pre>
           </div>
           <div class="panel reveal">
             <h4 class="sub" style="margin-top:0">③ 只要一份 jar，落位固定</h4>
-            <p>线上这份是 <code>plugins\exection\ai.jar</code>（<code>&lt;框架目录&gt;</code> 指 SFW 的安装目录）；仓库根的 <code>AiAgentV4.jar</code> 与它逐位相同。</p>
+            <p>线上这份是 <code>plugins\exection\ai.jar</code>（<code>&lt;框架目录&gt;</code> 指 SFW 的安装目录）；仓库根的 <code>AiAgentV4.jar</code> 与它逐位相同。换 jar 时<b>核身份按条目级逐条比对两枚 jar</b>（<code>tmp\v6-real\batch6\v2-jar-diff.ps1</code>）：只允许申报要改的那几个 <code>.class</code> 变，<b>非 class 条目必须 0 改动</b>；<b>别拿整文件 SHA-256 当钉子</b> —— 同一份 <code>out\</code> 连编两次哈希就不同（zip 元数据不确定），大小与条目内容却一致。</p>
             <div class="code" data-lang="powershell">
               <pre><code>Get-Item '&lt;框架目录&gt;\plugins\exection\ai.jar' | Select-Object Length</code></pre>
             </div>
@@ -95,7 +95,7 @@ start 8x64\bin\javaw -jar SFW.jar %*</code></pre>
           <div class="panel reveal d1">
             <h4 class="sub" style="margin-top:0">④ 提示词要自己准备</h4>
             <p>冷启动只会建 <b>0 字节空壳</b> <code>prompts\identity.md</code> 与 <code>prompts\subagent.md</code> —— <b>基板不带任何提示词文案</b>（<code>Boot.java</code>）。空文件与"文件不存在"在加载器里语义完全一致。</p>
-            <p class="t-cap">部署后把提示词文件放进数据根的 <code>prompts\</code> 就可以用了。当前线上这三个文件是：<code>identity.md</code> 14,034 字节、<code>subagent.md</code> 1,329 字节、<code>tools-index.md</code> 9,998 字节。</p>
+            <p class="t-cap">部署后把提示词文件放进数据根的 <code>prompts\</code> 就可以用了。当前线上这四个文件是：<code>identity.md</code> 17,608 字节、<code>subagent.md</code> 1,329 字节、<code>tools-index.md</code> 10,216 字节、<code>redline.md</code> 15,265 字节。前三个是提示词正文，<code>redline.md</code> 是<b>出站红线的唯一词表</b>（<code>term\Redline.java</code> 读它，<b>热读</b>：mtime + 字节数一变，下一条消息就用新表）；它的键有五组 —— <code>禁词常开</code> / <code>禁词不替换</code> / <code>禁词-&lt;类目&gt;</code> / <code>禁词替换-&lt;类目&gt;</code>，以及<b>成对写法</b>的 <code>禁词例外-&lt;类目&gt;: 上下文短语=被豁免的词</code>（例外<b>只放宽被点名的那一个词在点名的那种上下文里</b>，一次只豁免这一次命中；键缺失、值空、任一项没有 <code>=</code> 或有多于一个 <code>=</code>，一律按“这一类目没有任何例外”照旧拦）。<b>骨架不建它</b> —— 文件不在时红线一个词都不判并打一行 err，所以部署时别忘了放。</p>
           </div>
         </div>
       </section>
@@ -129,11 +129,11 @@ start 8x64\bin\javaw -jar SFW.jar %*</code></pre>
               <tr><th>名字</th><th>是什么</th><th>谁建的</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>config.json</code></td><td>配置文件（已知键 94 个，见<a href="config.html#keys">配置页</a>）</td><td><code>Conf.ensureDefaults()</code>（<code>Boot.java</code>）</td></tr>
+              <tr><td><code>config.json</code></td><td>配置文件（已知键 114 个，<code>Conf.knownKeys()</code>；见<a href="config.html#keys">配置页</a>）</td><td><code>Conf.ensureDefaults()</code>（<code>Boot.java</code>）</td></tr>
               <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>（<code>Conf.java</code>）；表在装配第⑯步末尾落盘（<code>Boot.createLibTables</code>）</td><td><code>Store.open()</code>（<code>Boot.java</code>）</td></tr>
-              <tr><td><code>prompts\</code></td><td>提示词文件目录（<code>identity.md</code> / <code>subagent.md</code> 等）</td><td>骨架 + 你自己放文件</td></tr>
-              <tr><td><code>files\</code></td><td>下载与图片落点（库导出文件也落这里，<code>Cmd.java</code>）</td><td>骨架（<code>Boot.java</code>）</td></tr>
-              <tr><td><code>tmp\</code></td><td>临时文件目录</td><td>骨架（<code>Boot.java</code>）</td></tr>
+              <tr><td><code>prompts\</code></td><td>提示词文件目录（<code>identity.md</code> / <code>subagent.md</code> / <code>tools-index.md</code> / <code>redline.md</code>）</td><td>骨架只建前两个空壳，其余你自己放</td></tr>
+              <tr><td><code>files\</code></td><td>下载与图片落点（附件、表情、抓回来的图；<b>库导出不落这里</b>）</td><td>骨架（<code>Boot.java</code>）</td></tr>
+              <tr><td><code>tmp\</code></td><td>临时文件目录，<b>也是库导出的默认落点</b>（<code>ai/store export</code> 与 <code>store_admin op=export</code> 不给路径时写 <code>&lt;表&gt;-&lt;时间戳&gt;.jsonl</code> 到这里）</td><td>骨架（<code>Boot.java</code>）</td></tr>
               <tr><td>外挂扩展层目录</td><td>后加进来的能力存放处；怎么写见 <a href="skills.html">11 · 技能开发</a></td><td>骨架（<code>Boot.java</code>）</td></tr>
               <tr><td>权限文件</td><td><code>perms-core.jsonc</code> 与各技能目录里的 <code>perms.jsonc</code>：谁能用哪个 op、谁能改 / 读哪类数据、谁能碰哪些路径（见 <a href="perms.html">07 · 权限管理</a>）</td><td>主人用控制台写，或手改文件</td></tr>
               <tr><td><code>logs\</code> / <code>debug-port.json</code> 等</td><td>运行期落盘物（日志、调试面状态）</td><td>运行期</td></tr>
@@ -143,7 +143,7 @@ start 8x64\bin\javaw -jar SFW.jar %*</code></pre>
         <p class="t-cap">更细的文件地图（源码 17 个包 + 数据表落点）见<a href="files.html">文件与数据根</a>页。</p>
 
         <div class="note reveal">
-          <p><span class="n-title">权限文件只活在实例旁</span>：部署脚本把 <code>data\</code> 往宿主的运行数据根拷时，<b>按文件名跳过</b>这几份 —— <code>perms-core.jsonc</code> 与每个技能目录里的 <code>perms.jsonc</code>，以及旧版那两份统一账本；另外 <code>config.json</code>、<code>v4.db</code>、<code>files\</code>、<code>tmp\</code>、<code>cache\</code>、启动脚本与调试面凭据文件也都不参与拷贝。<b>所以项目仓库里不放权限表，部署也不会用项目里的副本覆盖线上已经授权的那几份</b> —— 升级时它们的字节原样留着。要重置它们，只能在控制台改表或直接编辑那份线上文件。</p>
+          <p><span class="n-title">权限文件只活在实例旁</span>：部署脚本把 <code>data\</code> 往宿主的运行数据根拷时，<b>按文件名跳过</b>这几份 —— <code>perms-core.jsonc</code> 与每个技能目录里的 <code>perms.jsonc</code>，以及旧版那两份统一账本；另外 <code>config.json</code>、<code>v4.db</code>、<code>files\</code>、<code>tmp\</code>、<code>cache\</code>、启动脚本与调试面凭据文件也都不参与拷贝。<b>所以部署既不会用项目里的副本覆盖线上已经授权的那几份，也不判它们的 drift</b>（拷贝那一遍按文件名跳过；逐文件对账那一遍也把 <code>*.jsonc</code> 排除在外）—— 仓库 <code>data\skills\</code> 里那两份只是副本，<b>权限表的权威是运行数据根里那一份</b>：升级时它们逐字节原样留着。要重置或改授权，只能在控制台改表、或直接编辑那份线上文件。</p>
         </div>
 
         <div class="note reveal">
@@ -345,6 +345,9 @@ ai/status</code></pre>
         <div class="note bad reveal">
           <p><span class="n-title">把 <code>ai/exit</code> 和"退出程序"分开看</span>：它不结束 JVM。想重启基板而不是结束进程，用 <code>ai/restart</code>（先停旧基板，再读文件重新装配 19 步，不并发）（<code>Cmd.java</code>）。</p>
         </div>
+
+        <p class="t-cap"><b>换一版上去：一次部署的动作序列（通用口径）</b> —— ① <b>按精确 pid 停</b>旧实例，并确认端口不再监听；② <b>先备份回滚件</b>（旧 <code>ai.jar</code>，以及这次会被覆盖的那几个 data 文件）；③ 拷 <b>jar + data 一起</b>（<code>_deploy.ps1</code>，按上面的跳过清单跳过 <code>config.json</code> / <code>v4.db</code> / <code>SFW-BOT.ir</code> / <code>debug-port.json</code> / <code>*perms*.jsonc</code> / <code>files\</code> / <code>tmp\</code> / <code>cache\</code>）；④ 用 <code>run.bat</code> 把宿主起回来；⑤ 起来之后做 <b>boot 检查</b>（<code>ai/status</code>、<code>ai/napcat status</code>，再复跑一次数据面对账，应为 0 差异）。</p>
+        <p class="t-cap"><b>jar 与 data 必须一起上、一起退</b>：只上 data 会出现"旧 class 读新数据"的<b>半生效</b>状态（例如新词表被旧解析器读成半截），只上 jar 才是真的没效果 —— 所以回滚也一样，<b>回退 jar 时必须连 data 一起回退</b>，回滚件里两样都备。</p>
       </section>
 
       <!-- ============ 8 ============ -->
@@ -359,7 +362,8 @@ ai/status</code></pre>
           <div class="panel reveal tight">
             <h4 class="sub" style="margin-top:0">装之前</h4>
             <ul class="plain">
-              <li>jar 是这一份吗：</li>
+              <li>jar 是这一份吗：落位是 <code>&lt;框架目录&gt;\plugins\exection\ai.jar</code>，身份按<b>条目级</b>逐条比对（只允许申报要改的那几个 <code>.class</code> 变，非 class 条目 0 改动）</li>
+              <li>回滚件备好了吗：旧 jar 与这次要覆盖的那几个 data 文件（<b>回退时两样一起退</b>）</li>
               <li>宿主能起：<code>run.bat</code> 与 <code>8x64\bin\javaw</code> 在位</li>
               <li>启动目录确定不再改（密文与工作目录绑死，<code>Crypto.java</code>）</li>
               <li>数据来自 V3 的话先看<a href="migration.html">升级页</a>：<b>V4 不读 V3 的数据</b></li>
