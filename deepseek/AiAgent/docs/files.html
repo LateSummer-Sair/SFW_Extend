@@ -238,7 +238,7 @@
               <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>：全部业务数据与运行台账都在它里面（表清单见 <a href="#db">数据表落在哪</a>）</td><td>存储层 <code>store.Db</code> / <code>store.Store</code></td></tr>
               <tr><td><code>v4.db-wal</code></td><td>预写日志，WAL 模式的正常伴生文件；连接建立时就设上</td><td>SQLite 自己</td></tr>
               <tr><td><code>v4.db-shm</code></td><td>WAL 的共享内存索引文件，同样由 SQLite 自己维护</td><td>SQLite 自己</td></tr>
-              <tr><td><code>config.json</code></td><td>扁平 JSON，114 个已知键集中在这里（<code>Conf.knownKeys()</code>）；敏感键是密文</td><td><code>Conf</code>（<code>Conf.java</code> 拼出这个路径）</td></tr>
+              <tr><td><code>config.json</code></td><td>扁平 JSON，116 个已知键集中在这里（<code>Conf.knownKeys()</code>）；敏感键是密文</td><td><code>Conf</code>（<code>Conf.java</code> 拼出这个路径）</td></tr>
               <tr><td><code>perms-core.jsonc</code></td><td>基板侧的权限文件：三个域（<code>Skill</code> / <code>DB</code> / <code>File</code>），域里是它自己那几层（<code>Skill</code> 只有 <code>Run</code> / <code>Ban</code>；<code>Read</code> 只存在于 <code>DB</code> 与 <code>File</code>），规则键写成中括号数组；<b>路径只写在这一份里</b>（权限模型见 <a href="perms.html">权限管理</a>）</td><td><code>auth</code> 侧；装配期与技能目录里的 <code>perms.jsonc</code> 合并读入</td></tr>
               <tr><td><code>skills\&lt;技能名&gt;\perms.jsonc</code></td><td>技能自己的权限文件：只写这个技能提供的工具与<b>属于它的数据键</b>（写了别人的会被忽略，路径块整块不生效）；技能目录里没有它 = 它的全部 op 不授权</td><td>技能自己带；<code>auth</code> 侧合并读入</td></tr>
               <tr><td><code>prompts\</code></td><td>提示词正文与出站红线词表目录，见 <a href="#prompts">提示词文件</a></td><td><code>prompt.Prompts</code>、<code>term.Redline</code></td></tr>

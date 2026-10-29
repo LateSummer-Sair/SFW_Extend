@@ -127,7 +127,10 @@ public final class Builtins {
         reg.add(Tool.of("store")
                 .desc("读写基板库：**六库** = memory 长期记忆/note 知识笔记/dialog 对话历史/grouplog 群聊历史/"
                         + "sticker 表情包/pref 偏好设定；**外加插件声明的业务库**（情绪状态表等就在里面）——"
-                        + "当前到底有哪些库，先 `store_admin op=stat` 看一遍，别猜（猜错的名字会被直接拒）。")
+                        + "当前到底有哪些库，先 `store_admin op=stat` 看一遍，别猜（猜错的名字会被直接拒）。"
+                        + "★ **列多的大表用 fields 只取要用的列**（逗号分隔，如 fields=\"id,ts,content\"）："
+                        + "list/search 默认整行拉回来，grouplog 这种带正文的几十行就能吃掉几万字符；"
+                        + "只取需要的几列便宜得多。列名写错会被**整条拒**并列出真实列名。")
                 .returns("查询结果（JSON 文本）")
                 .params(schemaStoreRead(libs))
                 .handler(new Tool.Handler() {
@@ -161,7 +164,7 @@ public final class Builtins {
                             // 能读任意 scope_id 的记忆行。这里与记忆技能内部的 visible 同口径；
                             // MASTER / SYSTEM 恒全权（规格 §0）⇒ 用 isFree 而不是 master。
                             if (!isFree(me) && !readVisible(lib, o, me)) return Acl.DENY_PREFIX + "这条记忆不在你的作用域里（只能读本人 / 本群 / global）";
-                            return J.json(o);
+                            return shaped(o, args);
                         }
                         if ("count".equals(op)) {
                             // 动作级 op：数行数
@@ -181,7 +184,7 @@ public final class Builtins {
                                 hits = keepInScope(lib, hits, me);       // 老守卫：dialog / grouplog 的会话归属
                                 if (!isFree(me)) hits = keepReadScope(lib, hits, me);   // v6：memory 的本人 / 本群 / global
                             }
-                            return J.json(hits);
+                            return shaped(hits, args);
                         }
                         // 默认分支（list，以及认不出的 op 当 list 处理）：动作级 op
                         String aclDeny = needOp(auth, conf, "store.list");
@@ -190,7 +193,7 @@ public final class Builtins {
                         // v6 读口行归属：list 原来只靠 constrain 的等值过滤（它只碰 dialog / grouplog），
                         // memory 一行都不过滤 ⇒ 这里按行再过一次可见面（MASTER / SYSTEM 不筛）。
                         if (!isFree(me)) rows = keepReadScope(lib, rows, me);
-                        return J.json(rows);
+                        return shaped(rows, args);
                     }
                 }));
 
@@ -648,7 +651,8 @@ public final class Builtins {
         // ---------------- ③ 提示词：注入/写（仅主人） ----------------
         reg.add(Tool.of("prompt_write")
                 .desc("提示词注入与写入（仅主人）：load 载入某份提示词并注入/inject 注入一段文本/write 新建或覆盖提示词文件/clear 移除注入/reload。"
-                        + "slot 取 system 系统提示词/context 每轮上下文/tool 工具说明/arg 用户消息前。scope 省略=全局，否则是会话键。")
+                        + "slot 取 system 系统提示词/context 每轮上下文/arg 用户消息前。"
+                        + "tool 是**保留位**（没有渲染点，写它会被拒绝，不会静默失效）。scope 省略=全局，否则是会话键。")
                 .returns("操作结果")
                 .params(schemaPromptWrite())
                 .handler(new Tool.Handler() {
@@ -1164,6 +1168,44 @@ public final class Builtins {
                     }
                 }));
 
+        // ---------------- ③a 计划清单（多步任务） ----------------
+        //  为什么要有它：回合循环的终止条件是"这一轮没有任何工具调用"（agent/Loop.java），
+        //  所以"先说一句再干活"会让这一轮直接结束 —— 真机症状就是"回一句就装死、非得再问才动"。
+        //  多步任务的**第一步就 plan**，等于第一步就有工具调用 ⇒ 回合自然往下走；清单也成了她的推进凭据。
+        reg.add(Tool.of("plan")
+                .desc("多步任务的计划清单。**开工前先列**：plan items=\"查苏州天气；搜AI新闻；合起来总结\"（3~6 项，一项一件事）。"
+                        + "每做完一项：plan done=1（序号从 1 起）。想看还剩什么：plan（不带参数）。"
+                        + "**清单没走完不许收工**；卡住了就换工具继续 / 先给部分结果 / 明确说卡在哪+需要他什么。"
+                        + "单纯的聊天问答**不用**列清单，别把闲聊搞成项目。")
+                .returns("清单渲染（每行「序号. [x] 事项」，末尾给进度 n/m）；没有清单时说明没有")
+                .params(schemaPlan())
+                .handler(new Tool.Handler() {
+                    @Override
+                    public Object call(JsonObject args, Turn t) {
+                        String aclDeny = needOp(auth, conf, "plan");
+                        if (aclDeny != null) return aclDeny;
+                        return planTool(args, t, store);
+                    }
+                }));
+
+        // ---------------- ③b 接着说（跟进窗口） ----------------
+        //  她刚回完某人之后，窗口内这个人再说话就不必重新 @ —— 时长由她自己拿这个工具定。
+        reg.add(Tool.of("follow")
+                .desc("接着说：这一轮回完之后，还继续听「刚跟我说话的那个人」多久（秒，5~20；0=立刻收工）。"
+                        + "窗口内他再发一句我就直接接，不用他再 @ 我、也不等触发词；超时了才回到「要触发」。"
+                        + "想接着聊就开长一点（比如 15），说完就完事就开短一点或 0。"
+                        + "不调也行，默认按配置 followupSec（出厂 20 秒）。")
+                .returns("一行事实 [follow] ok=1 接着听 N 秒（或 收工）")
+                .params(schemaFollow())
+                .handler(new Tool.Handler() {
+                    @Override
+                    public Object call(JsonObject args, Turn t) {
+                        String aclDeny = needOp(auth, conf, "follow");
+                        if (aclDeny != null) return aclDeny;
+                        return followWindow(args, t);
+                    }
+                }));
+
         // ---------------- ④ 到点的事（闹钟账本 / 职责台） ----------------
         reg.add(Tool.of("alarm")
                 .desc("到点的事（**待办与闹钟是同一张账**）：add 记一件（写 at/in = 到点触发；不写时间 = 先记成待办）；"
@@ -1448,6 +1490,10 @@ public final class Builtins {
         ops.add("alarm", "done", "办妥收尾");
         ops.add("alarm", "fail", "没办成收尾");
         ops.add("alarm", "defer", "顺延或排期");
+        // [FOCUS 2026-10-19] 跟进窗口：她定「接着听多久」（5~20 秒，0=收工）
+        ops.add("follow", "", "定跟进窗口时长（接着听这个人多久）");
+        // [PLAN 2026-10-20] 多步任务的计划清单（A 项：让她有"清单"、也让回合不会在"回一句"时结束）
+        ops.add("plan", "", "多步任务的计划清单（列/勾/看）");
     }
 
     /**
@@ -3729,6 +3775,80 @@ public final class Builtins {
         return J.obj("type", type, "description", desc);
     }
 
+    /**
+     * <b>字段投影</b>（P4）：给了 {@code fields} 就只回这几列。
+     *
+     * <p><b>为什么</b>：{@code list}/{@code search} 走的是 {@code SELECT *}，一个大表（{@code grouplog}
+     * 那种带正文字段的）几十行就能把上下文吃掉几万字符。给模型一个"只取我要用的列"的口子，
+     * 比事后截断便宜得多。</p>
+     *
+     * <p><b>三条口径</b>：<br>
+     * 1) {@code fields} 缺省 / 空 / 含 {@code *} ⇒ <b>原样返回</b>（与加这个口之前逐字节相同）；<br>
+     * 2) {@code id} 恒留 —— 后续 {@code get}/{@code update} 要用它；<br>
+     * 3) 认不出的列名 ⇒ <b>整条拒</b>并列出这一行真正有哪些列（静默丢掉会让她以为查到了）。</p>
+     */
+    public static Object projectRowFields(Object data, JsonObject args) {
+        // ★ 裸字符串与数组都要认：J.strings 只认数组（它走 J.list），
+        //   而模型最自然的写法是 fields="id,ts,content" —— 只认数组会让这个口静默失效。
+        com.google.gson.JsonElement fe = args == null ? null : args.get("fields");
+        if (fe == null || fe.isJsonNull()) return data;
+        List<String> raw = new ArrayList<String>();
+        if (fe.isJsonArray()) {
+            for (com.google.gson.JsonElement x : fe.getAsJsonArray()) {
+                if (x != null && !x.isJsonNull()) raw.add(x.getAsString());
+            }
+        } else {
+            raw.add(fe.getAsString());
+        }
+        if (raw.isEmpty()) return data;
+        List<String> want = new ArrayList<String>();
+        boolean all = false;
+        for (String r : raw) {
+            if (r == null) continue;
+            for (String part : r.split("[,，;\\s]+")) {
+                String f = part == null ? "" : part.trim();
+                if (f.isEmpty()) continue;
+                if ("*".equals(f) || "all".equalsIgnoreCase(f)) { all = true; continue; }
+                if (!want.contains(f)) want.add(f);
+            }
+        }
+        if (all || want.isEmpty()) return data;
+        JsonObject probe = firstRow(data);
+        if (probe == null) return data;
+        List<String> unknown = new ArrayList<String>();
+        for (String f : want) if (!probe.has(f)) unknown.add(f);
+        if (!unknown.isEmpty()) {
+            return "未知的字段：" + unknown + "（这一行的字段有：" + new ArrayList<String>(probe.keySet()) + "）";
+        }
+        if (!want.contains("id")) want.add(0, "id");
+        if (data instanceof JsonObject) return pick((JsonObject) data, want);
+        List<JsonObject> out = new ArrayList<JsonObject>();
+        for (Object o : (List<?>) data) if (o instanceof JsonObject) out.add(pick((JsonObject) o, want));
+        return out;
+    }
+
+    /** 从一行里挑出要的列。 */
+    private static JsonObject pick(JsonObject row, List<String> want) {
+        JsonObject o = new JsonObject();
+        for (String f : want) if (row.has(f)) o.add(f, row.get(f));
+        return o;
+    }
+
+    /** 结果里的第一行（用来校验字段名 —— 同一次查询的行共享同一套列）。 */
+    private static JsonObject firstRow(Object data) {
+        if (data instanceof JsonObject) return (JsonObject) data;
+        if (data instanceof List) {
+            for (Object o : (List<?>) data) if (o instanceof JsonObject) return (JsonObject) o;
+        }
+        return null;
+    }
+
+    /** 投影后统一收口：拒文是字符串就直接回，否则 JSON 化。 */
+    private static Object shaped(Object data, JsonObject args) {
+        Object p = projectRowFields(data, args);
+        return p instanceof String ? p : J.json(p);
+    }
+
     private static JsonObject schemaStoreRead(sair.v4.store.Libs libs) {
         com.google.gson.JsonArray libArr = new com.google.gson.JsonArray();
         for (String l : libEnum(libs)) libArr.add(l);
@@ -3741,7 +3861,9 @@ public final class Builtins {
                         "query", obj("string", "检索词（search）"),
                         "filter", obj("object", "等值过滤，如 {\"group_id\":123}"),
                         "limit", obj("integer", "条数，默认 20"),
-                        "order", obj("string", "排序，默认 ts desc")),
+                        "order", obj("string", "排序，默认 ts desc"),
+                        "fields", obj("string", "只回这几列（逗号分隔，如 id,ts,content）；缺省 = 整行。"
+                                + "带正文的大表（grouplog 这类）强烈建议给；列名写错会被拒并列出真实列名")),
                 "required", arr("lib"));
     }
 
@@ -3977,6 +4099,124 @@ public final class Builtins {
     /** 时间戳 → 给人看的一行（`yyyy-MM-dd HH:mm`）。 */
     private static String stamp(long ms) {
         return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(new java.util.Date(ms));
+    }
+
+    /**
+     * {@code follow} 的处理：把"接着听多久"落到 {@link sair.v4.qq.Focus}。
+     *
+     * <p>没有具体的人（控制台会话）就明确说不行 —— 窗口是按「会话 + QQ」两维认的，没有发起人就没有窗口。</p>
+     */
+    private static String followWindow(JsonObject args, Turn t) {
+        String sess = t == null ? "" : Str.nz(t.session());
+        Caller me = t == null ? null : t.caller();
+        long qq = me == null ? 0L : me.qq();
+        if (sess.isEmpty() || qq <= 0L) {
+            return "[follow] ok=0 这个会话里没有「他」—— 接着听是按「会话 + 具体的人」认的，控制台里没有窗口";
+        }
+        int sec = J.i(args, "秒", sair.v4.qq.Focus.DEF_SEC);
+        if (sec <= 0) {
+            sair.v4.qq.Focus.close(sess, qq);
+            return "[follow] ok=1 收工（不再接着听）";
+        }
+        int c = sair.v4.qq.Focus.clamp(sec);
+        sair.v4.qq.Focus.open(sess, qq, c);
+        return "[follow] ok=1 接着听 " + c + " 秒"
+                + (sec != c ? ("（你说 " + sec + "，夹到 " + c + "）") : "")
+                + "；" + c + " 秒内他说话我直接接，不用再 @";
+    }
+
+    /**
+     * {@code plan} 的处理：一个工具三种用法（有 items = 重写；有 done = 勾一项；都没有 = 看进度）。
+     *
+     * <p>存在 kv 里、按会话隔离：同一群里的清单不会串到别的群；跨重启还在（kv 落库）。
+     * <b>超过 2 小时的清单当废纸</b> —— 旧清单留着只会污染新任务。</p>
+     */
+    private static String planTool(JsonObject args, Turn t, Store store) {
+        String sess = t == null ? "" : Str.nz(t.session());
+        if (sess.isEmpty()) return "[plan] ok=0 没有会话，清单记不了";
+        if (store == null) return "[plan] ok=0 存储没起来";
+        String key = "plan:" + sess;
+        long now = System.currentTimeMillis();
+        JsonObject cur = null;
+        try { cur = J.obj(store.kv(key, "")); } catch (Throwable ignored) { }
+        if (cur != null && now - J.l(cur, "ts", 0L) > 2L * 3600L * 1000L) cur = null;   // 过期当废纸
+
+        if (args.has("items")) {
+            String raw = J.s(args, "items", "");
+            List<String> items = new ArrayList<String>();
+            for (String part : raw.split("[;；\n、,，]")) {
+                String one = part.trim().replaceAll("^\\s*\\d+\\s*[.、):：]\\s*", "").trim();
+                if (one.isEmpty()) continue;
+                if (one.length() > 60) one = one.substring(0, 60) + "…";
+                items.add(one);
+                if (items.size() >= 12) break;
+            }
+            if (items.isEmpty()) {
+                try { store.kvSet(key, ""); } catch (Throwable ignored) { }
+                return "[plan] ok=1 清单已清空";
+            }
+            JsonObject o = new JsonObject();
+            o.addProperty("ts", now);
+            JsonArray arr = new JsonArray();
+            for (String one : items) {
+                JsonObject it = new JsonObject();
+                it.addProperty("t", one);
+                it.addProperty("d", false);
+                arr.add(it);
+            }
+            o.add("items", arr);
+            try { store.kvSet(key, J.json(o)); } catch (Throwable e) { return "[plan] ok=0 写不进去：" + e; }
+            return renderPlan("[plan] ok=1 清单记下了（共 " + items.size() + " 项，没走完不许收工）", o);
+        }
+
+        if (cur == null) {
+            if (args.has("done")) return "[plan] ok=0 现在没有清单 —— 多步任务先 plan items=\"…\" 列出来";
+            return "[plan] 现在没有清单";
+        }
+
+        if (args.has("done")) {
+            int n = J.i(args, "done", 0);
+            JsonArray arr = cur.getAsJsonArray("items");
+            if (n < 1 || n > arr.size()) return "[plan] ok=0 序号 " + n + " 越界（当前 " + arr.size() + " 项）";
+            JsonObject it = arr.get(n - 1).getAsJsonObject();
+            it.addProperty("d", true);
+            cur.addProperty("ts", now);
+            try { store.kvSet(key, J.json(cur)); } catch (Throwable ignored) { }
+            return renderPlan("[plan] ok=1 第 " + n + " 项勾掉了", cur);
+        }
+        return renderPlan("[plan] 当前清单", cur);
+    }
+
+    private static String renderPlan(String head, JsonObject o) {
+        JsonArray arr = o == null ? null : o.getAsJsonArray("items");
+        if (arr == null || arr.size() == 0) return head + "（空）";
+        StringBuilder sb = new StringBuilder(head).append('\n');
+        int done = 0;
+        for (int i = 0; i < arr.size(); i++) {
+            JsonObject it = arr.get(i).getAsJsonObject();
+            boolean d = J.b(it, "d", false);
+            if (d) done++;
+            sb.append(i + 1).append(". ").append(d ? "[x] " : "[ ] ").append(J.s(it, "t", "")).append('\n');
+        }
+        sb.append("进度 ").append(done).append("/").append(arr.size());
+        if (done >= arr.size()) sb.append(" —— 全部完成 ✓");
+        return sb.toString().trim();
+    }
+
+    private static JsonObject schemaPlan() {
+        return J.obj(
+                "type", "object",
+                "properties", J.obj(
+                        "items", obj("string", "要办的事：用；或换行分开，一项一件事（3~6 项最好，最多 12 项）。传空串 = 清空清单"),
+                        "done", obj("integer", "把第几项标成做完（序号从 1 起）")));
+    }
+
+    private static JsonObject schemaFollow() {
+        return J.obj(
+                "type", "object",
+                "properties", J.obj(
+                        "秒", obj("integer", "接着听多少秒：5~20。想接着聊就开长（如 15）；说完就完事用 0（立刻收工）。"
+                                + "不填 = 配置里的默认值（出厂 20）")));
     }
 
     private static JsonObject schemaAlarm() {

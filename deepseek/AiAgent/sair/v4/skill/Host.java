@@ -94,6 +94,16 @@ public interface Host {
     /** 最近几条入站图片的直连 URL（新的在前）；没有就返回空表。 */
     List<String> recentInboundImageUrls(int limit);
 
+    /**
+     * 最近几条入站消息里的<b>文件</b>段（新的在前）：{@code [{name, file, size, ts}]}。
+     *
+     * <p>默认实现返回空表 ⇒ 任何老宿主/桩不受影响；能提供它的宿主（{@code Boot}）覆写成
+     * {@code Inbound.recentFiles}。技能 {@code file op=fetch} 靠它定位"对方刚发的那个文件"。</p>
+     */
+    default List<JsonObject> inboundFiles(int limit) {
+        return java.util.Collections.emptyList();
+    }
+
     Prompts prompts();
 
     Inject inject();

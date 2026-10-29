@@ -99,7 +99,9 @@ public final class Conf implements sair.v4.skill.ConfView {
      *
      * <p>口径来源：主人原话「预算直接改大，再压缩就不对头」。</p>
      */
-    public static final int DEF_IDENTITY_MAX_CHARS = 8000;
+    // [PLAN 2026-10-20] 8000 → 9000：身份里加了「办事的姿势」硬规矩（约 400 字符），
+    //   旧预算只剩 11 字符余量 ⇒ 超了会被**截断**（规则写进去也不生效）。
+    public static final int DEF_IDENTITY_MAX_CHARS = 12000;
     /** 「低重要度记忆保留上限」的出厂默认（键 {@code maxLowImportance}）。 */
     public static final int DEF_MAX_LOW_IMPORTANCE = 500;
     /** 六库自维护间隔小时数的出厂默认（键 {@code maintainEveryHours}；{@code <=0} = 关闭）。 */
@@ -126,6 +128,8 @@ public final class Conf implements sair.v4.skill.ConfView {
     /** 默认只听本机回环：绑到别的地址且没设 token 时基板会拒绝启动 NapCat 服务。 */
     public static final String DEF_NAPCAT_HOST = "127.0.0.1";
     public static final long DEF_TICK_MS = 20000L;
+    /** [ALARMSEC 2026-10-24] 到点触发（闹钟）的独立周期：只跑 fireDue，很轻；甲方要求精确到秒 ⇒ 1 秒。 */
+    public static final long DEF_ALARM_TICK_MS = 1000L;
     /** 文件外链中转端口（V3 的 FileServer 就是 2671）。 */
     public static final int DEF_RELAY_PORT = 2671;
     // P9b-2 删除：DEF_PERM_BUILTIN / DEF_PERM_SKILL（旧档位体系"缺行默认档"的出厂值）与它们的读口
@@ -852,6 +856,9 @@ public final class Conf implements sair.v4.skill.ConfView {
 
     public long tickMs() { return getLong("tickMs", DEF_TICK_MS); }
 
+    /** 到点触发的周期（毫秒，键 {@code alarmTickMs}，默认 1000）。 */
+    public long alarmTickMs() { return getLong("alarmTickMs", DEF_ALARM_TICK_MS); }
+
     // ---- 调度（高并发：按会话分道；机制在 sair.v4.schedule.Lanes / Pool） ----
 
     /** 回合工作线程数（默认 2；1 = 旧口径：所有会话一条队列）。 */
@@ -1089,8 +1096,12 @@ public final class Conf implements sair.v4.skill.ConfView {
      *   <li>{@code skill} —— 技能自己的过程行（{@code [技能名] …}，走 {@code Host.out()}）；</li>
      *   <li>{@code ext} —— 插件扩展点的过程行（{@code [ext] provider=… chars=… ms=…}，
      *       以及 stage / voter / hook 的同形行；见 {@code sair.v4.ext.ExtRegistry}）；</li>
-     *   <li>{@code net} —— 外链中转行（{@code [relay] …}）。</li>
+     *   <li>{@code notice} —— 通知类事件的结构行（{@code [qq] notice …}；见 {@code QqGateway} 的 notice 分支）。</li>
+     *   <li>{@code net} —— 外链中转的<b>过程行</b>（{@code [relay] …}，见 {@code qq.Relay#log}）。</li>
      * </ul>
+     *
+     * <p>注意这一列是<b>消费侧的真实清单</b>：加了类别却没人 {@code logOn(…)} 就是假开关
+     * （{@code net} 曾经如此，D5-1 已接上）。</p>
      *
      * <p><b>不受本开关影响的</b>：错误（err）、警告（warn）、装配进度（{@code [v4] x/19 …}）、
      * 权限阻断、投递降级、以及各命令的回话 —— 这些不是"过程噪声"，该看见的必须看见。</p>
@@ -1298,6 +1309,8 @@ public final class Conf implements sair.v4.skill.ConfView {
         add(out, "replyMaxParts",
                 String.valueOf(getInt("replyMaxParts", sair.v4.term.Segmenter.DEF_MAX_PARTS)));
         add(out, "msgDedupWindowSec", String.valueOf(getInt("msgDedupWindowSec", sair.v4.qq.Seen.DEF_WINDOW_SEC)));
+        // [FOCUS 2026-10-19] 跟进窗口默认时长（秒，5~60；0 = 关掉）。她用 follow 工具可当场改。
+        add(out, "followupSec", String.valueOf(getInt("followupSec", sair.v4.qq.Focus.DEF_SEC)));
         // ---- Agent 与技能 ----
         add(out, "agentMaxRounds", String.valueOf(agentMaxRounds()));
         add(out, "subagentMaxRounds", String.valueOf(subagentMaxRounds()));
@@ -1327,6 +1340,7 @@ public final class Conf implements sair.v4.skill.ConfView {
         add(out, "eventWorkers", String.valueOf(eventWorkers()));
         add(out, "eventQueueMax", String.valueOf(eventQueueMax()));
         add(out, "tickMs", String.valueOf(tickMs()));
+        add(out, "alarmTickMs", String.valueOf(alarmTickMs()));
         // ---- 上下文注入 ----
         add(out, "prefInject", String.valueOf(prefInject()));
         add(out, "prefInjectMaxRows", String.valueOf(prefInjectMaxRows()));
@@ -1525,6 +1539,7 @@ public final class Conf implements sair.v4.skill.ConfView {
             set("ctxBudgetChars", DEF_CTX_BUDGET_CHARS);
             set("hookOverflow", "caller");
             set("turnMergeMaxChars", DEF_TURN_MERGE_CHARS);
+            set("followupSec", sair.v4.qq.Focus.DEF_SEC);
             set("modelConcurrency", DEF_MODEL_CONCURRENCY);
             set("modelGateWaitMs", DEF_MODEL_GATE_WAIT_MS);
             set("hookWorkers", DEF_HOOK_WORKERS);

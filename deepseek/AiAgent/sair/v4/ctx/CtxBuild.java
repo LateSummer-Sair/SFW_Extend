@@ -138,6 +138,9 @@ public final class CtxBuild {
      *       没有人发消息，是她自己在时间里跑的那一轮）；</li>
      *   <li>{@link #AD_SYSTEM} {@code system} —— <b>基板定时/闹钟/任务投递</b>（{@code Tick}）：
      *       到点了替某个人办那件事，不是"有人在会话里叫她"。</li>
+     *   <li>{@link #AD_QUOTE} {@code quote} —— 群里<b>引用了她自己刚发过的那条</b>
+     *       （{@code reply} 段的被引 {@code msg_id} ∈ 我们自己发出的台账）。人对"这条是发给我的吗？"
+     *       最自然的回答方式就是引用回复 ⇒ 按 D8 之前的口径这句话<b>永远到不了她面前</b>。</li>
      * </ul>
      */
     public static final String ADDRESSED_LEAD = "addressed: ";
@@ -154,11 +157,21 @@ public final class CtxBuild {
     public static final String AD_SELF = "self";
     /** {@code addressed} 取值：基板定时/闹钟/任务投递（{@code Tick}）。 */
     public static final String AD_SYSTEM = "system";
+    /**
+     * {@code addressed} 取值：群里<b>引用</b>了她自己发过的那条消息（D8，2026-10-14 批）。
+     *
+     * <p>判据是<b>正向证据</b>：本条 {@code reply} 段的被引 {@code message_id} ∈ 我们自己发出的
+     * 台账（内存 {@code sentRing} 或持久 {@code Store.sentKnown}）——{@code QqGateway.ownQuoted}。
+     * 引用的是同账号别家客户端发的（外部来源行，不在台账里）⇒ <b>不算</b>，
+     * 与 {@code extra.foreign} 那条口径天然对齐。<b>零网络调用</b>。</p>
+     */
+    public static final String AD_QUOTE = "quote";
 
     /** {@code addressed} 的<b>白名单</b>（渲染前的最后一道：产者塞的别的东西一律不出现）。 */
     public static boolean isAddressed(String v) {
-        return AD_TRIGGER.equals(v) || AD_AT.equals(v) || AD_PRIVATE.equals(v)
-                || AD_MASTER.equals(v) || AD_SELF.equals(v) || AD_SYSTEM.equals(v);
+        return AD_TRIGGER.equals(v) || AD_AT.equals(v) || AD_QUOTE.equals(v)
+                || AD_PRIVATE.equals(v) || AD_MASTER.equals(v) || AD_SELF.equals(v)
+                || AD_SYSTEM.equals(v);
     }
 
     /**

@@ -949,6 +949,8 @@ public final class DebugPort {
               .append(" degraded=").append(boot != null && boot.degraded() ? 1 : 0)
               .append(" skills=").append(skills)
               .append(" tools=").append(tools)
+              // [FOCUS 2026-10-19] 跟进窗口有几条开着（诊断用：0 = 没人在窗口里）
+              .append(" focus=").append(sair.v4.qq.Focus.size())
               .append(" ext=").append(ext)
               .append(" napcat=").append(napcat ? 1 : 0)
               .append(" tap=").append(tap ? 1 : 0)

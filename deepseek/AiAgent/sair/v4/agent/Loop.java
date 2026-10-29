@@ -322,7 +322,12 @@ public final class Loop {
     public static boolean speaks(String tool) {
         if (tool == null) return false;
         String t = tool.trim().toLowerCase();
-        return "send".equals(t) || "sendimage".equals(t) || "sticker".equals(t);
+        // [TTS 2026-10-19] speak 也算"说话"：语音就是她这一轮的回复。
+        // 不算进来会出一串问题 —— 框架不认为她说过话 ⇒ 继续跑收尾轮 ⇒
+        // 收尾轮把说话类工具藏起来 ⇒ 她以为语音没发出去，回一句"下一轮再补"，用户就收到
+        // "文字先说、语音下轮才到"的怪顺序（真机实测踩到）。算进来以后：语音即回复，
+        // 不再补文字轮；收尾轮里也自然不给她发语音的机会。
+        return "send".equals(t) || "sendimage".equals(t) || "sticker".equals(t) || "speak".equals(t);
     }
 
     /**

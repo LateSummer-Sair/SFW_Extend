@@ -245,7 +245,7 @@ public final class Agent {
                     out.dim("[agent] 投递通路（" + deliverTo + "）：正文不外发（要说话得她显式调发送类工具）"
                             + " chars=" + oc.text.length());
                 }
-            } else if (sink != null && !alreadyOut(t, t.session())) {
+            } else if (sink != null && !alreadyOut(t, t.session(), oc.text)) {
                 hookSend(t, oc.text);
                 sink.say(oc.text);
             } else if (sink != null && out != null) {
@@ -832,21 +832,41 @@ public final class Agent {
      * 注意真机上 SQL 读失败在 {@code Db.query} 里是<b>返回空表、不抛</b>，所以那种情况走的是上面
      * {@code isEmpty()} 那条 ⇒ 判<b>投正文</b>（台账坏掉只会多补一句，绝不会反过来让她哑掉）。</p>
      */
-    private boolean alreadyOut(Turn t, String session) {
+    private boolean alreadyOut(Turn t, String session, String finalText) {
         if (t == null) return false;
-        if (store == null) return t.spoke();
+        String fin = Str.trim(Str.nz(finalText));
+        if (fin.isEmpty()) return true;                 // 没有正文可投（既有行为：空正文什么都不发）
+        // [OUTFIX 2026-10-20] 判据从「调过发送类工具 ⇒ 不补正文」改成「**同一句**已经发过 ⇒ 不补」。
+        //   真机 11:45 那单（group 121873503）：她先发了一句「我先去本地翻一翻」再调 send，
+        //   干完活得出的结论被旧判据整条吞掉 —— 用户只收到承诺、等不到结果，观感就是「回一句就装死」。
+        //   "说过就不再补一句"的本意是防**重复**，不是防**结论**；只有同句才算重复。
+        if (store == null) return false;                // 没台账 ⇒ 一律投（多一句也比哑掉强，口径同旧注释）
         long since = t.startedAt();
         try {
             // ★ 台账是"成功才有行"的：本回合一行都没落 ⇒ 没有一次真发出去（被拒 / 平台失败）⇒ 正文必须投。
-            if (store.sentList("", since, 1).isEmpty()) return false;
-            if (t.spoke()) return true;
-            if (Str.has(session) && !store.sentList(session, since, 1).isEmpty()) return true;
-            String alt = altSessionKey(session);
-            return Str.has(alt) && !store.sentList(alt, since, 1).isEmpty();
+            List<JsonObject> sent = store.sentList("", since, 8);
+            if (sent.isEmpty()) return false;
+            for (JsonObject row : sent) {
+                if (sameSentence(J.s(row, "preview", ""), fin)) return true;
+            }
+            return false;
         } catch (Throwable e) {
-            if (out != null) out.warn("[agent] 出站台账查不动（本次退回「调过发送类工具」口径，不影响回复）：" + e);
-            return t.spoke();
+            if (out != null) out.warn("[agent] 出站台账查不动（本次一律投正文，不影响回复）：" + e);
+            return false;
         }
+    }
+
+    /**
+     * 台账里存的是**首 ~60 字预览**（{@code Store.sentAdd} 的 {@code preview}），所以"同一句"只能按前缀认：
+     * 预览剥掉尾部省略号后，必须是待投正文的前缀（且至少 2 个字符）。
+     */
+    private static boolean sameSentence(String preview, String fin) {
+        String p = Str.trim(Str.nz(preview));
+        String f = Str.trim(Str.nz(fin));
+        if (p.endsWith("…")) p = p.substring(0, p.length() - 1).trim();
+        if (p.length() < 2 || f.length() < 2) return false;
+        int n = Math.min(p.length(), f.length());
+        return p.regionMatches(0, f, 0, n) || f.regionMatches(0, p, 0, n);
     }
 
     /** 会话键的等价写法：私聊 {@code qq:<QQ>} ↔ {@code user:<QQ>}（群键没有第二写法，返回空串）。 */
