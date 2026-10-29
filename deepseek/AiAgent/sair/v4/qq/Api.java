@@ -338,24 +338,24 @@ public final class Api {
         // ★ FIX-ECHO 补-3/补-6：参数里出现自我记账头 ⇒ 拒发。判据是**按内容**（任意字符串叶子、
         //   任意动作名；表外动作也兜得住），深度 64 + 字符预算 200000，超限同样 fail-closed。
         String headFact = selfHeadFact(action, p);
-        if (headFact != null) return selfHeadDeny("动作出口 call(" + Str.trim(action) + ")", headFact);
+        if (headFact != null) return selfHeadDeny("动作出口 call(" + Str.trim(action) + ")", headFact, bodyOf(p));
         // ★ SILENT-FIX：发送类动作的**整条正文**就是协议暗号 ⇒ 整条拒发（与 term.Sinks 那道闸同源）。
         //   ★ 2026-09-28「贴边暗号」批：整条不相等但**贴着首/尾**的带括号暗号 ⇒ 这里就地剥掉
         //     （判据只有 Agent.stripSilent 一处），剥完的正文继续走下面的内容级闸。
         String silentFact = silentFact(action, p);
-        if (silentFact != null) return silentDeny("动作出口 call(" + Str.trim(action) + ")", silentFact);
+        if (silentFact != null) return silentDeny("动作出口 call(" + Str.trim(action) + ")", silentFact, bodyOf(p));
         // ★ 基板提炼批（2026-09-22）：工具发送路的**内容级闸** —— [[mood:…]] 标记族剥离（剥完为空 ⇒ 拦下）
         //   与出站红线（不可替换 ⇒ 拦下；可替换 ⇒ 就地换词）。判据与词表同源（qq.MoodMarks / term.Redline），
         //   与 term.Sinks.gate 那一层是**同一套**，这里不写第二套。位置同样在 available() **之前**。
         //   ★ 2026-09-28「协议标记漏出」批：这一支里还加了族 A/族 B/族 C（见 contentJudge 的注释）。
         String protoBefore = bodyOf(p);
         String contentFact = contentFact(action, p);
-        if (contentFact != null) return contentDeny("动作出口 call(" + Str.trim(action) + ")", contentFact);
+        if (contentFact != null) return contentDeny("动作出口 call(" + Str.trim(action) + ")", contentFact, bodyOf(p));
         // ★ 2026-09-23「出站核心批」②：'任意动作 × 任意字符串叶子'的那一支（同源判据、同一套落法；
         //   三条例外见 contentFactAny）。位置上紧跟上面那一支：发送类动作的 message 仍由上面那一支
         //   出结论（错文串因此逐字不变），这一支负责其余动作与其余字段。
         String anyFact = contentFactAny(action, p);
-        if (anyFact != null) return contentDeny("动作出口 call(" + Str.trim(action) + ")", anyFact);
+        if (anyFact != null) return contentDeny("动作出口 call(" + Str.trim(action) + ")", anyFact, bodyOf(p));
         // ★ 2026-09-28：剥了协议标记就留一行痕（改写绝不静默；判据同源、不写第二套）
         protoWarn("动作出口 call(" + Str.trim(action) + ")", protoBefore);
         if (!available()) return error(NOT_CONNECTED);
@@ -441,21 +441,21 @@ public final class Api {
             if (deny != null && !deny.trim().isEmpty()) return error(deny);
         }
         String headFact = selfHeadFact(action, p);
-        if (headFact != null) return selfHeadDeny("静默出口 callQuiet(" + Str.trim(action) + ")", headFact);
+        if (headFact != null) return selfHeadDeny("静默出口 callQuiet(" + Str.trim(action) + ")", headFact, bodyOf(p));
         // ★ SILENT-FIX：同一条整条判定（口径与 call 逐字相同）—— 这条 public 方法直连 Link，
         //   拿着 h.napcat() 的技能同样绕不过去（send 类动作的正文就是"要说出去的那句话"）。
         //   ★ 2026-09-28「贴边暗号」批：同一条"贴边 ⇒ 就地剥"（与 call 逐字相同）；注意本方法
         //     的既有契约是**不 deepCopy 参数**，所以这里剥的是**调用方自己那个对象**（与它下面
         //     那条 contentFact 的"就地剥标记 / 就地换词"是同一个契约）。
         String silentFact = silentFact(action, p);
-        if (silentFact != null) return silentDeny("静默出口 callQuiet(" + Str.trim(action) + ")", silentFact);
+        if (silentFact != null) return silentDeny("静默出口 callQuiet(" + Str.trim(action) + ")", silentFact, bodyOf(p));
         // ★ 基板提炼批：同一条内容级闸（口径与 call 逐字相同）。
         String protoBefore = bodyOf(p);
         String contentFact = contentFact(action, p);
-        if (contentFact != null) return contentDeny("静默出口 callQuiet(" + Str.trim(action) + ")", contentFact);
+        if (contentFact != null) return contentDeny("静默出口 callQuiet(" + Str.trim(action) + ")", contentFact, bodyOf(p));
         // ★ 2026-09-23「出站核心批」②：同一条 widened 闸（口径与 call 逐字相同）。
         String anyFact = contentFactAny(action, p);
-        if (anyFact != null) return contentDeny("静默出口 callQuiet(" + Str.trim(action) + ")", anyFact);
+        if (anyFact != null) return contentDeny("静默出口 callQuiet(" + Str.trim(action) + ")", anyFact, bodyOf(p));
         // ★ 2026-09-28：剥了协议标记就留一行痕（与 call 逐字同一条）
         protoWarn("静默出口 callQuiet(" + Str.trim(action) + ")", protoBefore);
         if (!available()) return error(NOT_CONNECTED);
@@ -1994,8 +1994,9 @@ public final class Api {
      * warn 只写结构事实（判据名 / 位置 / 字符数 / 哪个出口；超出扫描预算或深度时写预算事实），
      * <b>不含正文</b>；回执给调用方一句实话（它据此知道这条没发出去）。
      */
-    private JsonObject selfHeadDeny(String where, String fact) {
+    private JsonObject selfHeadDeny(String where, String fact, String text) {
         warn("[qq] 出站拦截：正文出现自我记账头（" + fact + "） → 整条丢弃（" + where + "）");
+        sair.v4.term.Sinks.hold("blocked", where, fact, text);
         return error("这条正文里带自我记账头（" + fact + "），按纪律整条拦下、没有发出去");
     }
 
@@ -2104,8 +2105,9 @@ public final class Api {
     }
 
     /** 拒发一条"整条正文就是协议暗号"的动作（{@link #silentFact}）：措辞只在这一处成型。 */
-    private JsonObject silentDeny(String where, String fact) {
+    private JsonObject silentDeny(String where, String fact, String text) {
         warn("[qq] 出站拦截：整条正文就是协议暗号（" + fact + "） → 整条丢弃（" + where + "）");
+        sair.v4.term.Sinks.hold("blocked", where, fact, text);
         return error("这条正文整条就是协议暗号（" + fact + "），按纪律整条拦下、没有发出去");
     }
 
@@ -2598,8 +2600,9 @@ public final class Api {
     }
 
     /** 拒发一条"内容级闸命中"的动作（{@link #contentFact}）：措辞只在这一处成型。 */
-    private JsonObject contentDeny(String where, String fact) {
+    private JsonObject contentDeny(String where, String fact, String text) {
         warn("[qq] 出站拦截：正文命中出站内容闸（" + fact + "） → 整条丢弃（" + where + "）");
+        sair.v4.term.Sinks.hold("blocked", where, fact, text);
         return error("这条正文命中出站内容闸（" + fact + "），按纪律整条拦下、没有发出去");
     }
 
@@ -2780,14 +2783,14 @@ public final class Api {
         int head = SelfEcho.headAt(clean);
         if (head >= 0) {
             return selfHeadDeny("文本出口 sendText",
-                    "rule=self_head at=" + head + " chars=" + clean.length());
+                    "rule=self_head at=" + head + " chars=" + clean.length(), clean);
         }
         // ★ 基板提炼批（2026-09-22）：内容级闸（同源判据，见 contentJudge）——文本出口这一道
         //   与 call / callQuiet 那两道是同一套；剥到什么都不剩 / 命中不可替换类目 ⇒ 拦下，
         //   可替换类目 ⇒ 换词后照发。排在"空正文"那句之前：整条就是标记的那一条要报出
         //   rule=mood_mark（那是真原因），不是"这条正文是空的"。
         Body jb = contentJudge(clean, "string");
-        if (jb.text == null) return contentDeny("文本出口 sendText", jb.why);
+        if (jb.text == null) return contentDeny("文本出口 sendText", jb.why, clean);
         clean = jb.text;
         if (clean.isEmpty()) return error("这条正文是空的（剥掉控制标记之后没有内容）");
         return group

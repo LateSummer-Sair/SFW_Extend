@@ -129,7 +129,7 @@ start 8x64\bin\javaw -jar SFW.jar %*</code></pre>
               <tr><th>名字</th><th>是什么</th><th>谁建的</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>config.json</code></td><td>配置文件（已知键 114 个，<code>Conf.knownKeys()</code>；见<a href="config.html#keys">配置页</a>）</td><td><code>Conf.ensureDefaults()</code>（<code>Boot.java</code>）</td></tr>
+              <tr><td><code>config.json</code></td><td>配置文件（已知键 116 个，<code>Conf.knownKeys()</code>；见<a href="config.html#keys">配置页</a>）</td><td><code>Conf.ensureDefaults()</code>（<code>Boot.java</code>）</td></tr>
               <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>（<code>Conf.java</code>）；表在装配第⑯步末尾落盘（<code>Boot.createLibTables</code>）</td><td><code>Store.open()</code>（<code>Boot.java</code>）</td></tr>
               <tr><td><code>prompts\</code></td><td>提示词文件目录（<code>identity.md</code> / <code>subagent.md</code> / <code>tools-index.md</code> / <code>redline.md</code>）</td><td>骨架只建前两个空壳，其余你自己放</td></tr>
               <tr><td><code>files\</code></td><td>下载与图片落点（附件、表情、抓回来的图；<b>库导出不落这里</b>）</td><td>骨架（<code>Boot.java</code>）</td></tr>

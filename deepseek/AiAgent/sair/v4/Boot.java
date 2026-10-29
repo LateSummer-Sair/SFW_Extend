@@ -853,6 +853,8 @@ public final class Boot {
                     }
                 });
                 sair.v4.term.Sinks.setExt(ext);          // 出站 stage 管线（④ 的"发送"半边）
+                sair.v4.term.Sinks.setStore(store);      // D4 证据面（同一静态注入纪律；默认 null = 不记）
+                sair.v4.tool.Registry.setStore(store);   // D9 结果句柄（同一静态注入纪律；默认 null = 退回砍尾）
                 // 基板级出站红线（2026-09-22 基板提炼批）：词表在 prompts\redline.md，热读。
                 // 与上面那一行同一个套路（静态注入口，默认 null = 一个词都不判 = 与加这一层之前逐字节一致）；
                 // 但它**不是**扩展点、不受 extEnabled 影响 —— 安全级规则不许随可选技能/总开关生死。
@@ -1468,6 +1470,8 @@ public final class Boot {
             try { if (eventPool != null) eventPool.shutdownNow(); } catch (Exception ignored) {}
             // 扩展点：先把出站管线摘掉（停完还在改正文是没意义的），再关掉它自己的工作线程池
             try { sair.v4.term.Sinks.setExt(null); } catch (Exception ignored) {}
+            try { sair.v4.term.Sinks.setStore(null); } catch (Exception ignored) {}
+            try { sair.v4.tool.Registry.setStore(null); } catch (Exception ignored) {}
             // 基板红线同一条纪律：停完还在判"这条能不能发"是没意义的（它有自己的热读缓存）
             try { sair.v4.term.Redline.uninstall(); } catch (Exception ignored) {}
             try { if (ext != null) ext.close(); } catch (Exception ignored) {}
@@ -1943,6 +1947,11 @@ public final class Boot {
             @Override
             public List<String> recentInboundImageUrls(int limit) {
                 return sair.v4.qq.Inbound.recentImageUrls(limit);
+            }
+
+            @Override
+            public List<JsonObject> inboundFiles(int limit) {
+                return sair.v4.qq.Inbound.recentFiles(limit);
             }
 
             @Override
@@ -2490,6 +2499,18 @@ public final class Boot {
         sk.addProperty("compiling", skillsCompiling);
         sk.addProperty("compile_ms", skillsCompileMs);
         sk.addProperty("compile_error", skillsError);
+        // ★ D5-3（2026-10-14）：**点名**是哪个插件有问题 —— 以前这里只有计数与"编挂了没有"，
+        //   出了事还得再去敲 ai/skill validate。判据只有一处：Skills.validate()（不写第二套）。
+        JsonArray skProblems = new JsonArray();
+        if (skills != null) {
+            try {
+                for (String p : skills.validate()) skProblems.add(p);
+            } catch (Throwable t) {
+                skProblems.add("(validate 失败: " + t + ")");
+            }
+        }
+        sk.add("problems", skProblems);
+        sk.addProperty("problem_n", skProblems.size());
         o.add("skills", sk);
 
         JsonObject pc = new JsonObject();

@@ -38,11 +38,21 @@ public final class Inbound {
         final String file;
         final String url;
         final long ts;
+        /** 文件段才有的显示名（图片为空）。 */
+        final String name;
+        /** 文件段才有的字节数（图片为 0）。 */
+        final long size;
 
         Entry(String file, String url, long ts) {
+            this(file, url, ts, "", 0L);
+        }
+
+        Entry(String file, String url, long ts, String name, long size) {
             this.file = Str.nz(file);
             this.url = Str.nz(url);
             this.ts = ts;
+            this.name = Str.nz(name);
+            this.size = size;
         }
 
         boolean live(long now) { return now - ts <= TTL_MS; }
@@ -53,6 +63,8 @@ public final class Inbound {
     private static final Map<String, Entry> BY_FILE = new LinkedHashMap<String, Entry>();
     /** 最近记下的条目（新的在最后）。 */
     private static final List<Entry> RECENT = new ArrayList<Entry>();
+    /** 最近记下的<b>文件</b>段（新的在最后）：图片那条路不用它。 */
+    private static final List<Entry> FILES = new ArrayList<Entry>();
 
     /** 记事：把一条入站消息里的图片段记下来（file 值 → url）。 */
     public static void remember(Ev e) {
@@ -62,21 +74,40 @@ public final class Inbound {
         List<String> urls = new ArrayList<String>();
         try {
             for (JsonObject seg : e.segments()) {
-                if (!"image".equals(Str.lower(J.s(seg, "type", "")))) continue;
+                String type = Str.lower(J.s(seg, "type", ""));
                 JsonObject d = J.sub(seg, "data");
                 if (d == null) continue;
-                String f = Str.trim(J.s(d, "file", ""));
-                String u = Str.trim(J.s(d, "url", ""));
-                files.add(f);
-                urls.add(u);
-                if (Str.blank(u) && Str.blank(f)) continue;
-                Entry en = new Entry(f, u, now);
-                synchronized (LOCK) {
-                    put(f, en);
-                    put(basename(f), en);
-                    RECENT.add(en);
-                    while (RECENT.size() > MAX_RECENT) RECENT.remove(0);
-                    trim(now);
+                if ("image".equals(type)) {
+                    String f = Str.trim(J.s(d, "file", ""));
+                    String u = Str.trim(J.s(d, "url", ""));
+                    files.add(f);
+                    urls.add(u);
+                    if (Str.blank(u) && Str.blank(f)) continue;
+                    Entry en = new Entry(f, u, now);
+                    synchronized (LOCK) {
+                        put(f, en);
+                        put(basename(f), en);
+                        RECENT.add(en);
+                        while (RECENT.size() > MAX_RECENT) RECENT.remove(0);
+                        trim(now);
+                    }
+                } else if ("file".equals(type)) {
+                    // 文件段：记 file 值与显示名。它一般没有直链 url（要拿 get_file 换），
+                    // 所以这里只登记"她刚收到过这个文件"这条线索，取内容由 file op=fetch 去做。
+                    String f = Str.trim(J.s(d, "file", ""));
+                    String nm = Str.trim(J.s(d, "name", ""));
+                    long sz = J.l(d, "file_size", 0L);
+                    String u = Str.trim(J.s(d, "url", ""));
+                    if (Str.blank(f) && Str.blank(nm)) continue;
+                    Entry en = new Entry(f, u, now, nm, sz);
+                    synchronized (LOCK) {
+                        put(f, en);
+                        put(basename(f), en);
+                        put(nm, en);
+                        FILES.add(en);
+                        while (FILES.size() > MAX_RECENT) FILES.remove(0);
+                        trim(now);
+                    }
                 }
             }
         } catch (Throwable ignored) {
@@ -125,6 +156,30 @@ public final class Inbound {
         return out;
     }
 
+    /**
+     * 最近几条入站<b>文件</b>（新的在前）：{@code [{name, file, size, ts}]}。
+     *
+     * <p>给技能 {@code file op=fetch} 用：用户刚发的文件在这里能找到它的 {@code file} 值与显示名。</p>
+     */
+    public static List<JsonObject> recentFiles(int limit) {
+        int n = limit > 0 ? limit : 3;
+        long now = System.currentTimeMillis();
+        List<JsonObject> out = new ArrayList<JsonObject>();
+        synchronized (LOCK) {
+            for (int i = FILES.size() - 1; i >= 0 && out.size() < n; i--) {
+                Entry en = FILES.get(i);
+                if (en == null || !en.live(now)) continue;
+                JsonObject o = new JsonObject();
+                o.addProperty("name", en.name);
+                o.addProperty("file", en.file);
+                o.addProperty("size", en.size);
+                o.addProperty("ts", en.ts);
+                out.add(o);
+            }
+        }
+        return out;
+    }
+
     /** 当前登记条数（诊断/探针用）。 */
     public static int size() {
         synchronized (LOCK) {
@@ -137,6 +192,7 @@ public final class Inbound {
         synchronized (LOCK) {
             BY_FILE.clear();
             RECENT.clear();
+            FILES.clear();
         }
     }
 

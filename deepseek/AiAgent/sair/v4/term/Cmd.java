@@ -2095,6 +2095,11 @@ public final class Cmd {
                 out.warn("用法：prompt inject <slot> <key> <文本>");
                 return;
             }
+            if (!sair.v4.prompt.Inject.renderable(p[0])) {
+                out.warn("这个槽没有渲染点（保留位）：\"" + p[0]
+                        + "\" —— 只有 system / context / arg 会真的生效；没有注入，也没有写进表里。");
+                return;
+            }
             boot.prompts().inject().put(p[0], p[1], p[2], "console");
             out.ok("已注入 " + p[0] + "/" + p[1]);
             return;
@@ -2387,7 +2392,7 @@ public final class Cmd {
                     "能力：",
                     "\t" + n + "/skill [list|reload|validate|read 名]   技能库（外挂层）",
                     "\t" + n + "/prompt [show|list|sections|read 名|stat|reload]  提示词",
-                    "\t" + n + "/prompt inject <slot> <key> <文本>      注入到 system/context/tool/arg",
+                    "\t" + n + "/prompt inject <slot> <key> <文本>      注入到 system/context/arg（tool 是保留位）",
                     "\t" + n + "/perm [list [op]|reload]           权限表（合并视图）：逐行看表 / 按 op 看谁能用 / 重新合并装载",
                     "\t" + n + "/perm gen                          只在已有权限文件里重排：按工具分组、补中文释义（不新建文件）",
                     "\t" + n + "/perm run|ban <op> <身份> [身份…]   白名单（授权）/ 黑名单（封禁）—— 只有主人能跑",

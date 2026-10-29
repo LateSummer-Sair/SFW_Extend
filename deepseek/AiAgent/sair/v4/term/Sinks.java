@@ -27,6 +27,84 @@ public final class Sinks {
     public static void setExt(sair.v4.ext.ExtRegistry e) { EXT = e; }
 
     /**
+     * <b>D4 证据面</b>（装配期由 {@code Boot} 注入；默认 {@code null} = 不记，
+     * 与加这一层之前<b>逐字节一致</b> —— 与 {@link #EXT} 同一条静态注入纪律）。
+     *
+     * <p><b>为什么要它</b>：被这道闸拦下/剥掉的出站，此前在<b>三个台账面上都不留</b>
+     * （{@code grouplog} / {@code dialog} 本来就没写，{@code warn} 只进滚动的控制台日志）
+     * ⇒ 「本来要发什么」事后查不到（台账 D4）。</p>
+     */
+    private static volatile sair.v4.store.Store STORE;
+
+    /** 注入/卸下证据面的库（装配期注入；{@code Boot.stop()} 卸下）。 */
+    public static void setStore(sair.v4.store.Store s) { STORE = s; }
+
+    /** D4 的落点：{@code kv} 里的<b>单键有界环</b>（{@code Store.maintain()} 从不清 {@code kv}）。 */
+    static final String HOLD_KEY = "outbound:hold";
+    /** 环的条数上限（超出丢最老的一条）。 */
+    static final int HOLD_MAX = 50;
+    /** 单条留存的原文上限（与 {@code SelfEcho.TEXT_MAX} 同量级）。 */
+    static final int HOLD_TEXT_MAX = 2000;
+
+    /**
+     * 记一条"被拦下/被剥掉"的<b>证据</b>（含当时要发的原文，供事后查）。
+     *
+     * <p><b>落在 {@code kv} 而不是 {@code sent} 表</b>：{@code sent} 按行数裁到
+     * {@code DEF_SENT_KEEP=2000}，而 D2 的跨重启去重（{@code Store.sentKnown}）正靠那 2000 行 ——
+     * 把被拦的塞进去会<b>挤掉真记账行、反而削弱 D2</b>；而且被拦的本来就没有 {@code message_id}。</p>
+     *
+     * <p><b>不许污染她的窗口</b>：{@code ChatWindow} 只读 {@code grouplog}/{@code dialog}，
+     * 本方法只碰 {@code kv} ⇒ 构造性不可见。</p>
+     *
+     * <p><b>任何异常一律吞掉</b>：证据面是旁路，绝不把发送路径带崩。</p>
+     */
+    public static void hold(String kind, String where, String rule, String text) {
+        sair.v4.store.Store st = STORE;
+        if (st == null) return;
+        try {
+            com.google.gson.JsonArray ring = new com.google.gson.JsonArray();
+            String prev = st.kv(HOLD_KEY, "");
+            if (prev != null && !prev.trim().isEmpty()) {
+                com.google.gson.JsonElement e = com.google.gson.JsonParser.parseString(prev);
+                if (e != null && e.isJsonArray()) {
+                    com.google.gson.JsonArray old = e.getAsJsonArray();
+                    for (int i = 0; i < old.size(); i++) ring.add(old.get(i));
+                }
+            }
+            com.google.gson.JsonObject rec = new com.google.gson.JsonObject();
+            rec.addProperty("ts", System.currentTimeMillis());
+            rec.addProperty("kind", kind);
+            rec.addProperty("where", where);
+            rec.addProperty("rule", rule);
+            String t = text == null ? "" : text;
+            rec.addProperty("chars", t.length());
+            rec.addProperty("text", sair.v4.kit.Str.cut(t, HOLD_TEXT_MAX));
+            ring.add(rec);
+            while (ring.size() > HOLD_MAX) ring.remove(0);
+            st.kvSet(HOLD_KEY, ring.toString());
+        } catch (Throwable ignored) {
+            // 证据面绝不把发送路径带崩
+        }
+    }
+
+    /**
+     * {@code before} 剥成 {@code after} 之后<b>被拿掉的那一段</b>（同前缀/同后缀之间）。
+     *
+     * <p>只用于 D4 留痕，不参与任何判据。多处不相邻的剥离会给出"从第一处到最后一处"的外包络
+     * —— 如实（宁可多留，不做猜截断点那种事）。</p>
+     */
+    private static String removedSpan(String before, String after) {
+        String a = before == null ? "" : before;
+        String b = after == null ? "" : after;
+        int p = 0;
+        while (p < a.length() && p < b.length() && a.charAt(p) == b.charAt(p)) p++;
+        int s = 0;
+        while (s < a.length() - p && s < b.length() - p
+                && a.charAt(a.length() - 1 - s) == b.charAt(b.length() - 1 - s)) s++;
+        return a.substring(p, a.length() - s);
+    }
+
+    /**
      * 跑一遍出站 stage 管线（<b>分段之后、发送之前</b>）。
      *
      * <p>零 stage 时原样返回同一个 List 对象 —— 调用方据此做到"行为逐字节不变"。</p>
@@ -387,7 +465,7 @@ public final class Sinks {
         Gate g = headGate(judged);          // ★ 只判自我记账头：工具调用标记照旧留给逐段那道闸
         if (g.drop()) {
             if (dropped != null) dropped[0] = 1;
-            blocked(out, where, g.why);
+            blocked(out, where, g.why, original);
             if (out != null) out.warn(where + " 整条拦截：这一条不再进入分段（" + g.why + "）");
             return null;
         }
@@ -437,7 +515,7 @@ public final class Sinks {
         // strip ⇒ 对**原文**去头（不是对清洗后的文本去头：清洗会把 <split> 剥掉，那就没法按它切了）
         if (segBase.trim().isEmpty()) {
             if (dropped != null) dropped[0] = 1;
-            blocked(out, where, "正文剥掉自我记账头之后什么都不剩（rule=self_head at=0 remain=0）");
+            blocked(out, where, "正文剥掉自我记账头之后什么都不剩（rule=self_head at=0 remain=0）", segBase);
             if (out != null) out.warn(where + " 整条拦截：这一条不再进入分段（剥完为空）");
             return null;
         }
@@ -593,8 +671,9 @@ public final class Sinks {
     }
 
     /** 记一行"拦下了"（结构事实，无正文 —— 与 {@code [qq] msg … chars=} 同口径）。 */
-    private static void blocked(Out out, String where, String fact) {
+    private static void blocked(Out out, String where, String fact, String text) {
         if (out != null) out.warn(where + " 出站拦截：" + fact + " → 整条丢弃");
+        hold("blocked", where, fact, text);
     }
 
     /**
@@ -610,12 +689,17 @@ public final class Sinks {
      */
     private static String stripMarks(Out out, String where, String text) {
         String cut = sair.v4.qq.MarkerTags.strip(text);
-        if (out != null && !cut.equals(text)) {
+        if (!cut.equals(text)) {
             String f = sair.v4.qq.MarkerTags.fact(text, cut);
-            out.warn(where + " 出站剥协议标记：" + (f == null ? "rule=proto_tag chars=" + text.length() : f));
+            if (out != null) {
+                out.warn(where + " 出站剥协议标记：" + (f == null ? "rule=proto_tag chars=" + text.length() : f));
+            }
+            // D4：留痕里带上**被剥掉的那一段**（不是整条）—— 与上面那行 warn 同一条事实、不同落点。
+            hold("stripped", where, f == null ? "rule=proto_tag" : f, removedSpan(text, cut));
         }
         return cut;
     }
+
 
     /**
      * <b>★ 2026-09-23 批 6-②：三条降级打印路与本地控制台共用的那一支闸</b>。
@@ -649,7 +733,7 @@ public final class Sinks {
             return;
         }
         Gate g = gate(clean);
-        if (g.drop()) { blocked(out, where, g.why); return; }
+        if (g.drop()) { blocked(out, where, g.why, clean); return; }
         out.print(gateText(out, where, g) + "\n", Out.Tone.NORMAL);   // 投递降级：不打出来这条就丢了
     }
 
@@ -1013,7 +1097,7 @@ public final class Sinks {
                 //      头在中段/剥完为空/头残缺 ⇒ 整条丢。命中就丢这一条（其余条照发），
                 //      日志只写结构事实。见 gate(...) 的说明。
                 Gate g = gate(part);
-                if (g.drop()) { blocked(out, "[qq]", g.why); blockedParts++; continue; }
+                if (g.drop()) { blocked(out, "[qq]", g.why, part); blockedParts++; continue; }
                 part = gateText(out, "[qq]", g);
                 if (echo) out.dim("[qq→] " + part);           // 只有 logVerbose 才打正文
                 // 条间停顿：拟人化（最后一条之后不停）
@@ -1132,7 +1216,7 @@ public final class Sinks {
                     if (part.isEmpty()) continue;
                     // ★ 与 QqSink 同一道闸（唯一一处）：工具调用标记 / 自我记账头 / 协议暗号
                     Gate g = gate(part);
-                    if (g.drop()) { blocked(out, "[task]", g.why); blockedParts++; continue; }
+                    if (g.drop()) { blocked(out, "[task]", g.why, part); blockedParts++; continue; }
                     part = gateText(out, "[task]", g);
                     if (i > 0 && seg != null) seg.pause();
                     String err = sender.send(group, target, part);

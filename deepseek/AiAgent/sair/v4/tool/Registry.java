@@ -18,6 +18,7 @@ import sair.v4.ctx.Turn;
 import sair.v4.kit.J;
 import sair.v4.kit.Out;
 import sair.v4.kit.Str;
+import sair.v4.store.Store;
 
 /**
  * 唯一工具注册表（基板）。
@@ -37,6 +38,32 @@ public final class Registry implements sair.v4.skill.ToolView {
     private final Auth auth;
     private final Conf conf;
     private final Out out;
+
+    // ------------------------------------------------ 结果句柄（有界引用，D9 批）
+
+    /** 工具结果正文超预算时，全文落 {@code kv} 的键前缀。 */
+    private static final String SPILL_PREFIX = "toolresult:";
+
+    /** 句柄序号（从当前毫秒起，保证不与旧句柄重号）。 */
+    private static final java.util.concurrent.atomic.AtomicLong SPILL_SEQ =
+            new java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis());
+
+    /** 每落这么多个句柄清一次超龄的（不是每次落都扫）。 */
+    private static final int SPILL_PRUNE_EVERY = 32;
+
+    /** 句柄保留条数（key 升序 ≈ 时间序，超出删最旧）。 */
+    private static final int SPILL_KEEP = 200;
+
+    /**
+     * <b>结果句柄的库句柄</b>（静态注入，默认 {@code null} = 不落句柄，行为与加它之前<b>逐字节相同</b>）。
+     *
+     * <p>与 {@code Sinks.setStore} 同一套静态注入纪律（D4 批）：由 {@code Boot} 在库建好之后注入、
+     * 卸载时清成 {@code null}。探针不注入 ⇒ 拿不到库 ⇒ 走老口径，不会因为没库就改行为或报错。</p>
+     */
+    private static volatile Store SPILL_STORE;
+
+    /** 注入/清除结果句柄库（{@code null} = 关闭句柄，退回砍尾）。 */
+    public static void setStore(Store s) { SPILL_STORE = s; }
 
     /** 能力索引 / 名字兜底 / 参数复核（配置外挂 data/prompts/tools-index.md）。 */
     private volatile ToolIndex index;
@@ -323,7 +350,7 @@ public final class Registry implements sair.v4.skill.ToolView {
             logTool(name, System.currentTimeMillis() - t0, text, !looksFailed(text), null, t);
             int max = conf == null ? 6000 : conf.toolResultMax();
             if (max > 0 && text.length() > max) {
-                text = text.substring(0, max) + "\n…（结果已截断，共 " + text.length() + " 字符）";
+                text = clip(name, c, text, max);
             }
             return Str.blank(text) ? "(无输出)" : text;
         } catch (Throwable e) {
@@ -332,6 +359,56 @@ public final class Registry implements sair.v4.skill.ToolView {
             StackTraceElement[] st = e.getStackTrace();
             for (int i = 0; i < Math.min(4, st.length); i++) sb.append("\n  at ").append(st[i]);
             return sb.toString();
+        }
+    }
+
+    /**
+     * <b>工具结果超预算时的收口</b>（D9）：能留句柄就留句柄，留不了就与加它之前<b>逐字节相同</b>（砍尾）。
+     *
+     * <p><b>为什么只在主人/她本人落句柄</b>：{@code kv} 的读权限由技能管控表的<b>数据域</b>决定
+     * （线上 {@code perms-core.jsonc} 里没有 {@code kv} 条目 ⇒ 按"没列到 = 未授权"，非主人读不回来）。
+     * 落了句柄却取不回来，比砍尾更坏 —— 所以非主人<b>原样走老口径</b>。</p>
+     *
+     * <p>落库失败也退回砍尾：绝不因为一段证据没存住就改变对外行为。</p>
+     */
+    private static String clip(String tool, Caller c, String text, int max) {
+        int full = text.length();
+        Store s = SPILL_STORE;
+        boolean maySpill = s != null && (c == null || c.master() || c.system());
+        if (maySpill) {
+            String key = null;
+            try {
+                key = SPILL_PREFIX + SPILL_SEQ.incrementAndGet();
+                s.kvSet(key, text);
+                // ★ 必须回读验证：{@code Db.exec} 是"吞异常只记日志"的（Db.java:229），
+                //   写失败<b>不抛</b>。不回读就会把句柄指向空处 —— 那比砍尾更坏
+                //   （模型以为取得到、结果取不回）。
+                if (!text.equals(s.kv(key, null))) key = null;
+                if (key != null && SPILL_SEQ.get() % SPILL_PRUNE_EVERY == 0) pruneSpill(s);
+            } catch (Throwable e) {
+                key = null;
+            }
+            if (key != null) {
+                // 预留标记本身的长度，让返回值仍落在调用方给的上限里。
+                int keep = max > 320 ? max - 260 : max;
+                int head = (keep * 2) / 3;
+                int tail = keep - head;
+                String mark = "\n…（已省略 " + (full - keep) + " 字符；全文 key=" + key
+                        + "，取回：store op=list lib=kv filter={\"k\":\"" + key + "\"}）\n";
+                return text.substring(0, head) + mark + text.substring(full - tail);
+            }
+        }
+        return text.substring(0, max) + "\n…（结果已截断，共 " + full + " 字符）";
+    }
+
+    /** 清超龄句柄。绝不抛（清理失败只影响占用，不影响正确性）。 */
+    private static void pruneSpill(Store s) {
+        try {
+            List<JsonObject> rows = s.kvList(SPILL_PREFIX, SPILL_KEEP + 64);
+            for (int i = 0; i < rows.size() - SPILL_KEEP; i++) {
+                s.kvDelete(J.s(rows.get(i), "k", ""), false);
+            }
+        } catch (Throwable ignored) {
         }
     }
 

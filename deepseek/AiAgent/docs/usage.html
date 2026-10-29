@@ -299,7 +299,7 @@
             </thead>
             <tbody>
               <tr><td><code>v4.db</code></td><td><b>唯一的数据文件</b>（业务库 + 运行表 + 全文索引都在里面）</td><td>备份就是复制它；它的表结构交给基板自己维护就好</td></tr>
-              <tr><td><code>config.json</code></td><td>配置文件（已知键 114 个）</td><td>含密文；换启动目录会解不开</td></tr>
+              <tr><td><code>config.json</code></td><td>配置文件（已知键 116 个）</td><td>含密文；换启动目录会解不开</td></tr>
               <tr><td><code>perms-core.jsonc</code></td><td>基板侧的权限文件（主人写的，三个域各自分层，路径也写在这一份里）</td><td>写坏了只能靠备份回滚</td></tr>
               <tr><td><code>skills\&lt;技能名&gt;\perms.jsonc</code></td><td>技能自己的权限文件（只写这个技能提供的工具与属于它的数据键；目录里没有它 = 它的 op 都不授权）</td><td>跟着技能目录走：删掉目录，它的授权也一起消失</td></tr>
               <tr><td><code>prompts\</code></td><td>提示词文件</td><td><code>ai/prompt reload</code> 即可重载，不必重启</td></tr>

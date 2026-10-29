@@ -737,8 +737,17 @@ public final class Relay {
         return sb.toString();
     }
 
+    /**
+     * relay 的<b>过程行</b>（{@code [relay] …}）。
+     *
+     * <p><b>D5-1（2026-10-14）</b>：受配置 {@code logConsole} 的 {@code net} 类别管辖 ——
+     * 在此之前这个类别只在 {@code Conf} 的文档里存在、**没有任何消费点**，relay 的过程行无条件打。
+     * 与"错误与警告永远在"的口径一致：{@link #warn} 那一支<b>不</b>受本开关影响。</p>
+     */
     private void log(String msg) {
-        if (out != null) out.dim(msg);
+        if (out == null) return;
+        if (conf != null && !conf.logOn("net")) return;
+        out.dim(msg);
     }
 
     private void warn(String msg) {

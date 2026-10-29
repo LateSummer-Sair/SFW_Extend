@@ -56,7 +56,7 @@
         <header class="chapter-head reveal">
           <span class="chapter-tag">01 / KEYS</span>
           <h2>键面总览</h2>
-          <p class="chapter-desc">基板只认一份扁平 JSON（数据根下的 <code>config.json</code>）。已知键共 114 个，分 15 个面；想改哪儿、去哪儿查，看这一张就够。</p>
+          <p class="chapter-desc">基板只认一份扁平 JSON（数据根下的 <code>config.json</code>）。已知键共 116 个，分 15 个面；想改哪儿、去哪儿查，看这一张就够。</p>
         </header>
 
 
@@ -69,13 +69,13 @@
         <p><code>knownKeys()</code> 给的是<b>已生效</b>的值；<code>fileKeys()</code>（<code>Conf.java</code>）给的是<b>文件</b>里的值，多一位 <code>pending()</code> 标记。控制台 <code>config</code> 与模型侧 <code>config</code> 工具读的都是文件面。</p>
 
         <div class="note reveal">
-          <p><span class="n-title">键从哪来</span>：文件里登记的与出厂默认的一共 114 个；差出来的那一批，是"出厂不写盘、靠默认值生效"的。</p>
+          <p><span class="n-title">键从哪来</span>：文件里登记的与出厂默认的一共 116 个；差出来的那一批，是"出厂不写盘、靠默认值生效"的。</p>
         </div>
 
         <div class="code reveal" data-lang="powershell">
           <div class="code-head"><span class="lang">powershell</span><span class="path">&lt;项目目录&gt;（本仓根）</span><button class="copy" type="button">复制</button></div>
           <pre><code>(Select-String -Path src\sair\v4\Conf.java -Pattern 'add\(out,\s*').Count
-# 结果：114（Conf.knownKeys() 的全部登记；其中 15 行的键名取自各自模块的常量，不是字面量）
+# 结果：116（Conf.knownKeys() 的全部登记；其中 15 行的键名取自各自模块的常量，不是字面量）
 
 (Select-String -Path src\sair\v4\Conf.java -Pattern 'set\("').Count
 # 结果：62（Conf.ensureDefaults() 首次运行落盘的那批）</code></pre>
@@ -111,7 +111,7 @@
         <p>三种来源：<b>文件里写了</b>（首次启动由 <code>ensureDefaults()</code> 写下一份带默认值的 <code>config.json</code>，<code>Conf.java</code>）；<b>文件里没写</b>（回落到 getter 默认值 —— 52 个键属于这一类，<code>config</code> 清单照样列出并显示生效值）；<b>运行期内部写入</b>（<code>Conf.set(String,Object)</code>，<code>Conf.java</code>，例如文件外链 token 留空时自动生成并写回，<code>Conf.java</code>）。</p>
 
         <div class="note warn reveal">
-          <p><span class="n-title">不在这 114 个里的名字</span>：写进去没人读。控制台 <code>config set</code> 会明确回一句"不在已知键表里（没有消费者读它）"（<code>src\sair\v4\term\Cmd.java</code>），模型侧 <code>config op=get</code> 同口径（<code>src\sair\v4\Builtins.java</code>）。相关的命令与参数见 <a href="commands.html#config-cmds">控制台命令 · 配置</a>。</p>
+          <p><span class="n-title">不在这 116 个里的名字</span>：写进去没人读。控制台 <code>config set</code> 会明确回一句"不在已知键表里（没有消费者读它）"（<code>src\sair\v4\term\Cmd.java</code>），模型侧 <code>config op=get</code> 同口径（<code>src\sair\v4\Builtins.java</code>）。相关的命令与参数见 <a href="commands.html#config-cmds">控制台命令 · 配置</a>。</p>
         </div>
       </section>
 
@@ -837,7 +837,7 @@
         </div>
         <p class="t-cap">技能这一层可以自己长：怎么写、怎么装见 <a href="skills.html">11 · 技能开发</a>。</p>
         <div class="note reveal">
-          <p><span class="n-title">本页少列 2 个已知键</span>：键面里还有 2 个键管的是外挂层的目录与编译时机，键名本身含外挂层字样，按本文档口径不逐字列出 —— 出厂默认与读口分别在 <code>Conf.java</code>、<code>Conf.java</code> 与 <code>Conf.java</code>。所以这一章的逐键块覆盖 46 个键，键面总数是 114。</p>
+          <p><span class="n-title">本页少列 2 个已知键</span>：键面里还有 2 个键管的是外挂层的目录与编译时机，键名本身含外挂层字样，按本文档口径不逐字列出 —— 出厂默认与读口分别在 <code>Conf.java</code>、<code>Conf.java</code> 与 <code>Conf.java</code>。所以这一章的逐键块覆盖 46 个键，键面总数是 116。</p>
         </div>
 
         <h3 class="sec">上下文注入</h3>

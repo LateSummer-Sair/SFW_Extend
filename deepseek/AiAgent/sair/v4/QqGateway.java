@@ -581,6 +581,39 @@ public final class QqGateway {
             return false;
         }
     }
+    /**
+     * <b>D8</b>：本条消息<b>引用的那条</b>是不是我们自己发出去的。
+     *
+     * <p>群里只认被 @（{@link #shouldAnswer}），而人对"这条是发给我的吗？"最自然的回答方式是
+     * <b>引用回复</b> ⇒ 旧口径下这句话压根不产生这一轮（{@code skip reason=not_addressed}），
+     * 能力③的第二步在群聊里因此不可达。</p>
+     *
+     * <p>判据是<b>正向证据</b>，与 D1 同一条尺子：<b>被引 id ∈ 我们自己发出的台账</b>
+     * （先内存 {@link #recentSent}，再持久 {@code Store.sentKnown} 走 {@code idx_sent_msgid} 点查）。
+     * 引用同账号<b>别家</b>客户端发的（外部来源行，不在台账里）⇒ 不算 ——
+     * 那正是能力②要防的方向，两条口径天然对齐。</p>
+     *
+     * <p><b>零网络调用</b>；没有 {@code reply} 段 ⇒ {@link sair.v4.qq.QuoteCache#replyId} 返回空串、
+     * 连库都不碰。任何异常一律当"不是"（宁可少答一句，别把别家的消息当成在叫她）。</p>
+     */
+    private boolean ownQuoted(sair.v4.qq.Ev ev) {
+        return ownQuotedId(sair.v4.qq.QuoteCache.replyId(ev));
+    }
+
+    /** {@link #ownQuoted} 的取值版：入参已经是被引 id 文本时直接判（{@code handleMessage} 复用它）。 */
+    private boolean ownQuotedId(String replyRef) {
+        try {
+            String s = Str.trim(replyRef);
+            if (s.isEmpty()) return false;
+            long id = Long.parseLong(s);
+            if (id <= 0L) return false;
+            if (recentSent(id)) return true;
+            return boot != null && boot.store() != null && boot.store().sentKnown(id);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     // ★ 自我识别（A 路与 B 路怎么认出"这一条我已经记过了"）—— 这一段的结论是被实测逼出来的，
     //   写清楚免得后人再踩一次：
     //   朴素做法是"落行前先查 `sent` 台账里有没有这个 msg_id"。**它会让 A 路永远不落行**：
@@ -1126,6 +1159,13 @@ public final class QqGateway {
             facts("hook handled=1 session=" + session + "（技能接管，基板不再自动回复）");
             return;
         }
+        // [FOCUS 2026-10-19] 跟进窗口：她刚回完这个人、窗口还开着 ⇒ 这一条**就是对她说的**。
+        //   必须判在**技能那一票之前**：触发词技能对"没命中词表、也没 @ 我"的消息会投 _reply=false，
+        //   而那一支在老代码里直接 return —— 窗口就永远轮不到（真机实测：窗口 focus=1 但消息没回）。
+        //   窗口是"她刚刚在跟这个人说话"这个事实，比词表更直接，所以它压过那一票与地址门。
+        final boolean focusHot = Str.has(session) && sair.v4.qq.Focus.hot(session, c.qq());
+        // 诊断落点是 status 里的 focus=… ，不在这里打 [qq] 行：ProbeNotices 钉死"控制台没有 QQ 降级告警"，
+        // 多一行 [qq] 会被它当成噪音（实测就是这么红的）。
         // 技能还能投"这条要不要自动回"这一票（缺省 = 按地址规则走）：
         //   _reply=false → 别自动回（例如触发词没命中）—— 直接结束，省掉一整轮模型调用；
         //   _reply=true  → 即使没被 @、也不是主人也回（例如触发词命中）。
@@ -1135,7 +1175,7 @@ public final class QqGateway {
         //   先问插件投票 →（没人表态才）看技能那一票 →（还是没有才）看地址规则。
         // 今天没有任何 voter，pluginVote 直接返回 null，下面两步与加这一层之前逐字节一样。
         sair.v4.ext.ExtRegistry.Verdict pv = pluginVote(ev, c);
-        if (pv != null && pv.vote == sair.v4.ext.TriggerVoter.Vote.DECLINE) {
+        if (!focusHot && pv != null && pv.vote == sair.v4.ext.TriggerVoter.Vote.DECLINE) {
             facts("skip reason=" + pv.reason + " session=" + session
                     + "（插件投票 " + pv.by + "：不自动回 —— 不产生模型调用）");
             return;
@@ -1150,12 +1190,12 @@ public final class QqGateway {
                 }
             } catch (Throwable ignored) {
             }
-            if (vote != null && !vote.booleanValue()) {
+            if (!focusHot && vote != null && !vote.booleanValue()) {
                 facts("skip reason=" + J.s(payload, "_reply_reason", "declined") + " session=" + session
                         + "（技能判定这条不自动回 —— 不产生模型调用）");
                 return;
             }
-            if (vote == null && !shouldAnswer(ev, c)) {
+            if (!focusHot && vote == null && !shouldAnswer(ev, c, session)) {
                 facts("skip reason=not_addressed session=" + session + "（非主人/非私聊/未@）");
                 return;
             }
@@ -1209,11 +1249,12 @@ public final class QqGateway {
         final String quoteFact = qc == null ? "" : qc.onTurn(quoteRef, quoteRowId, ev.groupId());
         final String mediaFact = Str.blank(quoteFact) ? media
                 : (Str.blank(media) ? quoteFact : media + "\n" + quoteFact);
+        final boolean byQuote = ownQuotedId(quoteRef);   // D8：引用正向证据，本轮只算一次
         facts("→ lane=" + session + " high=" + ((c.master() || !c.isGroup()) ? 1 : 0)
                 + " chars=" + prompt.length() + (media.isEmpty() ? "" : " media=1")
                 + (Str.blank(quoteFact) ? "" : " quote=1")
-                + " addressed=" + Str.nz(addressedOf(ev, c, byVote)));
-        submitTurn(caller, sink, prompt, mediaFact, addressedOf(ev, c, byVote));
+                + " addressed=" + Str.nz(addressedOf(ev, c, byVote, byQuote)));
+        submitTurn(caller, sink, prompt, mediaFact, addressedOf(ev, c, byVote, byQuote));
     }
 
     /**
@@ -1234,9 +1275,21 @@ public final class QqGateway {
      * 不是写个空值）。纯函数：只看入参，不读配置、不读库、不抛。</p>
      */
     static String addressedOf(Ev ev, Caller c, boolean byVote) {
+        return addressedOf(ev, c, byVote, false);
+    }
+
+    /**
+     * {@link #addressedOf(Ev, Caller, boolean)} 的取值版：{@code byQuote} 由调用方先算一次
+     * （{@code QqGateway.handleMessage} 的 {@code ownQuotedId(quoteRef)}），避免同一轮查两遍台账。
+     *
+     * <p>优先级：{@code trigger} &gt; {@code at} &gt; {@code quote} &gt; {@code private} &gt; {@code master}。
+     * {@code quote} 排在 {@code at} 之后：被 @ 的同时又引用，读更直接的 {@code at}。</p>
+     */
+    static String addressedOf(Ev ev, Caller c, boolean byVote, boolean byQuote) {
         try {
             if (byVote) return sair.v4.ctx.CtxBuild.AD_TRIGGER;
             if (ev != null && ev.isGroup() && ev.atSelf()) return sair.v4.ctx.CtxBuild.AD_AT;
+            if (byQuote) return sair.v4.ctx.CtxBuild.AD_QUOTE;
             if (ev != null && ev.isPrivate()) return sair.v4.ctx.CtxBuild.AD_PRIVATE;
             if (c != null && c.master()) return sair.v4.ctx.CtxBuild.AD_MASTER;
         } catch (Throwable ignored) {
@@ -1278,7 +1331,16 @@ public final class QqGateway {
                 new sair.v4.schedule.ChatJob.Body() {
                     @Override
                     public void run(String text, String mediaFact) {
+                        long turnStart = System.currentTimeMillis();
                         sair.v4.agent.Loop.Outcome oc = boot.agent().ask(caller, sink, text, mediaFact, addressed);
+                        // [FOCUS 2026-10-19] 她这轮说完了 ⇒ 开跟进窗口（她自己定过就沿用，否则用默认）。
+                        // 为什么放在回合末：窗口要等她的回话真的落下去再开始计时，否则"还没说完就超时"。
+                        try {
+                            int defSec = boot.conf() == null ? sair.v4.qq.Focus.DEF_SEC
+                                    : boot.conf().getInt("followupSec", sair.v4.qq.Focus.DEF_SEC);
+                            sair.v4.qq.Focus.afterTurn(session, caller == null ? 0L : caller.qq(), defSec, turnStart);
+                        } catch (Throwable ignored) {
+                        }
                         // 回合摘要：这轮跑了多久、几轮、几次工具、成没成 —— 结构事实，无正文
                         if (oc != null) {
                             turn("session=" + session + " rounds=" + oc.rounds + " tools=" + oc.toolCalls
@@ -1329,9 +1391,21 @@ public final class QqGateway {
      * 现在口径与技能注释一致：<b>群里要么 @ 它，要么用触发词</b>，主人也一样。</p>
      */
     public boolean shouldAnswer(Ev ev, Caller c) {
+        return shouldAnswer(ev, c, "");
+    }
+
+    /**
+     * 同 {@link #shouldAnswer(Ev, Caller)}，另带会话键 —— <b>跟进窗口</b>要按「会话 + 人」两维认。
+     *
+     * <p>[FOCUS 2026-10-19] 她刚回完这个人：窗口内这人再说一句就算在叫她，不必再 @。,
+     * 窗口时长由她自己用 {@code follow} 工具定（5~60 秒），超时才回到「要触发」。</p>
+     */
+    public boolean shouldAnswer(Ev ev, Caller c, String session) {
         if (c == null) return false;
+        if (Str.has(session) && sair.v4.qq.Focus.hot(session, c.qq())) return true;
         if (ev.isPrivate()) return true;      // 私聊 = 直接找它
-        return ev.atSelf();                   // 群里：只认被 @（触发词那条路由技能接管，不走这里）
+        if (ev.atSelf()) return true;         // 群里：@ 到它（触发词那条路由技能接管，不走这里）
+        return ownQuoted(ev);                 // D8：群里引用它自己发过的那条 ⇒ 也算在叫它
     }
 
     /** 入站去重窗口（毫秒；配置 {@code msgDedupWindowSec}，{@code 0} = 关闭判重）。 */
@@ -1406,6 +1480,18 @@ public final class QqGateway {
             if (type.isEmpty() || "text".equals(type)) continue;
             JsonObject f = new JsonObject();
             f.addProperty("type", type);
+            // [LOOKID 2026-10-20] 把**这条消息的 id** 随每个内容段一起给她。
+            //   为什么必须给：{@code look}（看图）只认消息身份 —— {@code look id=<消息id> seg=<第几张>}。
+            //   以前她手上只有 {\"type\":\"image\",…} 与 {@code [图片 …]} 标签，**没有 id** ⇒ 拼不出 look 的入参
+            //   ⇒ 只能回\"图没送到我这儿\"（真机日志里 22:0x 那几条就是这么来的）。这条字段补的就是那个洞。
+            // 只给**媒体段**（at/face 这类没有"看图"需求）；at 段的形状是冻结的（ProbeMediaOnly ⑦/⑪ 钉着），
+            // 往那儿加字段会把"纯 at 消息的 mediaFact"改形 —— 那是回归，不是增强。
+            // 只给**能看图/取图的那四类媒体段**；at/face/未知段不加 —— 它们的形状是冻结的
+            // （ProbeMediaOnly ⑦/⑪ 与 ProbeMediaRender M2-19 都钉着，"未知段没有字段"是契约）。
+            long mid = ev.messageId();
+            boolean mediaSeg = "image".equals(type) || "record".equals(type)
+                    || "video".equals(type) || "file".equals(type);
+            if (mid > 0L && mediaSeg) f.addProperty("msg_id", mid);
             JsonObject d = J.sub(seg, "data");
             if (d != null) {
                 for (Map.Entry<String, JsonElement> e : d.entrySet()) {

@@ -59,7 +59,21 @@ public final class Tick {
                 beat();
             }
         });
-        if (out != null) out.dim("[tick] 已启动，周期 " + period + "ms（on_timer 钩子 + 定时唤醒）");
+        // [ALARMSEC 2026-10-24] 到点触发单独走 1 秒定时器：主 tick 是 20 秒（on_timer/维护），
+        //   拿它触发闹钟最多晚 20 秒 —— 甲方要求精确到秒。这里只跑 fireDue（一次索引查询，很轻）。
+        long alarmPeriod = Math.max(200L, conf.alarmTickMs());
+        Th.every("v4-alarm", alarmPeriod, alarmPeriod, new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    fireDue();
+                } catch (Throwable t) {
+                    if (out != null) out.err("[tick] 到点触发失败: " + t);
+                }
+            }
+        });
+
+        if (out != null) out.dim("[tick] 已启动：主周期 " + period + "ms（on_timer 钩子 + 维护），到点触发 " + alarmPeriod + "ms（闹钟精度到秒）");
     }
 
     public void stop() { running = false; }

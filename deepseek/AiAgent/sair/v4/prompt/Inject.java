@@ -35,6 +35,25 @@ public final class Inject {
     /** 每个槽位最多保留的注入条目（超出丢最旧）。 */
     public static final int MAX_PER_SLOT = 64;
 
+    /**
+     * <b>真正有渲染点</b>的槽位。
+     *
+     * <p><b>D5-2（2026-10-14）</b>：{@link #TOOL} 曾是"写了不生效"的假能力 ——
+     * 它在常量表、文档与工具描述里都写着，但全树<b>没有任何 {@code render(…, TOOL)} 调用点</b>
+     * （只在 {@code Skills.clearSkillInject} 的清理清单里出现）。于是技能或主人往里注入，
+     * 拿到的是"已注入"，而那段文字<b>永远到不了模型面前</b>。</p>
+     *
+     * <p>本类现在的口径：<b>没有渲染点的槽位一律拒绝落库</b>（{@link #renderable}），
+     * 调用方据此给一句明白话 —— 宁可当场说"这个槽不生效"，也不假装成功。</p>
+     */
+    private static final java.util.List<String> RENDERED =
+            java.util.Collections.unmodifiableList(java.util.Arrays.asList(SYSTEM, CONTEXT, ARG));
+
+    /** 这个槽位真的有渲染点吗？（{@code tool} 是保留位 ⇒ false） */
+    public static boolean renderable(String slot) {
+        return RENDERED.contains(Str.trim(slot));
+    }
+
     /** scope → slot → key → {text, source, ts} */
     private final Map<String, Map<String, Map<String, JsonObject>>> table =
             new LinkedHashMap<String, Map<String, Map<String, JsonObject>>>();
@@ -45,6 +64,7 @@ public final class Inject {
 
     public synchronized void put(String scope, String slot, String key, String text, String source) {
         if (Str.blank(slot) || Str.blank(key)) return;
+        if (!renderable(slot)) return;      // D5-2：没有渲染点 ⇒ 不落库（不许"写了不生效"被当成成功）
         String sc = Str.blank(scope) ? GLOBAL : scope.trim();
         Map<String, Map<String, JsonObject>> slots = table.get(sc);
         if (slots == null) {

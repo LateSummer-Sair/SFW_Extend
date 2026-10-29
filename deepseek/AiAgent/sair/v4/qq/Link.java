@@ -105,6 +105,13 @@ public final class Link {
 
     private final AtomicLong echoSeq = new AtomicLong(1L);
 
+    /** <b>D6</b>：连接序号（日志里点名"来自哪条/发给哪条"用；只增不减，跨重连也不复用）。 */
+    private final AtomicLong connSeq = new AtomicLong(1L);
+
+    /** D6：上一次"动作发给哪条"打过的日志对象与当时连接数（只在变化时打一行，避免刷屏）。 */
+    private volatile Conn lastPickLogged;
+    private volatile int lastPickCount = -1;
+
     /** 多连接时 API 调用的首选连接：最近收到事件的连接。 */
     private volatile Conn preferred;
 
@@ -304,12 +311,36 @@ public final class Link {
         }
     }
 
-    /** 首选连接：最近收到事件的连接优先，其次任意 open 连接。 */
+    /**
+     * 首选连接：最近收到事件的连接优先，其次任意 open 连接。
+     *
+     * <p><b>D6</b>：手里有多条连接时，把"动作发给哪条、为什么"打一行 —— 这是唯一能让事后
+     * 说清"那条动作走的是哪条连接"的地方。口径本身没有变（仍旧是上面这条优先级），
+     * 变的只是**它不再无声**。</p>
+     */
     private Conn pick() {
         Conn p = preferred;
-        if (p != null && p.open) return p;
-        for (Conn c : conns) if (c.open) return c;
+        if (p != null && p.open) {
+            notePick(p, "首选（最近收到事件的连接）");
+            return p;
+        }
+        for (Conn c : conns) {
+            if (c.open) {
+                notePick(c, "回退（没有首选：还没收到过事件 / 首选已断开）");
+                return c;
+            }
+        }
         return null;
+    }
+
+    /** D6：多连接时点名"动作发给哪条"；**只在选择或连接数变化时**打一行（不刷屏）。 */
+    private void notePick(Conn c, String why) {
+        int n = clients();
+        if (n <= 1) return;
+        if (c == lastPickLogged && n == lastPickCount) return;
+        lastPickLogged = c;
+        lastPickCount = n;
+        log("[conn] 多连接（" + n + " 条）：动作发给 " + c.label() + " —— " + why, Out.Tone.DIM);
     }
 
     private int timeoutMs() {
@@ -412,6 +443,7 @@ public final class Link {
 
         String key = null;
         String auth = null;
+        String selfId = null;
         for (int i = 1; i < lines.length; i++) {
             String line = lines[i];
             int c = line.indexOf(':');
@@ -420,6 +452,9 @@ public final class Link {
             String v = line.substring(c + 1).trim();
             if ("sec-websocket-key".equals(k)) key = v;
             else if ("authorization".equals(k)) auth = v;
+            // D6：NapCat 会带 X-Self-ID（这个账号的 QQ 号）。**只记录、不据此做任何校验** ——
+            // 它让"同账号多客户端"这件事在日志里看得见，但鉴权口径一个字不改（仍只看 token）。
+            else if ("x-self-id".equals(k)) selfId = v;
         }
 
         if (key == null || key.isEmpty()) {
@@ -451,7 +486,7 @@ public final class Link {
         os.write(sb.toString().getBytes(Fs.UTF8));
         os.flush();
         sock.setSoTimeout(0);
-        return new Conn(sock, in, os);
+        return new Conn(sock, in, os, selfId);
     }
 
     /** 计算 Sec-WebSocket-Accept = base64(SHA1(key + GUID))。 */
@@ -598,6 +633,11 @@ public final class Link {
         }
         if (!J.s(o, "post_type", "").isEmpty()) {
             preferred = c; // 最近收到事件的连接 = 后续动作的首选
+            // D6：多连接时**必须能看出这条事件来自哪条** —— 单连接（正常情况）一个字都不打。
+            if (clients() > 1) {
+                log("[conn] 事件来自 " + c.label() + " —— 当前 " + clients()
+                        + " 条连接；它成为后续动作的首选", Out.Tone.DIM);
+            }
             dispatch(o);
         }
     }
@@ -746,14 +786,25 @@ public final class Link {
         final OutputStream os;
         final Object writeLock = new Object();
         final String remote;
+        /** D6：本连接的序号（日志点名用）。 */
+        final long seq;
+        /** D6：握手时带的 {@code X-Self-ID}（没有就是空串）。**只记录，不参与任何校验**。 */
+        final String xSelfId;
         volatile boolean open = true;
         volatile long lastRecv = System.currentTimeMillis();
 
-        Conn(Socket sock, InputStream in, OutputStream os) {
+        Conn(Socket sock, InputStream in, OutputStream os, String xSelfId) {
             this.sock = sock;
             this.in = in;
             this.os = os;
             this.remote = String.valueOf(sock.getRemoteSocketAddress());
+            this.seq = connSeq.getAndIncrement();
+            this.xSelfId = xSelfId == null ? "" : xSelfId.trim();
+        }
+
+        /** <b>D6</b>：日志里唯一认得出的"哪条连接"（序号 + 对端 + 可选的 self_id）。 */
+        String label() {
+            return "#" + seq + " " + remote + (xSelfId.isEmpty() ? "" : " self_id=" + xSelfId);
         }
 
         void sendText(String text) throws IOException {

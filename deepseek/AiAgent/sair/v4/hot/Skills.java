@@ -368,8 +368,17 @@ public final class Skills {
                 String ptxt = Fs.read(sk.promptFile, "");
                 if (Str.has(ptxt)) {
                     String slot = sk.inject.trim();
-                    inject.put(Inject.GLOBAL, slot, "skill:" + name, ptxt, "skill:" + name);
-                    sk.injectedSlot = slot;
+                    if (!Inject.renderable(slot)) {
+                        // D5-2：声明的槽没有渲染点（保留位）。**不许静默** —— 否则技能作者
+                        // 以为 prompt.md 生效了，实际一个字都没进上下文。
+                        if (out != null) {
+                            out.warn("[skills] " + name + " 声明的注入槽 \"" + slot
+                                    + "\" 没有渲染点（保留位；当前只有 system/context/arg）⇒ 它的 prompt.md 没有注入");
+                        }
+                    } else {
+                        inject.put(Inject.GLOBAL, slot, "skill:" + name, ptxt, "skill:" + name);
+                        sk.injectedSlot = slot;
+                    }
                 }
             }
         }
