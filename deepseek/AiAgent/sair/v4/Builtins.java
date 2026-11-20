@@ -942,6 +942,96 @@ public final class Builtins {
                     }
                 }));
 
+        // ---------------- ⑦b 官方联网（Search / Fetch） ----------------
+        // 技能换成官方搜索/抓取时的唯一入口。失败一律收成 {ok:false,error} 回给模型 ——
+        // 一次网络故障不许把整轮回合搞挂。超时由 Tools 内部兜住：单次读超时之外还有墙钟总时限
+        // （search 30s / fetch 60s，见 Tools.SEARCH_TOTAL_MS / FETCH_TOTAL_MS；连接 15s）。
+        // 结果在这里先按安全预算自裁（netBudget）：Registry 按 toolResultMax 从尾部截断，
+        // 剪掉半个 JSON 会让调用方整段解析失败，所以交给它的必须永远是一段完整、放得下的 JSON。
+        reg.add(Tool.of("net")
+                .desc("官方联网（DeepSeek /v1/tools/*）：action=search 搜网页；action=fetch 抓一个网页的正文（Markdown）。"
+                        + "只要标题摘要用 search；要读长文才用 fetch。失败会回 {ok:false,error}，不中断回合。"
+                        + "结果超长会先自裁：search 从尾部减条数、fetch 截断正文，并标 truncated:true（JSON 始终完整）。")
+                .returns("search → {ok:true,results:[{title,url,snippet,summary,rerank_score,authority}],count}"
+                        + "（content=true 时每项另带 content；减条时多 truncated:true）；"
+                        + "fetch → {ok:true,title,content}（截断时多 truncated:true 与 chars=原始字数）；"
+                        + "失败 → {ok:false,error}")
+                .params(schemaNet())
+                .handler(new Tool.Handler() {
+                    @Override
+                    public Object call(JsonObject args, Turn t) {
+                        String action = J.s(args, "action", "search").trim().toLowerCase();
+                        if (action.isEmpty()) action = "search";
+                        // ★ 取法与其它工具同一口：工具路径没绑触发者时（t == null 或 t.caller() == null）
+                        //   退回 Ctx.caller()。仍取不到 = 判不出主体 ⇒ 按拒绝返回 {ok:false}。
+                        //   绝不能把 null 交给 ACL —— Acl.allow(null, op) 的口径是“内部/诊断，不筛”，等于 fail-open。
+                        Caller c = t == null ? null : t.caller();
+                        if (c == null) c = sair.v4.ctx.Ctx.caller();
+                        if (c == null) {
+                            return netErr(Acl.DENY_PREFIX + "判不出调用者身份，按拒绝处理：net." + action);
+                        }
+                        String deny = needOpAs(auth, c, "net." + action);
+                        if (deny != null) return deny;
+                        if (conf == null) return netErr("配置未装载（conf == null），联网工具不可用");
+                        try {
+                            // 配置读取放进 try：apiKey / toolsBaseUrl 读出事也只回 {ok:false}，不冒泡
+                            // apiKey 与 model 工具同一来源（Conf.apiKey()；DeepSeek 客户端也是从它取）
+                            String key = conf.apiKey();
+                            if (!Str.has(key)) return netErr("没有配置 apiKey（config.json 的 apiKey），联网工具不可用");
+                            String base = conf.toolsBaseUrl();
+                            int budget = netBudget(conf);
+                            if ("search".equals(action)) {
+                                String q = J.s(args, "q", "").trim();
+                                if (q.isEmpty()) return netErr("search 需要 q（搜索词）");
+                                int n = J.i(args, "n", 8);
+                                if (n < 1) n = 1;
+                                if (n > 50) n = 50;   // 官方 count 上限 = 50
+                                boolean needContent = J.b(args, "content", false);
+                                JsonObject extra = new JsonObject();
+                                extra.addProperty("count", n);
+                                extra.addProperty("need_content", needContent);
+                                JsonObject r = sair.v4.ai.Tools.search(base, key, q, J.json(extra));
+                                java.util.List<JsonObject> rows = J.objects(r, "results");
+                                JsonArray hits = new JsonArray();
+                                for (int i = 0; i < rows.size() && hits.size() < n; i++) {
+                                    JsonObject row = rows.get(i);
+                                    JsonObject one = new JsonObject();
+                                    netCopy(one, row, "title");
+                                    netCopy(one, row, "url");
+                                    netCopy(one, row, "snippet");
+                                    netCopy(one, row, "summary");
+                                    netCopy(one, row, "rerank_score");
+                                    netCopy(one, row, "authority");
+                                    if (needContent) netCopy(one, row, "content");   // 要了正文就带回来，否则这个开关等于没用
+                                    hits.add(one);
+                                }
+                                JsonObject resp = new JsonObject();
+                                resp.addProperty("ok", true);
+                                resp.add("results", hits);
+                                resp.addProperty("count", hits.size());
+                                return netFitSearch(resp, budget);
+                            }
+                            if ("fetch".equals(action)) {
+                                String url = J.s(args, "url", "").trim();
+                                if (url.isEmpty()) return netErr("fetch 需要 url");
+                                JsonObject r = sair.v4.ai.Tools.fetch(base, key, url);
+                                int chars = J.s(r, "content", "").length();   // 原始字数：截断后要如实告诉调用方
+                                JsonObject resp = new JsonObject();
+                                resp.addProperty("ok", true);
+                                netCopy(resp, r, "title");
+                                netCopy(resp, r, "content");
+                                return netFitFetch(resp, chars, budget);
+                            }
+                            return netErr("未知 action：" + action + "（可用 search / fetch）");
+                        } catch (Exception e) {
+                            // Tools 的契约是"任何失败都抛 RuntimeException"；这里全部转成结果，不许冒泡。
+                            // ★ 只接 Exception：Error（OOM / StackOverflow 之类）必须冒泡，不能被一段网络兜底吞掉。
+                            String m = e.getMessage();
+                            return netErr(m == null || m.trim().isEmpty() ? e.getClass().getSimpleName() : m);
+                        }
+                    }
+                }));
+
         // ---------------- ⑧ NapCat ----------------
         reg.add(Tool.of("napcat")
                 .desc("NapCat（OneBot v11）：action=list 看动作目录；其余 action 直接调用，params 是动作参数对象。"
@@ -1084,6 +1174,169 @@ public final class Builtins {
         // 控制台捕获器（流式旁路 + 游标读 + 框架命令桥）在这里挂上配置里的上限：
         // 这一步之后 conf 一定拿得到；幂等、装不上（无界面环境）就静默降级，不影响其余能力。
         sair.v4.term.SfwOut.installTap(conf);
+
+        reg.add(Tool.of("route")
+                .desc("路由事实面 + 代问。action=status 看已连的 Bot 服务（配了几个/启了几个/此刻真连着几个）；"
+                        + "recent/audit 看最近的路由事实行与代问记录；ask 以 otheruser 身份向某个服务发一条命令并取回它的回复"
+                        + "（回复被基板截获，不会发进群里）。身份红线：不能拟造主人或 Bot 自己。")
+                .returns("status → 通道列表；recent/audit → 事实行；ask → {ok,reply,segments,captured,elapsed_ms,error}")
+                .params(schemaRoute())
+                .handler(new Tool.Handler() {
+                    @Override
+                    public Object call(JsonObject args, Turn t) {
+                        String action = J.s(args, "action", "status").trim().toLowerCase();
+                        if (action.isEmpty()) action = "status";
+                        Caller c = t == null ? null : t.caller();
+                        sair.v4.qq.Proxy px = boot == null ? null : boot.proxy();
+                        if (px == null) {
+                            return "路由代理未装配（nativeEnabled=false 或 linker 里没有可用的 json）——"
+                                    + "现在看不到任何 Bot 服务";
+                        }
+                        String deny = needOpAs(auth, c, "route." + action);
+                        if (deny != null) return deny;
+
+                        if ("status".equals(action)) {
+                            List<JsonObject> st = px.status();
+                            JsonObject outJ = new JsonObject();
+                            outJ.addProperty("channels", st.size());
+                            outJ.addProperty("asking", px.busyAsking());
+                            com.google.gson.JsonArray arrSt = new com.google.gson.JsonArray();
+                            for (JsonObject one : st) arrSt.add(one);
+                            outJ.add("list", arrSt);
+                            return outJ;
+                        }
+                        int n = 20;
+                        if (args.has("n") && args.get("n").isJsonPrimitive()) {
+                            try { n = Math.max(1, Math.min(200, args.get("n").getAsInt())); } catch (Throwable ignore) {}
+                        }
+                        if ("claim".equals(action)) {
+                            JsonObject o = px.claimState();
+                            com.google.gson.JsonArray ta = new com.google.gson.JsonArray();
+                            for (String x : px.claimTexts()) ta.add(x);
+                            o.add("texts", ta);
+                            return o;
+                        }
+                        if ("recent".equals(action)) {
+                            // ★ 事实行 + 当前 claim 已截获的正文（她只要调 recent 就能看到内容）
+                            java.util.List<String> l = new java.util.ArrayList<String>(px.recentFacts(n));
+                            java.util.List<String> tx = px.claimTexts();
+                            if (!tx.isEmpty()) {
+                                l.add(0, "—— 当前代问已截获 " + tx.size() + " 段正文 ——");
+                                for (int i = 0; i < tx.size(); i++) l.add((i + 1) + ". " + tx.get(i));
+                            }
+                            return l;
+                        }
+                        if ("audit".equals(action)) {
+                            return px.recentAsks(n);
+                        }
+                        if ("ask".equals(action)) {
+                            // 只有主人和她自己能代问（其余人一律拒绝：这是"替别人说话"的能力）
+                            if (c == null) return "没有调用者身份，不知道该用什么身份代问";
+                            // otheruser 也可以代问，但只能用 otheruser 身份（红线在 Proxy 里判）
+                            String svc = J.s(args, "service", "").trim();
+                            String text = J.s(args, "text", "").trim();
+                            if (svc.isEmpty() || text.isEmpty()) return "需要 service 和 text";
+                            long gid = 0L;
+                            boolean gidGiven = false;
+                            if (args.has("group_id") && args.get("group_id").isJsonPrimitive()) {
+                                try { gid = args.get("group_id").getAsLong(); gidGiven = true; } catch (Throwable ignore) {}
+                            }
+                            // ★ 触发位置即回复位置：从【这一轮的会话】取，而不是从 caller 的身份取。
+                            //   子 Agent 的 Caller 往往不带群（isGroup()=false），用它会导致
+                            //   "群里触发却回私聊"。Turn.session() 才是这一轮真正属于哪个会话，
+                            //   格式：console | group:<gid> | qq:<uid>（见 Caller.session()）。
+                            if (!gidGiven) {
+                                String ss = (t == null ? null : t.session());
+                                if (ss != null && ss.startsWith("group:")) {
+                                    try { gid = Long.parseLong(ss.substring(6).trim()); } catch (Throwable ignore) {}
+                                } else if (ss == null || ss.isEmpty()) {
+                                    if (c.isGroup()) gid = c.groupId();   // 兜底
+                                }
+                            }
+                            long asUser;
+                            boolean explicit = args.has("as_user") && args.get("as_user").isJsonPrimitive();
+                            if (explicit) {
+                                try { asUser = args.get("as_user").getAsLong(); } catch (Throwable e) { return "as_user 必须是数字"; }
+                            } else if (c.qq() > 0) {
+                                // ★ 2026-11-16 主人核定：主人/椰羊说话就用自己的身份（如实，不降级）
+                                asUser = c.qq();
+                            } else {
+                                asUser = conf == null ? 10000L : conf.routeProxyUid();
+                            }
+                            // 主人 / 椰羊自己 ⇒ 可拟造任何真实存在的 QQ
+                            boolean priv = (c.master() || c.system());
+                            long quiet = conf == null ? 4000 : conf.routeAskQuietMs();
+                            long maxMs = conf == null ? 20000 : conf.routeAskTimeoutMs();
+                            if (args.has("quiet_ms") && args.get("quiet_ms").isJsonPrimitive()) {
+                                try { quiet = Math.max(300, args.get("quiet_ms").getAsLong()); } catch (Throwable ignore) {}
+                            }
+                            if (args.has("max_ms") && args.get("max_ms").isJsonPrimitive()) {
+                                try { maxMs = Math.max(1000, args.get("max_ms").getAsLong()); } catch (Throwable ignore) {}
+                            }
+                            JsonObject rr = px.ask(svc, asUser, text, gid, quiet, maxMs, priv);
+                            // 把"可能还有追加段"如实说清（不编造）
+                            if (rr.has("captured") && rr.get("captured").getAsInt() <= 1) {
+                                rr.addProperty("note", "这条服务可能分批回复；若只看到一段，可加大 quiet_ms / max_ms，"
+                                        + "或 60 秒内调 route action=claim / action=recent 取已截获的正文（claim 内继续截获，不会漏到 QQ）");
+                            }
+                            return rr;
+                        }
+                        return "未知 action：" + action + "（可用 status / recent / audit / ask）";
+                    }
+                }));
+
+        reg.add(Tool.of("talkimage")
+                .desc("把一张图贴到本地「AI 对话」面板（不需要 QQ 会话）。image 可以是本地绝对路径或 http(s) URL；"
+                        + "超过 10MB 会等比压到 10MB 以内再贴。只用于本地对话，不往 QQ 发。")
+                .returns("一句结果：已贴到「AI 对话」+ 落盘路径")
+                .params(J.obj("image", "本地绝对路径 或 http(s) 图片 URL"))
+                .handler(new Tool.Handler() {
+                    @Override
+                    public Object call(JsonObject args, Turn t) {
+                        String img = J.s(args, "image", "").trim();
+                        if (img.isEmpty()) return "需要 image（本地路径或 URL）";
+                        try {
+                            java.io.File f = localImage(img);
+                            if (f == null || !f.isFile()) return "取不到图：" + img;
+                            sair.v4.ui.TalkPanel p = boot == null ? null : boot.talkPanel();
+                            if (p == null) return "「AI 对话」面板没挂载（web/start 没跑？）—— 图已落盘：" + f.getAbsolutePath();
+                            boolean ok = p.appendImage(f, "来自本地对话");
+                            return ok ? ("（控制台专属输出）已贴图到「AI 对话」面板：" + f.getAbsolutePath())
+                                      : ("面板已到图片上限（" + sair.v4.ui.TalkPanel.MAX_IMAGES + " 张）—— 图在：" + f.getAbsolutePath());
+                        } catch (Throwable e) {
+                            return "贴图失败：" + e.getClass().getSimpleName() + " " + e.getMessage();
+                        }
+                    }
+                }));
+
+        reg.add(Tool.of("talk")
+                .desc("【控制台专属输出】把一句话写进本地「AI 对话」面板（不经过 QQ，不需要会话）。"
+                        + "在控制台/本地面板触发的回合里，这就是「说话给主人看」的正路；"
+                        + "图片用 talkimage，文字用 talk。返回里会明确告诉你「已写入面板」。")
+                .returns("一句话：已写入「AI 对话」面板")
+                .params(J.obj("text", "要写进面板的正文（可多行）"))
+                .handler(new Tool.Handler() {
+                    @Override
+                    public Object call(JsonObject args, Turn t) {
+                        String txt = J.s(args, "text", "");
+                        if (txt == null || txt.trim().isEmpty()) return "需要 text";
+                        sair.v4.ui.TalkPanel p = boot == null ? null : boot.talkPanel();
+                        if (p == null) return "「AI 对话」面板没挂载（web/start 没跑？）";
+                        final javax.swing.JTextPane tp = p.textPane();
+                        if (tp == null) return "面板 textPane 取不到";
+                        final String s = txt.endsWith("\n") ? txt : txt + "\n";
+                        javax.swing.SwingUtilities.invokeLater(new Runnable() {
+                            @Override public void run() {
+                                try {
+                                    javax.swing.text.StyledDocument d = tp.getStyledDocument();
+                                    d.insertString(d.getLength(), s, null);
+                                    tp.setCaretPosition(d.getLength());
+                                } catch (Throwable ignored) {}
+                            }
+                        });
+                        return "（控制台专属输出）已写入「AI 对话」面板：" + (txt.length() > 40 ? txt.substring(0, 40) + "…" : txt);
+                    }
+                }));
 
         reg.add(Tool.of("console")
                 .desc("SFW 控制台（仅主人）：read 读控制台最近输出（游标式）/run 执行框架命令（如 jj/at 1+/100）并回它的新输出"
@@ -1470,6 +1723,9 @@ public final class Builtins {
         ops.add("model", "balance", "查余额");
         ops.add("model", "models", "模型清单");
         ops.add("model", "info", "当前模型信息");
+        // ⑦b 官方联网（Search / Fetch）
+        ops.add("net", "search", "官方网页搜索");
+        ops.add("net", "fetch", "官方网页抓取");
         // ⑧ NapCat：每个动作一个 op（动作目录是唯一来源）
         List<String> acts = sair.v4.qq.Api.actionNames();
         for (int i = 0; i < acts.size(); i++) {
@@ -2531,6 +2787,11 @@ public final class Builtins {
             return configGet(conf, J.s(args, "key", ""));
         }
         if ("set".equals(op)) {
+            // [SELFSYNC 2026-11-04] selfId 已弃用：她的号由基板每次 NapCat（重）连时自动读，配置命令不许改
+            if ("selfId".equalsIgnoreCase(sair.v4.kit.Str.nz(J.s(args, "key", "")))) {
+                return "[config] ok=0 selfId 已弃用：她自己的号由基板在每次 NapCat（重）连时自动读取，"
+                        + "配置命令不再能改它（写了也不生效）。换号只需在 NapCat 那边切换。";
+            }
             // 动作级 op：改一个键（下面还有一层"只有主人"的业务硬判）
             String deny = needOpAs(auth, c, "config.set");
             if (deny != null) return deny;
@@ -4057,6 +4318,182 @@ public final class Builtins {
                                 + "，上限 " + NAPCAT_LIST_MAX + "，越界自动夹取；参数说明看 tools op=show napcat）"),
                         "offset", obj("integer", "action=list：从第几个动作开始（从 0 数，默认 0）——"
                                 + "看下一页就填上一页元信息 _page.next 里那句，形如 action=list offset=40")));
+    }
+
+    /** talkimage 用：把 image 参数变成落盘好的本地文件（URL 会下载，>10MB 会压缩）。 */
+    private static java.io.File localImage(String img) throws Exception {
+        byte[] raw = null;
+        if (img.startsWith("http://") || img.startsWith("https://")) {
+            java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(img).openConnection();
+            c.setConnectTimeout(8000);
+            c.setReadTimeout(20000);
+            c.setRequestProperty("User-Agent", "AiAgentV4/4.4");
+            try (java.io.InputStream is = c.getInputStream();
+                 java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream()) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = is.read(buf)) > 0) bo.write(buf, 0, n);
+                raw = bo.toByteArray();
+            } finally { c.disconnect(); }
+        } else {
+            java.io.File src = new java.io.File(img);
+            if (!src.isFile()) return null;
+            raw = java.nio.file.Files.readAllBytes(src.toPath());
+        }
+        if (raw == null || raw.length == 0) return null;
+        final long CAP = 10L * 1024 * 1024;
+        String ext = "png";
+        if (raw.length > CAP) {
+            java.awt.image.BufferedImage im = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(raw));
+            if (im != null) {
+                double k = Math.sqrt((double) CAP / (double) raw.length) * 0.95;
+                int w = Math.max(1, (int) (im.getWidth() * k));
+                int hh = Math.max(1, (int) (im.getHeight() * k));
+                java.awt.image.BufferedImage sc = new java.awt.image.BufferedImage(w, hh,
+                        java.awt.image.BufferedImage.TYPE_INT_RGB);
+                java.awt.Graphics2D g = sc.createGraphics();
+                g.drawImage(im, 0, 0, w, hh, null);
+                g.dispose();
+                java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                javax.imageio.ImageIO.write(sc, "jpg", bo);
+                raw = bo.toByteArray();
+                ext = "jpg";
+            }
+        }
+        byte[] dg = java.security.MessageDigest.getInstance("SHA-1").digest(raw);
+        StringBuilder sb = new StringBuilder();
+        for (byte x : dg) sb.append(String.format("%02x", x));
+        java.io.File dir = new java.io.File(new java.io.File("data"), "AiAgent-V4/files/inbox");
+        if (!dir.isDirectory()) dir.mkdirs();
+        java.io.File out = new java.io.File(dir, sb.substring(0, 16) + "." + ext);
+        if (!out.isFile() || out.length() != raw.length) java.nio.file.Files.write(out.toPath(), raw);
+        return out;
+    }
+
+    private static JsonObject schemaRoute() {
+        return J.obj(
+                "action", "status | recent | audit | claim | ask（默认 status）",
+                "service", "ask 时的服务名（linker 目录里的文件名，如 DC小枫 / Yunzai）",
+                "text", "ask 时要发过去的命令正文",
+                "as_user", "ask 时拟造的用户号；留空 = 按说话人定（主人触发则降级为 routeProxyUid）",
+                "group_id", "ask 时的群号；缺省或 0 = 私聊",
+                "n", "recent / audit 取几条（默认 20，最大 200）",
+                "quiet_ms", "ask 时：两段回复之间容忍多久算说完（默认 4000）",
+                "max_ms", "ask 时：整个代问最多等多久（默认 20000）");
+    }
+
+    private static JsonObject schemaNet() {
+        return J.obj(
+                "type", "object",
+                "properties", J.obj(
+                        "action", oneOf("search/fetch", "search", "search", "fetch"),
+                        "q", obj("string", "search 的搜索词（1～128 字符；支持 site: / -site: / \"精确短语\"）"),
+                        "n", obj("integer", "search 取几条结果，默认 8，最多 50（官方上限）"),
+                        "content", obj("boolean", "search 是否连正文一起取（need_content），默认 false"),
+                        "url", obj("string", "fetch 要抓的网页 URL（http/https）")),
+                "required", arr("action"));
+    }
+
+    /** net 的结果投影：只搬这几个字段，缺的不补 null（没给就是没给）。 */
+    private static void netCopy(JsonObject to, JsonObject from, String key) {
+        com.google.gson.JsonElement e = J.get(from, key);
+        if (e != null) to.add(key, e);
+    }
+
+    /** net 的统一失败面：绝不抛，原因原样交给模型，回合照常往下走。 */
+    private static JsonObject netErr(String why) {
+        JsonObject o = new JsonObject();
+        o.addProperty("ok", false);
+        o.addProperty("error", Str.nz(why));
+        return o;
+    }
+
+    /**
+     * net 结果的安全预算（字符）：序列化后超过它就先自裁。
+     *
+     * <p>上限取 <b>8000</b> 与 {@code conf.toolResultMax()} 的较小者 —— 前者是这一族结果的硬顶，
+     * 后者是 {@code Registry} 真正会从尾部截断的那条线。留在这里自裁，是为了让 JSON <b>永远合法</b>。</p>
+     */
+    private static int netBudget(Conf conf) {
+        int max = conf == null ? 0 : conf.toolResultMax();
+        return max > 0 && max < 8000 ? max : 8000;
+    }
+
+    /**
+     * search 结果自裁：超过预算就<b>从尾部减条数</b>，并加 {@code truncated:true}。
+     *
+     * <p>为什么不截字段：搜索结果是一条条独立的，少一条仍是"少了一条"；把某条的 url/title 剪一半
+     * 只会给出一个假链接。预算小到连空页都放不下时退到最小形状 —— 合法性优先。</p>
+     */
+    private static JsonObject netFitSearch(JsonObject resp, int budget) {
+        if (J.json(resp).length() <= budget) return resp;
+        JsonArray hits = new JsonArray();
+        com.google.gson.JsonElement e = J.get(resp, "results");
+        if (e != null && e.isJsonArray()) hits = e.getAsJsonArray();
+        boolean cut = false;
+        while (hits.size() > 0 && J.json(resp).length() > budget) {
+            hits.remove(hits.size() - 1);
+            cut = true;
+        }
+        if (cut) {
+            resp.addProperty("count", hits.size());
+            resp.addProperty("truncated", true);
+            // truncated 这个键本身也占长度：加上它之后可能又超了，再减一轮（否则会白扔掉剩下的条数）
+            while (hits.size() > 0 && J.json(resp).length() > budget) {
+                hits.remove(hits.size() - 1);
+                resp.addProperty("count", hits.size());
+            }
+        }
+        if (J.json(resp).length() <= budget) return resp;
+        JsonObject tiny = new JsonObject();
+        tiny.addProperty("ok", true);
+        tiny.add("results", new JsonArray());
+        tiny.addProperty("count", 0);
+        tiny.addProperty("truncated", true);
+        return tiny;
+    }
+
+    /**
+     * fetch 结果自裁：{@code content} 超预算就截断，加 {@code truncated:true} 与原始 {@code chars}。
+     *
+     * <p>标题是"这一页是什么"的唯一线索，最后才动它；连标题都放不下才退到最小形状。
+     * 每一轮至少砍 24 个字符，循环次数有硬顶，绝不会因为长度算不准转不出去。</p>
+     */
+    private static JsonObject netFitFetch(JsonObject resp, int originalChars, int budget) {
+        if (J.json(resp).length() <= budget) return resp;
+        resp.addProperty("truncated", true);
+        resp.addProperty("chars", originalChars);
+        String content = J.s(resp, "content", "");
+        String title = J.s(resp, "title", "");
+        for (int i = 0; i < 64; i++) {
+            int over = J.json(resp).length() - budget;
+            if (over <= 0) return resp;
+            if (content.length() > 0) {
+                content = content.substring(0, safeCut(content, content.length() - over - 24));
+                resp.addProperty("content", content);
+            } else if (title.length() > 0) {
+                title = title.substring(0, safeCut(title, title.length() - over - 24));
+                resp.addProperty("title", title);
+            } else {
+                break;
+            }
+        }
+        if (J.json(resp).length() <= budget) return resp;
+        JsonObject tiny = new JsonObject();                            // 兜底：宁可只剩元信息，也要是合法 JSON
+        tiny.addProperty("ok", true);
+        tiny.addProperty("title", "");
+        tiny.addProperty("content", "");
+        tiny.addProperty("truncated", true);
+        tiny.addProperty("chars", originalChars);
+        return tiny;
+    }
+
+    /** 按 UTF-16 下标截断时别切在代理对中间（emoji 会变成半个字符）。 */
+    private static int safeCut(String s, int keep) {
+        if (keep <= 0) return 0;
+        if (keep >= s.length()) return s.length();
+        if (Character.isLowSurrogate(s.charAt(keep))) keep--;
+        return keep;
     }
 
     private static JsonObject schemaConsole() {

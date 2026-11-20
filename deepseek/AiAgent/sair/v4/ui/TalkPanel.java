@@ -794,7 +794,52 @@ public class TalkPanel extends JPanel {
     }
 
     /** 文本窗格（退化路径返回 null）。 */
+    /** 对话面板里最多贴多少张图（软上限）。 */
+    public static final int MAX_IMAGES = 20;
+    private int imagesShown = 0;
+
     public JTextPane textPane() { return pane; }
+
+    /**
+     * 把一张图片贴进对话面板。**只能用 JLabel**（JTextPane.insertComponent 的既定约束）。
+     *
+     * <p>只在 EDT 上做；显示宽最多 320px 等比缩；图超过 10MB 的等比压缩由调用方先做好。
+     * 组件总数软上限 {@link #MAX_IMAGES}（超出就不贴，只留文本路径，避免长会话把内存撑爆）。</p>
+     */
+    public boolean appendImage(final java.io.File f, final String caption) {
+        if (f == null || !f.isFile()) return false;
+        final JTextPane p = pane;
+        if (p == null) return false;
+        if (imagesShown >= MAX_IMAGES) return false;
+        javax.swing.SwingUtilities.invokeLater(new Runnable() {
+            @Override public void run() {
+                try {
+                    java.awt.image.BufferedImage im = javax.imageio.ImageIO.read(f);
+                    if (im == null) {
+                        javax.swing.text.StyledDocument d0 = p.getStyledDocument();
+                        d0.insertString(d0.getLength(), "（图片读不出来：" + f.getName() + "）\n", null);
+                        return;
+                    }
+                    int w = im.getWidth(), h = im.getHeight();
+                    int maxW = 320;
+                    if (w > maxW) { h = Math.max(1, h * maxW / w); w = maxW; }
+                    java.awt.Image sc = im.getScaledInstance(w, h, java.awt.Image.SCALE_SMOOTH);
+                    javax.swing.JLabel lb = new javax.swing.JLabel(new javax.swing.ImageIcon(sc));
+                    lb.setToolTipText(((caption == null || caption.isEmpty()) ? "图片" : caption)
+                            + "  " + f.getAbsolutePath());
+                    javax.swing.text.StyledDocument doc = p.getStyledDocument();
+                    doc.insertString(doc.getLength(), "\n", null);
+                    p.setCaretPosition(doc.getLength());
+                    p.insertComponent(lb);
+                    doc.insertString(doc.getLength(),
+                            ((caption == null || caption.isEmpty()) ? "" : caption + "  ") + f.getName() + "\n", null);
+                    imagesShown++;
+                } catch (Throwable ignored) {
+                }
+            }
+        });
+        return true;
+    }
 
     /** 滚动容器（退化路径返回 null）。 */
     public JScrollPane scrollPane() { return scroll; }

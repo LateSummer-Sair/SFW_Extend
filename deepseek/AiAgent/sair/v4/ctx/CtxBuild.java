@@ -1566,6 +1566,27 @@ public final class CtxBuild {
             return msg("user", body);
         }
         t.put(ST_ATTACH, sair.v4.qq.MediaAttach.sentFact(r));
+        // [LOOKGATE 2026-10-30] 记下"这一轮真的挂进模型的是哪几条消息的图" —— look 的门禁据此判断：
+        //   挂进来了 ⇒ 拦（别白花钱，你自己能看）；没挂进来（引用图/历史图）⇒ 放行（不然她永远看不到）。
+        try {
+            if (store != null && t.session() != null) {
+                com.google.gson.JsonObject rec = new com.google.gson.JsonObject();
+                com.google.gson.JsonArray ids = new com.google.gson.JsonArray();
+                java.util.Set<String> seen = new java.util.HashSet<String>();
+                for (int i = 0; i < facts.size(); i++) {
+                    try {
+                        com.google.gson.JsonObject f = facts.get(i).getAsJsonObject();
+                        String mid = J.s(f, "msg_id", "");
+                        if (Str.has(mid) && seen.add(mid)) ids.add(new com.google.gson.JsonPrimitive(mid));
+                    } catch (Throwable ignored2) {
+                    }
+                }
+                rec.add("ids", ids);
+                rec.addProperty("at", System.currentTimeMillis());
+                store.kvSet("media:attached:" + t.session(), J.json(rec));
+            }
+        } catch (Throwable ignored) {
+        }
         return sair.v4.ai.Msg.userWithImages(body, r.urls());
     }
 

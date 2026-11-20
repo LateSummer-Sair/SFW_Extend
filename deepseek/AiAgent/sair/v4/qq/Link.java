@@ -83,6 +83,43 @@ public final class Link {
     }
 
     /** 原始帧级文本钩子（调试用）。 */
+    /**
+     * 路由钩子：在事件交给椰羊之前先过一遍。
+     *
+     * <p>返回 {@code true} 表示「我已经处理了，别再交给椰羊」（比如带 {@code dc-} 前缀
+     * 的消息被转发给了 DC小枫 那条出站连接）。返回 {@code false} 表示不归我管。</p>
+     */
+    public interface Router {
+        boolean route(JsonObject event);
+    }
+
+    private volatile Router router;
+
+    /** 装路由钩子（多 Bot 服务共用一号的代理）。 */
+    public void setRouter(Router r) { this.router = r; }
+
+    /**
+     * 把一条事件<b>反向推给 NapCat</b>（同一条 WS，双向都能发）。
+     *
+     * <p>用途：DC小枫 / Yunzai 这些出站客户端推来的事件，原样转给 NapCat 由它执行。
+     * 注意这里是<b>事件</b>不是动作 —— NapCat 作为 OneBot 实现，收到 {@code post_type}
+     * 非空的事件会当「有人说了话」处理。</p>
+     *
+     * @return true = 至少推到了一条连接
+     */
+    public boolean pushEvent(JsonObject event) {
+        if (event == null) return false;
+        Conn c = pick();
+        if (c == null) return false;
+        try {
+            c.sendText(event.toString());
+            return true;
+        } catch (Exception e) {
+            drop(c);
+            return false;
+        }
+    }
+
     public interface RawSink {
         void onFrame(String text);
     }
@@ -114,6 +151,15 @@ public final class Link {
 
     /** 多连接时 API 调用的首选连接：最近收到事件的连接。 */
     private volatile Conn preferred;
+
+    /**
+     * 事件来源连接（ThreadLocal）。
+     * <p><b>为什么要它</b>：{@code preferred} 只是"最近一条事件的来源"，单变量 ——
+     * 两条连接（NapCat / SairNative）交替推事件时会互相覆盖，导致 A 的事件被回复到 B。
+     * 这里把来源连接绑在<b>处理该事件的那个线程</b>上，动作只在同一线程上发，
+     * 所以"事件从哪来、回复就回哪去"，两条连接永不串线。</p>
+     */
+    private final ThreadLocal<Conn> srcConn = new ThreadLocal<Conn>();
 
     private volatile Handler handler;
     private volatile RawSink rawSink;
@@ -210,6 +256,11 @@ public final class Link {
 
     /** 至少一个已握手 WS 连接。 */
     public boolean connected() { return clients() > 0; }
+
+    /** [SELFSYNC] 每次有连接握手成功都会调它（重连也算）。 */
+    private volatile Runnable onConnect;
+
+    public void setOnConnect(Runnable r) { this.onConnect = r; }
 
     /** 已握手连接数。 */
     public int clients() {
@@ -319,6 +370,11 @@ public final class Link {
      * 变的只是**它不再无声**。</p>
      */
     private Conn pick() {
+        // ★ 优先：事件来源连接（同一线程上处理的事件，回复必须回它）
+        Conn src = srcConn.get();
+        if (src != null && src.open) {
+            return src;
+        }
         Conn p = preferred;
         if (p != null && p.open) {
             notePick(p, "首选（最近收到事件的连接）");
@@ -399,6 +455,11 @@ public final class Link {
             }
             conns.add(c);
             log("NapCat 已连接：" + c.remote + "（当前连接数 " + clients() + "）", Out.Tone.OK);
+        try {
+            Runnable cb = onConnect;
+            if (cb != null) cb.run();
+        } catch (Throwable ignored) {
+        }
             readLoop(c);
         } catch (Exception e) {
             if (running && c == null) log("NapCat 握手失败：" + brief(e), Out.Tone.WARN);
@@ -632,13 +693,13 @@ public final class Link {
             // 无人认领（多半是 post() 的响应）：忽略
         }
         if (!J.s(o, "post_type", "").isEmpty()) {
-            preferred = c; // 最近收到事件的连接 = 后续动作的首选
+            preferred = c; // 最近收到事件的连接 = 后续动作的首选（单连接/兜底）
             // D6：多连接时**必须能看出这条事件来自哪条** —— 单连接（正常情况）一个字都不打。
             if (clients() > 1) {
                 log("[conn] 事件来自 " + c.label() + " —— 当前 " + clients()
                         + " 条连接；它成为后续动作的首选", Out.Tone.DIM);
             }
-            dispatch(o);
+            dispatch(o, c);   // ★ 把来源连接一起传下去
         }
     }
 
@@ -652,17 +713,32 @@ public final class Link {
      * 池与队列都满时按 {@code eventOverflow} 处置并计数（默认丢弃：只在真的超过设计容量时发生）。</p>
      */
     private void dispatch(final JsonObject event) {
+        dispatch(event, null);
+    }
+
+    private void dispatch(final JsonObject event, final Conn src) {
+        // ★ 先过路由钩子：命中的（比如 dc- / yz- 前缀）不再交给椰羊
+        Router rt = router;
+        if (rt != null) {
+            try {
+                if (rt.route(event)) return;
+            } catch (Throwable t) {
+                log("路由钩子异常（已吞掉，交回椰羊）：" + brief(t), Out.Tone.ERR);
+            }
+        }
         final Handler h = handler;
         // 入站事件行默认不打（控制台只留 Agent 调用事件）；要看加 logConsole 里的 msg
         if (conf == null || (conf.logQq() && conf.logOn("msg"))) log(briefEvent(event), Out.Tone.DIM);
         if (h == null) return;
         Runnable r = new Runnable() {
             @Override public void run() {
+                if (src != null) srcConn.set(src);   // ★ 事件来源绑定到本线程
                 try {
                     h.onEvent(event);
                 } catch (Throwable t) {
                     log("事件处理异常（已吞掉，连接保持）：" + brief(t), Out.Tone.ERR);
                 } finally {
+                    srcConn.remove();                // ★ 必须清理，避免线程池串线
                     eventsDone.incrementAndGet();
                 }
             }

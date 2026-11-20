@@ -31,6 +31,9 @@ import sair.v4.prompt.Inject;
 import sair.v4.prompt.Prompts;
 import sair.v4.qq.Api;
 import sair.v4.qq.Link;
+import sair.v4.qq.LinkerLoader;
+import sair.v4.qq.OutLink;
+import sair.v4.qq.Proxy;
 import sair.v4.skill.Host;
 import sair.v4.store.Store;
 import sair.v4.tool.Registry;
@@ -157,6 +160,8 @@ public final class Boot {
     private Skills skills;
     private DeepSeek ai;
     private Link link;
+    /** 多 Bot 服务共用一号的路由代理（data/linker/ 下每个 json 一条出站通道）。 */
+    private Proxy proxy;
     private Api api;
     /**
      * 技能/模型发起的 NapCat 动作用的<b>带闸门实例</b>。
@@ -985,7 +990,13 @@ public final class Boot {
         // ⑮ 基板工具面（15 个）
         step("基板工具面", new Runnable() {
             @Override
-            public void run() { Builtins.register(Boot.this); }
+            public void run() {
+                // Tools 的日志接基板出口：Search/Fetch 的失败要能在控制台看到；
+                // verbose 跟现有的 logVerbose 总开关（conf 在①就装好了，这里仍兜一层）
+                sair.v4.ai.Tools.out = out;
+                sair.v4.ai.Tools.verbose = conf != null && conf.logVerbose();
+                Builtins.register(Boot.this);
+            }
         });
 
         // ⑯ 技能扫描（它要注册工具、挂钩子、声明自己的库）。默认同步跑完 —— 台账里这一步的耗时就是"技能编译"的耗时；
@@ -1039,6 +1050,142 @@ public final class Boot {
                 if (conf != null && conf.napcatEnabled()) {
                     if (link.start()) log("NapCat 反向 WS 已监听端口 " + conf.napcatPort());
                     else log("NapCat 监听失败（端口 " + conf.napcatPort() + " 被占用？）——本地交互照常可用");
+                // [SELFSYNC 2026-11-04] 每次 NapCat（重）连上来都重新读一次真实登录号 —— 换号只需要在 NapCat 那边切，
+                // 这边不用改配置、不用重启（selfId 配置项已弃用）。
+                link.setOnConnect(new Runnable() {
+                    @Override
+                    public void run() {
+                        Tick tk = tick;
+                        if (tk != null) tk.resyncSelfId();
+                        // ★ NapCat 已连上 ⇒ 现在才启动下游通道
+                        //   顺序不能反：下游要的一切查询都得先问 NapCat
+                        Proxy pxx = proxy;
+                        if (pxx != null && !pxx.started()) {
+                            try {
+                                // ★ resyncSelfId 之后才拿到的真实号，必须刷进 Proxy 再启动下游
+                                //   否则下游连上时 selfId=0，lifecycle 发不出去，Yunzai 会一直
+                                //   报「找不到对应Bot」。
+                                long sid = (conf == null ? 0 : conf.selfId());
+                                if (sid > 0) pxx.setSelfId(sid);
+                                log("启动下游前 selfId=" + sid);
+                                pxx.startAll();
+                                log("NapCat 已连接，下游通道启动：" + pxx.routeCount() + " 条");
+                            } catch (Throwable t) {
+                                log("下游通道启动失败：" + t);
+                            }
+                        }
+                    }
+                });
+
+                // ⑰-b 出站路由代理：扫 linker 目录，**有几个 json 就建几个客户端**。
+                //      这里不做任何全局开关 —— 每个 json 自己的 enabled 字段就是它的开关。
+                {
+                //      NapCat 来 "dc-xxx"  ⇒ 去前缀 ⇒ 推给 DC小枫
+                //      NapCat 来 "yz-xxx"  ⇒ 去前缀 ⇒ 推给 Yunzai
+                //      NapCat 来 无前缀    ⇒ 交回椰羊
+                //      DC/Yunzai 推来的事件 ⇒ 原样转给 NapCat
+                try {
+                    final Proxy px = new Proxy(conf.selfId(), out);
+                    px.setMasterUid(conf.masterQQ());
+                    link.setRouter(new Link.Router() {
+                        @Override public boolean route(JsonObject ev) { return px.route(ev); }
+                    });
+                    px.setPush(new Proxy.Push() {
+                        @Override public boolean event(JsonObject ev) { return link.pushEvent(ev); }
+                    });
+                    // ★ 截获到一段就立刻输出到「AI 对话」面板（她可评可不评）
+                    px.setCaptureSink(new Proxy.CaptureSink() {
+                        @Override public void onCapture(String route, String session, String text, boolean claimed) {
+                            try {
+                                sair.v4.ui.TalkPanel tp = talkPanel;
+                                if (tp == null) return;
+                                final javax.swing.JTextPane pane = tp.textPane();
+                                if (pane == null) return;
+                                String body = text == null ? "" : text.trim();
+                                if (body.isEmpty()) body = "(无文字，可能是纯图片)";
+                                final String line = "〔" + route + " → " + session + "〕" + (claimed ? "" : "【未认领】") + body + "\n";
+                                javax.swing.SwingUtilities.invokeLater(new Runnable() {
+                                    @Override public void run() {
+                                        try {
+                                            javax.swing.text.StyledDocument d = pane.getStyledDocument();
+                                            d.insertString(d.getLength(), line, null);
+                                            pane.setCaretPosition(d.getLength());
+                                        } catch (Throwable ignored) {}
+                                    }
+                                });
+                            } catch (Throwable ignored) {}
+                        }
+
+                        @Override public void onImage(String route, String session, java.io.File f, boolean claimed) {
+                            try {
+                                sair.v4.ui.TalkPanel tp = talkPanel;
+                                if (tp == null || f == null) return;
+                                tp.appendImage(f, "〔" + route + " → " + session + "〕" + (claimed ? "" : "【未认领】"));
+                            } catch (Throwable ignored) {}
+                        }
+                    });
+                    px.setNapCat(new Proxy.NapCat() {
+                        @Override public String call(String action, JsonObject params) {
+                            return link.call(action, params, true);
+                        }
+                    });
+                    File linkerDir = LinkerLoader.dirOf(new File("."));
+                    java.util.List<LinkerLoader.Spec> specs = LinkerLoader.load(linkerDir, out);
+                    for (final LinkerLoader.Spec sp : specs) {
+                        OutLink ol = new OutLink(sp.name, sp.url, sp.token,
+                                new OutLink.Responder() {
+                                    @Override public com.google.gson.JsonElement answer(String a, JsonObject p) {
+                                        return px.answer(sp.name, a, p);
+                                    }
+                                },
+                                new OutLink.EventSink() {
+                                    @Override public void onEvent(OutLink self, JsonObject ev) {
+                                        px.forwardToNapCat(self, ev);
+                                    }
+                                });
+                        ol.setHeartbeatMs(sp.heartbeatMs);
+                        px.addRoute(sp.name, sp.prefix, ol);
+                    }
+                    // SairNative：**不由 json 控制**，只由 config.json 的 nativeEnabled 决定（基板读）
+                    //   主人 2026-11-15 定：本机 SairNative 也装成了 NapCat，两边同时对外会打架，
+                    //   所以它单独走一个配置开关，默认关。
+                    int total = specs.size();
+                    if (conf.nativeEnabled()) {
+                        String nu = conf.nativeUrl();
+                        if (nu == null || nu.trim().isEmpty()) {
+                            log("SairNative 连接：nativeEnabled=true 但 nativeUrl 是空的，跳过");
+                        } else {
+                            OutLink nl = new OutLink("SairNative", nu.trim(), "",
+                                    new OutLink.Responder() {
+                                        @Override public com.google.gson.JsonElement answer(String a, JsonObject p) {
+                                            return px.answer("SairNative", a, p);
+                                        }
+                                    },
+                                    new OutLink.EventSink() {
+                                        @Override public void onEvent(OutLink self, JsonObject ev) {
+                                            px.forwardToNapCat(self, ev);
+                                        }
+                                    });
+                            nl.setHeartbeatMs(conf.nativeHeartbeatMs());
+                            px.addRoute("SairNative", conf.nativePrefix(), nl);
+                            total++;
+                            log("SairNative 连接：已装配（" + nu.trim() + "）");
+                        }
+                    } else {
+                        log("SairNative 连接：关闭（config.json 里 nativeEnabled=false）");
+                    }
+                    proxy = px;
+                    if (total > 0) {
+                        log("出站路由代理就绪：" + total + " 条通道（json " + specs.size()
+                                + " 条 + SairNative " + (total - specs.size())
+                                + " 条）—— 等 NapCat 连上再启动下游");
+                    } else {
+                        log("出站路由代理：linker 目录下没有配置，且 SairNative 关闭，跳过");
+                    }
+                } catch (Throwable t) {
+                    log("出站路由代理装配失败（NapCat 主链路不受影响）：" + t);
+                }
+                }
                 } else {
                     log("NapCat 未启用（config.json 里 napcatEnabled=false）——本地交互照常可用");
                 }
@@ -1462,7 +1609,8 @@ public final class Boot {
             // M4：引用解析的 worker 先收（在 link 之前 —— 在飞的取数最多被中断一次，
             // Link.call 的 InterruptedException 分支已经处理）
             try { if (quote != null) quote.shutdown(); } catch (Exception ignored) {}
-            try { if (link != null) { link.setHandler(null); link.stop(); } } catch (Exception ignored) {}
+            try { if (proxy != null) proxy.stopAll(); } catch (Exception ignored) {}
+        try { if (link != null) { link.setHandler(null); link.stop(); } } catch (Exception ignored) {}
             try { if (store != null) store.db().close(); } catch (Exception ignored) {}
             try { turns.shutdownNow(); } catch (Exception ignored) {}
             try { if (lanes != null) lanes.shutdown(); } catch (Exception ignored) {}
@@ -1951,7 +2099,35 @@ public final class Boot {
 
             @Override
             public List<JsonObject> inboundFiles(int limit) {
-                return sair.v4.qq.Inbound.recentFiles(limit);
+                java.util.List<JsonObject> out = new java.util.ArrayList<JsonObject>();
+        try {
+            out.addAll(sair.v4.qq.Inbound.recentFiles(limit));
+        } catch (Throwable ignored) {
+        }
+        // [FILEKEEP 2026-10-30] 再并上 kv 里的持久线索（内存那本只活 30 分钟 ⇒ 引用旧文件查不到）
+        try {
+            String v = store == null ? "" : store.kv("inbound:files", "");
+            JsonArray arr = Str.has(v) ? J.arr(v) : null;
+            if (arr != null) {
+                for (int i = arr.size() - 1; i >= 0 && out.size() < Math.max(limit, 1); i--) {
+                    JsonObject o = arr.get(i).getAsJsonObject();
+                    String f = Str.trim(J.s(o, "file", ""));
+                    boolean dup = false;
+                    for (JsonObject had : out) {
+                        if (f.equals(Str.trim(J.s(had, "file", "")))) { dup = true; break; }
+                    }
+                    if (dup) continue;
+                    JsonObject copy = new JsonObject();
+                    copy.addProperty("name", J.s(o, "name", ""));
+                    copy.addProperty("file", f);
+                    copy.addProperty("size", J.l(o, "size", 0L));
+                    copy.addProperty("ts", J.l(o, "ts", 0L));
+                    out.add(copy);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return out;
             }
 
             @Override
@@ -2176,6 +2352,9 @@ public final class Boot {
     }
 
     /** 文件外链中转（⑧ 的一部分；没装配时返回 null）。 */
+    /** 出站路由代理（未启用时返回 null）。 */
+    public Proxy proxy() { return proxy; }
+
     public sair.v4.qq.Relay relay() { return relay; }
 
     public DynCode dyn() { return dyn; }

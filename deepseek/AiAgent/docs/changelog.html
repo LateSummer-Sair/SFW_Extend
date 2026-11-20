@@ -56,8 +56,8 @@
       <section class="chapter" id="current">
         <header class="chapter-head reveal">
           <span class="chapter-tag">当前版本</span>
-          <h2>当前版本 · V4.3</h2>
-      <p>这一版是 <b>V4.3</b>。九件事、权限三域、命令表结构都不变；变的是三件与她"本人"有关的事：<b>身份</b>（同一个人在别的群里叫什么，基板直接给她一格事实；每一轮还多一行"本轮说话人"钉在最近处）、<b>记忆</b>（从冷查变成热查：拿"这句话 + 最近几轮"一起去检索）、<b>出站纪律</b>（协议暗号不只整条拦，贴在句子首尾也剥掉，被长度分段劈成两半的也不再进群）。另外把"给她的东西"按<b>提供 + 引导</b>再收了一遍：对方情绪标签还给她、用词表替她判"正经办事"的那条否决删掉、技能说明书的读法补全。按时间从新到旧，细节见下方条目。这一版之后，<b>2026-10-01</b> 又续了一条 <b>V4.3（续）</b>：事实块多三行纯数据事实（<code>clients:</code> / <code>cmdish:</code> / <code>addressed:</code>）与三个开关，加一道「其他」归属闸，见下方最新条目。</p>
+          <h2>当前版本 · V4.4</h2>
+      <p>这一版是 <b>V4.4</b>。九件事、权限三域、命令表结构都不变；变的是她<b>调模型的方式</b>：DeepSeek 官方 API 在 2026-11-13 开放了「全家桶」能力（思考模式开关与强度、JSON 输出、stop、内容风控、会话标题、服务端联网工具、Files/OCR/ASR/TTS/Search/Fetch），这一版把这些能用的都接进来了。旧的一句话：<b>身份</b>（同一个人在别的群里叫什么，基板直接给她一格事实；每一轮还多一行"本轮说话人"钉在最近处）、<b>记忆</b>（从冷查变成热查：拿"这句话 + 最近几轮"一起去检索）、<b>出站纪律</b>（协议暗号不只整条拦，贴在句子首尾也剥掉，被长度分段劈成两半的也不再进群）。另外把"给她的东西"按<b>提供 + 引导</b>再收了一遍：对方情绪标签还给她、用词表替她判"正经办事"的那条否决删掉、技能说明书的读法补全。按时间从新到旧，细节见下方条目。这一版之后，<b>2026-10-01</b> 又续了一条 <b>V4.3（续）</b>：事实块多三行纯数据事实（<code>clients:</code> / <code>cmdish:</code> / <code>addressed:</code>）与三个开关，加一道「其他」归属闸，见下方最新条目。</p>
           <p class="chapter-desc">
             这一条记录当前线上这一版的内容：能做什么、有哪些限制、哪些还没落地，都照实写。
             历史条目按版本号从高到低排在后面，改了什么一目了然。
@@ -66,8 +66,42 @@
 
         <ol class="release-list">
 
+<li class="release v4 reveal">
+<div class="rel-ver">当前版本 · V4.4</div>
+<div class="rel-body">
+<h3 class="rel-title">2026-11-20 · V4.4：接入 DeepSeek 官方全家桶 API（思考开关/JSON/stop/风控/标题/联网工具/9 个工具 API）</h3>
+<div class="rel-desc">
+<b>版本号 V4.3 ⇒ V4.4</b>；九件事、权限三域、命令表结构都不变。变的是"她怎么调模型"和"她手里多了哪些官方工具"。按时间从新到旧，一条一句：
+<br>
+· <b>请求体补齐（新）</b>：<code>sair\v4\ai\DeepSeek.java</code> 现在会发 <code>thinking{type}</code>、<code>reasoning_effort</code>、<code>response_format{json_object}</code>、<code>stop</code>、<code>stream_options.include_usage</code>、<code>safety_check{level}</code>、<code>title{enabled}</code>；<code>tools</code> 里可追加官方的 <code>deepseek_web_search</code> / <code>deepseek_read_url</code>。<b>默认全部不发</b>（<code>aiThinking=auto</code>），只有显式配置才写进请求体 —— 默认请求与升级前一致。
+<br>
+· <b>思考模式口径（定）</b>：官方默认开启且 <code>effort=high</code>；我们默认 <code>auto</code>（不干预）。只有 <code>aiThinking=enabled</code> 才发 <code>reasoning_effort</code>；<code>disabled</code> 既不发 thinking 也不发 effort。思考模式下官方忽略 <code>temperature</code>/<code>top_p</code>，也不再允许 <code>tool_choice=required</code> ⇒ 基板检测到冲突会自动降级成 <code>auto</code> 并记一条 warn（否则官方回 400）。
+<br>
+· <b>10 个新配置键（新）</b>：<code>aiThinking</code> / <code>aiReasoningEffort</code> / <code>aiJsonMode</code> / <code>aiStopSeqs</code> / <code>aiStreamUsage</code> / <code>aiSafetyLevel</code> / <code>aiTitleEnabled</code> / <code>aiWebTools</code> / <code>toolsBaseUrl</code> / <code>anthropicBaseUrl</code>，全部登记进 <code>Conf.knownKeys()</code>（现 <b>119</b> 个键）。
+<br>
+· <b>9 个官方工具 API 封装（新）</b>：新建 <code>sair\v4\ai\Tools.java</code> —— <code>search</code>（/v1/tools/search）、<code>fetch</code>（/v1/tools/fetch，返回 Markdown）、<code>ocr</code>（≤100MiB/≤1000 页/总 180s，读完整 JSON）、<code>asr</code>（只吃 Ogg Opus 或 16bit PCM WAV，≤8MiB/≤120s）、<code>tts</code>（stella/tide，流式中途断流当失败）、<code>fileUpload/fileList/fileGet/fileDelete</code>。都带"墙钟总时限"守护线程，到点主动断开。
+<br>
+· <b><code>net</code> 工具（新）</b>：<code>action=search|fetch</code>，两个动作分别对应 op <code>net.search</code> / <code>net.fetch</code>；返回前在工具内部就把结果裁到工具结果上限内（<b>永远返回合法 JSON</b>），不再依赖上层截断。
+<br>
+· <b>三个技能改官方优先（新）</b>：<code>联网搜索</code>（官方 Search 优先，失败/空结果回退必应）、<code>网页抓取</code>（官方 Fetch 优先且过 SSRF 闸门，失败/白页回退 CDP）、<code>语音</code>（官方 TTS 优先，失败回退 edge-tts）。都带 <code>优先官方</code> 开关（默认 true），关掉即完全恢复原实现。
+<br>
+· <b>语音口径（修）</b>：她每次调用都会带 <code>tone=温柔</code>，若把 tone 当"官方不支持的语气旋钮"就会永久走 edge-tts。<b>现在只有 <code>rate/volume/pitch</code> 才算阻止条件</b>，tone 走官方时忽略。
+<br>
+· <b>顺手修的缺陷</b>：<code>J.b()</code> 的布尔解析（Gson 的 <code>getAsBoolean()</code> 对字符串不抛异常，导致 <code>1/on/yes/是/开</code> 全返回 false ⇒ 原 catch 分支是死代码，已重写）；<code>stream_options</code> 与 opts 覆盖顺序；<code>emptyStream</code> 不再把 usage-only 帧当内容；<code>gateExit</code> 改为释放"进入时拿到的那个信号量"；<code>net</code> 在 caller 为空时不再 fail-open；OCR/TTS/Files 补墙钟总时限。
+<br>
+· <b>线上实测（照实记）</b>：<code>search</code> 633ms / 3 条（首条 rerank_score 2.25）；<code>fetch</code> title=Example Domain、正文 1300 字；<code>tts</code> 142KB 且 <code>RIFF/WAVE</code> 头正确。部署后 <code>tools=51</code>（新增 net）、<code>skills=39</code>、<code>ready=1</code>。
+<br>
+· <b>踩过的坑（留给以后）</b>：<code>config.json</code> 里的 <code>apiKey</code> 是 84 字符 base64 形态，拿它调官方会 <b>401</b>；真正有效的是 <code>.ir</code> 里的 <code>ai/config set apiKey sk-…</code>。<b>排障别拿 config.json 的 key 当凭证。</b>
+<br>
+· <b>已知限制（照实记，这一版不修）</b>：① 三个技能里各有一份官方直连实现（技能侧 <code>dsSearch</code>/<code>dsFetch</code>），与基板 <code>Tools</code> 并存 —— 这是<b>权限细分</b>的刻意妥协（可以只给技能不给基板工具，或反之），不是技术债，<b>不要合并</b>；② 官方 ASR 未接（NapCat 自带语音转文字，够用）；③ <code>aiTitleEnabled</code> 只把 title 请求发给官方，响应里的标题还没接住落库。
+<br>
+· <b>当前规模（照实核过）</b>：<code>src\</code> 下 <b>124</b> 个 <code>.java</code>、配置键 <b>119</b> 个、技能 <b>39</b> 个、工具面 <b>51</b> 个。
+</div>
+</div>
+</li>
+
           <li class="release v4 reveal">
-            <div class="rel-ver">当前版本 · V4.3（续）</div>
+            <div class="rel-ver">V4.3（续）</div>
             <div class="rel-body">
               <h3 class="rel-title">2026-10-01 · V4.3（续）：事实块多三行（<code>clients:</code> / <code>cmdish:</code> / <code>addressed:</code>）与「其他」归属闸；误投指令改为"先问一句"</h3>
               <div class="rel-desc">

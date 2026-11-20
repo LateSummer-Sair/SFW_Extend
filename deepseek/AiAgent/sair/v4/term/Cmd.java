@@ -194,6 +194,10 @@ public final class Cmd {
                 promptCmd(a);
                 return null;
             }
+            if ("route".equals(f)) {
+                routeCmd(a);
+                return null;
+            }
             if ("napcat".equals(f)) {
                 napcat(a);
                 return null;
@@ -2180,6 +2184,95 @@ public final class Cmd {
      * <p>它决定"本地文件怎么交给 NapCat"：开着就走 URL（跨机可取），关着就走 {@code file:///}（只有同机能取）。
      * 状态输出里的 token 一律脱敏，要看完整值用 {@code config relayToken}。</p>
      */
+    /**
+     * {@code route [status|recent [n]|audit [n]|ask <服务> <as_user|proxy> <文本...> [-g <群号>]]}
+     *
+     * <p>基板事实面 + 代问原语的控制台入口（AI 工具面之后再挂，两者同源）。</p>
+     */
+    private void routeCmd(String a) {
+        if (boot == null) { out.err("基板未就绪"); return; }
+        sair.v4.qq.Proxy px = boot.proxy();
+        String[] v = Str.verb(a == null ? "" : a);
+        String op = v[0].isEmpty() ? "status" : v[0].toLowerCase(java.util.Locale.ROOT);
+        if (px == null) {
+            out.warn("路由代理未装配（看启动日志里 nativeEnabled / linker 那两行）");
+            return;
+        }
+        if ("status".equals(op)) {
+            java.util.List<com.google.gson.JsonObject> st = px.status();
+            out.line("通道 " + st.size() + " 条；当前在代问中：" + (px.busyAsking() ? "是" : "否"));
+            for (com.google.gson.JsonObject o : st) {
+                out.dim("  " + J.s(o, "name", "") + "  前缀「" + J.s(o, "prefix", "") + "」  "
+                        + (J.b(o, "connected", false) ? "已连接" : "未连接")
+                        + "  收事件 " + J.s(o, "events_in", "0") + "  代问 " + J.s(o, "asks_out", "0")
+                        + "  最近事件 " + (J.s(o, "last_event_at", "").isEmpty() ? "无" : J.s(o, "last_event_at", ""))
+                        + "\n    " + J.s(o, "url", ""));
+            }
+            out.dim("  用法：route [status|recent [n]|audit [n]|ask <服务> <as_user|proxy> <文本…> [-g 群号]]");
+            return;
+        }
+        if ("recent".equals(op) || "audit".equals(op)) {
+            int n = 20;
+            if (v[1] != null && v[1].trim().matches("\\d+")) n = Math.min(200, Integer.parseInt(v[1].trim()));
+            java.util.List<String> l = "audit".equals(op) ? px.recentAsks(n) : px.recentFacts(n);
+            if (l.isEmpty()) { out.dim("（空）"); return; }
+            for (String x : l) out.dim("  " + x);
+            return;
+        }
+        if ("ask".equals(op)) {
+            String[] p = (v[1] == null ? "" : v[1]).split("\\s+", 3);
+            if (p.length < 3) {
+                out.warn("用法：route ask <服务> <as_user|proxy> <文本…> [-g 群号]");
+                return;
+            }
+            String svc = p[0];
+            String who = p[1];
+            String text = p[2];
+            long gid = 0L;
+            int gi = text.indexOf(" -g ");
+            if (gi > 0) {
+                String g = text.substring(gi + 4).trim();
+                text = text.substring(0, gi).trim();
+                if (g.matches("\\d+")) gid = Long.parseLong(g);
+            }
+            long asUser;
+            if ("proxy".equalsIgnoreCase(who)) {
+                asUser = boot.conf().routeProxyUid();
+            } else if (who.matches("\\d+")) {
+                asUser = Long.parseLong(who);
+            } else {
+                out.warn("as_user 要么是数字，要么写 proxy（= 配置里的 routeProxyUid）");
+                return;
+            }
+            out.dim("代问 " + svc + "  as_user=" + asUser + (gid > 0 ? "  群=" + gid : "  私聊")
+                    + "  静默 " + boot.conf().routeAskQuietMs() + "ms / 超时 " + boot.conf().routeAskTimeoutMs() + "ms");
+            // 控制台 ≡ 主人 ⇒ 允许拟造任何真实存在的 QQ
+            com.google.gson.JsonObject r = px.ask(svc, asUser, text, gid,
+                    boot.conf().routeAskQuietMs(), boot.conf().routeAskTimeoutMs(), true);
+            if (J.b(r, "ok", false)) {
+                out.ok("它回了：" + J.s(r, "reply", ""));
+                out.dim("  捕获动作 " + J.s(r, "captured", "0") + " 个，耗时 " + J.s(r, "elapsed_ms", "0") + "ms");
+                // ★ 图片只进「AI 对话」面板，左侧控制台保持纯文本
+                if (r.has("images") && r.get("images").isJsonArray()) {
+                    for (com.google.gson.JsonElement ie : r.getAsJsonArray("images")) {
+                        if (!ie.isJsonObject()) continue;
+                        String lp = J.s(ie.getAsJsonObject(), "local", "");
+                        if (lp.isEmpty()) continue;
+                        java.io.File img = new java.io.File(lp);
+                        sair.v4.ui.TalkPanel tp = boot.talkPanel();
+                        boolean shown = tp != null && tp.appendImage(img, "来自 " + svc);
+                        out.dim("  [图片] " + (shown ? "已贴到「AI 对话」" : "已落盘（面板未挂载或已达上限）")
+                                + "  " + lp);
+                    }
+                }
+            } else {
+                out.warn("没拿到结果：" + J.s(r, "error", ""));
+            }
+            return;
+        }
+        out.err("用法：route [status|recent [n]|audit [n]|ask <服务> <as_user|proxy> <文本…> [-g 群号]]");
+    }
+
     private void relay(String a) {
         String[] v = Str.verb(a);
         String op = v[0].isEmpty() ? "status" : v[0].toLowerCase();

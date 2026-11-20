@@ -119,17 +119,37 @@ public final class J {
         }
     }
 
+    /**
+     * 读一个布尔键（缺键 / 不是原语 / 认不出来一律回落 {@code def}）。
+     *
+     * <p>字符串的宽容解析（{@code Conf.getBool} 与各技能的 {@code getBool} 都走这一个口）：
+     * {@code true|1|yes|on|是|开} = 真，{@code false|0|no|off|否|关} = 假（大小写不敏感），
+     * 其它回落默认值。2026-11-20 修：原来只认 1/yes/on 三个词，写「是 / 开」会掉成 false。</p>
+     */
     public static boolean b(JsonObject o, String k, boolean def) {
         JsonElement e = get(o, k);
         if (e == null || !e.isJsonPrimitive()) return def;
-        try {
-            return e.getAsBoolean();
-        } catch (Exception ex) {
-            String s = s(o, k, "").trim();
-            if ("1".equals(s) || "yes".equalsIgnoreCase(s) || "on".equalsIgnoreCase(s)) return true;
-            if ("0".equals(s) || "no".equalsIgnoreCase(s) || "off".equalsIgnoreCase(s)) return false;
-            return def;
-        }
+        // JSON 布尔本身：直接读（true/false 就是它）
+        if (e.getAsJsonPrimitive().isBoolean()) return e.getAsBoolean();
+        // 字符串 / 数字：走宽容解析才算数。
+        // 【2026-11-20 根因】原来这里写的是 try { e.getAsBoolean() } catch { ...宽容解析... } ——
+        // 但 Gson 的 getAsBoolean() 对非布尔值**不抛异常**，一律 Boolean.parseBoolean(getAsString())：
+        // 字符串 "1" / "是" / "开" 直接得到 false，catch 里那段宽容解析是**死代码**，永远跑不到。
+        // 所以必须先按类型分叉，不能靠异常。
+        return boolWord(s(o, k, ""), def);
+    }
+
+    /** 「开 / 关」的宽容解析：认不出来回落 {@code def}（不因为一个拼错就翻转行为）。 */
+    private static boolean boolWord(String v, boolean def) {
+        if (v == null) return def;
+        String t = v.trim();
+        if (t.isEmpty()) return def;
+        String s = t.toLowerCase(java.util.Locale.ROOT);
+        if ("true".equals(s) || "1".equals(s) || "yes".equals(s) || "on".equals(s)
+                || "是".equals(t) || "开".equals(t)) return true;
+        if ("false".equals(s) || "0".equals(s) || "no".equals(s) || "off".equals(s)
+                || "否".equals(t) || "关".equals(t)) return false;
+        return def;
     }
 
     public static JsonObject sub(JsonObject o, String k) {

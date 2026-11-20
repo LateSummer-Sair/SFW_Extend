@@ -1058,6 +1058,12 @@ public final class QqGateway {
         // 必须先登记再取媒体事实：只有媒体没有文字时那一轮的全部输入就是这条事实，
         // 而图片段的 URL 兜底读的就是这本登记簿。
         sair.v4.qq.Inbound.remember(ev);
+        // [FILEKEEP 2026-10-30] 附件线索另落一份到 kv：内存那本只活 30 分钟，
+        //   主人【引用】半小时前发过的文件时 file.fetch 就查不到（和 look 那个缺陷同类）。
+        try {
+            keepInboundFiles(ev.segments());
+        } catch (Throwable ignored) {
+        }
         final JsonArray mediaArr = mediaFacts(ev);
         // ★ D2（N2）：语音转写（`fetch_ptt_text`）—— 入站渲染链上的**唯一**调用点。
         //   为什么必须接在这里：`Api.pttEnrich` 只是"前置一步"（就地给 record 段补 `ptt_text`），
@@ -1472,6 +1478,61 @@ public final class QqGateway {
      *
      * <p>图片段若 data 里没有可用 URL，回落到基板入站登记簿（{@link Inbound}）里记下的那条直连 URL。</p>
      */
+    /**
+     * 入站附件的<b>持久线索</b>：把 file 段（名字/文件标识/大小）追加进 kv 的环形表。
+     * 内存那本（{@code Inbound.FILES}）只活 30 分钟，引用/历史文件会查不到；kv 这本活 7 天。
+     */
+    private void keepInboundFiles(java.util.List<JsonObject> segments) {
+        if (segments == null || boot == null || boot.store() == null) return;
+        JsonArray fresh = new JsonArray();
+        for (int i = 0; i < segments.size(); i++) {
+            JsonObject seg = segments.get(i);
+            String type = Str.lower(J.s(seg, "type", ""));
+            if (!"file".equals(type)) continue;
+            JsonObject d = J.sub(seg, "data");
+            if (d == null) continue;
+            String f = Str.trim(J.s(d, "file", ""));
+            String nm = Str.trim(J.s(d, "name", ""));
+            if (f.isEmpty() && nm.isEmpty()) continue;
+            JsonObject o = new JsonObject();
+            o.addProperty("name", nm);
+            o.addProperty("file", f);
+            o.addProperty("size", J.l(d, "file_size", 0L));
+            o.addProperty("ts", System.currentTimeMillis());
+            fresh.add(o);
+        }
+        if (fresh.size() == 0) return;
+        JsonArray all = new JsonArray();
+        try {
+            String v = boot.store().kv("inbound:files", "");
+            JsonArray old = Str.has(v) ? J.arr(v) : null;
+            if (old != null) for (int i = 0; i < old.size(); i++) all.add(old.get(i));
+        } catch (Throwable ignored) {
+        }
+        for (int i = 0; i < fresh.size(); i++) all.add(fresh.get(i));
+        long cut = System.currentTimeMillis() - 7L * 24L * 3600L * 1000L;
+        java.util.LinkedHashMap<String, JsonObject> keep = new java.util.LinkedHashMap<String, JsonObject>();
+        for (int i = 0; i < all.size(); i++) {
+            JsonObject o = all.get(i).getAsJsonObject();
+            if (J.l(o, "ts", 0L) < cut) continue;
+            String k = J.s(o, "file", "");
+            if (k.isEmpty()) k = "n:" + J.s(o, "name", "") + "#" + i;
+            keep.remove(k);
+            keep.put(k, o);
+        }
+        JsonArray out = new JsonArray();
+        int skip = Math.max(0, keep.size() - 60);
+        int n = 0;
+        for (JsonObject o : keep.values()) {
+            if (n++ < skip) continue;
+            out.add(o);
+        }
+        try {
+            boot.store().kvSet("inbound:files", J.json(out));
+        } catch (Throwable ignored) {
+        }
+    }
+
     public static JsonArray mediaFacts(Ev ev) {
         JsonArray arr = new JsonArray();
         if (ev == null) return arr;

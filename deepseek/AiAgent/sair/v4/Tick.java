@@ -36,6 +36,8 @@ public final class Tick {
     private final sair.v4.term.Segmenter seg;
 
     private volatile boolean running = false;
+    /** [SELFSYNC 2026-11-04] 登录账号同步只做一次（连上 NapCat 后的第一次心跳）。失败会自动重试。 */
+    private volatile boolean selfSynced = false;
     private volatile long n = 0;
     private volatile long lastMaintain = 0;
 
@@ -76,6 +78,35 @@ public final class Tick {
         if (out != null) out.dim("[tick] 已启动：主周期 " + period + "ms（on_timer 钩子 + 维护），到点触发 " + alarmPeriod + "ms（闹钟精度到秒）");
     }
 
+    /**
+     * [SELFSYNC 2026-11-04] 从 NapCat 读<b>真实登录的账号</b>，和配置里的 {@code selfId} 对不上就自动纠正。
+     * <p>为什么需要：椰羊有主号 2671623601 和备用号 2857252183，主人可能随时切换。
+     * 不自动同步的话，每次换号都要手改 {@code SFW-BOT.ir} 的 selfId 再重启 —— 一旦忘了，
+     * 她会认不出自己的消息（selfEcho / atSelf / 窗口里的「我」都靠 selfId），表现是「自己跟自己对话」。</p>
+     * <p>只改<b>内存里的</b> config（{@code .ir} 下次启动照样会把它写回去，所以两边不会打架）；
+     * 拿到 0 / 异常就保持原值并下个心跳重试。</p>
+     */
+    private void syncSelfId() {
+        try {
+            Api a = api;
+            if (a == null || !a.available()) return;
+            JsonObject r = a.call("get_login_info", new JsonObject());
+            selfSynced = true;
+            long id = J.l(J.sub(r, "data"), "user_id", 0L);
+            if (id <= 0L) return;
+            long was = conf.selfId();
+            if (id == was) return;
+            conf.setSelfId(id);
+            if (out != null) {
+                out.warn("[v4] NapCat 实际登录账号 = " + id + "，与配置 selfId=" + was + " 不同 ⇒ 已自动同步（配置项 selfId 已弃用，以后只认 NapCat 实读）");
+            }
+        } catch (Throwable t) {
+            if (out != null) out.err("[tick] 登录账号同步失败（下个心跳重试）: " + t);
+        }
+    }
+    /** [SELFSYNC] NapCat 每次（重）连上来都调一次：让下个心跳重新读真实登录号。 */
+    public void resyncSelfId() { selfSynced = false; }
+
     public void stop() { running = false; }
 
     public boolean running() { return running; }
@@ -102,6 +133,7 @@ public final class Tick {
         } catch (Throwable t) {
             if (out != null) out.err("[tick] 定时唤醒检查失败: " + t);
         }
+        if (!selfSynced) syncSelfId();
         try {
             maybeMaintain();
         } catch (Throwable t) {

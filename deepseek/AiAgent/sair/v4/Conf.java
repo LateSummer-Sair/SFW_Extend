@@ -146,6 +146,121 @@ public final class Conf implements sair.v4.skill.ConfView {
     /** 群聊历史（{@code grouplog}）默认保留天数；{@code <=0} = 不过期。 */
     public static final int DEF_GROUPLOG_KEEP_DAYS = 30;
 
+    // ---------------- DeepSeek API 请求选项（2026-11-20；键 aiThinking … anthropicBaseUrl） ----------------
+    //
+    // 这一族只影响"发给模型服务端的请求体长什么样 / 走哪个端点根"，不改本机任何行为：
+    // 关掉或留空 = 回到"不发这个字段"的旧行为。取值一律**原样返回**（与 turnOverflow /
+    // mediaVision 那一族同一种写法：这里不夹取、不纠错），非法值由消费者按默认处理。
+    // 缺省值只写在这里一处，getter 就是唯一读口（knownKeys() 也读同一个 getter）。
+
+    /**
+     * 思考模式（键 {@code aiThinking}）的出厂默认：{@code auto}。
+     *
+     * <p>官方字段是请求体的 {@code thinking}（{@code {"type":"enabled"|"disabled"}}）。
+     * 官方<b>默认开启</b>且 {@code reasoning_effort} 默认 {@code high} —— 也就是说
+     * 不发这个字段时，简单闲聊也会走思考链、白烧 token。三档含义：</p>
+     * <ul>
+     *   <li>{@code auto} —— <b>不往请求体里发 {@code thinking} 字段</b>（让服务端按官方默认走，
+     *       与加这个键之前逐字节一致；也是本键的出厂值 = 默认零行为变化）；</li>
+     *   <li>{@code enabled} —— 显式发 {@code thinking:{type:"enabled"}}（要推理的场景）；</li>
+     *   <li>{@code disabled} —— 显式发 {@code thinking:{type:"disabled"}}（闲聊/短答，省钱省时）。</li>
+     * </ul>
+     *
+     * <p>官方口径：思考模式下 {@code temperature} / {@code top_p} 会被忽略（传了不报错但不生效）。</p>
+     */
+    public static final String DEF_AI_THINKING = "auto";
+
+    /**
+     * 思考强度（键 {@code aiReasoningEffort}）的出厂默认：{@code high}（<b>与官方默认一致</b>）。
+     *
+     * <p>官方字段 {@code reasoning_effort}，取值 {@code none|low|high|max}。
+     * <b>只在思考模式开启时有效</b>：{@code thinking.type=disabled} 时它被忽略。
+     * 官方默认 {@code high} 偏贵 —— 闲聊/短答给 {@code low} 或 {@code none}，
+     * 分析代码/复杂问答才用 {@code high}/{@code max}。</p>
+     */
+    public static final String DEF_AI_REASONING_EFFORT = "high";
+
+    /**
+     * JSON 输出模式（键 {@code aiJsonMode}）的出厂默认：{@code false}。
+     *
+     * <p>官方字段 {@code response_format:{type:"json_object"}}：强制模型输出<b>一个 JSON 对象</b>。
+     * 官方要求提示词里自己写明"要输出 JSON"，否则可能一直吐空白或不合法内容；
+     * 它是"格式约束"，不是"一定能解析成功"的保证（调用方仍要容错）。
+     * 关 = 不发该字段。</p>
+     */
+    public static final boolean DEF_AI_JSON_MODE = false;
+
+    /**
+     * 停止序列（键 {@code aiStopSeqs}）的出厂默认：<b>空</b>（= 不发 {@code stop}）。
+     *
+     * <p>官方字段 {@code stop}（字符串数组）：模型一产出其中任一串就<b>立即停</b>。
+     * 本键用<b>逗号分隔</b>（英文 {@code ,} 为主，中文逗号也吃），空 = 一个都不发。
+     * 官方硬上限：<b>最多 16 个、每个 ≤512 字节</b> —— 超出的由消费者丢弃并记一行日志，
+     * 绝不让一个畸形配置把请求打成 400。</p>
+     */
+    public static final String DEF_AI_STOP_SEQS = "";
+
+    /**
+     * 流式响应要不要回 usage（键 {@code aiStreamUsage}）的出厂默认：{@code true}。
+     *
+     * <p>官方字段 {@code stream_options:{include_usage:true}}：开了以后流式请求会在<b>最后多一个
+     * chunk</b>，里面只有 {@code usage}（token 数与缓存命中），{@code choices} 为空 ——
+     * 这是流式下唯一能拿到计费/缓存数据的口子。关 = 不发 {@code stream_options}（拿不到 usage）。</p>
+     */
+    public static final boolean DEF_AI_STREAM_USAGE = true;
+
+    /**
+     * 内容安全档位（键 {@code aiSafetyLevel}）的出厂默认：{@code low}。
+     *
+     * <p>官方 {@code safety_check} 的档位，取值 {@code low|high}：
+     * {@code low} = 官方的宽松档（<b>不额外加审</b>，与不发该字段的手感一致，故为出厂值）；
+     * {@code high} = 更严的审（可能把正常回复也吞成拒答，按需打开）。</p>
+     *
+     * <p>官方坑：<b>不带联网工具</b>时 {@code safety_check} 与 {@code tool_choice=required} 冲突（400），
+     * 降级逻辑由请求体装配侧处理，不在这里做。</p>
+     */
+    public static final String DEF_AI_SAFETY_LEVEL = "low";
+
+    /**
+     * 会话标题开关（键 {@code aiTitleEnabled}）的出厂默认：{@code false}。
+     *
+     * <p>官方 {@code title} 能力：让服务端在这一次请求里顺手生成会话标题，
+     * 省掉"另起一次调用算标题"的那笔钱。开启 = 请求体多带这个字段；
+     * 默认关 = 不发该字段（旧行为，标题要另算）。标题的落库/展示是调用方的事，本键只管"发不发"。</p>
+     */
+    public static final boolean DEF_AI_TITLE_ENABLED = false;
+
+    /**
+     * 官方联网工具开关（键 {@code aiWebTools}）的出厂默认：{@code false}。
+     *
+     * <p>开 = 在 {@code tools} 里放官方内置的 {@code deepseek_web_search} / {@code deepseek_read_url}，
+     * 模型可以自己搜网页、读 URL（按成功请求计费，Search/Fetch 5 元 / 1000 次）。
+     * 关 = 一个都不放（旧行为：联网靠本地技能）。</p>
+     *
+     * <p>官方硬约束：{@code tool_choice=required} + 思考模式会 <b>400</b>，
+     * 装配侧必须自动降级成 {@code auto} 并记日志 —— 这条降级与 {@code aiThinking} 耦合，
+     * 不放进本键。</p>
+     */
+    public static final boolean DEF_AI_WEB_TOOLS = false;
+
+    /**
+     * 工具类端点（Search / Fetch / OCR / ASR / TTS）的根地址（键 {@code toolsBaseUrl}）。
+     *
+     * <p>默认 {@link #DEF_API_URL}（官方就是与对话同域），但<b>单独一个键</b>：
+     * 换代理 / 走测试域时不必连对话端点（{@code apiUrl}）一起改。
+     * 用法是 {@code 根 + "/v1/tools/search"} 这一类，末尾斜杠由 getter 吃掉。</p>
+     */
+    public static final String DEF_TOOLS_BASE_URL = DEF_API_URL;
+
+    /**
+     * Anthropic 兼容 API 的根地址（键 {@code anthropicBaseUrl}）。
+     *
+     * <p>官方给的是 {@code https://api.deepseek.com/anthropic}：把 {@code claude-*} 的请求
+     * 映射到 DeepSeek 模型（{@code POST <根>/v1/messages}）。默认值就是官方那串，
+     * 只在"要换域/走代理"时才改；末尾斜杠由 getter 吃掉。</p>
+     */
+    public static final String DEF_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic";
+
     // ---------------- 调度（高并发：按会话分道） ----------------
     /**
      * 回合工作线程数：{@code 1} = 旧口径（所有会话挤一条队列，一个慢群堵住所有人）。
@@ -521,7 +636,12 @@ public final class Conf implements sair.v4.skill.ConfView {
     public List<String> pendingKeys(Conf fileView) {
         List<String> out = new ArrayList<String>();
         Conf f = fileView == null ? fileView() : fileView;
-        for (Key k : knownKeys()) if (isPending(k.name(), f)) out.add(k.name());
+        for (Key k : knownKeys()) {
+            // [SELFSYNC 2026-11-04] selfId 是**运行时自动同步**的（NapCat 实读），不是"改了还没重启"的配置项
+            // —— 不算 pending，否则每次心跳同步都会被报成"待生效配置"，status 和配置页都会骗人。
+            if ("selfId".equalsIgnoreCase(Str.nz(k.name()))) continue;
+            if (isPending(k.name(), f)) out.add(k.name());
+        }
         return out;
     }
 
@@ -590,6 +710,48 @@ public final class Conf implements sair.v4.skill.ConfView {
 
     public int maxTokens() { return getInt("maxTokens", 0); }
 
+    // ---- DeepSeek API 请求选项（2026-11-20；消费者 = ai.DeepSeek 的请求体装配） ----
+    //
+    // 这 10 个键的**唯一读口**就是下面 10 个 getter（knownKeys() 也读它们，所以自省面报的值
+    // 不可能与真正发出去的值不一致）。取值集合、官方含义、硬上限都写在上面对应的 DEF_* 常量上，
+    // 这里不再抄第二遍；改口径只改常量那一处。
+
+    /** 思考模式：{@code auto}（不发字段）/ {@code enabled} / {@code disabled}；默认 {@link #DEF_AI_THINKING}。 */
+    public String thinking() { return get("aiThinking", DEF_AI_THINKING); }
+
+    /** 思考强度：{@code none|low|high|max}；默认 {@link #DEF_AI_REASONING_EFFORT}。只在思考开启时有效。 */
+    public String reasoningEffort() { return get("aiReasoningEffort", DEF_AI_REASONING_EFFORT); }
+
+    /** JSON 输出模式（{@code response_format:{type:"json_object"}}）；默认 {@link #DEF_AI_JSON_MODE}。 */
+    public boolean jsonMode() { return getBool("aiJsonMode", DEF_AI_JSON_MODE); }
+
+    /** 停止序列原文（逗号分隔；最多 16 个、每个 ≤512 字节）；默认 {@link #DEF_AI_STOP_SEQS} = 空 = 不发 {@code stop}。 */
+    public String stopSeqs() { return get("aiStopSeqs", DEF_AI_STOP_SEQS); }
+
+    /** 流式响应要不要回 usage（{@code stream_options.include_usage}）；默认 {@link #DEF_AI_STREAM_USAGE}。 */
+    public boolean streamUsage() { return getBool("aiStreamUsage", DEF_AI_STREAM_USAGE); }
+
+    /** 内容安全档位：{@code low|high}；默认 {@link #DEF_AI_SAFETY_LEVEL}。 */
+    public String safetyLevel() { return get("aiSafetyLevel", DEF_AI_SAFETY_LEVEL); }
+
+    /** 会话标题开关（请求体 {@code title} 能力）；默认 {@link #DEF_AI_TITLE_ENABLED}。 */
+    public boolean titleEnabled() { return getBool("aiTitleEnabled", DEF_AI_TITLE_ENABLED); }
+
+    /** 官方联网工具（{@code deepseek_web_search} / {@code deepseek_read_url}）开关；默认 {@link #DEF_AI_WEB_TOOLS}。 */
+    public boolean webTools() { return getBool("aiWebTools", DEF_AI_WEB_TOOLS); }
+
+    /** 工具类端点根地址（Search / Fetch / OCR / ASR / TTS）；默认 {@link #DEF_TOOLS_BASE_URL}；末尾斜杠已去除。 */
+    public String toolsBaseUrl() {
+        String u = get("toolsBaseUrl", DEF_TOOLS_BASE_URL);
+        return u.endsWith("/") ? u.substring(0, u.length() - 1) : u;
+    }
+
+    /** Anthropic 兼容 API 的根地址；默认 {@link #DEF_ANTHROPIC_BASE_URL}；末尾斜杠已去除。 */
+    public String anthropicBaseUrl() {
+        String u = get("anthropicBaseUrl", DEF_ANTHROPIC_BASE_URL);
+        return u.endsWith("/") ? u.substring(0, u.length() - 1) : u;
+    }
+
     // ---- NapCat ----
     public boolean napcatEnabled() { return getBool("napcatEnabled", false); }
 
@@ -600,7 +762,17 @@ public final class Conf implements sair.v4.skill.ConfView {
 
     public String napcatToken() { return get("napcatToken", ""); }
 
+    /**
+     * 她自己的 QQ（[SELFSYNC 2026-11-04]）。
+     *
+     * <p><b>权威来源 = NapCat 实读</b>（{@code Tick.syncSelfId} → {@link #setSelfId}），
+     * 每次（重）连都会重新读一次。配置文件里的值只作<b>兜底</b>（夹具/旧配置/第一次心跳之前）；
+     * <b>控制台配置命令改不了它</b>（{@code config set selfId} 会被拒）。</p>
+     */
     public long selfId() { return getLong("selfId", 0L); }
+
+    /** 自动同步用：把 NapCat 实读到的号写进来（内存不落盘；{@code save()} 不会写它）。 */
+    public void setSelfId(long id) { if (id > 0L) J.put(data, "selfId", id); }
 
     public int napcatTimeoutMs() { return getInt("napcatTimeoutMs", 10000); }
 
@@ -609,6 +781,37 @@ public final class Conf implements sair.v4.skill.ConfView {
      * 是否启用文件外链中转。<b>默认 false</b>：这个服务能读出本机任意文件，
      * 只有明确需要"NapCat 在别的机器上"时才打开（打开前请先填 {@link #relayPublicHost()}）。
      */
+    /**
+     * SairNative 连接开关（基板读 config.json，默认 <b>false</b>）。
+     *
+     * <p><b>只管 SairNative 这一个客户端</b>。DC小枫 / Yunzai 那些下游完全由
+     * {@code data/AiAgent-V4/linker/} 里的 json 决定（有几个 json 就建几个）。
+     * 这一项只决定「要不要额外建一条到本机 SairNative 的客户端」。</p>
+     *
+     * <p>启用：{@code ai/config set nativeEnabled true}（或直接改 config.json）后 {@code ai/restart}。</p>
+     */
+    public boolean nativeEnabled() { return getBool("nativeEnabled", false); }
+
+    /** 代问时 master 触发的降级身份（必须是 otheruser 级别，默认 10000）。 */
+    public long routeProxyUid() { return getLong("routeProxyUid", 10000L); }
+
+    /** 代问的静默窗（毫秒）：这么久没有新的 send_* 就收尾。 */
+    public int routeAskQuietMs() { return getInt("routeAskQuietMs", 1500); }
+
+    /** 代问的总超时（毫秒）。 */
+    public int routeAskTimeoutMs() { return getInt("routeAskTimeoutMs", 20000); }
+
+    /** SairNative 的 OneBot 地址（它自己的 /onebot 端点）。 */
+    public String nativeUrl() {
+        return get("nativeUrl", "ws://127.0.0.1:8788/onebot?access_token=sair-native");
+    }
+
+    /** 推给 SairNative 的事件前缀；空 = 全量。 */
+    public String nativePrefix() { return get("nativePrefix", ""); }
+
+    /** 到 SairNative 的心跳间隔（毫秒）。 */
+    public int nativeHeartbeatMs() { return getInt("nativeHeartbeatMs", 5000); }
+
     public boolean relayEnabled() { return getBool("relayEnabled", false); }
 
     /** 中转监听端口；0 = 让系统挑一个空闲端口（实际端口在 status 里给出）。 */
@@ -1290,9 +1493,26 @@ public final class Conf implements sair.v4.skill.ConfView {
         add(out, "temperature", String.valueOf(temperature()));
         add(out, "topP", String.valueOf(topP()));
         add(out, "maxTokens", String.valueOf(maxTokens()));
+        // ---- DeepSeek API 请求选项（2026-11-20；10 个键；**不进 ensureDefaults()**）----
+        // 登记口径与 chatWindowSize / mediaRender 那一族完全一致：进 knownKeys()（`ai/config`
+        // 看得见、能 get/set），**不进 ensureDefaults()** —— 出厂不写盘，缺省值只有 DEF_AI_* /
+        // DEF_TOOLS_BASE_URL / DEF_ANTHROPIC_BASE_URL 那一处（getter 就是唯一读口）。
+        // 键名与官方请求字段的对应：aiThinking→thinking、aiReasoningEffort→reasoning_effort、
+        // aiJsonMode→response_format、aiStopSeqs→stop、aiStreamUsage→stream_options.include_usage、
+        // aiSafetyLevel→safety_check、aiTitleEnabled→title、aiWebTools→tools(deepseek_web_search/read_url)。
+        add(out, "aiThinking", thinking());
+        add(out, "aiReasoningEffort", reasoningEffort());
+        add(out, "aiJsonMode", String.valueOf(jsonMode()));
+        add(out, "aiStopSeqs", stopSeqs());
+        add(out, "aiStreamUsage", String.valueOf(streamUsage()));
+        add(out, "aiSafetyLevel", safetyLevel());
+        add(out, "aiTitleEnabled", String.valueOf(titleEnabled()));
+        add(out, "aiWebTools", String.valueOf(webTools()));
+        add(out, "toolsBaseUrl", toolsBaseUrl());
+        add(out, "anthropicBaseUrl", anthropicBaseUrl());
         add(out, "historyLimit", String.valueOf(getInt("historyLimit", DEF_HISTORY_LIMIT)));
         add(out, "historyMaxChars", String.valueOf(getInt("historyMaxChars", DEF_HISTORY_MAX_CHARS)));
-        add(out, "selfId", String.valueOf(selfId()));
+        add(out, "selfId", String.valueOf(selfId()) + " (deprecated: auto from NapCat)");
         add(out, "masterQQ", String.valueOf(masterQQ()));
         add(out, "masterQQs", get("masterQQs", ""));
         // ---- 回复与回合 ----
@@ -1322,6 +1542,10 @@ public final class Conf implements sair.v4.skill.ConfView {
         add(out, "skillsDir", skillsRel());
         add(out, "draftsDir", draftsRel());
         add(out, "skillsAsync", String.valueOf(skillsAsync()));
+        // 技能侧的「官方联网优先」开关（2026-11-20 补登记；消费者 = 技能「联网搜索」/「网页抓取」的 officialFirst）——
+        // 同一登记口径：进 knownKeys()（`ai/config` 看得见、能 get/set），**不进 ensureDefaults()** ——
+        // 出厂不写盘，缺省值 true（两个技能各自兜底）；值是 true/false（也认 1/yes/on/是/开，见 J.b）。
+        add(out, "优先官方", String.valueOf(getBool("优先官方", true)));
         // ---- 调度（池 / 闸门 / 优先级） ----
         add(out, "turnWorkers", String.valueOf(turnWorkers()));
         add(out, "turnQueueMax", String.valueOf(turnQueueMax()));
@@ -1409,6 +1633,14 @@ public final class Conf implements sair.v4.skill.ConfView {
         add(out, "relayPublicHost", relayPublicHost());
         add(out, "relayToken", relayToken());
         add(out, "relayTtlMinutes", String.valueOf(relayTtlMinutes()));
+        // ---- SairNative 连接（只管这一条；下游 DC小枫/Yunzai 由 linker/*.json 决定）----
+        add(out, "nativeEnabled", String.valueOf(nativeEnabled()));
+        add(out, "routeProxyUid", String.valueOf(routeProxyUid()));
+        add(out, "routeAskQuietMs", String.valueOf(routeAskQuietMs()));
+        add(out, "routeAskTimeoutMs", String.valueOf(routeAskTimeoutMs()));
+        add(out, "nativeUrl", nativeUrl());
+        add(out, "nativePrefix", nativePrefix());
+        add(out, "nativeHeartbeatMs", String.valueOf(nativeHeartbeatMs()));
         // ---- 语音转写（N2/D2：键 qqPttText，默认开；消费者 = Api.pttEnrich）----
         // 登记口径与 mediaRender 那一族一致：进 knownKeys()（`ai/config` 看得见、能 get/set），
         // **不进 ensureDefaults()** —— 出厂不写盘，缺省值只有 Conf.qqPttText() 那一处。
